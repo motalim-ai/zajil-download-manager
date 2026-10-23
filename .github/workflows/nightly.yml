@@ -54,6 +54,7 @@ jobs:
       # it; here it runs alone. The count is checked, so a renamed test
       # cannot pass by running nothing.
       - name: Test the speed limit on the real clock
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -66,7 +67,9 @@ jobs:
   alert:
     name: Open an issue on failure
     needs: real-clock
-    if: failure()
+    # A job that reaches its time limit is "cancelled", not "failed", so
+    # that counts too (review of #37). The test also has its own limits.
+    if: failure() || contains(needs.real-clock.result, 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       issues: write

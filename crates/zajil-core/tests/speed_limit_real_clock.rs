@@ -4,17 +4,21 @@
 //!
 //! The tests in `speed_limit.rs` run on a `ManualClock`, where the bug of
 //! the review of #32 (the first second at 3 to 6 times the limit) shows
-//! by a margin of 51 KiB only. Here the margin is wide: the first second
-//! may reach twice the limit, the bug gave 5.5 times. Checked by bringing
-//! the bug back (each connection's first 256 KiB not counted): 2.4 times
-//! the limit with 8 connections, and the test failed. The same downloads
+//! by a margin of 51 KiB only. Here the first second may reach twice the
+//! limit. Checked against the code before the fix (the head of #32, review
+//! of #37): 3.0 to 3.4 times the limit in the first second, and the test
+//! failed; and against a smaller version of the bug (each connection's
+//! first 256 KiB not counted): 2.4 times, failed too. The same downloads
 //! also check the average on the real clock, with the owner's tolerance
 //! of M3.
 //!
 //! Not covered here: the line that writes every piece at once under a
 //! limit (`limited` in `segmented.rs`). Without it this test still gave
 //! 0.97 to 0.997 of the limit, also with segments of 64 KiB (#36).
-
+//!
+//! Each download has a time limit, so a limit that waits forever fails the
+//! test instead of letting the job time out, which GitHub reports as
+//! cancelled rather than failed (review of #37).
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -41,16 +45,19 @@ async fn on_the_real_clock_the_first_second_stays_under_twice_the_limit() {
         // The most on disk within the first second.
         let first_second = Mutex::new(0u64);
         let started = Instant::now();
-        let finished = engine
-            .download(&server.url("/f.bin"), dir.path(), &mut |event| {
-                if let Event::Progress { done, .. } = event
-                    && started.elapsed() <= Duration::from_secs(1)
-                {
-                    let mut most = first_second.lock().unwrap();
-                    *most = (*most).max(done);
-                }
-            })
+        let url = server.url("/f.bin");
+        let mut on_event = |event| {
+            if let Event::Progress { done, .. } = event
+                && started.elapsed() <= Duration::from_secs(1)
+            {
+                let mut most = first_second.lock().unwrap();
+                *most = (*most).max(done);
+            }
+        };
+        let download = engine.download(&url, dir.path(), &mut on_event);
+        let finished = tokio::time::timeout(Duration::from_secs(120), download)
             .await
+            .unwrap_or_else(|_| panic!("{connections} connections: not done after 120 s"))
             .unwrap();
         let took = started.elapsed();
         assert_eq!(
