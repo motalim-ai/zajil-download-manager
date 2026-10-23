@@ -1,0 +1,837 @@
+//! A local HTTP and HTTPS server for Zajil's tests. Never shipped.
+//!
+//! It serves files from memory and can simulate the hard cases from
+//! `AGENTS.md`: a server that ignores `Range`, a connection cut in the middle,
+//! a file that changes on the server (new `ETag`), slow or stalled transfers,
+//! `429` with `Retry-After`, `403` after some requests, redirects and
+//! dangerous names in `Content-Disposition`. Every request is logged with the
+//! number of body bytes the server sent, so tests can check what was asked
+//! for twice.
+//!
+//! The server runs on its own thread and runtime, so it works from both
+//! synchronous and asynchronous tests, and stops when dropped.
+
+#![forbid(unsafe_code)]
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::io;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use bytes::Bytes;
+use http_body_util::channel::{Channel, Sender};
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Empty};
+use hyper::body::Incoming;
+use hyper::header::{self, HeaderValue};
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
+use sha2::{Digest, Sha256};
+use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio_rustls::TlsAcceptor;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type Body = BoxBody<Bytes, BoxError>;
+
+const CHUNK: usize = 64 * 1024;
+
+/// `Last-Modified` used unless a test sets another.
+pub const DEFAULT_LAST_MODIFIED: &str = "Wed, 21 Oct 2026 07:28:00 GMT";
+
+/// A failure returned instead of the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub status: u16,
+    /// Seconds for the `Retry-After` header.
+    pub retry_after: Option<u64>,
+}
+
+/// A file served at one path, and how the server misbehaves for it.
+#[derive(Debug, Clone)]
+pub struct FileSpec {
+    body: Bytes,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    date: Option<String>,
+    ranges: bool,
+    send_length: bool,
+    content_disposition: Option<String>,
+    cut_after: Option<(u64, usize)>,
+    stall_after: Option<u64>,
+    bytes_per_sec: Option<u64>,
+    fail_first: Vec<Failure>,
+    forbid_after: Option<usize>,
+}
+
+impl FileSpec {
+    /// A well-behaved file: `Content-Length`, `Accept-Ranges: bytes`, a
+    /// fresh strong `ETag` and a fixed `Last-Modified`.
+    pub fn new(body: impl Into<Bytes>) -> Self {
+        static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
+        let version = NEXT_VERSION.fetch_add(1, Ordering::Relaxed);
+        FileSpec {
+            body: body.into(),
+            etag: Some(format!("\"v{version}\"")),
+            last_modified: Some(DEFAULT_LAST_MODIFIED.to_owned()),
+            date: None,
+            ranges: true,
+            send_length: true,
+            content_disposition: None,
+            cut_after: None,
+            stall_after: None,
+            bytes_per_sec: None,
+            fail_first: Vec::new(),
+            forbid_after: None,
+        }
+    }
+
+    /// The server ignores `Range` and always answers `200` with the whole
+    /// file, without `Accept-Ranges`.
+    pub fn without_ranges(mut self) -> Self {
+        self.ranges = false;
+        self
+    }
+
+    pub fn etag(mut self, etag: Option<&str>) -> Self {
+        self.etag = etag.map(str::to_owned);
+        self
+    }
+
+    /// The `Last-Modified` header, or `None` for none. The default is
+    /// [`DEFAULT_LAST_MODIFIED`] for every file, so a test that replaces a
+    /// file without an `ETag` must set a new value here to show a change,
+    /// or the same value to simulate a change within the same second.
+    pub fn last_modified(mut self, value: Option<&str>) -> Self {
+        self.last_modified = value.map(str::to_owned);
+        self
+    }
+
+    /// The `Date` header. By default the server sends the current time.
+    /// Tests of RFC 9110 §8.8.2.2 set it close to `Last-Modified`.
+    pub fn date(mut self, value: &str) -> Self {
+        self.date = Some(value.to_owned());
+        self
+    }
+
+    /// No `Content-Length`: the body is sent chunked.
+    pub fn without_length(mut self) -> Self {
+        self.send_length = false;
+        self
+    }
+
+    /// Raw value of the `Content-Disposition` header.
+    pub fn content_disposition(mut self, value: &str) -> Self {
+        self.content_disposition = Some(value.to_owned());
+        self
+    }
+
+    /// The first `times` GET responses are cut after `bytes` body bytes.
+    pub fn cut_after(mut self, bytes: u64, times: usize) -> Self {
+        self.cut_after = Some((bytes, times));
+        self
+    }
+
+    /// Every GET response stops sending after `bytes` body bytes and keeps
+    /// the connection open.
+    pub fn stall_after(mut self, bytes: u64) -> Self {
+        self.stall_after = Some(bytes);
+        self
+    }
+
+    /// Limits each response to about `bytes_per_sec`.
+    pub fn throttle(mut self, bytes_per_sec: u64) -> Self {
+        self.bytes_per_sec = Some(bytes_per_sec.max(1));
+        self
+    }
+
+    /// The first GET requests get these failures, in order.
+    pub fn fail_first(mut self, failures: Vec<Failure>) -> Self {
+        self.fail_first = failures;
+        self
+    }
+
+    /// GET requests after the first `requests` get `403 Forbidden`.
+    pub fn forbid_after(mut self, requests: usize) -> Self {
+        self.forbid_after = Some(requests);
+        self
+    }
+
+    pub fn body(&self) -> &Bytes {
+        &self.body
+    }
+
+    pub fn current_etag(&self) -> Option<&str> {
+        self.etag.as_deref()
+    }
+}
+
+/// One request as the server saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestRecord {
+    pub method: String,
+    pub path: String,
+    pub range: Option<String>,
+    pub if_range: Option<String>,
+    pub status: u16,
+    /// Body bytes handed to the connection: an upper bound of what the
+    /// client received, counted when each chunk is handed over. A cut
+    /// response counts only what was sent before the cut. Not a speed
+    /// measurement.
+    pub bytes_sent: u64,
+    /// The TLS version of the connection (`"TLSv1_3"`), or `None` for HTTP.
+    pub tls_version: Option<String>,
+}
+
+struct LogEntry {
+    record: RequestRecord,
+    bytes_sent: Arc<AtomicU64>,
+}
+
+struct Served {
+    spec: FileSpec,
+    gets: usize,
+}
+
+#[derive(Default)]
+struct Shared {
+    files: HashMap<String, Served>,
+    redirects: HashMap<String, (String, u16)>,
+    log: Vec<LogEntry>,
+}
+
+/// A running test server. Stops when dropped.
+pub struct TestServer {
+    addr: SocketAddr,
+    base: String,
+    shared: Arc<Mutex<Shared>>,
+    shutdown: Option<oneshot::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl TestServer {
+    /// Plain HTTP on `127.0.0.1` and a free port.
+    pub fn http() -> Self {
+        Self::http_on((Ipv4Addr::LOCALHOST, 0).into()).expect("bind 127.0.0.1")
+    }
+
+    /// Plain HTTP on the given address (for example `[::1]:0`).
+    pub fn http_on(addr: SocketAddr) -> io::Result<Self> {
+        Self::start(addr, None, "http", None)
+    }
+
+    /// HTTPS on `127.0.0.1` with the certificate described by `tls`. The
+    /// URL uses `host`, which may differ from the certificate's names to
+    /// test a certificate for the wrong host.
+    pub fn https(tls: Tls, host: &str) -> Self {
+        let (cert, key) = tls.issue();
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("TLS versions")
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .expect("server certificate");
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        Self::start(
+            (Ipv4Addr::LOCALHOST, 0).into(),
+            Some(acceptor),
+            "https",
+            Some(host),
+        )
+        .expect("bind 127.0.0.1")
+    }
+
+    /// HTTPS with a fresh self-signed certificate for `names`, which no
+    /// client trusts.
+    pub fn https_self_signed(names: &[&str], host: &str) -> Self {
+        Self::https(Tls::self_signed(names), host)
+    }
+
+    fn start(
+        addr: SocketAddr,
+        tls: Option<TlsAcceptor>,
+        scheme: &str,
+        host: Option<&str>,
+    ) -> io::Result<Self> {
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (bound_tx, bound_rx) = std::sync::mpsc::channel();
+        let server_shared = shared.clone();
+
+        let thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("test server runtime");
+            runtime.block_on(serve(addr, tls, server_shared, shutdown_rx, bound_tx));
+            runtime.shutdown_timeout(Duration::from_millis(200));
+        });
+
+        let addr = match bound_rx.recv() {
+            Ok(Ok(addr)) => addr,
+            Ok(Err(err)) => {
+                let _ = thread.join();
+                return Err(err);
+            }
+            Err(_) => return Err(io::Error::other("test server thread exited")),
+        };
+        let authority = match host {
+            Some(host) => format!("{host}:{}", addr.port()),
+            None => addr.to_string(),
+        };
+        Ok(TestServer {
+            addr,
+            base: format!("{scheme}://{authority}"),
+            shared,
+            shutdown: Some(shutdown_tx),
+            thread: Some(thread),
+        })
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    /// Full URL for `path` (which starts with `/`).
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base, path)
+    }
+
+    /// Serves `spec` at `path`, replacing any previous file there. A new
+    /// [`FileSpec`] has a new `ETag`, so this simulates a changed file.
+    pub fn put(&self, path: &str, spec: FileSpec) {
+        self.lock()
+            .files
+            .insert(path.to_owned(), Served { spec, gets: 0 });
+    }
+
+    /// Answers requests for `from` with a redirect to `to` (a path or URL).
+    pub fn redirect(&self, from: &str, to: &str, status: u16) {
+        self.lock()
+            .redirects
+            .insert(from.to_owned(), (to.to_owned(), status));
+    }
+
+    /// Every request so far, oldest first.
+    pub fn requests(&self) -> Vec<RequestRecord> {
+        self.lock()
+            .log
+            .iter()
+            .map(|entry| RequestRecord {
+                bytes_sent: entry.bytes_sent.load(Ordering::SeqCst),
+                ..entry.record.clone()
+            })
+            .collect()
+    }
+
+    /// GET requests for `path` so far, oldest first.
+    pub fn gets(&self, path: &str) -> Vec<RequestRecord> {
+        self.requests()
+            .into_iter()
+            .filter(|r| r.method == "GET" && r.path == path)
+            .collect()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.shared.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+async fn serve(
+    addr: SocketAddr,
+    tls: Option<TlsAcceptor>,
+    shared: Arc<Mutex<Shared>>,
+    mut shutdown: oneshot::Receiver<()>,
+    bound: std::sync::mpsc::Sender<io::Result<SocketAddr>>,
+) {
+    let listener = match TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            let _ = bound.send(Err(err));
+            return;
+        }
+    };
+    let _ = bound.send(listener.local_addr());
+
+    loop {
+        let stream = tokio::select! {
+            _ = &mut shutdown => return,
+            accepted = listener.accept() => match accepted {
+                Ok((stream, _)) => stream,
+                Err(_) => continue,
+            },
+        };
+        let shared = shared.clone();
+        let tls = tls.clone();
+        tokio::spawn(async move {
+            let service = |tls_version: Option<String>| {
+                service_fn(move |req| {
+                    let shared = shared.clone();
+                    let tls_version = tls_version.clone();
+                    async move { Ok::<_, Infallible>(handle(req, &shared, tls_version)) }
+                })
+            };
+            let http = hyper::server::conn::http1::Builder::new();
+            match tls {
+                Some(acceptor) => {
+                    // A client that rejects our certificate ends here.
+                    if let Ok(stream) = acceptor.accept(stream).await {
+                        let version = stream
+                            .get_ref()
+                            .1
+                            .protocol_version()
+                            .map(|v| format!("{v:?}"));
+                        let _ = http
+                            .serve_connection(TokioIo::new(stream), service(version))
+                            .await;
+                    }
+                }
+                None => {
+                    let _ = http
+                        .serve_connection(TokioIo::new(stream), service(None))
+                        .await;
+                }
+            }
+        });
+    }
+}
+
+fn handle(
+    req: Request<Incoming>,
+    shared: &Mutex<Shared>,
+    tls_version: Option<String>,
+) -> Response<Body> {
+    let mut shared = shared.lock().unwrap_or_else(|e| e.into_inner());
+    let header = |name| {
+        req.headers()
+            .get(name)
+            .and_then(|v: &HeaderValue| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let path = req.uri().path().to_owned();
+    let is_head = req.method() == Method::HEAD;
+    let bytes_sent = Arc::new(AtomicU64::new(0));
+    let mut record = RequestRecord {
+        method: req.method().to_string(),
+        path: path.clone(),
+        range: header(header::RANGE),
+        if_range: header(header::IF_RANGE),
+        status: 0,
+        bytes_sent: 0,
+        tls_version,
+    };
+
+    let response = if let Some((to, status)) = shared.redirects.get(&path) {
+        Response::builder()
+            .status(*status)
+            .header(header::LOCATION, to.as_str())
+            .body(empty())
+            .unwrap()
+    } else if let Some(served) = shared.files.get_mut(&path) {
+        let get_index = served.gets;
+        if !is_head {
+            served.gets += 1;
+        }
+        respond(
+            &served.spec,
+            &record,
+            is_head,
+            get_index,
+            bytes_sent.clone(),
+        )
+    } else {
+        status_only(StatusCode::NOT_FOUND)
+    };
+
+    record.status = response.status().as_u16();
+    shared.log.push(LogEntry { record, bytes_sent });
+    response
+}
+
+fn respond(
+    spec: &FileSpec,
+    record: &RequestRecord,
+    is_head: bool,
+    get_index: usize,
+    bytes_sent: Arc<AtomicU64>,
+) -> Response<Body> {
+    if !is_head {
+        if spec.forbid_after.is_some_and(|n| get_index >= n) {
+            return status_only(StatusCode::FORBIDDEN);
+        }
+        if let Some(failure) = spec.fail_first.get(get_index) {
+            let mut builder = Response::builder().status(failure.status);
+            if let Some(secs) = failure.retry_after {
+                builder = builder.header(header::RETRY_AFTER, secs.to_string());
+            }
+            return builder.body(empty()).unwrap();
+        }
+    }
+
+    let total = spec.body.len() as u64;
+    let range = if spec.ranges && if_range_matches(spec, record.if_range.as_deref()) {
+        record.range.as_deref().map(|r| parse_range(r, total))
+    } else {
+        None
+    };
+
+    let mut builder = Response::builder().header(header::CONTENT_TYPE, "application/octet-stream");
+    if spec.ranges {
+        builder = builder.header(header::ACCEPT_RANGES, "bytes");
+    }
+    if let Some(etag) = &spec.etag {
+        builder = builder.header(header::ETAG, etag);
+    }
+    if let Some(date) = &spec.last_modified {
+        builder = builder.header(header::LAST_MODIFIED, date);
+    }
+    if let Some(date) = &spec.date {
+        // hyper adds the current time only when no Date header is set.
+        builder = builder.header(header::DATE, date);
+    }
+    if let Some(cd) = &spec.content_disposition {
+        builder = builder.header(header::CONTENT_DISPOSITION, cd);
+    }
+
+    let (status, start, end) = match range {
+        None => (StatusCode::OK, 0, total),
+        Some(Some((start, last))) => {
+            builder = builder.header(
+                header::CONTENT_RANGE,
+                format!("bytes {start}-{last}/{total}"),
+            );
+            (StatusCode::PARTIAL_CONTENT, start, last + 1)
+        }
+        Some(None) => {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+                .body(empty())
+                .unwrap();
+        }
+    };
+    if spec.send_length {
+        builder = builder.header(header::CONTENT_LENGTH, end - start);
+    }
+    builder = builder.status(status);
+    if is_head {
+        return builder.body(empty()).unwrap();
+    }
+
+    let body = spec.body.slice(start as usize..end as usize);
+    let cut = spec
+        .cut_after
+        .filter(|&(_, times)| get_index < times)
+        .map(|(bytes, _)| bytes);
+    let (sender, channel) = Channel::<Bytes, BoxError>::new(1);
+    tokio::spawn(stream_body(
+        sender,
+        body,
+        cut,
+        spec.stall_after,
+        spec.bytes_per_sec,
+        bytes_sent,
+    ));
+    builder.body(channel.boxed()).unwrap()
+}
+
+async fn stream_body(
+    mut sender: Sender<Bytes, BoxError>,
+    body: Bytes,
+    cut: Option<u64>,
+    stall: Option<u64>,
+    bytes_per_sec: Option<u64>,
+    bytes_sent: Arc<AtomicU64>,
+) {
+    let limit = [cut, stall]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(u64::MAX)
+        .min(body.len() as u64) as usize;
+    let chunk = match bytes_per_sec {
+        Some(bps) => (bps as usize / 20).clamp(1, CHUNK),
+        None => CHUNK,
+    };
+
+    let mut offset = 0;
+    while offset < limit {
+        let next = (offset + chunk).min(limit);
+        let sent = next - offset;
+        // Count before handing the chunk over, so the count is complete by
+        // the time the client has read everything.
+        bytes_sent.fetch_add(sent as u64, Ordering::SeqCst);
+        if sender.send_data(body.slice(offset..next)).await.is_err() {
+            bytes_sent.fetch_sub(sent as u64, Ordering::SeqCst);
+            return; // client went away
+        }
+        offset = next;
+        if let Some(bps) = bytes_per_sec {
+            tokio::time::sleep(Duration::from_secs_f64(sent as f64 / bps as f64)).await;
+        }
+    }
+
+    if offset == body.len() {
+        return; // complete
+    }
+    if cut.is_some_and(|c| c as usize == offset) {
+        sender.abort(Box::new(io::Error::other("cut by test server")));
+        return;
+    }
+    // Stalled: keep the connection open and send nothing.
+    let _keep = sender;
+    std::future::pending::<()>().await;
+}
+
+/// RFC 9110 §13.1.5: a strong `ETag` that matches exactly, or the exact
+/// `Last-Modified` date. Weak validators never match.
+fn if_range_matches(spec: &FileSpec, if_range: Option<&str>) -> bool {
+    match if_range {
+        None => true,
+        Some(value) if value.starts_with("W/") => false,
+        Some(value) if value.starts_with('"') => spec.etag.as_deref() == Some(value),
+        Some(value) => spec.last_modified.as_deref() == Some(value),
+    }
+}
+
+/// Parses a single `bytes=` range. `Some(None)` means unsatisfiable.
+fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
+    let spec = value.strip_prefix("bytes=")?.trim();
+    if spec.contains(',') {
+        return None;
+    }
+    let (first, last) = spec.split_once('-')?;
+    let (start, end) = if first.is_empty() {
+        let suffix: u64 = last.parse().ok()?;
+        if suffix == 0 {
+            return None;
+        }
+        (total.saturating_sub(suffix), total.checked_sub(1)?)
+    } else {
+        let start: u64 = first.parse().ok()?;
+        let end = if last.is_empty() {
+            total.checked_sub(1)?
+        } else {
+            last.parse::<u64>().ok()?.min(total.checked_sub(1)?)
+        };
+        (start, end)
+    };
+    (start <= end && start < total).then_some((start, end))
+}
+
+fn empty() -> Body {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn status_only(status: StatusCode) -> Response<Body> {
+    Response::builder().status(status).body(empty()).unwrap()
+}
+
+/// The certificate an HTTPS test server presents.
+#[derive(Debug, Clone)]
+pub struct Tls {
+    names: Vec<String>,
+    kind: CertKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CertKind {
+    /// Signed by the test CA and valid now.
+    Trusted,
+    /// Signed by the test CA, but expired yesterday.
+    Expired,
+    /// Signed by itself; nobody trusts it.
+    SelfSigned,
+}
+
+impl Tls {
+    /// Signed by [`test_ca_der`] and valid now. A client trusts it only if
+    /// the test adds that CA.
+    pub fn trusted(names: &[&str]) -> Self {
+        Self::new(names, CertKind::Trusted)
+    }
+
+    /// Signed by the test CA, but no longer valid.
+    pub fn expired(names: &[&str]) -> Self {
+        Self::new(names, CertKind::Expired)
+    }
+
+    /// Self-signed; no client trusts it.
+    pub fn self_signed(names: &[&str]) -> Self {
+        Self::new(names, CertKind::SelfSigned)
+    }
+
+    fn new(names: &[&str], kind: CertKind) -> Self {
+        Tls {
+            names: names.iter().map(|n| (*n).to_owned()).collect(),
+            kind,
+        }
+    }
+
+    fn issue(
+        &self,
+    ) -> (
+        rustls::pki_types::CertificateDer<'static>,
+        rustls::pki_types::PrivateKeyDer<'static>,
+    ) {
+        let key = rcgen::KeyPair::generate().expect("server key");
+        let mut params = rcgen::CertificateParams::new(self.names.clone()).expect("names");
+        params.distinguished_name.push(
+            rcgen::DnType::CommonName,
+            self.names.first().cloned().unwrap_or_default(),
+        );
+        params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+        params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+        let now = rcgen::date_time_ymd(1970, 1, 1) + since_epoch();
+        let day = Duration::from_secs(24 * 3600);
+        (params.not_before, params.not_after) = match self.kind {
+            CertKind::Expired => (now - 30 * day, now - day),
+            // Short validity: macOS refuses server certificates valid for
+            // more than 825 days, even under a custom root.
+            _ => (now - day, now + 30 * day),
+        };
+        let cert = match self.kind {
+            CertKind::SelfSigned => params.self_signed(&key),
+            _ => params.signed_by(&key, &test_ca().issuer),
+        }
+        .expect("sign certificate");
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(key.serialize_der().into());
+        (cert.der().clone(), key)
+    }
+}
+
+/// The certificate authority of this test run, created on first use and
+/// kept only in memory: no certificate or key is ever stored in the
+/// repository.
+struct TestCa {
+    issuer: rcgen::CertifiedIssuer<'static, rcgen::KeyPair>,
+}
+
+fn test_ca() -> &'static TestCa {
+    static CA: std::sync::OnceLock<TestCa> = std::sync::OnceLock::new();
+    CA.get_or_init(|| {
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.distinguished_name.push(
+            rcgen::DnType::CommonName,
+            "Zajil temporary test CA (do not trust)",
+        );
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        params.key_usages = vec![
+            rcgen::KeyUsagePurpose::KeyCertSign,
+            rcgen::KeyUsagePurpose::CrlSign,
+            rcgen::KeyUsagePurpose::DigitalSignature,
+        ];
+        let now = rcgen::date_time_ymd(1970, 1, 1) + since_epoch();
+        let day = Duration::from_secs(24 * 3600);
+        params.not_before = now - 2 * day;
+        params.not_after = now + 60 * day;
+        let key = rcgen::KeyPair::generate().expect("CA key");
+        TestCa {
+            issuer: rcgen::CertifiedIssuer::self_signed(params, key).expect("CA certificate"),
+        }
+    })
+}
+
+/// DER of this test run's CA certificate, for tests that must trust
+/// [`Tls::trusted`] servers.
+pub fn test_ca_der() -> Vec<u8> {
+    test_ca().issuer.der().to_vec()
+}
+
+/// Time since 1970, to build rcgen dates from `date_time_ymd(1970, 1, 1)`.
+fn since_epoch() -> Duration {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after 1970")
+}
+
+/// Deterministic pseudo-random bytes (SplitMix64), fast enough for large
+/// test files.
+pub fn random_bytes(len: usize, seed: u64) -> Vec<u8> {
+    let mut state = seed;
+    let mut out = Vec::with_capacity(len + 8);
+    while out.len() < len {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        out.extend_from_slice(&(z ^ (z >> 31)).to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+/// Lowercase hex SHA-256 of `data`.
+pub fn sha256_hex(data: &[u8]) -> String {
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ranges() {
+        assert_eq!(parse_range("bytes=0-9", 100), Some((0, 9)));
+        assert_eq!(parse_range("bytes=90-", 100), Some((90, 99)));
+        assert_eq!(parse_range("bytes=-10", 100), Some((90, 99)));
+        assert_eq!(parse_range("bytes=50-500", 100), Some((50, 99)));
+        assert_eq!(parse_range("bytes=100-", 100), None);
+        assert_eq!(parse_range("bytes=5-1", 100), None);
+        assert_eq!(parse_range("bytes=0-1,5-6", 100), None);
+        assert_eq!(parse_range("items=0-1", 100), None);
+        assert_eq!(parse_range("bytes=0-", 0), None);
+    }
+
+    #[test]
+    fn if_range_uses_strong_comparison() {
+        let spec = FileSpec::new(&b"x"[..]).etag(Some("\"a\""));
+        assert!(if_range_matches(&spec, None));
+        assert!(if_range_matches(&spec, Some("\"a\"")));
+        assert!(!if_range_matches(&spec, Some("\"b\"")));
+        assert!(!if_range_matches(&spec, Some("W/\"a\"")));
+        assert!(if_range_matches(&spec, Some(DEFAULT_LAST_MODIFIED)));
+        assert!(!if_range_matches(
+            &spec,
+            Some("Thu, 01 Jan 1970 00:00:00 GMT")
+        ));
+    }
+
+    #[test]
+    fn random_bytes_are_deterministic() {
+        assert_eq!(random_bytes(1000, 7), random_bytes(1000, 7));
+        assert_ne!(random_bytes(1000, 7), random_bytes(1000, 8));
+        assert_eq!(random_bytes(13, 1).len(), 13);
+    }
+
+    #[test]
+    fn new_specs_get_new_etags() {
+        let a = FileSpec::new(&b"x"[..]);
+        let b = FileSpec::new(&b"x"[..]);
+        assert_ne!(a.current_etag(), b.current_etag());
+    }
+}

@@ -17,6 +17,15 @@
 | `serde` | 1.0.229 | MIT أو Apache-2.0 | `zajil-core` | قراءة ملف الحالة وكتابته | M1 |
 | `serde_json` | 1.0.154 | MIT أو Apache-2.0 | `zajil-core` | صيغة JSON لملف الحالة (ADR-0004) | M1 |
 | `sha2` | 0.11.1 | MIT أو Apache-2.0 | `zajil-core` | بصمة ملف الحالة، وبصمات الملفات | M1 |
+| `tokio` | 1.54.1 | MIT | `zajil-testserver` (وبعده المحرّك) | التشغيل غير المتزامن (async) | M1 |
+| `hyper` | 1.12.0 | MIT | `zajil-testserver` (اختبار فقط) | سيرفر HTTP/1.1 للحالات الصعبة | M1 |
+| `hyper-util` | 0.1.21 | MIT | `zajil-testserver` (اختبار فقط) | ربط hyper بـ tokio | M1 |
+| `http-body-util` | 0.1.5 | MIT | `zajil-testserver` (اختبار فقط) | إرسال الجسم على دفعات، وقطعه في المنتصف | M1 |
+| `bytes` | 1.12.1 | MIT | `zajil-testserver` (اختبار فقط) | مخازن البيانات | M1 |
+| `rustls` | 0.23.46 | Apache-2.0 أو ISC أو MIT | `zajil-testserver` (وبعده المحرّك) | TLS. **بمزوّد التشفير `ring` فقط** | M1 |
+| `ring` | 0.17.14 | Apache-2.0 و ISC | عبر `rustls` و`rcgen` | مزوّد التشفير. اخترناه بدل `aws-lc-rs` لأن ترخيص `aws-lc-sys` يتضمن رخصة OpenSSL غير المتوافقة مع GPL-3.0 | M1 |
+| `tokio-rustls` | 0.26.6 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | سيرفر HTTPS للاختبار | M1 |
+| `rcgen` | 0.14.10 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | ينشئ في كل تشغيل للاختبارات جهة إصدار (CA) مؤقتة في الذاكرة، ويوقّع بها شهادات السيرفر التجريبي (صالحة، ومنتهية)، وشهادة موقّعة ذاتيًا. **لا توجد أي شهادة أو مفتاح في المستودع**. بمزوّد `ring` فقط | M1 |
 | `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`) | M1 |
 | `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة | M1 |
 | `dunce` | 1.0.5 | CC0-1.0 أو MIT-0 أو Apache-2.0 | `zajil-core` | مسار مجلد التحميل الحقيقي دون بادئة `\\?\` في ويندوز حين لا تلزم، حتى تبقى المسارات المعروضة للمستخدم مقروءة | M1 |
