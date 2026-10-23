@@ -31,18 +31,15 @@ fn splits(events: &[Event]) -> Vec<(u64, u64)> {
 }
 
 /// M2 success criterion: one very slow connection. Without splitting, its
-/// 2 MiB segment alone would take 32 s at 64 KiB/s. It is the last segment,
-/// so the first connection (which reads on into an untouched next segment)
-/// cannot simply take it over.
+/// 2 MiB segment alone would take 32 s at 64 KiB/s. It is the first
+/// connection (the whole-file response), so no other connection can simply
+/// read on into its segment: the segment has to be split.
 #[tokio::test]
 async fn one_slow_connection_is_split_and_the_download_ends_in_time() {
     let server = TestServer::http();
     let data = random_bytes(8 * MIB as usize, 70);
-    // Four segments of 2 MiB; the one starting at 6 MiB is very slow.
-    server.put(
-        "/f.bin",
-        FileSpec::new(data.clone()).slow_at(6 * MIB, 64 * KIB),
-    );
+    // Four segments of 2 MiB; the first one is very slow.
+    server.put("/f.bin", FileSpec::new(data.clone()).slow_at(0, 64 * KIB));
     let dir = tempfile::tempdir().unwrap();
     let mut events = Vec::new();
 
@@ -61,7 +58,7 @@ async fn one_slow_connection_is_split_and_the_download_ends_in_time() {
     eprintln!("took {took:?}, splits: {splits:?}");
     // The event log shows the slow segment being split, first of all.
     assert!(!splits.is_empty());
-    assert_eq!(splits[0].0, 6 * MIB, "{splits:?}");
+    assert_eq!(splits[0].0, 0, "{splits:?}");
     assert!(splits.iter().all(|&(segment, at)| at > segment));
     assert!(took < Duration::from_secs(8), "took {took:?}");
 }
@@ -89,7 +86,7 @@ async fn a_download_stopped_after_a_split_resumes_from_its_state() {
     let data = random_bytes(8 * MIB as usize, 72);
     let spec = FileSpec::new(data.clone())
         .etag(Some("\"same\""))
-        .slow_at(6 * MIB, 32 * KIB)
+        .slow_at(0, 32 * KIB)
         .throttle(MIB);
     server.put("/f.bin", spec);
     let dir = tempfile::tempdir().unwrap();
