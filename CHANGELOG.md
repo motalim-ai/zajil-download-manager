@@ -15,3 +15,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - Issue and PR templates.
   - Empty Rust workspace.
   - CI on Windows, macOS and Linux: fmt, clippy, test and license check.
+  - All CI actions pinned to commit SHAs (Dependabot updates them).
+  - Rust toolchain pinned in `rust-toolchain.toml`.
+  - `AGENTS.md`: work rules for AI agents.
+- Owner decisions recorded:
+  - ADR-0003, ADR-0004 and ADR-0005 accepted.
+  - License set to GPL-3.0-or-later.
+  - App id `io.github.motalim_ai.zajil`.
+  - FTP moved to 1.x.
