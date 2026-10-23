@@ -490,3 +490,78 @@ async fn stopping_at_many_moments_leaves_a_resumable_download_or_nothing() {
         }
     }
 }
+
+/// Review of #31: an item kept the state file of a new download that had
+/// failed before its first byte (its files were removed), and another
+/// download of another URL then took that name; resuming the first item
+/// finished the second's file and marked it done. Now a failure before any
+/// byte forgets the state file, and a state file of another URL is never
+/// resumed for an item.
+#[tokio::test]
+async fn an_item_never_resumes_another_downloads_state_file() {
+    let server = TestServer::http();
+    let (data_a, data_b) = (random_bytes(300_000, 420), random_bytes(300_000, 421));
+    server.put(
+        "/a/same.bin",
+        FileSpec::new(data_a.clone()).cut_after(0, 100),
+    );
+    server.put(
+        "/b/same.bin",
+        FileSpec::new(data_b.clone()).cut_after(100_000, 1),
+    );
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    set_max_active(&store, "main", 1);
+    let a = add(&store, "main", &server.url("/a/same.bin"), downloads.path());
+    let b = add(&store, "main", &server.url("/b/same.bin"), downloads.path());
+    let once = Engine::new(Options {
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    let run = |store: &QueueStore| {
+        Runner::new(once.clone(), store.clone()).poll(Duration::from_millis(20))
+    };
+
+    let summary = run(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert_eq!(summary.failed, 2);
+    let queues = store.load().unwrap();
+    assert_eq!(queues.item(a).unwrap().state_file, None, "A wrote nothing");
+    let b_state = queues.item(b).unwrap().state_file.clone().unwrap();
+    assert!(b_state.exists());
+
+    // Even if A still pointed at B's state file (an older Zajil, or a
+    // hand edit), it is not resumed: it is another URL.
+    server.put("/a/same.bin", FileSpec::new(data_a.clone()));
+    store
+        .update(move |q| {
+            let item = q.item_mut(a).unwrap();
+            item.state_file = Some(b_state);
+            item.status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    let before_b = server.gets("/b/same.bin").len();
+    let summary = run(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert_eq!(summary.finished, 1);
+    assert_eq!(
+        server.gets("/b/same.bin").len(),
+        before_b,
+        "B's file was asked for"
+    );
+    let queues = store.load().unwrap();
+    let file = queues.item(a).unwrap().file.clone().unwrap();
+    assert_eq!(fs::read(&file).unwrap(), data_a);
+    // B's download is untouched and can still be resumed.
+    assert_eq!(queues.item(b).unwrap().status, Status::Failed);
+    assert!(
+        queues
+            .item(b)
+            .unwrap()
+            .state_file
+            .as_ref()
+            .unwrap()
+            .exists()
+    );
+}

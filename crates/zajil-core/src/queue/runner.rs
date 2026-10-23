@@ -141,11 +141,17 @@ impl Runner {
             }
             tokio::select! {
                 Some(joined) = tasks.join_next_with_id() => {
+                    // Events the task sent before it ended come first: a
+                    // late `Started` must not record a state file after the
+                    // end was recorded (review of #31).
+                    while let Ok((item, event)) = messages.try_recv() {
+                        self.download_event(item, event, &running, on_event).await?;
+                    }
                     self.finished(joined, &mut running, &mut summary, on_event).await?;
                     look = true;
                 }
                 Some((item, event)) = messages.recv() => {
-                    self.download_event(item, event, on_event).await?;
+                    self.download_event(item, event, &running, on_event).await?;
                 }
                 () = stop.requested(), if !summary.stopped => {
                     summary.stopped = true;
@@ -228,8 +234,13 @@ impl Runner {
                     let mut report = |event| {
                         let _ = events.send((id, event));
                     };
-                    let resumable = match &item.state_file {
-                        Some(path) => tokio::fs::try_exists(path).await.unwrap_or(false),
+                    let resumable = match item.state_file.clone() {
+                        Some(path) => {
+                            let url = item.url.clone();
+                            tokio::task::spawn_blocking(move || belongs_to(&path, &url))
+                                .await
+                                .unwrap_or(false)
+                        }
                         None => false,
                     };
                     let result = match item.state_file.filter(|_| resumable) {
@@ -262,8 +273,12 @@ impl Runner {
         &self,
         id: u64,
         event: Event,
+        running: &HashMap<u64, Running>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
+        if !running.contains_key(&id) {
+            return Ok(()); // a download that has ended
+        }
         if let Event::Started { state_file, .. } = &event {
             let state_file = state_file.clone();
             ignore_removed(
@@ -336,14 +351,19 @@ impl Runner {
                         if by_runner || item.status == Status::Active {
                             item.status = Status::Waiting;
                         }
-                        if state_file.is_some() {
-                            item.state_file = state_file;
-                        }
+                        // `None`: nothing was written and the files are
+                        // gone; the name may soon be another download's.
+                        item.state_file = state_file;
                     }
                     Err(err) => {
                         item.status = Status::Failed;
-                        if let Error::Interrupted { state_file, .. } = &err {
-                            item.state_file = Some(state_file.clone());
+                        match &err {
+                            Error::Interrupted { state_file, .. } => {
+                                item.state_file = Some(state_file.clone());
+                            }
+                            // Nothing written, files removed (review of #31).
+                            Error::NoData(_) => item.state_file = None,
+                            _ => {}
                         }
                         item.error = Some(err.to_string());
                     }
@@ -362,6 +382,21 @@ impl Runner {
     ) -> Result<T, StoreError> {
         let store = self.store.clone();
         blocking(move || store.update(change)).await
+    }
+}
+
+/// Whether the state file at `path` is this item's download: the file may
+/// have been removed (a new download stopped before its first byte), and
+/// its name taken by another download since, of another URL (review of
+/// #31). A missing file or one of another URL is not; a file that cannot
+/// be read is left to the resume, which says why.
+fn belongs_to(path: &std::path::Path, url: &str) -> bool {
+    match crate::state::DownloadState::load(path) {
+        Ok(state) => reqwest::Url::parse(url).is_ok_and(|url| url.as_str() == state.url),
+        Err(crate::state::StateError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
+            false
+        }
+        Err(_) => true,
     }
 }
 
