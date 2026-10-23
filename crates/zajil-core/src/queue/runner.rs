@@ -76,8 +76,9 @@ pub struct Summary {
     pub failed: usize,
     /// The run was asked to stop before the queues were done.
     pub stopped: bool,
-    /// The run ended because the queue of [`Runner::until_queue_done`] had
-    /// nothing left to run (other downloads were stopped and wait).
+    /// The run ended because the queue of [`Runner::until_queue_done`]
+    /// finished: every download in it is done, at least one of them in
+    /// this run (other downloads were stopped and wait).
     pub queue_ended: bool,
 }
 
@@ -175,6 +176,8 @@ impl Runner {
         // clock), and what was last said about each closed queue.
         let mut change_at: Option<Duration> = None;
         let mut announced: HashMap<String, Timestamp> = HashMap::new();
+        // Items whose download finished in this run.
+        let mut finished_now: HashSet<u64> = HashSet::new();
         loop {
             if look {
                 look = false;
@@ -188,11 +191,18 @@ impl Runner {
                     let queue = queues
                         .queue(until)
                         .ok_or_else(|| StoreError::NoSuchQueue(until.clone()))?;
-                    let busy = queue.items.iter().any(|i| {
-                        matches!(i.status, Status::Waiting | Status::Active)
-                            || running.contains_key(&i.id)
-                    });
-                    if !busy {
+                    // Finished: all done, and not all before this run (a
+                    // queue finished earlier must not turn the computer
+                    // off at once). A failed or paused download is not
+                    // done, so the run then goes on as if nothing had been
+                    // asked, and nothing else is stopped (review of #35).
+                    let all_done = !queue.items.is_empty()
+                        && queue
+                            .items
+                            .iter()
+                            .all(|i| i.status == Status::Done && !running.contains_key(&i.id));
+                    let one_now = queue.items.iter().any(|i| finished_now.contains(&i.id));
+                    if all_done && one_now {
                         summary.queue_ended = true;
                         for run in running.values_mut() {
                             run.by_runner = true;
@@ -236,7 +246,8 @@ impl Runner {
                     while let Ok((item, event)) = messages.try_recv() {
                         self.download_event(item, event, &running, on_event).await?;
                     }
-                    self.finished(joined, &mut running, &mut summary, on_event).await?;
+                    self.finished(joined, &mut running, &mut summary, &mut finished_now, on_event)
+                        .await?;
                     look = true;
                 }
                 Some((item, event)) = messages.recv() => {
@@ -453,6 +464,7 @@ impl Runner {
         joined: Result<(tokio::task::Id, Ended), tokio::task::JoinError>,
         running: &mut HashMap<u64, Running>,
         summary: &mut Summary,
+        finished_now: &mut HashSet<u64>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
         let (id, result) = match joined {
@@ -474,6 +486,7 @@ impl Runner {
         let event = match &result {
             Ok(done) => {
                 summary.finished += 1;
+                finished_now.insert(id);
                 QueueEvent::Finished {
                     item: id,
                     file: done.file.clone(),

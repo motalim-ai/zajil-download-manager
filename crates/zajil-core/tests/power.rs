@@ -257,7 +257,7 @@ async fn a_paused_download_keeps_the_computer_on() {
         })
         .unwrap();
     let summary = setup.run(Some("night")).await;
-    assert!(summary.queue_ended);
+    assert!(!summary.queue_ended, "{summary:?}");
     let power = Arc::new(MockPower::default());
     let (_c, _h, task) = countdown(&setup, "night", summary, power.clone(), Stop::new());
     assert!(matches!(
@@ -265,6 +265,56 @@ async fn a_paused_download_keeps_the_computer_on() {
         AfterQueue::NotFinished { left: 1 }
     ));
     assert!(power.asked().is_empty());
+}
+
+/// Review of #35: a queue whose downloads were all done in an earlier run
+/// ended the new run at once, before any other queue downloaded anything,
+/// and the computer was asked to shut down. Now the queue must finish a
+/// download in this run.
+#[tokio::test]
+async fn a_queue_finished_in_an_earlier_run_does_not_turn_the_computer_off() {
+    let setup = setup();
+    setup.add("night", "/ok.bin");
+    assert_eq!(setup.run(None).await.finished, 1);
+    let other = setup.add("main", "/ok.bin");
+
+    let summary = setup.run(Some("night")).await;
+    assert!(!summary.queue_ended, "{summary:?}");
+    assert_eq!(summary.finished, 1, "the other queue downloaded");
+    assert_eq!(
+        setup.store.load().unwrap().item(other).unwrap().status,
+        Status::Done
+    );
+    let power = Arc::new(MockPower::default());
+    let (_c, mut heard, task) = countdown(&setup, "night", summary, power.clone(), Stop::new());
+    assert!(matches!(
+        task.await.unwrap(),
+        AfterQueue::NotFinished { .. }
+    ));
+    assert!(heard.try_recv().is_err(), "a countdown started");
+    assert!(power.asked().is_empty());
+}
+
+/// Review of #35: a failed (or paused) download in the chosen queue ended
+/// the run and stopped every other download, although nothing would be
+/// done. Now the run goes on as if nothing had been asked.
+#[tokio::test]
+async fn a_failure_in_the_chosen_queue_does_not_stop_other_downloads() {
+    let setup = setup();
+    setup.server.put(
+        "/big.bin",
+        FileSpec::new(random_bytes(2 * 1024 * 1024, 901)),
+    );
+    setup.add("night", "/missing.bin");
+    let other = setup.add("main", "/big.bin");
+
+    let summary = setup.run(Some("night")).await;
+    assert!(!summary.queue_ended && !summary.stopped, "{summary:?}");
+    assert_eq!((summary.finished, summary.failed), (1, 1));
+    assert_eq!(
+        setup.store.load().unwrap().item(other).unwrap().status,
+        Status::Done
+    );
 }
 
 /// The system may refuse (no permission): the error is reported.

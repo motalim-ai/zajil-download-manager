@@ -186,7 +186,7 @@ flowchart LR
 
 **`PowerControl` (M3)**:
 - **لا يُستدعى إلا بطلب صريح** من المستخدم لقائمة واحدة في تشغيل واحد (`--shutdown-after` أو `--sleep-after`)، والطلب لا يُحفظ.
-- **لا يحدث إلا إذا اكتملت كل تحميلات القائمة**، وبعد عد تنازلي يلغيه Ctrl+C (`zajil_core::queue::after_queue`).
+- **لا يحدث إلا إذا اكتملت كل تحميلات القائمة، واحد منها على الأقل في هذا التشغيل**، وبعد عد تنازلي يلغيه Ctrl+C (`zajil_core::queue::after_queue`). وإذا فشل تحميل منها أو أُوقف مؤقتًا، يكمل التشغيل كأن شيئًا لم يُطلب، ولا يتوقف أي تحميل آخر (مراجعة #35).
 - **الاختبارات تستعمل تنفيذًا وهميًا فقط**، و`power_guard.rs` يتأكد من ذلك.
 - **سياج أخير**: التنفيذ الحقيقي يرفض العمل ما دام `ZAJIL_NO_POWER_ACTIONS` مضبوطًا، والـ CI يضبطه. هذا المتغير يمنع فقط، ولا يسبب إيقافًا أبدًا.
 
@@ -202,7 +202,7 @@ flowchart LR
 | الإشعارات | Windows notifications | Notification Center | freedesktop notifications (D-Bus) |
 | التشغيل مع بدء النظام | مفتاح `Run` في الريجستري | Login Item | ملف `.desktop` في `~/.config/autostart` |
 | المسارات (الإعدادات، والبيانات، ومجلد التحميل) | `%APPDATA%` و`Known Folders` | `~/Library/Application Support` | معيار XDG |
-| إيقاف الجهاز أو إدخاله في السكون بعد الانتهاء (`zajil_platform::power`، M3) | `InitiateShutdownW` بعد تفعيل `SeShutdownPrivilege`، و`SetSuspendState` | حدث Apple «إيقاف» إلى `loginwindow` عبر `osascript` (QA1134)، و`pmset sleepnow` | `systemctl poweroff` و`systemctl suspend` (systemd-logind وpolkit) |
+| إيقاف الجهاز أو إدخاله في السكون بعد الانتهاء (`zajil_platform::power`، M3) | `InitiateShutdownW` بعد تفعيل `SeShutdownPrivilege`، و`SetSuspendState` | حدث Apple `kAEShutDown` (`shut`) إلى `loginwindow` عبر `osascript` (QA1134)، و`pmset sleepnow` | `systemctl poweroff` و`systemctl suspend` (systemd-logind وpolkit) |
 | الاتصال المحلي (IPC) | Named Pipe خاص بالمستخدم | Unix domain socket بصلاحية 0700 | Unix domain socket بصلاحية 0700 |
 
 المثبّتات (M8): ‎.exe أو ‎.msi لويندوز، و‎.dmg لماك، وAppImage و‎.deb لينكس.

@@ -105,10 +105,11 @@ pub enum QueueCommand {
     /// Run every queue until nothing is left to download. Ctrl+C stops the
     /// downloads after recording their progress; run it again to go on.
     Run {
-        /// When this queue has finished (every download in it done), stop
-        /// the other downloads and shut the computer down, after a
-        /// countdown that Ctrl+C cancels. Asked for this run only; never
-        /// saved.
+        /// When this queue has finished (every download in it done, at
+        /// least one in this run), stop the other downloads and shut the
+        /// computer down, after a countdown that Ctrl+C cancels. If it
+        /// cannot finish (a download failed or is paused), the run goes on
+        /// and the computer stays on. Asked for this run only; never saved.
         #[arg(long, value_name = "QUEUE", conflicts_with = "sleep_after")]
         shutdown_after: Option<String>,
         /// The same, but put the computer to sleep.

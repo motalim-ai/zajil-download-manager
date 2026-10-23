@@ -49,7 +49,7 @@
 
 **ما يفعله زاجِل على كل نظام**:
 - ويندوز: `InitiateShutdownW` بعد تفعيل `SeShutdownPrivilege`، و`SetSuspendState` للسكون.
-- ماك: حدث Apple «إيقاف» إلى `loginwindow` (طريقة أبل في QA1134) عبر `osascript`، و`pmset sleepnow` للسكون.
+- ماك: حدث Apple `kAEShutDown` (الرمز `shut`، وليس `rsdn` الذي يعرض نافذة الإيقاف فقط. وجدته مراجعة #35) إلى `loginwindow` (طريقة أبل في QA1134) عبر `osascript`، و`pmset sleepnow` للسكون. **تحقق في التجربة أن الجهاز انطفأ دون نافذة تأكيد من النظام.**
 - لينكس: `systemctl poweroff` و`systemctl suspend`.
 
 </div>

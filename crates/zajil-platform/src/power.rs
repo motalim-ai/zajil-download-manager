@@ -4,7 +4,7 @@
 //! | | Shut down | Sleep |
 //! |---|---|---|
 //! | Windows | `InitiateShutdownW` with `SHUTDOWN_POWEROFF`, after enabling `SeShutdownPrivilege`. Programs with unsaved work may still stop it | `SetSuspendState` |
-//! | macOS | the "really shut down" Apple event to `loginwindow` (Apple's documented way, Technical Q&A QA1134), sent with `osascript` | `pmset sleepnow` |
+//! | macOS | the shut-down Apple event (`kAEShutDown`, `'shut'`) to `loginwindow` (Apple's documented way, Technical Q&A QA1134), sent with `osascript` | `pmset sleepnow` |
 //! | Linux | `systemctl poweroff`, through systemd-logind and its polkit rules | `systemctl suspend` |
 //!
 //! **Safety.** Zajil never calls this unless the user asked for it for one
@@ -93,11 +93,12 @@ mod imp {
 
     pub fn perform(action: PowerAction) -> io::Result<()> {
         match action {
-            // kAEShutDown ('rsdn') to loginwindow: shut down without its own
-            // confirmation (the countdown was ours).
+            // kAEShutDown ('shut', AERegistry.h) to loginwindow: shut down,
+            // the countdown was ours. Not 'rsdn' (kAEShowShutdownDialog),
+            // which only shows the system's dialog (review of #35).
             PowerAction::Shutdown => run(
                 "/usr/bin/osascript",
-                &["-e", "tell application \"loginwindow\" to «event aevtrsdn»"],
+                &["-e", "tell application \"loginwindow\" to «event aevtshut»"],
             ),
             PowerAction::Sleep => run("/usr/bin/pmset", &["sleepnow"]),
         }
