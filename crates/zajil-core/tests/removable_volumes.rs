@@ -29,7 +29,8 @@ fn volumes() -> Vec<(&'static str, PathBuf)> {
 #[tokio::test]
 async fn downloads_finish_next_to_a_taken_name() {
     let server = TestServer::http();
-    let data = random_bytes(1 << 20, 7);
+    // 4 MiB: big enough to be split over several connections (M2).
+    let data = random_bytes(4 << 20, 7);
     server.put("/f.bin", FileSpec::new(data.clone()));
     let engine = Engine::new(Options::default()).unwrap();
 

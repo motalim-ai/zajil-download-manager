@@ -61,6 +61,8 @@ pub struct FileSpec {
     body: Bytes,
     announced_length: Option<u64>,
     etag: Option<String>,
+    etag_per_connection: Option<(String, String)>,
+    authorization: Option<String>,
     last_modified: Option<String>,
     date: Option<String>,
     ranges: bool,
@@ -85,6 +87,8 @@ impl FileSpec {
             body: body.into(),
             announced_length: None,
             etag: Some(format!("\"v{version}\"")),
+            etag_per_connection: None,
+            authorization: None,
             last_modified: Some(DEFAULT_LAST_MODIFIED.to_owned()),
             date: None,
             ranges: true,
@@ -112,6 +116,23 @@ impl FileSpec {
     /// always answers `200` with the whole file.
     pub fn ignore_ranges(mut self) -> Self {
         self.honor_ranges = false;
+        self
+    }
+
+    /// Two machines behind one name, each with its own `ETag` for the same
+    /// bytes (as Apache or nginx compute them from the inode or the time):
+    /// odd-numbered connections see `odd`, even-numbered ones `even`, and
+    /// `If-Range` is checked against the one the connection sees.
+    pub fn etag_per_connection(mut self, odd: &str, even: &str) -> Self {
+        self.etag_per_connection = Some((odd.to_owned(), even.to_owned()));
+        self
+    }
+
+    /// Every GET without exactly this `Authorization` header gets
+    /// `401 Unauthorized` (for Basic, `"Basic "` and the base64 of
+    /// `user:password`).
+    pub fn require_authorization(mut self, value: &str) -> Self {
+        self.authorization = Some(value.to_owned());
         self
     }
 
@@ -218,6 +239,8 @@ pub struct RequestRecord {
     pub bytes_sent: u64,
     /// The TLS version of the connection (`"TLSv1_3"`), or `None` for HTTP.
     pub tls_version: Option<String>,
+    /// The `Authorization` header, if any.
+    pub authorization: Option<String>,
     /// Number of the TCP connection, counted from 1 in the order the server
     /// accepted them. Requests on the same connection share it (keep-alive).
     pub connection: u64,
@@ -543,6 +566,7 @@ fn handle(
         path: path.clone(),
         range: header(header::RANGE),
         if_range: header(header::IF_RANGE),
+        authorization: header(header::AUTHORIZATION),
         status: 0,
         bytes_sent: 0,
         tls_version,
@@ -610,6 +634,25 @@ fn respond(
     get_index: usize,
     bytes_sent: Arc<AtomicU64>,
 ) -> Response<Body> {
+    let per_connection;
+    let spec = match &spec.etag_per_connection {
+        Some((odd, even)) => {
+            let etag = if record.connection % 2 == 1 {
+                odd
+            } else {
+                even
+            };
+            per_connection = FileSpec {
+                etag: Some(etag.clone()),
+                ..spec.clone()
+            };
+            &per_connection
+        }
+        None => spec,
+    };
+    if !is_head && spec.authorization.is_some() && record.authorization != spec.authorization {
+        return status_only(StatusCode::UNAUTHORIZED);
+    }
     if !is_head {
         if spec.forbid_after.is_some_and(|n| get_index >= n) {
             return status_only(StatusCode::FORBIDDEN);

@@ -39,6 +39,44 @@ use crate::state::{
 /// server, before giving up for now.
 const MAX_RESTARTS: u8 = 3;
 
+/// What one call of the engine may still do as it starts over: how many
+/// restarts are left, and whether the file may still be split. Not `Debug`:
+/// it holds the user name and password of the URL.
+#[derive(Clone)]
+struct Attempt {
+    restarts_left: u8,
+    split: bool,
+    /// The URL the user gave, if it has a user name or password. Kept in
+    /// memory only, never in the state file (ADR-0004, rule 7), so range
+    /// requests carry them too.
+    credentials: Option<Url>,
+}
+
+impl Attempt {
+    fn new(url: Option<&Url>) -> Self {
+        Attempt {
+            restarts_left: MAX_RESTARTS,
+            split: true,
+            credentials: url
+                .filter(|url| !url.username().is_empty() || url.password().is_some())
+                .cloned(),
+        }
+    }
+
+    /// `url` with the user's credentials, if it is on the same origin as the
+    /// URL that had them (as `reqwest` keeps them only within one origin).
+    fn authorize(&self, url: &Url) -> Url {
+        let mut url = url.clone();
+        if let Some(with) = &self.credentials
+            && with.origin() == url.origin()
+        {
+            let _ = url.set_username(with.username());
+            let _ = url.set_password(with.password());
+        }
+        url
+    }
+}
+
 /// Engine settings. There is deliberately no setting that weakens TLS
 /// certificate checks.
 #[derive(Debug, Clone)]
@@ -233,7 +271,7 @@ impl Engine {
             state,
             response,
             Some(cleanup),
-            MAX_RESTARTS,
+            Attempt::new(Some(&url)),
             on_event,
         )
         .await
@@ -313,7 +351,7 @@ impl Engine {
                     state,
                     RestartReason::PartFileMissing,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await;
@@ -348,7 +386,7 @@ impl Engine {
                     state,
                     reason,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await;
@@ -373,7 +411,7 @@ impl Engine {
                             state,
                             RestartReason::RangeMismatch,
                             None,
-                            MAX_RESTARTS,
+                            Attempt::new(None),
                             on_event,
                         )
                         .await;
@@ -398,7 +436,7 @@ impl Engine {
                     state,
                     response,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await
@@ -416,7 +454,7 @@ impl Engine {
                     state,
                     RestartReason::RangeMismatch,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await
@@ -469,7 +507,7 @@ impl Engine {
                             state,
                             reason,
                             None,
-                            MAX_RESTARTS,
+                            Attempt::new(None),
                             on_event,
                         )
                         .await;
@@ -486,7 +524,7 @@ impl Engine {
                     first: Some((response, segment.start)),
                     cleanup: None,
                 };
-                self.run_segments(job, MAX_RESTARTS, on_event).await
+                self.run_segments(job, Attempt::new(None), on_event).await
             }
             StatusCode::OK => {
                 let reason = if changed(&state, &response) {
@@ -502,7 +540,7 @@ impl Engine {
                     state,
                     response,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await
@@ -514,7 +552,7 @@ impl Engine {
                     state,
                     RestartReason::RangeMismatch,
                     None,
-                    MAX_RESTARTS,
+                    Attempt::new(None),
                     on_event,
                 )
                 .await
@@ -527,7 +565,7 @@ impl Engine {
     async fn run_segments(
         &self,
         job: Job,
-        restarts_left: u8,
+        attempt: Attempt,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         let final_path = job.final_path.clone();
@@ -539,34 +577,32 @@ impl Engine {
                 reason,
                 response,
                 cleanup,
-            } => match response {
-                Some(response) => {
-                    on_event(Event::Restarted { reason });
-                    let state = state_from_response(old.url, &response);
-                    Box::pin(self.start(
-                        final_path,
-                        part,
-                        state,
-                        response,
-                        cleanup,
-                        restarts_left,
-                        on_event,
-                    ))
-                    .await
+            } => {
+                // The validator changed while segments were being asked for.
+                // Some servers have several machines behind one name, each
+                // with its own ETag for the same file: one connection reads
+                // from one machine, so start over on one connection.
+                let attempt = Attempt {
+                    split: attempt.split && reason != RestartReason::FileChanged,
+                    ..attempt
+                };
+                match response {
+                    Some(response) => {
+                        on_event(Event::Restarted { reason });
+                        let state = state_from_response(old.url, &response);
+                        Box::pin(self.start(
+                            final_path, part, state, response, cleanup, attempt, on_event,
+                        ))
+                        .await
+                    }
+                    None => {
+                        Box::pin(
+                            self.restart(final_path, part, old, reason, cleanup, attempt, on_event),
+                        )
+                        .await
+                    }
                 }
-                None => {
-                    Box::pin(self.restart(
-                        final_path,
-                        part,
-                        old,
-                        reason,
-                        cleanup,
-                        restarts_left,
-                        on_event,
-                    ))
-                    .await
-                }
-            },
+            }
         }
     }
 
@@ -579,7 +615,7 @@ impl Engine {
         old: DownloadState,
         reason: RestartReason,
         cleanup: Option<EmptyDownloadCleanup>,
-        restarts_left: u8,
+        attempt: Attempt,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         on_event(Event::Restarted { reason });
@@ -589,13 +625,7 @@ impl Engine {
         }
         let state = state_from_response(old.url, &response);
         self.start(
-            final_path,
-            part,
-            state,
-            response,
-            cleanup,
-            restarts_left,
-            on_event,
+            final_path, part, state, response, cleanup, attempt, on_event,
         )
         .await
     }
@@ -611,14 +641,18 @@ impl Engine {
         mut state: DownloadState,
         response: Response,
         cleanup: Option<EmptyDownloadCleanup>,
-        restarts_left: u8,
+        attempt: Attempt,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
-        let Some(restarts_left) = restarts_left.checked_sub(1) else {
+        let Some(restarts_left) = attempt.restarts_left.checked_sub(1) else {
             return Err(Error::Interrupted {
                 state_file: state_path(&final_path),
                 reason: "the file kept changing on the server; try again later".into(),
             });
+        };
+        let attempt = Attempt {
+            restarts_left,
+            ..attempt
         };
         let len = state.content_length;
         let part_file = part_path(&final_path);
@@ -643,7 +677,7 @@ impl Engine {
         .await?;
         drop(keep_alive);
 
-        let split = self.split(&state);
+        let split = attempt.split.then(|| self.split(&state)).flatten();
         let watch = cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
         if let Some(segments) = split {
             state.segments = segments;
@@ -653,7 +687,7 @@ impl Engine {
                 client: self.client.clone(),
                 connections: self.options.connections,
                 save_interval: self.options.save_interval,
-                url: response.url().clone(),
+                url: attempt.authorize(response.url()),
                 if_range,
                 final_path,
                 part,
@@ -661,7 +695,7 @@ impl Engine {
                 first: Some((response, 0)),
                 cleanup,
             };
-            return self.run_segments(job, restarts_left, on_event).await;
+            return self.run_segments(job, attempt, on_event).await;
         }
         save_state(&mut state, &state_path(&final_path), watch).await?;
         self.transfer(final_path, part, state, cleanup)
