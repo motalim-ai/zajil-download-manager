@@ -61,13 +61,17 @@ jobs:
       # zajil-core run on a small image of each and fail on CI without them.
       - name: Mount FAT32 and exFAT test volumes (Linux)
         if: runner.os == 'Linux'
+        # A slow package mirror once hung this step for over 20 minutes.
+        timeout-minutes: 10
+        env:
+          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends dosfstools exfatprogs
+          sudo apt-get $APT_OPTIONS update -q
+          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends dosfstools exfatprogs
           # The runner's kernel ships the exFAT driver as an extra module.
           if ! sudo modprobe exfat; then
-            sudo apt-get install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
+            sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
             sudo modprobe exfat
           fi
           truncate -s 256M "$RUNNER_TEMP/fat32.img" "$RUNNER_TEMP/exfat.img"
@@ -82,6 +86,7 @@ jobs:
           echo "ZAJIL_TEST_EXFAT=/mnt/zexfat" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (macOS)
         if: runner.os == 'macOS'
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           hdiutil create -quiet -size 256m -fs "MS-DOS FAT32" -volname ZFAT32 "$RUNNER_TEMP/fat32.dmg"
@@ -94,6 +99,7 @@ jobs:
           echo "ZAJIL_TEST_EXFAT=/Volumes/ZEXFAT" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
