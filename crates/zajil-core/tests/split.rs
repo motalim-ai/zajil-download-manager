@@ -141,6 +141,8 @@ async fn a_change_during_splitting_leaves_only_the_new_version() {
     let server = TestServer::http();
     let old = random_bytes(8 * MIB as usize, 73);
     let new = random_bytes(8 * MIB as usize, 74);
+    let new_spec = FileSpec::new(new.clone());
+    let new_etag = new_spec.current_etag().unwrap().to_owned();
     // The first connection is slow, so the others finish their segments
     // (old bytes on disk) and then split it. Those split requests come
     // after the first four, when the server already has the new version.
@@ -148,7 +150,7 @@ async fn a_change_during_splitting_leaves_only_the_new_version() {
         "/f.bin",
         FileSpec::new(old.clone())
             .slow_at(0, 64 * KIB)
-            .replaced_after(4, FileSpec::new(new.clone())),
+            .replaced_after(4, new_spec),
     );
     let dir = tempfile::tempdir().unwrap();
     let mut events = Vec::new();
@@ -182,13 +184,21 @@ async fn a_change_during_splitting_leaves_only_the_new_version() {
         "only {old_on_disk} old bytes were written"
     );
     assert!(!splits(&events[..restart]).is_empty());
-    // One restart only, and then one connection: no more range requests.
+    // One restart only, and then one connection: no range request was
+    // ever made for the new version (a split download of it would send its
+    // ETag in If-Range).
     assert_eq!(
         events
             .iter()
             .filter(|e| matches!(e, Event::Restarted { .. }))
             .count(),
         1
+    );
+    let gets = server.gets("/f.bin");
+    assert!(
+        gets.iter()
+            .all(|r| r.if_range.as_deref() != Some(new_etag.as_str())),
+        "{gets:?}"
     );
 
     // The new version in full; not one byte comes from the old one.

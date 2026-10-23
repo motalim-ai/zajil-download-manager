@@ -400,12 +400,12 @@ fn connections_must_be_between_1_and_32() {
 }
 
 /// Owner decision on #28: a resume that needs a user name and password
-/// says so and prints the `zajil get` command to start again, quoted for
-/// each shell, with USER and PASSWORD in place of the user's own. The URL
-/// comes from the state file (untrusted), so it holds `$(id)`: the shells
-/// must pass it through untouched.
+/// says so and how to download the file again. Following those steps gives
+/// the file its own name, with nothing left behind (review of #29: a
+/// printed `zajil get` made `f (1).bin` next to the old files). Nothing
+/// secret is printed: not the password, not a token in the URL.
 #[test]
-fn a_resume_that_needs_credentials_prints_how_to_start_again() {
+fn a_resume_that_needs_credentials_says_how_to_download_again() {
     let server = TestServer::http();
     let data = random_bytes(1_000_000, 6);
     let spec = || {
@@ -413,15 +413,18 @@ fn a_resume_that_needs_credentials_prints_how_to_start_again() {
             .etag(Some("\"same\""))
             .require_authorization("Basic dTpw")
     };
-    let path = "/x$(id).bin";
-    server.put(path, spec().cut_after(300_000, 1));
+    server.put("/f.bin", spec().cut_after(300_000, 1));
     let dir = tempfile::tempdir().unwrap();
-    let work = tempfile::tempdir().unwrap();
-    let url = server.url(path).replacen("http://", "http://u:p@", 1);
+    let dir_arg = dir.path().to_str().unwrap();
+    let url = format!(
+        "{}?sig=SECRET-TOKEN",
+        server.url("/f.bin").replacen("http://", "http://u:p@", 1)
+    );
 
-    let out = zajil(&["get", &url, "-c", "1", "-d", dir.path().to_str().unwrap()]);
+    let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     let state_file = only_state_file(dir.path());
+    let part_file = dir.path().join("f.bin.zajil-part");
 
     let out = zajil(&["resume", state_file.to_str().unwrap()]);
     let stderr = text(&out.stderr);
@@ -430,108 +433,44 @@ fn a_resume_that_needs_credentials_prints_how_to_start_again() {
         stderr.contains("asks for a user name and password"),
         "{stderr}"
     );
-    assert!(
-        !stderr.contains("u:p@"),
-        "no credentials are ever printed: {stderr}"
-    );
-
-    let expected_url = server
-        .url(path)
-        .replacen("http://", "http://USER:PASSWORD@", 1);
-    let mut lines = stderr.lines();
-    let mut seen = 0;
-    while let Some(line) = lines.next() {
-        let Some(shell) = line
-            .strip_prefix("zajil: to start it again, run this in ")
-            .and_then(|rest| rest.split_once(" with your").map(|(shell, _)| shell))
-        else {
-            continue;
-        };
-        let command = lines.next().unwrap().trim_start();
-        let args = command
-            .strip_prefix("zajil get ")
-            .unwrap_or_else(|| panic!("unexpected command: {command}"));
-        for passed in run_and_list_args(shell, args, work.path()) {
-            assert_eq!(passed.len(), 3, "{shell}: {passed:?}");
-            assert_eq!(passed[0], expected_url, "{shell}");
-            assert_eq!(passed[1], "--dir", "{shell}");
-            assert_eq!(
-                Path::new(&passed[2]).canonicalize().unwrap(),
-                dir.path().canonicalize().unwrap(),
-                "{shell}"
-            );
-        }
-        seen += 1;
+    for secret in ["u:p@", ":p@", "SECRET-TOKEN"] {
+        assert!(!stderr.contains(secret), "{secret} printed: {stderr}");
     }
-    assert!(seen > 0, "no command printed: {stderr}");
+    // The two files to delete and the folder, as the engine knows them.
+    let shown = |path: &Path| {
+        stderr
+            .lines()
+            .any(|line| line.trim_start_matches("zajil:").trim() == path.to_str().unwrap())
+    };
+    let real_state = state_file.canonicalize().unwrap();
+    let real_part = part_file.canonicalize().unwrap();
+    assert!(shown(&real_state) || shown(&state_file), "{stderr}");
+    assert!(shown(&real_part) || shown(&part_file), "{stderr}");
+    assert!(stderr.contains("`--dir` set to"), "{stderr}");
+
+    // Follow the steps: delete both files, run the same `zajil get`.
+    fs::remove_file(&state_file).unwrap();
+    fs::remove_file(&part_file).unwrap();
+    server.put("/f.bin", spec());
+    let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let mut names: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["f.bin"]);
+    assert_eq!(fs::read(dir.path().join("f.bin")).unwrap(), data);
 }
 
-/// Runs `args` (as printed) in `shell`, and returns for each real shell the
-/// list of arguments it passed on.
-fn run_and_list_args(shell: &str, args: &str, work: &Path) -> Vec<Vec<String>> {
-    let outputs: Vec<Output> = match shell {
-        "PowerShell" => {
-            let script = work.join("args.ps1");
-            fs::write(
-                &script,
-                format!("function show {{ foreach ($a in $args) {{ Write-Output $a }} }}\r\nshow {args}\r\n"),
-            )
-            .unwrap();
-            vec![
-                Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                    ])
-                    .arg(&script)
-                    .current_dir(work)
-                    .output()
-                    .unwrap(),
-            ]
-        }
-        "cmd" => {
-            let script = work.join("args.cmd");
-            fs::write(
-                &script,
-                format!("@echo off\r\nfor %%a in ({args}) do echo %%~a\r\n"),
-            )
-            .unwrap();
-            vec![
-                Command::new("cmd")
-                    .args(["/d", "/c"])
-                    .arg(&script)
-                    .current_dir(work)
-                    .output()
-                    .unwrap(),
-            ]
-        }
-        _ => ["sh", "bash", "zsh"]
-            .iter()
-            .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
-            .map(|sh| {
-                Command::new(sh)
-                    .arg("-c")
-                    .arg(format!("printf '%s\\n' {args}"))
-                    .current_dir(work)
-                    .output()
-                    .unwrap()
-            })
-            .collect(),
-    };
-    assert!(!outputs.is_empty(), "no shell found for {shell}");
-    outputs
-        .into_iter()
-        .map(|out| {
-            assert!(out.status.success(), "{shell}: {}", text(&out.stderr));
-            text(&out.stdout)
-                .lines()
-                .map(|line| line.trim_end().to_owned())
-                .collect()
-        })
-        .collect()
+/// Review of #29: an invalid URL printed in full, password included.
+#[test]
+fn an_invalid_url_never_prints_its_password() {
+    let out = zajil(&["get", "http://u:S3cret@127.0.0.1:99999/f.bin", "-d", "."]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains("invalid URL"), "{stderr}");
+    assert!(!stderr.contains("S3cret"), "{stderr}");
 }
 
 #[test]

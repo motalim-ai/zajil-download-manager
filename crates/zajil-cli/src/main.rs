@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 use zajil_core::{
     DEFAULT_CONNECTIONS, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options, RestartReason,
 };
-use zajil_platform::shell::{self, Arg, ShellCommand};
+use zajil_platform::shell::{self, ShellCommand};
 use zajil_platform::{AppPaths, SystemPaths};
 
 /// Exit code when the download stopped but can be resumed.
@@ -171,46 +171,30 @@ fn stopped(reason: &str, state_file: &Path) -> ExitCode {
 }
 
 /// A resume the server refused with 401: the state file never keeps a user
-/// name or password, so tell the user how to start the download again
-/// with them.
+/// name or password, so tell the user how to download the file again.
+///
+/// No command is printed to copy: it would put the password in a command
+/// line, a URL with a token in front of everyone, and a new `zajil get`
+/// next to the old files would save the file under another name (review of
+/// #29). The user runs their own `zajil get` again, after deleting the two
+/// old files.
 fn needs_credentials(err: &Error) -> ExitCode {
-    let Error::CredentialsNeeded { url, state_file } = err else {
+    let Error::CredentialsNeeded { state_file, .. } = err else {
         return fail(&err.to_string());
     };
     eprintln!("zajil: error: {err}");
-    // `USER` and `PASSWORD` stand where the user puts theirs; nothing of
-    // theirs is ever printed or saved.
-    let with_placeholders = match url.split_once("://") {
-        Some((scheme, rest)) => format!("{scheme}://USER:PASSWORD@{rest}"),
-        None => url.clone(),
-    };
-    let dir = state_file
-        .parent()
-        .map(|dir| dir.to_string_lossy().into_owned())
-        .unwrap_or_else(|| ".".into());
-    let args = [
-        Arg::Quoted(&with_placeholders),
-        Arg::Plain("--dir"),
-        Arg::Quoted(&dir),
-    ];
-    for ShellCommand { shell, command } in shell::command_lines("zajil get", &args) {
-        match command {
-            Some(command) => {
-                eprintln!(
-                    "zajil: to start it again, run this in {shell} with your user name and \
-                     password in place of USER and PASSWORD:"
-                );
-                eprintln!("    {command}");
-            }
-            None => {
-                eprintln!("zajil: {shell} cannot be given this command safely; use another shell.")
-            }
-        }
-    }
-    eprintln!("zajil: write @ : / % in them as %40 %3A %2F %25.");
+    let part_file = zajil_core::state::part_path(
+        &zajil_core::state::final_path_for_state(state_file).unwrap_or_default(),
+    );
+    let dir = state_file.parent().unwrap_or(Path::new("."));
+    eprintln!("zajil: to download it again:");
+    eprintln!("zajil:   1. delete the two files this download left:");
+    eprintln!("zajil:        {}", state_file.display());
+    eprintln!("zajil:        {}", part_file.display());
     eprintln!(
-        "zajil: it starts from the beginning; the old .zajil-part and .zajil-state files can \
-         then be deleted."
+        "zajil:   2. run the same `zajil get` command again, with your user name and password \
+         in the URL, and `--dir` set to {}",
+        dir.display()
     );
     ExitCode::FAILURE
 }

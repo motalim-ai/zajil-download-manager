@@ -207,8 +207,8 @@ pub enum Error {
     },
     #[error(
         "the server asks for a user name and password (401 Unauthorized); Zajil never saves \
-         them in the state file, so this download cannot be resumed: start it again with them \
-         in the URL"
+         them in the state file, so this download cannot be resumed and has to be downloaded \
+         again"
     )]
     CredentialsNeeded {
         /// The URL of the download, without a user name or password.
@@ -1109,12 +1109,26 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
 
 fn parse_url(raw: &str) -> Result<Url, Error> {
     let url = Url::parse(raw).map_err(|err| Error::InvalidUrl {
-        url: raw.to_owned(),
+        url: without_userinfo(raw),
         reason: err.to_string(),
     })?;
     match url.scheme() {
         "http" | "https" => Ok(url),
         other => Err(Error::UnsupportedScheme(other.to_owned())),
+    }
+}
+
+/// `raw` (a URL that did not parse) with everything between `://` and the
+/// last `@` hidden, so an error message never shows a password. A password
+/// may itself hold `/`, `#` or `?`, so the last `@` is the only safe end;
+/// an `@` later in the path hides a little too much, never too little.
+fn without_userinfo(raw: &str) -> String {
+    match (raw.find("://"), raw.rfind('@')) {
+        (Some(scheme_end), Some(at)) if at > scheme_end + 3 => {
+            format!("{}***{}", &raw[..scheme_end + 3], &raw[at..])
+        }
+        (None, Some(at)) => format!("***{}", &raw[at..]),
+        _ => raw.to_owned(),
     }
 }
 
@@ -1467,6 +1481,26 @@ mod tests {
             None
         );
         assert_eq!(if_range_value(&Validator::default()), None);
+    }
+
+    #[test]
+    fn an_invalid_url_never_shows_its_password() {
+        // Review of #29: the whole URL, password included, was in the error.
+        for raw in [
+            "http://u:S3cret@127.0.0.1:99999/f.bin",
+            "http://u:pa#S3cret@127.0.0.1:1/f.bin",
+            "http://u:pa?S3cret@h:1/f",
+            "http://u:pa/S3cret@h:99999/f",
+            "u:S3cret@h:99999/f",
+        ] {
+            let message = parse_url(raw).unwrap_err().to_string();
+            assert!(!message.contains("S3cret"), "{message}");
+        }
+        assert_eq!(
+            without_userinfo("http://u:S3cret@h:99999/f"),
+            "http://***@h:99999/f"
+        );
+        assert_eq!(without_userinfo("http://h:99999/f"), "http://h:99999/f");
     }
 
     #[test]
