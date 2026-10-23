@@ -1,0 +1,23 @@
+{
+  "checksum": "sha256:b809cf1d002fa72850f44bf1eb6e484669e822d0df8b57cfa83275afa8c7e622",
+  "updated_at": "2026-10-23T10:05:12Z",
+  "segments": [
+    {
+      "done": 31457280,
+      "end": 104857599,
+      "start": 0
+    }
+  ],
+  "validator": {
+    "date": "Wed, 21 Oct 2026 08:00:00 GMT",
+    "etag": "\"abc123\"",
+    "last_modified": "Wed, 21 Oct 2026 07:28:00 GMT"
+  },
+  "url": "https://example.com/files/report.pdf",
+  "schema_version": 1,
+  "format": "zajil-state",
+  "final_url": "https://cdn.example.com/a/report.pdf",
+  "created_at": "2026-10-23T10:00:00Z",
+  "content_length": 104857600,
+  "accept_ranges": true
+}

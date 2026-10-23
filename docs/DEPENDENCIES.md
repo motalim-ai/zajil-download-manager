@@ -14,6 +14,11 @@
 | المكتبة | الإصدار | الترخيص | تُستخدم في | السبب | أُضيفت في |
 |---|---|---|---|---|---|
 | `dirs` | 7.0.0 | MIT أو Apache-2.0 | `zajil-platform` | مسارات النظام القياسية: Known Folders في ويندوز، وXDG في لينكس (يعتمد على `option-ext` بترخيص MPL-2.0) | M1 |
+| `serde` | 1.0.229 | MIT أو Apache-2.0 | `zajil-core` | قراءة ملف الحالة وكتابته | M1 |
+| `serde_json` | 1.0.154 | MIT أو Apache-2.0 | `zajil-core` | صيغة JSON لملف الحالة (ADR-0004) | M1 |
+| `sha2` | 0.11.1 | MIT أو Apache-2.0 | `zajil-core` | بصمة ملف الحالة، وبصمات الملفات | M1 |
+| `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`) | M1 |
+| `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة | M1 |
 | `dunce` | 1.0.5 | CC0-1.0 أو MIT-0 أو Apache-2.0 | `zajil-core` | مسار مجلد التحميل الحقيقي دون بادئة `\\?\` في ويندوز حين لا تلزم، حتى تبقى المسارات المعروضة للمستخدم مقروءة | M1 |
 | `icu_properties` | 2.4.0 | Unicode-3.0 | `zajil-core` | بيانات يونيكود (Joining_Type وCanonical_Combining_Class) لقواعد ContextJ في RFC 5892: متى يبقى ZWNJ وZWJ في اسم الملف. موجودة أصلًا في البرنامج عبر `reqwest` ← `url` ← `idna`، فلا تضيف كودًا جديدًا إلى النسخة النهائية | M1 |
 | `thiserror` | 2.0.21 | MIT أو Apache-2.0 | كل المكتبات | تعريف أنواع الأخطاء | M1 |
