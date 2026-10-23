@@ -1118,18 +1118,25 @@ fn parse_url(raw: &str) -> Result<Url, Error> {
     }
 }
 
-/// `raw` (a URL that did not parse) with everything between `://` and the
-/// last `@` hidden, so an error message never shows a password. A password
-/// may itself hold `/`, `#` or `?`, so the last `@` is the only safe end;
-/// an `@` later in the path hides a little too much, never too little.
+/// `raw` (a URL that did not parse) with what may be a user name and
+/// password hidden, so an error message never shows a password: everything
+/// after the scheme's `:` (and its slashes) up to the last `@`. It does not
+/// rely on `://`, which a mistyped URL may lack (`http:/u:p@h`) or have
+/// again later (`?next=https://…`). A password may hold `/`, `#` or `?`, so
+/// the last `@` is the only safe end; an `@` later in the URL hides a little
+/// too much, never too little.
 fn without_userinfo(raw: &str) -> String {
-    match (raw.find("://"), raw.rfind('@')) {
-        (Some(scheme_end), Some(at)) if at > scheme_end + 3 => {
-            format!("{}***{}", &raw[..scheme_end + 3], &raw[at..])
+    let Some(at) = raw.rfind('@') else {
+        return raw.to_owned();
+    };
+    let start = match raw[..at].find(':') {
+        Some(colon) => {
+            let after = colon + 1;
+            after + raw[after..at].len() - raw[after..at].trim_start_matches('/').len()
         }
-        (None, Some(at)) => format!("***{}", &raw[at..]),
-        _ => raw.to_owned(),
-    }
+        None => 0,
+    };
+    format!("{}***{}", &raw[..start], &raw[at..])
 }
 
 fn lock(file: &File, final_path: &Path) -> Result<(), Error> {
@@ -1500,6 +1507,17 @@ mod tests {
             without_userinfo("http://u:S3cret@h:99999/f"),
             "http://***@h:99999/f"
         );
+        // Review of #29: a `://` only later in the URL, or none at all.
+        for raw in [
+            "http:/u:S3cret@h:99999/f?next=https://x",
+            "http:/u:S3cret@h:99999/f#https://x",
+            "http:u:S3cret@h:99999/f",
+        ] {
+            assert!(!without_userinfo(raw).contains("S3cret"), "{raw}");
+            if let Err(err) = parse_url(raw) {
+                assert!(!err.to_string().contains("S3cret"), "{err}");
+            }
+        }
         assert_eq!(without_userinfo("http://h:99999/f"), "http://h:99999/f");
     }
 

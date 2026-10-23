@@ -20,6 +20,15 @@ pub fn commands(program: &str, arg: &str) -> Vec<ShellCommand> {
     imp::commands(program, arg)
 }
 
+/// Commands that delete exactly the files at `paths`, quoted for the shells
+/// people use on this system: `rm --` in POSIX shells, `Remove-Item
+/// -LiteralPath` in PowerShell, `del` in cmd (`None` where cmd cannot quote a
+/// path safely). Paths come from servers: printed bare, a name with a space
+/// or `$(…)` would delete another file or run code when pasted.
+pub fn delete_commands(paths: &[&str]) -> Vec<ShellCommand> {
+    imp::delete_commands(paths)
+}
+
 /// bash, zsh and other POSIX shells: single quotes, where nothing is
 /// special, with each `'` written as `'\''`.
 pub fn quote_posix(arg: &str) -> String {
@@ -61,6 +70,14 @@ mod imp {
             command: Some(format!("{program} {}", quote_posix(arg))),
         }]
     }
+
+    pub fn delete_commands(paths: &[&str]) -> Vec<ShellCommand> {
+        let quoted: Vec<String> = paths.iter().map(|p| quote_posix(p)).collect();
+        vec![ShellCommand {
+            shell: "your shell",
+            command: Some(format!("rm -- {}", quoted.join(" "))),
+        }]
+    }
 }
 
 #[cfg(windows)]
@@ -76,6 +93,21 @@ mod imp {
             ShellCommand {
                 shell: "cmd",
                 command: quote_cmd(arg).map(|quoted| format!("{program} {quoted}")),
+            },
+        ]
+    }
+
+    pub fn delete_commands(paths: &[&str]) -> Vec<ShellCommand> {
+        let powershell: Vec<String> = paths.iter().map(|p| quote_powershell(p)).collect();
+        let cmd: Option<Vec<String>> = paths.iter().map(|p| quote_cmd(p)).collect();
+        vec![
+            ShellCommand {
+                shell: "PowerShell",
+                command: Some(format!("Remove-Item -LiteralPath {}", powershell.join(","))),
+            },
+            ShellCommand {
+                shell: "cmd",
+                command: cmd.map(|quoted| format!("del {}", quoted.join(" "))),
             },
         ]
     }
@@ -109,6 +141,22 @@ mod tests {
         );
         for bad in ["%PATH%.zip", "a!b!.zip", "a\"b", "a\nb"] {
             assert_eq!(quote_cmd(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn delete_commands_quote_every_path() {
+        let commands = delete_commands(&[NASTY, "/tmp/My Report.pdf"]);
+        assert!(!commands.is_empty());
+        let first = commands[0].command.as_deref().unwrap();
+        if cfg!(unix) {
+            assert_eq!(first, format!("rm -- '{NASTY}' '/tmp/My Report.pdf'"));
+        } else {
+            assert_eq!(
+                first,
+                format!("Remove-Item -LiteralPath '{NASTY}','/tmp/My Report.pdf'")
+            );
+            assert_eq!(delete_commands(&["a%PATH%"])[1].command, None);
         }
     }
 

@@ -400,22 +400,29 @@ fn connections_must_be_between_1_and_32() {
 }
 
 /// Owner decision on #28: a resume that needs a user name and password
-/// says so and how to download the file again. Following those steps gives
-/// the file its own name, with nothing left behind (review of #29: a
-/// printed `zajil get` made `f (1).bin` next to the old files). Nothing
-/// secret is printed: not the password, not a token in the URL.
+/// says so and how to download the file again. Review of #29:
+/// - following the steps gives the file its own name, with nothing left
+///   behind;
+/// - nothing secret is printed: not the password, not a token in the URL;
+/// - the paths come from the server (here `$(touch PWNED)`, backticks and a
+///   space, next to a file of the user's named `x`), so the printed delete
+///   command and folder are run in each real shell: they delete exactly the
+///   two files, run nothing, and pass the folder through untouched.
 #[test]
 fn a_resume_that_needs_credentials_says_how_to_download_again() {
     let server = TestServer::http();
     let data = random_bytes(1_000_000, 6);
+    let name = "x $(touch PWNED)`id`.bin";
     let spec = || {
         FileSpec::new(data.clone())
             .etag(Some("\"same\""))
             .require_authorization("Basic dTpw")
+            .content_disposition(&format!("attachment; filename=\"{name}\""))
     };
     server.put("/f.bin", spec().cut_after(300_000, 1));
     let dir = tempfile::tempdir().unwrap();
     let dir_arg = dir.path().to_str().unwrap();
+    fs::write(dir.path().join("x"), b"the user's own file").unwrap();
     let url = format!(
         "{}?sig=SECRET-TOKEN",
         server.url("/f.bin").replacen("http://", "http://u:p@", 1)
@@ -424,7 +431,8 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
     let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     let state_file = only_state_file(dir.path());
-    let part_file = dir.path().join("f.bin.zajil-part");
+    let part_file = dir.path().join(format!("{name}.zajil-part"));
+    assert!(part_file.exists());
 
     let out = zajil(&["resume", state_file.to_str().unwrap()]);
     let stderr = text(&out.stderr);
@@ -436,20 +444,69 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
     for secret in ["u:p@", ":p@", "SECRET-TOKEN"] {
         assert!(!stderr.contains(secret), "{secret} printed: {stderr}");
     }
-    // The two files to delete, as the engine knows them: compare the real
-    // paths, since Windows may show a folder by its long or short name.
-    let shown = |path: &Path| {
-        let real = path.canonicalize().unwrap();
-        stderr.lines().any(|line| {
-            let printed = line.trim_start_matches("zajil:").trim();
-            Path::new(printed)
-                .canonicalize()
-                .is_ok_and(|printed| printed == real)
-        })
-    };
-    assert!(shown(&state_file), "{stderr}");
-    assert!(shown(&part_file), "{stderr}");
-    assert!(stderr.contains("`--dir` set to"), "{stderr}");
+
+    // The printed commands: step 1 (delete) and step 2 (the folder).
+    let (mut deletes, mut folders) = (Vec::new(), Vec::new());
+    let mut step = 0;
+    let mut lines = stderr.lines();
+    while let Some(line) = lines.next() {
+        if line.starts_with("zajil:   1.") {
+            step = 1;
+        } else if line.starts_with("zajil:   2.") {
+            step = 2;
+        } else if let Some(shell) = line
+            .strip_prefix("zajil:      in ")
+            .and_then(|rest| rest.strip_suffix(':'))
+        {
+            let command = lines.next().unwrap().trim_start().to_owned();
+            match step {
+                1 => deletes.push((shell.to_owned(), command)),
+                2 => folders.push((shell.to_owned(), command)),
+                _ => panic!("a command outside the steps: {stderr}"),
+            }
+        }
+    }
+    assert!(!deletes.is_empty() && !folders.is_empty(), "{stderr}");
+
+    let state_bytes = fs::read(&state_file).unwrap();
+    let part_bytes = fs::read(&part_file).unwrap();
+    for (shell, command) in &deletes {
+        let check = |out: Output| {
+            assert!(out.status.success(), "{shell}: {}", text(&out.stderr));
+            assert!(
+                !state_file.exists() && !part_file.exists(),
+                "{shell}: {command}"
+            );
+            assert!(!dir.path().join("PWNED").exists(), "{shell} ran code");
+            assert_eq!(
+                fs::read(dir.path().join("x")).unwrap(),
+                b"the user's own file"
+            );
+            // Put them back for the next shell.
+            fs::write(&state_file, &state_bytes).unwrap();
+            fs::write(&part_file, &part_bytes).unwrap();
+        };
+        assert!(
+            run_in_shell(shell, command, dir.path(), check) > 0,
+            "no {shell}"
+        );
+    }
+    for (shell, command) in &folders {
+        let args = command
+            .strip_prefix("--dir ")
+            .unwrap_or_else(|| panic!("unexpected: {command}"));
+        let check = |out: Output| {
+            assert!(out.status.success(), "{shell}: {}", text(&out.stderr));
+            let printed = text(&out.stdout).trim_end().to_owned();
+            assert_eq!(
+                Path::new(&printed).canonicalize().unwrap(),
+                dir.path().canonicalize().unwrap(),
+                "{shell}"
+            );
+        };
+        let shown = run_in_shell(shell, &format!("show {args}"), dir.path(), check);
+        assert!(shown > 0, "no {shell}");
+    }
 
     // Follow the steps: delete both files, run the same `zajil get`.
     fs::remove_file(&state_file).unwrap();
@@ -462,8 +519,78 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     names.sort();
-    assert_eq!(names, ["f.bin"]);
-    assert_eq!(fs::read(dir.path().join("f.bin")).unwrap(), data);
+    assert_eq!(names, ["x", name]);
+    assert_eq!(fs::read(dir.path().join(name)).unwrap(), data);
+}
+
+/// Runs `command` in `shell` (as `zajil` names it) inside `work`, once per
+/// real shell, and hands each result to `check` before the next run.
+/// `show <arg>` prints its one argument, in every shell. Returns how many
+/// shells ran.
+fn run_in_shell(shell: &str, command: &str, work: &Path, check: impl Fn(Output)) -> usize {
+    let script_dir = work.parent().unwrap().to_path_buf();
+    let work = work.to_path_buf();
+    let runs: Vec<Box<dyn Fn() -> Output>> = match shell {
+        "PowerShell" => {
+            let script = script_dir.join("zajil-test.ps1");
+            fs::write(
+                &script,
+                format!("function show {{ Write-Output $args[0] }}\r\n{command}\r\n"),
+            )
+            .unwrap();
+            vec![Box::new(move || {
+                Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                    ])
+                    .arg(&script)
+                    .current_dir(&work)
+                    .output()
+                    .unwrap()
+            })]
+        }
+        "cmd" => {
+            let script = script_dir.join("zajil-test.cmd");
+            let command = command.replacen("show ", "echo ", 1);
+            fs::write(&script, format!("@echo off\r\n{command}\r\n")).unwrap();
+            vec![Box::new(move || {
+                let mut out = Command::new("cmd")
+                    .args(["/d", "/c"])
+                    .arg(&script)
+                    .current_dir(&work)
+                    .output()
+                    .unwrap();
+                // cmd's echo keeps the quotes.
+                let shown = text(&out.stdout).trim_end().trim_matches('"').to_owned();
+                out.stdout = shown.into_bytes();
+                out
+            })]
+        }
+        _ => ["sh", "bash", "zsh"]
+            .into_iter()
+            .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
+            .map(|sh| {
+                let script = format!("show() {{ printf '%s' \"$1\"; }}; {command}");
+                let work = work.clone();
+                Box::new(move || {
+                    Command::new(sh)
+                        .arg("-c")
+                        .arg(&script)
+                        .current_dir(&work)
+                        .output()
+                        .unwrap()
+                }) as Box<dyn Fn() -> Output>
+            })
+            .collect(),
+    };
+    for run in &runs {
+        check(run());
+    }
+    runs.len()
 }
 
 /// Review of #29: an invalid URL printed in full, password included.
