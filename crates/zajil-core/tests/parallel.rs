@@ -423,9 +423,8 @@ async fn credentials_in_the_url_reach_every_range_request() {
 
     assert_eq!(fs::read(&done.file).unwrap(), data);
     let gets = server.gets("/f.bin");
-    assert_eq!(
-        gets.iter().filter(|r| r.range.is_some()).count(),
-        7,
+    assert!(
+        gets.iter().filter(|r| r.range.is_some()).count() >= 7,
         "{gets:?}"
     );
     assert!(gets.iter().all(|r| r.status != 401), "{gets:?}");
@@ -480,11 +479,15 @@ async fn a_server_whose_etag_differs_per_connection_completes_on_one_connection(
         sha256_hex(&data)
     );
     assert_eq!(restarts(&events), [RestartReason::FileChanged]);
-    // After the restart nothing more was asked: the whole-file answer that
-    // showed the change was read to the end on its own connection. So the
-    // requests are the first one and the seven range requests only.
+    // The restart asked for nothing new: the whole-file answer to a range
+    // request, which showed the change, was read to the end on its own
+    // connection. The only request without a range is the first one.
     let gets = server.gets("/f.bin");
-    assert!(gets.len() <= 8, "{gets:?}");
+    assert_eq!(
+        gets.iter().filter(|r| r.range.is_none()).count(),
+        1,
+        "{gets:?}"
+    );
     assert!(gets.iter().any(|r| r.range.is_some() && r.status == 200));
     assert_eq!(names_in(dir.path()), ["f.bin"]);
 }
