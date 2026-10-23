@@ -2,8 +2,9 @@
 //! on the M3 plan): a `ManualClock` only moves when a limit makes a
 //! download wait, so the time it shows is exactly what the limits cost,
 //! however fast or slow CI is. The data still comes over real connections
-//! from the test server. The one test on the real clock is in
-//! `zajil-cli/tests/queue.rs` (`the_real_clock_drives_the_limits`).
+//! from the test server. The tests on the real clock are
+//! `the_real_clock_drives_limits_and_schedules` in `zajil-cli/tests/queue.rs`,
+//! and `speed_limit_real_clock.rs`, which runs every night only (#36).
 //!
 //! Owner's tolerance (ROADMAP M3): the average is between 0.9 and 1.1 MiB/s
 //! for a limit of 1 MiB/s, over at least 6 seconds.

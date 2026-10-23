@@ -1,0 +1,102 @@
+name: Nightly
+
+# Tests that are too slow or too timing-dependent for pull requests. This
+# workflow never runs on a pull request, so it never blocks a merge: when
+# it fails, it opens an issue (or comments on the one already open).
+# Owner's decision on #36 (item 14).
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      check_alert:
+        description: "Fail on purpose (skips the tests) to check that a failure opens an issue"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  # As in ci.yml: the real PowerControl refuses while this is set.
+  ZAJIL_NO_POWER_ACTIONS: "1"
+
+# Actions are pinned to the same commit SHAs as ci.yml.
+
+jobs:
+  real-clock:
+    name: Real-clock speed limit (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Fail on purpose
+        if: inputs.check_alert
+        shell: bash
+        run: |
+          echo "::error::check_alert was set: failing on purpose to check the alert"
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned toolchain
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The test is #[ignore]d so that `cargo test` on pull requests skips
+      # it; here it runs alone. The count is checked, so a renamed test
+      # cannot pass by running nothing.
+      - name: Test the speed limit on the real clock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p zajil-core --test speed_limit_real_clock -- \
+            --ignored --exact --nocapture \
+            on_the_real_clock_the_first_second_stays_under_twice_the_limit \
+            | tee real-clock.txt
+          grep -q 'test result: ok. 1 passed' real-clock.txt
+
+  alert:
+    name: Open an issue on failure
+    needs: real-clock
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          CHECK_ALERT: ${{ inputs.check_alert }}
+        run: |
+          set -euo pipefail
+          title="الاختبارات الليلية: فشل اختبار حد السرعة بالوقت الحقيقي"
+          if [ "$CHECK_ALERT" = "true" ]; then
+            title="$title (تجربة التنبيه)"
+          fi
+          body="$(printf '%s\n' \
+            '<div dir="rtl">' '' \
+            "فشل التشغيل الليلي: $RUN_URL" '' \
+            "- الـ commit: \`$SHA\`" \
+            "- السبب: \`$EVENT\`" \
+            '- الاختبار: `crates/zajil-core/tests/speed_limit_real_clock.rs`' '' \
+            'هذا لا يمنع الدمج. افتح السجل لترى النظام والأرقام.' '' '</div>')"
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on #$existing"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
