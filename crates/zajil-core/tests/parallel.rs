@@ -324,14 +324,17 @@ async fn a_cancelled_parallel_download_without_data_leaves_nothing() {
     )
     .await;
     assert!(cancelled.is_err());
-    // Writes and saves still on blocking threads end first.
-    tokio::task::spawn_blocking(|| ()).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        names_in(dir.path()).is_empty(),
-        "{:?}",
-        names_in(dir.path())
-    );
+    // Writes and saves still running on blocking threads end first, then
+    // the files go: wait for that, with a wide margin for slow machines.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !names_in(dir.path()).is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{:?}",
+            names_in(dir.path())
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[tokio::test]
@@ -490,4 +493,45 @@ async fn a_server_whose_etag_differs_per_connection_completes_on_one_connection(
     );
     assert!(gets.iter().any(|r| r.range.is_some() && r.status == 200));
     assert_eq!(names_in(dir.path()), ["f.bin"]);
+}
+
+/// Review of the fixes for #24: a restart (after a `206` of another
+/// version, from a server that ignores `If-Range`) went out without the
+/// credentials of the URL, and the whole download failed with 401.
+#[tokio::test]
+async fn a_restart_keeps_the_credentials_of_the_url() {
+    let server = TestServer::http();
+    let data = random_bytes(8 * MIB, 66);
+    server.put(
+        "/f.bin",
+        FileSpec::new(data.clone())
+            .require_authorization("Basic dTpw")
+            .etag_per_connection("\"a\"", "\"b\"")
+            .ignore_if_range(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let url = server.url("/f.bin").replacen("http://", "http://u:p@", 1);
+    let mut events = Vec::new();
+
+    let done = engine(8)
+        .download(&url, dir.path(), &mut |e| events.push(e))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sha256_hex(&fs::read(&done.file).unwrap()),
+        sha256_hex(&data)
+    );
+    assert_eq!(restarts(&events), [RestartReason::FileChanged]);
+    let gets = server.gets("/f.bin");
+    // The first request, the range requests, and the restart's request.
+    assert!(
+        gets.iter().filter(|r| r.range.is_none()).count() >= 2,
+        "{gets:?}"
+    );
+    assert!(gets.iter().all(|r| r.status != 401), "{gets:?}");
+    assert!(
+        gets.iter()
+            .all(|r| r.authorization.as_deref() == Some("Basic dTpw"))
+    );
 }

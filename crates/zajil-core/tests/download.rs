@@ -445,9 +445,16 @@ async fn saving_the_state_never_blocks_the_async_runtime() {
             }
         }
     });
+    // Lets go 400 ms after the file is grabbed (at `Started`), not after the
+    // test starts: in M2 more work comes before `Started` (free space,
+    // allocation), and a slow machine could otherwise grab it too late and
+    // never let go (review of the M2 fixes).
     let releaser = tokio::spawn({
         let held = held.clone();
         async move {
+            while held.lock().unwrap().is_none() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             tokio::time::sleep(Duration::from_millis(400)).await;
             held.lock().unwrap().take();
         }

@@ -51,6 +51,13 @@ async fn downloads_finish_next_to_a_taken_name() {
             .await
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(second.file, dir.join("f (1).bin"), "{name}");
+        // The file was split over several connections on this volume too.
+        let ranged = server
+            .gets("/f.bin")
+            .iter()
+            .filter(|r| r.range.is_some())
+            .count();
+        assert!(ranged >= 2, "{name}: {ranged} range requests");
         for file in [&first.file, &second.file] {
             assert_eq!(
                 sha256_hex(&fs::read(file).unwrap()),

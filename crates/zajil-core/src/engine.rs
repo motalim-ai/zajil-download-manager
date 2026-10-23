@@ -399,7 +399,7 @@ impl Engine {
         }
 
         let response = self
-            .get_with_fallback(&state, Some((done, None, if_range)))
+            .get_with_fallback(&state, Some((done, None, if_range)), &Attempt::new(None))
             .await?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
@@ -485,7 +485,11 @@ impl Engine {
         };
         let (from, to) = (segment.start + segment.done, segment.end.expect("checked"));
         let response = self
-            .get_with_fallback(&state, Some((from, Some(to), if_range.clone())))
+            .get_with_fallback(
+                &state,
+                Some((from, Some(to), if_range.clone())),
+                &Attempt::new(None),
+            )
             .await?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
@@ -619,7 +623,7 @@ impl Engine {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         on_event(Event::Restarted { reason });
-        let response = self.get_with_fallback(&old, None).await?;
+        let response = self.get_with_fallback(&old, None, &attempt).await?;
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
@@ -733,12 +737,15 @@ impl Engine {
 
     /// Requests `final_url`, and the original URL if that fails: signed CDN
     /// links often expire, while the original URL redirects to a fresh one.
+    /// With `attempt`'s credentials, if it has any for that origin: the
+    /// state file never holds them, but a restart within one call does.
     async fn get_with_fallback(
         &self,
         state: &DownloadState,
         range: Option<(u64, Option<u64>, String)>,
+        attempt: &Attempt,
     ) -> Result<Response, Error> {
-        let final_url = parse_url(&state.final_url)?;
+        let final_url = attempt.authorize(&parse_url(&state.final_url)?);
         let first = self.get(final_url, range.clone()).await;
         let usable = |r: &Result<Response, Error>| {
             r.as_ref().is_ok_and(|r| {
@@ -753,7 +760,8 @@ impl Engine {
         if usable(&first) || state.final_url == state.url {
             return first;
         }
-        self.get(parse_url(&state.url)?, range).await
+        self.get(attempt.authorize(&parse_url(&state.url)?), range)
+            .await
     }
 
     /// GETs `url`; with `range`, only bytes `from` to `to` (or to the end)

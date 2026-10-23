@@ -67,6 +67,7 @@ pub struct FileSpec {
     date: Option<String>,
     ranges: bool,
     honor_ranges: bool,
+    ignore_if_range: bool,
     send_length: bool,
     content_disposition: Option<String>,
     cut_after: Option<(u64, usize)>,
@@ -93,6 +94,7 @@ impl FileSpec {
             date: None,
             ranges: true,
             honor_ranges: true,
+            ignore_if_range: false,
             send_length: true,
             content_disposition: None,
             cut_after: None,
@@ -133,6 +135,13 @@ impl FileSpec {
     /// `user:password`).
     pub fn require_authorization(mut self, value: &str) -> Self {
         self.authorization = Some(value.to_owned());
+        self
+    }
+
+    /// The server serves `Range` requests even when `If-Range` does not
+    /// match (it ignores `If-Range`, as some servers do).
+    pub fn ignore_if_range(mut self) -> Self {
+        self.ignore_if_range = true;
         self
     }
 
@@ -667,7 +676,9 @@ fn respond(
     }
 
     let total = spec.body.len() as u64;
-    let range = if spec.honor_ranges && if_range_matches(spec, record.if_range.as_deref()) {
+    let range = if spec.honor_ranges
+        && (spec.ignore_if_range || if_range_matches(spec, record.if_range.as_deref()))
+    {
         record.range.as_deref().map(|r| parse_range(r, total))
     } else {
         None
