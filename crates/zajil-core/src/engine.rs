@@ -1119,24 +1119,30 @@ fn parse_url(raw: &str) -> Result<Url, Error> {
 }
 
 /// `raw` (a URL that did not parse) with what may be a user name and
-/// password hidden, so an error message never shows a password: everything
-/// after the scheme's `:` (and its slashes) up to the last `@`. It does not
-/// rely on `://`, which a mistyped URL may lack (`http:/u:p@h`) or have
-/// again later (`?next=https://…`). A password may hold `/`, `#` or `?`, so
-/// the last `@` is the only safe end; an `@` later in the URL hides a little
-/// too much, never too little.
+/// password hidden, so an error message never shows them: everything up to
+/// the last `@`, except a leading `http:` or `https:` and its slashes. It
+/// does not rely on `://`, which a mistyped URL may lack (`http:/u:p@h`) or
+/// have again later (`?next=https://…`); and anything before the `@` that
+/// is not that scheme may be a token (`TOKEN:x-oauth-basic@h`, `http//…`).
+/// A password may hold `/`, `#` or `?`, so the last `@` is the only safe
+/// end; an `@` later in the URL hides a little too much, never too little.
 fn without_userinfo(raw: &str) -> String {
     let Some(at) = raw.rfind('@') else {
         return raw.to_owned();
     };
-    let start = match raw[..at].find(':') {
-        Some(colon) => {
-            let after = colon + 1;
-            after + raw[after..at].len() - raw[after..at].trim_start_matches('/').len()
+    let head = &raw[..at];
+    let scheme = ["https:", "http:"].into_iter().find(|scheme| {
+        head.get(..scheme.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(scheme))
+    });
+    let keep = match scheme {
+        Some(scheme) => {
+            let rest = &head[scheme.len()..];
+            scheme.len() + rest.len() - rest.trim_start_matches('/').len()
         }
         None => 0,
     };
-    format!("{}***{}", &raw[..start], &raw[at..])
+    format!("{}***{}", &raw[..keep], &raw[at..])
 }
 
 fn lock(file: &File, final_path: &Path) -> Result<(), Error> {
@@ -1512,6 +1518,12 @@ mod tests {
             "http:/u:S3cret@h:99999/f?next=https://x",
             "http:/u:S3cret@h:99999/f#https://x",
             "http:u:S3cret@h:99999/f",
+            // Third review of #29: a token as the user name, and no scheme
+            // or a mistyped one.
+            "S3cret_TOKEN:x-oauth-basic@h:99999/f",
+            "http//S3cret_TOKEN:x-oauth-basic@h:99999/f",
+            "https;//S3cret_TOKEN:x@h:99999/f",
+            "HTTPS://S3cret:x@h:99999/f",
         ] {
             assert!(!without_userinfo(raw).contains("S3cret"), "{raw}");
             if let Err(err) = parse_url(raw) {
@@ -1519,6 +1531,8 @@ mod tests {
             }
         }
         assert_eq!(without_userinfo("http://h:99999/f"), "http://h:99999/f");
+        assert_eq!(without_userinfo("http:/u:p@h:1/f"), "http:/***@h:1/f");
+        assert_eq!(without_userinfo("T:x@h:1/f"), "***@h:1/f");
     }
 
     #[test]

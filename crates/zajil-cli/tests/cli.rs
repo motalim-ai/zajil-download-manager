@@ -420,9 +420,13 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
             .content_disposition(&format!("attachment; filename=\"{name}\""))
     };
     server.put("/f.bin", spec().cut_after(300_000, 1));
-    let dir = tempfile::tempdir().unwrap();
-    let dir_arg = dir.path().to_str().unwrap();
-    fs::write(dir.path().join("x"), b"the user's own file").unwrap();
+    // The folder's name is tricky too, so `--dir` must be quoted (third
+    // review of #29): a space, `$(touch PWNED)`, a backtick and a quote.
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("d $(touch PWNED)`id` it's");
+    fs::create_dir(&dir).unwrap();
+    let dir_arg = dir.to_str().unwrap();
+    fs::write(dir.as_path().join("x"), b"the user's own file").unwrap();
     let url = format!(
         "{}?sig=SECRET-TOKEN",
         server.url("/f.bin").replacen("http://", "http://u:p@", 1)
@@ -430,8 +434,8 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
 
     let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
-    let state_file = only_state_file(dir.path());
-    let part_file = dir.path().join(format!("{name}.zajil-part"));
+    let state_file = only_state_file(dir.as_path());
+    let part_file = dir.as_path().join(format!("{name}.zajil-part"));
     assert!(part_file.exists());
 
     let out = zajil(&["resume", state_file.to_str().unwrap()]);
@@ -477,9 +481,10 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
                 !state_file.exists() && !part_file.exists(),
                 "{shell}: {command}"
             );
-            assert!(!dir.path().join("PWNED").exists(), "{shell} ran code");
+            assert!(!dir.as_path().join("PWNED").exists(), "{shell} ran code");
+            assert!(!root.path().join("PWNED").exists(), "{shell} ran code");
             assert_eq!(
-                fs::read(dir.path().join("x")).unwrap(),
+                fs::read(dir.as_path().join("x")).unwrap(),
                 b"the user's own file"
             );
             // Put them back for the next shell.
@@ -487,7 +492,7 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
             fs::write(&part_file, &part_bytes).unwrap();
         };
         assert!(
-            run_in_shell(shell, command, dir.path(), check) > 0,
+            run_in_shell(shell, command, dir.as_path(), check) > 0,
             "no {shell}"
         );
     }
@@ -500,11 +505,11 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
             let printed = text(&out.stdout).trim_end().to_owned();
             assert_eq!(
                 Path::new(&printed).canonicalize().unwrap(),
-                dir.path().canonicalize().unwrap(),
+                dir.as_path().canonicalize().unwrap(),
                 "{shell}"
             );
         };
-        let shown = run_in_shell(shell, &format!("show {args}"), dir.path(), check);
+        let shown = run_in_shell(shell, &format!("show {args}"), dir.as_path(), check);
         assert!(shown > 0, "no {shell}");
     }
 
@@ -514,13 +519,13 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
     server.put("/f.bin", spec());
     let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
     assert!(out.status.success(), "{}", text(&out.stderr));
-    let mut names: Vec<_> = fs::read_dir(dir.path())
+    let mut names: Vec<_> = fs::read_dir(dir.as_path())
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     names.sort();
     assert_eq!(names, ["x", name]);
-    assert_eq!(fs::read(dir.path().join(name)).unwrap(), data);
+    assert_eq!(fs::read(dir.as_path().join(name)).unwrap(), data);
 }
 
 /// Runs `command` in `shell` (as `zajil` names it) inside `work`, once per
