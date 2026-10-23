@@ -274,17 +274,30 @@ mod imp {
 
     pub fn create_private(path: &Path) -> io::Result<File> {
         // The mode applies at creation; the umask can only remove bits.
-        OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(path)
+            .open(path)?;
+        // On macOS a file also inherits the folder's inheritable access
+        // list, whatever its mode (review of #30): remove it before any
+        // byte is written.
+        if let Err(err) = acl::remove(&file) {
+            drop(file);
+            let _ = std::fs::remove_file(path);
+            return Err(err);
+        }
+        Ok(file)
     }
 
     pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {
-        let meta = std::fs::symlink_metadata(path)?;
-        Ok(meta.file_type().is_file() && meta.mode() & 0o077 == 0)
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let meta = file.metadata()?;
+        Ok(meta.file_type().is_file() && meta.mode() & 0o077 == 0 && !acl::has_entries(&file)?)
     }
 
     pub fn open_like_a_scanner(path: &Path) -> io::Result<File> {
@@ -293,6 +306,86 @@ mod imp {
 
     pub fn write_at(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
         file.write_all_at(buf, offset)
+    }
+
+    /// macOS access lists (ACLs). A file inherits the inheritable entries
+    /// of its folder, and those can let others read it whatever its mode.
+    #[cfg(target_os = "macos")]
+    #[allow(unsafe_code)]
+    mod acl {
+        use std::ffi::{c_int, c_void};
+        use std::fs::File;
+        use std::io;
+        use std::os::unix::io::AsRawFd;
+
+        /// `acl_type_t` for the extended (NFSv4-style) list macOS uses.
+        const ACL_TYPE_EXTENDED: c_int = 0x0000_0100;
+        const ACL_FIRST_ENTRY: c_int = 0;
+
+        // From <sys/acl.h> in the macOS SDK (libSystem).
+        unsafe extern "C" {
+            fn acl_init(count: c_int) -> *mut c_void;
+            fn acl_free(object: *mut c_void) -> c_int;
+            fn acl_get_fd_np(fd: c_int, kind: c_int) -> *mut c_void;
+            fn acl_set_fd_np(fd: c_int, acl: *mut c_void, kind: c_int) -> c_int;
+            fn acl_get_entry(acl: *mut c_void, entry_id: c_int, entry: *mut *mut c_void) -> c_int;
+        }
+
+        /// Gives `file` an empty access list (like `chmod -N`).
+        pub fn remove(file: &File) -> io::Result<()> {
+            // SAFETY: asks for an empty list; checked for null below.
+            let empty = unsafe { acl_init(0) };
+            if empty.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: the descriptor is open for the lifetime of `file`, and
+            // `empty` is a valid list, freed once after the call.
+            let result = unsafe { acl_set_fd_np(file.as_raw_fd(), empty, ACL_TYPE_EXTENDED) };
+            let err = io::Error::last_os_error();
+            // SAFETY: `empty` came from `acl_init` and is freed once.
+            unsafe { acl_free(empty) };
+            if result != 0 {
+                return Err(err);
+            }
+            Ok(())
+        }
+
+        /// Whether `file` has any access list entry at all.
+        pub fn has_entries(file: &File) -> io::Result<bool> {
+            // SAFETY: the descriptor is open for the lifetime of `file`.
+            let list = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
+            if list.is_null() {
+                let err = io::Error::last_os_error();
+                // No list at all.
+                return if err.raw_os_error() == Some(libc::ENOENT) {
+                    Ok(false)
+                } else {
+                    Err(err)
+                };
+            }
+            let mut entry = std::ptr::null_mut();
+            // SAFETY: `list` is a valid list; `entry` is a writable pointer.
+            let found = unsafe { acl_get_entry(list, ACL_FIRST_ENTRY, &mut entry) } == 0;
+            // SAFETY: `list` came from `acl_get_fd_np` and is freed once.
+            unsafe { acl_free(list) };
+            Ok(found)
+        }
+    }
+
+    /// Linux: a default access list of the folder is masked by the mode, so
+    /// `0600` leaves it no effect; nothing to remove.
+    #[cfg(not(target_os = "macos"))]
+    mod acl {
+        use std::fs::File;
+        use std::io;
+
+        pub fn remove(_file: &File) -> io::Result<()> {
+            Ok(())
+        }
+
+        pub fn has_entries(_file: &File) -> io::Result<bool> {
+            Ok(false)
+        }
     }
 
     fn c_path(path: &Path) -> io::Result<CString> {
@@ -1124,6 +1217,57 @@ mod tests {
         }
         assert!(!only_owner_can_access(&plain).unwrap());
         check_with_system_tool(&old);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Review of #30: on macOS a folder's inheritable access list made a
+    /// `0600` state file readable by everyone, and the check said it was
+    /// private. The test gives the folder such a list with `chmod +a`, the
+    /// way the reviewer did, and reads the result with `ls -le`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_inherited_access_list_is_removed_on_macos() {
+        use std::process::Command;
+        let dir = tempdir();
+        let status = Command::new("/bin/chmod")
+            .args(["+a", "everyone allow read,file_inherit"])
+            .arg(&dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Control: a file made the ordinary way inherits it, and the check
+        // sees it even with mode 0600.
+        let plain = dir.join("plain");
+        fs::write(&plain, b"x").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&plain, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let listing = |path: &Path| {
+            let out = Command::new("/bin/ls")
+                .arg("-le")
+                .arg(path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        assert!(listing(&plain).contains("everyone"), "{}", listing(&plain));
+        assert!(!only_owner_can_access(&plain).unwrap());
+
+        let private = dir.join("state");
+        drop(create_private(&private).unwrap());
+        assert!(
+            !listing(&private).contains("everyone"),
+            "{}",
+            listing(&private)
+        );
+        assert!(only_owner_can_access(&private).unwrap());
+        // Still private after it replaces another file, as a save does.
+        let old = dir.join("old");
+        fs::write(&old, b"old").unwrap();
+        replace_file(&private, &old).unwrap();
+        assert!(!listing(&old).contains("everyone"), "{}", listing(&old));
+        assert!(only_owner_can_access(&old).unwrap());
         let _ = fs::remove_dir_all(&dir);
     }
 
