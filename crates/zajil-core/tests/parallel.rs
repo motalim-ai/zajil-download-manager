@@ -549,3 +549,34 @@ async fn a_restart_keeps_the_credentials_of_the_url() {
             .all(|r| r.authorization.as_deref() == Some("Basic dTpw"))
     );
 }
+
+/// The same for a download of several segments (owner decision on #28).
+#[tokio::test]
+async fn resuming_a_parallel_download_that_needed_credentials_says_so() {
+    let server = TestServer::http();
+    let data = random_bytes(8 * MIB, 67);
+    let spec = || {
+        FileSpec::new(data.clone())
+            .etag(Some("\"same\""))
+            .require_authorization("Basic dTpw")
+    };
+    server.put("/f.bin", spec().cut_after(300_000, 8).forbid_after(8));
+    let dir = tempfile::tempdir().unwrap();
+    let url = server.url("/f.bin").replacen("http://", "http://u:p@", 1);
+    let state_file = match engine(8).download(&url, dir.path(), &mut |_| {}).await {
+        Err(Error::Interrupted { state_file, .. }) => state_file,
+        other => panic!("expected an interruption, got {other:?}"),
+    };
+    assert!(DownloadState::load(&state_file).unwrap().segments.len() > 1);
+    server.put("/f.bin", spec());
+
+    let err = engine(8)
+        .resume(&state_file, &mut |_| {})
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::CredentialsNeeded { url, .. } if *url == server.url("/f.bin")),
+        "{err:?}"
+    );
+    assert!(err.to_string().contains("user name and password"), "{err}");
+}

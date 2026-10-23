@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 use zajil_core::{
     DEFAULT_CONNECTIONS, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options, RestartReason,
 };
-use zajil_platform::shell::{self, ShellCommand};
+use zajil_platform::shell::{self, Arg, ShellCommand};
 use zajil_platform::{AppPaths, SystemPaths};
 
 /// Exit code when the download stopped but can be resumed.
@@ -121,6 +121,7 @@ async fn run(command: Command, connections: usize) -> ExitCode {
         Err(Failure::Engine(Error::Interrupted { state_file, reason })) => {
             stopped(&reason, &state_file)
         }
+        Err(Failure::Engine(err @ Error::CredentialsNeeded { .. })) => needs_credentials(&err),
         Err(Failure::Cancelled) => match progress.state_file.clone() {
             Some(state_file) => stopped("cancelled", &state_file),
             None => fail("cancelled"),
@@ -167,6 +168,51 @@ fn stopped(reason: &str, state_file: &Path) -> ExitCode {
         }
     }
     ExitCode::from(EXIT_RESUMABLE)
+}
+
+/// A resume the server refused with 401: the state file never keeps a user
+/// name or password, so tell the user how to start the download again
+/// with them.
+fn needs_credentials(err: &Error) -> ExitCode {
+    let Error::CredentialsNeeded { url, state_file } = err else {
+        return fail(&err.to_string());
+    };
+    eprintln!("zajil: error: {err}");
+    // `USER` and `PASSWORD` stand where the user puts theirs; nothing of
+    // theirs is ever printed or saved.
+    let with_placeholders = match url.split_once("://") {
+        Some((scheme, rest)) => format!("{scheme}://USER:PASSWORD@{rest}"),
+        None => url.clone(),
+    };
+    let dir = state_file
+        .parent()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".into());
+    let args = [
+        Arg::Quoted(&with_placeholders),
+        Arg::Plain("--dir"),
+        Arg::Quoted(&dir),
+    ];
+    for ShellCommand { shell, command } in shell::command_lines("zajil get", &args) {
+        match command {
+            Some(command) => {
+                eprintln!(
+                    "zajil: to start it again, run this in {shell} with your user name and \
+                     password in place of USER and PASSWORD:"
+                );
+                eprintln!("    {command}");
+            }
+            None => {
+                eprintln!("zajil: {shell} cannot be given this command safely; use another shell.")
+            }
+        }
+    }
+    eprintln!("zajil: write @ : / % in them as %40 %3A %2F %25.");
+    eprintln!(
+        "zajil: it starts from the beginning; the old .zajil-part and .zajil-state files can \
+         then be deleted."
+    );
+    ExitCode::FAILURE
 }
 
 fn fail(message: &str) -> ExitCode {

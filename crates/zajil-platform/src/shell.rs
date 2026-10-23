@@ -17,8 +17,41 @@ pub struct ShellCommand {
 /// `program arg`, quoted for the shells people use on this system: POSIX
 /// shells (bash, zsh, sh) on macOS and Linux; PowerShell and cmd on Windows.
 pub fn commands(program: &str, arg: &str) -> Vec<ShellCommand> {
-    imp::commands(program, arg)
+    command_lines(program, &[Arg::Quoted(arg)])
 }
+
+/// One argument of a printed command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arg<'a> {
+    /// Untrusted text (a path or URL): always quoted.
+    Quoted(&'a str),
+    /// Fixed text of our own, such as an option name: written as it is.
+    Plain(&'a str),
+}
+
+/// `program` and its `args`, quoted for the shells people use on this
+/// system. A shell that cannot quote one of the arguments safely gets
+/// `None`.
+pub fn command_lines(program: &str, args: &[Arg<'_>]) -> Vec<ShellCommand> {
+    imp::shells()
+        .into_iter()
+        .map(|(shell, quote)| {
+            let quoted: Option<Vec<String>> = args
+                .iter()
+                .map(|arg| match arg {
+                    Arg::Quoted(text) => quote(text),
+                    Arg::Plain(text) => Some((*text).to_owned()),
+                })
+                .collect();
+            ShellCommand {
+                shell,
+                command: quoted.map(|args| format!("{program} {}", args.join(" "))),
+            }
+        })
+        .collect()
+}
+
+type Quote = fn(&str) -> Option<String>;
 
 /// bash, zsh and other POSIX shells: single quotes, where nothing is
 /// special, with each `'` written as `'\''`.
@@ -55,11 +88,8 @@ pub fn quote_cmd(arg: &str) -> Option<String> {
 mod imp {
     use super::*;
 
-    pub fn commands(program: &str, arg: &str) -> Vec<ShellCommand> {
-        vec![ShellCommand {
-            shell: "your shell",
-            command: Some(format!("{program} {}", quote_posix(arg))),
-        }]
+    pub fn shells() -> Vec<(&'static str, Quote)> {
+        vec![("your shell", |arg| Some(quote_posix(arg)))]
     }
 }
 
@@ -67,16 +97,10 @@ mod imp {
 mod imp {
     use super::*;
 
-    pub fn commands(program: &str, arg: &str) -> Vec<ShellCommand> {
+    pub fn shells() -> Vec<(&'static str, Quote)> {
         vec![
-            ShellCommand {
-                shell: "PowerShell",
-                command: Some(format!("{program} {}", quote_powershell(arg))),
-            },
-            ShellCommand {
-                shell: "cmd",
-                command: quote_cmd(arg).map(|quoted| format!("{program} {quoted}")),
-            },
+            ("PowerShell", |arg| Some(quote_powershell(arg))),
+            ("cmd", quote_cmd),
         ]
     }
 }
@@ -109,6 +133,33 @@ mod tests {
         );
         for bad in ["%PATH%.zip", "a!b!.zip", "a\"b", "a\nb"] {
             assert_eq!(quote_cmd(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn command_lines_quote_every_untrusted_argument() {
+        let lines = command_lines(
+            "zajil get",
+            &[
+                Arg::Quoted("https://h/$(touch PWNED).zip"),
+                Arg::Plain("--dir"),
+                Arg::Quoted("/tmp/it's"),
+            ],
+        );
+        assert!(!lines.is_empty());
+        if cfg!(unix) {
+            assert_eq!(
+                lines[0].command.as_deref(),
+                Some(r"zajil get 'https://h/$(touch PWNED).zip' --dir '/tmp/it'\''s'")
+            );
+        } else {
+            assert_eq!(
+                lines[0].command.as_deref(),
+                Some("zajil get 'https://h/$(touch PWNED).zip' --dir '/tmp/it''s'")
+            );
+            // cmd cannot protect `%`, so it gets no command at all.
+            let lines = command_lines("zajil get", &[Arg::Quoted("%PATH%"), Arg::Quoted("x")]);
+            assert_eq!(lines[1].command, None);
         }
     }
 

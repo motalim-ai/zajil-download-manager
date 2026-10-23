@@ -205,6 +205,16 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error(
+        "the server asks for a user name and password (401 Unauthorized); Zajil never saves \
+         them in the state file, so this download cannot be resumed: start it again with them \
+         in the URL"
+    )]
+    CredentialsNeeded {
+        /// The URL of the download, without a user name or password.
+        url: String,
+        state_file: PathBuf,
+    },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
     #[error(
@@ -472,7 +482,7 @@ impl Engine {
                 )
                 .await
             }
-            status => Err(Error::Status(status)),
+            status => Err(refused(status, &state, &final_path, &Attempt::new(None))),
         }
     }
 
@@ -575,7 +585,7 @@ impl Engine {
                 )
                 .await
             }
-            status => Err(Error::Status(status)),
+            status => Err(refused(status, &state, &final_path, &Attempt::new(None))),
         }
     }
 
@@ -639,7 +649,7 @@ impl Engine {
         on_event(Event::Restarted { reason });
         let response = self.get_with_fallback(&old, None, &attempt).await?;
         if response.status() != StatusCode::OK {
-            return Err(Error::Status(response.status()));
+            return Err(refused(response.status(), &old, &final_path, &attempt));
         }
         let state = state_from_response(old.url, &response);
         self.start(
@@ -1021,6 +1031,26 @@ pub(crate) async fn finish_download(
         bytes,
     });
     Ok(Finished { file, bytes })
+}
+
+/// The error for a refusal (`status`) of a request made for `state`. A `401`
+/// without credentials in memory means the download needed a user name and
+/// password, which the state file never keeps (ADR-0004, rule 7): say so,
+/// rather than a bare 401.
+fn refused(
+    status: StatusCode,
+    state: &DownloadState,
+    final_path: &Path,
+    attempt: &Attempt,
+) -> Error {
+    if status == StatusCode::UNAUTHORIZED && attempt.credentials.is_none() {
+        Error::CredentialsNeeded {
+            url: state.url.clone(),
+            state_file: state_path(final_path),
+        }
+    } else {
+        Error::Status(status)
+    }
 }
 
 /// Fails with [`Error::NotEnoughSpace`] unless `needed` bytes fit in the free

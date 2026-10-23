@@ -5,7 +5,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use zajil_core::state::DownloadState;
-use zajil_core::{Engine, Event, Options};
+use zajil_core::{Engine, Event, Options, RestartReason};
 use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 
 const MIB: u64 = 1024 * 1024;
@@ -130,4 +130,73 @@ async fn a_download_stopped_after_a_split_resumes_from_its_state() {
         !events.iter().any(|e| matches!(e, Event::Restarted { .. })),
         "{events:?}"
     );
+}
+
+/// Owner decision on #28: when the file changes while it is being split,
+/// the download starts over on one connection, and the final file must be
+/// the new version in full, without a single byte of the old one, even
+/// though most of the old version was already on disk.
+#[tokio::test]
+async fn a_change_during_splitting_leaves_only_the_new_version() {
+    let server = TestServer::http();
+    let old = random_bytes(8 * MIB as usize, 73);
+    let new = random_bytes(8 * MIB as usize, 74);
+    // The first connection is slow, so the others finish their segments
+    // (old bytes on disk) and then split it. Those split requests come
+    // after the first four, when the server already has the new version.
+    server.put(
+        "/f.bin",
+        FileSpec::new(old.clone())
+            .slow_at(0, 64 * KIB)
+            .replaced_after(4, FileSpec::new(new.clone())),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut events = Vec::new();
+
+    let done = engine()
+        .download(&server.url("/f.bin"), dir.path(), &mut |e| events.push(e))
+        .await
+        .unwrap();
+
+    // Most of the old version was on disk before the change was seen.
+    let restart = events
+        .iter()
+        .position(|e| matches!(e, Event::Restarted { .. }))
+        .expect("the download started over");
+    assert!(matches!(
+        events[restart],
+        Event::Restarted {
+            reason: RestartReason::FileChanged
+        }
+    ));
+    let old_on_disk = events[..restart]
+        .iter()
+        .filter_map(|e| match e {
+            Event::Progress { done, .. } => Some(*done),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    assert!(
+        old_on_disk >= 6 * MIB,
+        "only {old_on_disk} old bytes were written"
+    );
+    assert!(!splits(&events[..restart]).is_empty());
+    // One restart only, and then one connection: no more range requests.
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, Event::Restarted { .. }))
+            .count(),
+        1
+    );
+
+    // The new version in full; not one byte comes from the old one.
+    let saved = fs::read(&done.file).unwrap();
+    assert_eq!(saved.len(), new.len());
+    assert_eq!(sha256_hex(&saved), sha256_hex(&new));
+    let from_old = (0..saved.len())
+        .filter(|&i| saved[i] == old[i] && old[i] != new[i])
+        .count();
+    assert_eq!(from_old, 0);
 }
