@@ -19,6 +19,7 @@
 | [0005](0005-extension-communication.md) | اتصال الإضافة: Native Messaging مع zajil-host | مقبول |
 | [0006](0006-platform-abstraction.md) | الأنظمة الثلاثة: واجهة واحدة وثلاثة تنفيذات | مقبول (مطلب من المالك) |
 | [0007](0007-queues-and-settings-storage.md) | تخزين القوائم والإعدادات: ملف JSON بقواعد ملف الحالة، مع قفل بين العمليات | مقبول |
+| [0008](0008-ui-library.md) | مكتبة الواجهة: Svelte 5 مع TypeScript، وFluent عبر `@fluent/bundle` | مقبول |
 
 لكتابة قرار جديد، انسخ [القالب](template.md).
 
