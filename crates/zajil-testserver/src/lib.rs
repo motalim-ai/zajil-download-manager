@@ -737,11 +737,19 @@ fn respond(
         .filter(|&(_, times)| get_index < times)
         .map(|(bytes, _)| bytes);
     let (sender, channel) = Channel::<Bytes, BoxError>::new(1);
+    // A response that announced more than it has stalls at the end of what
+    // it has, keeping the connection open. Closing it would make Windows
+    // send a reset that can drop the headers before the client reads them.
+    let short = spec
+        .announced_length
+        .filter(|&announced| status == StatusCode::OK && announced > body.len() as u64)
+        .map(|_| body.len() as u64);
+    let stall = [spec.stall_after, short].into_iter().flatten().min();
     tokio::spawn(stream_body(
         sender,
         body,
         cut,
-        spec.stall_after,
+        stall,
         spec.bytes_per_sec,
         bytes_sent,
     ));
@@ -784,7 +792,7 @@ async fn stream_body(
         }
     }
 
-    if offset == body.len() {
+    if offset == body.len() && stall.is_none_or(|stall| stall as usize > offset) {
         return; // complete
     }
     if cut.is_some_and(|c| c as usize == offset) {
