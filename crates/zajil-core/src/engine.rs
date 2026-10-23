@@ -93,7 +93,8 @@ pub struct Options {
     /// values are clamped). A file is split only if its server announces
     /// `Accept-Ranges: bytes`, its size and a strong validator.
     pub connections: usize,
-    /// No segment is made smaller than this many bytes.
+    /// No segment is made smaller than this many bytes, at the start or by
+    /// dynamic splitting.
     pub min_segment_size: u64,
 }
 
@@ -126,6 +127,10 @@ pub enum Event {
     Progress { done: u64, total: Option<u64> },
     /// A resumed download had to start again from byte 0.
     Restarted { reason: RestartReason },
+    /// Dynamic splitting: a free connection took over the second half of
+    /// what remained of the slowest segment. The segment that starts at
+    /// `segment` now ends just before `at`, where a new one starts.
+    Split { segment: u64, at: u64 },
     /// The download is complete at `file`.
     Finished { file: PathBuf, bytes: u64 },
 }
@@ -519,6 +524,7 @@ impl Engine {
                 let job = Job {
                     client: self.client.clone(),
                     connections: self.options.connections,
+                    min_segment: self.options.min_segment_size,
                     save_interval: self.options.save_interval,
                     url: response.url().clone(),
                     if_range,
@@ -690,6 +696,7 @@ impl Engine {
             let job = Job {
                 client: self.client.clone(),
                 connections: self.options.connections,
+                min_segment: self.options.min_segment_size,
                 save_interval: self.options.save_interval,
                 url: attempt.authorize(response.url()),
                 if_range,

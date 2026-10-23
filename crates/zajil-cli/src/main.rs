@@ -232,7 +232,7 @@ impl Progress {
                 self.clear_line();
                 eprintln!("Starting over: {}", describe(reason));
             }
-            Event::Finished { .. } => {}
+            Event::Split { .. } | Event::Finished { .. } => {}
         }
     }
 

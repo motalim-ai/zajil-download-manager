@@ -396,3 +396,20 @@ fn counts_bodies_sent_at_the_same_time_and_connections() {
     assert_eq!(heads[0].connection, heads[1].connection);
     assert!(heads.iter().all(|r| r.concurrent == 0));
 }
+
+#[test]
+fn slows_only_the_response_that_starts_at_the_given_byte() {
+    let server = TestServer::http();
+    server.put(
+        "/f",
+        FileSpec::new(random_bytes(200_000, 25)).slow_at(100_000, 100_000),
+    );
+    let started = Instant::now();
+    let fast = get(&server, "/f", &[("Range", "bytes=0-99999")]);
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert_eq!(fast.body.len(), 100_000);
+    let started = Instant::now();
+    let slow = get(&server, "/f", &[("Range", "bytes=100000-199999")]);
+    assert!(started.elapsed() >= Duration::from_millis(800));
+    assert_eq!(slow.body.len(), 100_000);
+}

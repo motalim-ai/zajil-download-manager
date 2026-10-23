@@ -73,6 +73,7 @@ pub struct FileSpec {
     cut_after: Option<(u64, usize)>,
     stall_after: Option<u64>,
     bytes_per_sec: Option<u64>,
+    slow_at: Option<(u64, u64)>,
     fail_first: Vec<Failure>,
     forbid_after: Option<usize>,
     replaced_after: Option<(usize, Box<FileSpec>)>,
@@ -100,6 +101,7 @@ impl FileSpec {
             cut_after: None,
             stall_after: None,
             bytes_per_sec: None,
+            slow_at: None,
             fail_first: Vec::new(),
             forbid_after: None,
             replaced_after: None,
@@ -201,6 +203,14 @@ impl FileSpec {
     /// Limits each response to about `bytes_per_sec`.
     pub fn throttle(mut self, bytes_per_sec: u64) -> Self {
         self.bytes_per_sec = Some(bytes_per_sec.max(1));
+        self
+    }
+
+    /// A response that starts at byte `start` of the file (a range request
+    /// for that byte, or the whole file for `0`) is limited to about
+    /// `bytes_per_sec`: one slow connection among fast ones.
+    pub fn slow_at(mut self, start: u64, bytes_per_sec: u64) -> Self {
+        self.slow_at = Some((start, bytes_per_sec.max(1)));
         self
     }
 
@@ -745,12 +755,16 @@ fn respond(
         .filter(|&announced| status == StatusCode::OK && announced > body.len() as u64)
         .map(|_| body.len() as u64);
     let stall = [spec.stall_after, short].into_iter().flatten().min();
+    let throttle = match spec.slow_at {
+        Some((slow, bytes_per_sec)) if slow == start => Some(bytes_per_sec),
+        _ => spec.bytes_per_sec,
+    };
     tokio::spawn(stream_body(
         sender,
         body,
         cut,
         stall,
-        spec.bytes_per_sec,
+        throttle,
         bytes_sent,
     ));
     builder.body(channel.boxed()).unwrap()

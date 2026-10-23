@@ -23,6 +23,13 @@
 //! next segment if that one has nothing written or reserved yet. So the
 //! first response (a plain `200` with the whole file) is never wasted, and a
 //! server that ignores ranges is still read to the end on one connection.
+//!
+//! **Dynamic splitting** (docs/ARCHITECTURE.md §3.2): a connection with no
+//! free segment left takes the second half of what remains of the segment
+//! with the longest time left (remaining bytes ÷ its connection's speed),
+//! if each half is at least the minimum segment size. The old connection
+//! stops where the new segment begins. Every split is reported as
+//! [`Event::Split`] and saved with the next checkpoint.
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -52,6 +59,17 @@ const WRITE_BATCH: usize = 256 * 1024;
 /// A connection writes what it has after this long even if the batch is not
 /// full, so slow connections still show progress and get saved.
 const WRITE_AFTER: Duration = Duration::from_millis(200);
+
+/// A connection's speed is trusted only after it has worked this long.
+const SPEED_AFTER: Duration = Duration::from_millis(500);
+
+/// A connection that has sent nothing for this long counts as stalled: its
+/// segment is the first one to split.
+const STALLED_AFTER: Duration = Duration::from_secs(1);
+
+/// How often a connection with nothing to do looks again for a segment to
+/// split.
+const LOOK_AGAIN: Duration = Duration::from_millis(100);
 
 /// The segments for a new download of `len` bytes over at most
 /// `connections` connections, none smaller than `min_segment` bytes; `None`
@@ -96,6 +114,8 @@ pub(crate) enum Outcome {
 pub(crate) struct Job {
     pub client: Client,
     pub connections: usize,
+    /// No split leaves a segment smaller than this.
+    pub min_segment: u64,
     pub save_interval: Duration,
     /// The URL range requests go to.
     pub url: Url,
@@ -117,6 +137,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
     let Job {
         client,
         connections,
+        min_segment,
         save_interval,
         url,
         if_range,
@@ -132,12 +153,12 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
     let state_file = state_path(&final_path);
     let (events, mut messages) = mpsc::unbounded_channel();
     let (stop, stopped) = watch::channel(false);
-    let mut board = Board::new(state);
+    let mut board = Board::new(state, min_segment);
     if let Some((_, start)) = &first {
         let index = board
             .index_of(*start)
             .expect("the first response's segment");
-        board.live[index].owner = Some(0);
+        board.live[index].take(0, Instant::now());
     }
     let ctx = Arc::new(Ctx {
         client,
@@ -195,6 +216,9 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                     }
                     on_event(Event::Progress { done, total: Some(total) });
                 }
+                Some(Message::Split { segment, at }) => {
+                    on_event(Event::Split { segment, at });
+                }
                 Some(Message::Restart { reason, response }) if restart.is_none() => {
                     restart = Some((reason, response));
                     let _ = stop.send(true);
@@ -227,6 +251,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                     *ctx.new.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 }
             }
+            Message::Split { segment, at } => on_event(Event::Split { segment, at }),
             Message::Restart { reason, response } => {
                 restart.get_or_insert((reason, response));
             }
@@ -330,6 +355,9 @@ impl Ctx {
 enum Message {
     /// Bytes written to the file.
     Wrote(u64),
+    /// The segment starting at `segment` was split; the new one starts at
+    /// `at`.
+    Split { segment: u64, at: u64 },
     Restart {
         reason: RestartReason,
         response: Option<Response>,
@@ -339,6 +367,8 @@ enum Message {
 /// The segments and who works on them.
 struct Board {
     state: DownloadState,
+    /// No split leaves a segment smaller than this.
+    min_segment: u64,
     /// One entry per segment of `state`, in the same order.
     live: Vec<Live>,
     /// The server answered a range request with the whole file.
@@ -355,13 +385,38 @@ struct Live {
     /// A connection failed on this segment; no other one retries it (M2
     /// retries arrive with backoff in a later change).
     failed: bool,
+    /// When the owner took the segment, and the bytes it wrote since: its
+    /// speed.
+    since: Option<Instant>,
+    written: u64,
+}
+
+impl Live {
+    fn take(&mut self, id: usize, now: Instant) {
+        self.owner = Some(id);
+        self.since = Some(now);
+        self.written = 0;
+    }
+}
+
+/// What a connection with no free segment can do.
+#[derive(Debug, PartialEq, Eq)]
+enum Steal {
+    /// It took the new segment `(start, end)`, split from the segment that
+    /// starts at `from`.
+    Split { from: u64, start: u64, end: u64 },
+    /// Nothing to split yet; a segment may become worth splitting soon.
+    Wait,
+    /// Nothing will ever be worth splitting: the connection can end.
+    Nothing,
 }
 
 impl Board {
-    fn new(state: DownloadState) -> Self {
+    fn new(state: DownloadState, min_segment: u64) -> Self {
         let live = vec![Live::default(); state.segments.len()];
         Board {
             state,
+            min_segment: min_segment.max(1),
             live,
             ranges_refused: false,
             failure: None,
@@ -403,7 +458,7 @@ impl Board {
             let live = &self.live[i];
             live.owner.is_none() && !live.failed && !self.is_complete(i)
         })?;
-        self.live[index].owner = Some(id);
+        self.live[index].take(id, Instant::now());
         let segment = &self.state.segments[index];
         Some((
             segment.start,
@@ -456,7 +511,83 @@ impl Board {
     fn wrote(&mut self, start: u64, bytes: u64) {
         let index = self.index_of(start).expect("a reserved segment stays");
         self.live[index].pending -= bytes;
+        self.live[index].written += bytes;
         self.state.segments[index].done += bytes;
+    }
+
+    /// Bytes of segment `index` that nobody has written or reserved yet.
+    fn remaining(&self, index: usize) -> u64 {
+        let segment = &self.state.segments[index];
+        let next = segment.start + segment.done + self.live[index].pending;
+        (self.end_of(index) + 1).saturating_sub(next)
+    }
+
+    /// For a connection with no free segment: splits the segment with the
+    /// longest time left (remaining bytes ÷ the speed of its connection)
+    /// and gives `id` its second half. A segment is split only if both
+    /// halves keep at least `min_segment` bytes; a connection that has just
+    /// started is not judged until its speed is known, unless it is
+    /// stalled.
+    fn split_slowest(&mut self, id: usize, now: Instant) -> Steal {
+        if self.ranges_refused {
+            return Steal::Nothing;
+        }
+        let mut best: Option<(usize, f64)> = None;
+        let mut may_wait = false;
+        for index in 0..self.live.len() {
+            let live = &self.live[index];
+            let remaining = self.remaining(index);
+            if live.owner.is_none() || live.owner == Some(id) || remaining / 2 < self.min_segment {
+                continue;
+            }
+            let elapsed = live.since.map_or(Duration::ZERO, |since| now - since);
+            let seconds_left = if live.written == 0 {
+                if elapsed < STALLED_AFTER {
+                    may_wait = true;
+                    continue;
+                }
+                f64::INFINITY
+            } else {
+                if elapsed < SPEED_AFTER {
+                    may_wait = true;
+                    continue;
+                }
+                let speed = live.written as f64 / elapsed.as_secs_f64();
+                remaining as f64 / speed
+            };
+            if best.is_none_or(|(_, longest)| seconds_left > longest) {
+                best = Some((index, seconds_left));
+            }
+        }
+        let Some((index, _)) = best else {
+            return if may_wait {
+                Steal::Wait
+            } else {
+                Steal::Nothing
+            };
+        };
+        let segment = self.state.segments[index].clone();
+        let end = self.end_of(index);
+        let remaining = self.remaining(index);
+        // The new segment starts halfway through what is left.
+        let start = end + 1 - remaining / 2;
+        self.state.segments[index].end = Some(start - 1);
+        self.state.segments.insert(
+            index + 1,
+            Segment {
+                start,
+                end: Some(end),
+                done: 0,
+            },
+        );
+        let mut live = Live::default();
+        live.take(id, now);
+        self.live.insert(index + 1, live);
+        Steal::Split {
+            from: segment.start,
+            start,
+            end,
+        }
     }
 
     /// Gives back a reservation that was not written.
@@ -486,10 +617,8 @@ impl Board {
         }
         // Whoever owned it has not written anything; its connection lets go
         // as soon as it notices.
-        self.live[next] = Live {
-            owner: Some(id),
-            ..Live::default()
-        };
+        self.live[next] = Live::default();
+        self.live[next].take(id, Instant::now());
         self.release(id, start);
         Some(next_start)
     }
@@ -515,9 +644,10 @@ async fn worker(ctx: Arc<Ctx>, id: usize, mut stream: Option<Stream>) {
         }
         let current = match stream.take() {
             Some(stream) => stream,
-            None => match request_free_segment(&ctx, id).await {
-                Some(stream) => stream,
-                None => return,
+            None => match find_work(&ctx, id).await {
+                Work::Stream(stream) => stream,
+                Work::Again => continue,
+                Work::Done => return,
             },
         };
         let segment = current.segment;
@@ -528,16 +658,61 @@ async fn worker(ctx: Arc<Ctx>, id: usize, mut stream: Option<Stream>) {
     }
 }
 
-/// Asks the server for the next free segment. `None` when there is nothing
-/// left to ask for, or the answer cannot be used.
-async fn request_free_segment(ctx: &Arc<Ctx>, id: usize) -> Option<Stream> {
-    let (start, from, to) = {
+enum Work {
+    Stream(Stream),
+    /// Look again (after a split that came to nothing, or a short wait).
+    Again,
+    /// Nothing left for this connection.
+    Done,
+}
+
+/// A free segment, or else the second half of the slowest one.
+async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
+    let found = {
         let mut board = ctx.board();
         if board.ranges_refused {
-            return None;
+            return Work::Done;
         }
-        board.take_free(id)?
+        match board.take_free(id) {
+            Some(free) => Ok(free),
+            None => Err(board.split_slowest(id, Instant::now())),
+        }
     };
+    let (start, from, to) = match found {
+        Ok(free) => free,
+        Err(Steal::Split { from, start, end }) => {
+            let _ = ctx.events.send(Message::Split {
+                segment: from,
+                at: start,
+            });
+            (start, start, end)
+        }
+        Err(Steal::Wait) => {
+            tokio::select! {
+                _ = tokio::time::sleep(LOOK_AGAIN) => {}
+                _ = ctx.stop_requested() => {}
+            }
+            return Work::Again;
+        }
+        Err(Steal::Nothing) => return Work::Done,
+    };
+    match request_range(ctx, id, start, from, to).await {
+        Some(stream) => Work::Stream(stream),
+        // The segment failed or was given back: another connection may
+        // still need help.
+        None => Work::Again,
+    }
+}
+
+/// Asks the server for bytes `from` to `to` of the segment starting at
+/// `start`, which `id` owns. `None` when the answer cannot be used.
+async fn request_range(
+    ctx: &Arc<Ctx>,
+    id: usize,
+    start: u64,
+    from: u64,
+    to: u64,
+) -> Option<Stream> {
     let request = ctx
         .client
         .get(ctx.url.clone())
@@ -745,6 +920,97 @@ mod tests {
         assert!(plan((2 << 20) - 1, 8, 1 << 20).is_none());
         assert!(plan(100 << 20, 1, 1 << 20).is_none());
         assert!(plan(0, 8, 1 << 20).is_none());
+    }
+
+    /// A board of `segments` of 1000 bytes each, all owned, the owner of
+    /// segment `i` having worked `ages[i]` and written `written[i]`.
+    fn board(ages: &[Duration], written: &[u64], now: Instant) -> Board {
+        let count = ages.len() as u64;
+        let mut state = DownloadState::new(
+            "http://h/f".into(),
+            "http://h/f".into(),
+            Validator::default(),
+            Some(count * 1000),
+            true,
+        );
+        state.segments = (0..count)
+            .map(|i| Segment {
+                start: i * 1000,
+                end: Some(i * 1000 + 999),
+                done: written[i as usize],
+            })
+            .collect();
+        let mut board = Board::new(state, 100);
+        for (i, live) in board.live.iter_mut().enumerate() {
+            live.take(i, now - ages[i]);
+            live.written = written[i];
+        }
+        board
+    }
+
+    const SECOND: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn splits_the_segment_with_the_longest_time_left_in_half() {
+        let now = Instant::now();
+        // Same age; segment 1 has written least, so it is the slowest.
+        let mut board = board(&[SECOND; 3], &[500, 100, 400], now);
+        let steal = board.split_slowest(9, now);
+        // 900 bytes remain of segment 1 (100..=999 of it); the new segment
+        // takes the last 450.
+        assert_eq!(
+            steal,
+            Steal::Split {
+                from: 1000,
+                start: 1550,
+                end: 1999
+            }
+        );
+        let segments = &board.state.segments;
+        assert_eq!(segments[1].end, Some(1549));
+        assert_eq!((segments[2].start, segments[2].end), (1550, Some(1999)));
+        assert_eq!(segments[2].done, 0);
+        assert_eq!(board.live[2].owner, Some(9));
+        assert_eq!(board.live.len(), segments.len());
+    }
+
+    #[test]
+    fn a_stalled_connection_is_split_first() {
+        let now = Instant::now();
+        let mut board = board(&[2 * SECOND, 2 * SECOND], &[10, 0], now);
+        assert!(matches!(
+            board.split_slowest(9, now),
+            Steal::Split { from: 1000, .. }
+        ));
+    }
+
+    #[test]
+    fn waits_while_connections_are_too_new_to_judge() {
+        let now = Instant::now();
+        let young = Duration::from_millis(100);
+        let mut board = board(&[young, young], &[10, 0], now);
+        assert_eq!(board.split_slowest(9, now), Steal::Wait);
+    }
+
+    #[test]
+    fn never_leaves_a_half_below_the_minimum() {
+        let now = Instant::now();
+        // 150 bytes left in each: halves of 75 < 100.
+        let mut board = board(&[SECOND; 2], &[850, 850], now);
+        assert_eq!(board.split_slowest(9, now), Steal::Nothing);
+        // A free segment or one owned by the asker is never split.
+        let mut board = super::tests::board(&[SECOND; 2], &[0, 0], now);
+        board.live[0].owner = None;
+        board.live[1].owner = Some(9);
+        assert_eq!(board.split_slowest(9, now), Steal::Nothing);
+    }
+
+    #[test]
+    fn nothing_is_split_once_the_server_refuses_ranges() {
+        let now = Instant::now();
+        let mut board = board(&[SECOND; 2], &[0, 0], now);
+        board.ranges_refused = true;
+        assert_eq!(board.split_slowest(9, now), Steal::Nothing);
     }
 
     #[test]
