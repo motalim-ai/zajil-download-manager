@@ -11,8 +11,8 @@
 //!    to resume. Otherwise the part file is renamed to its final name in one
 //!    step and the state file is removed.
 
-use std::fs::TryLockError;
-use std::io;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{self, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,9 +22,12 @@ use reqwest::header::{self, HeaderMap};
 use reqwest::{Client, Response, StatusCode, Url, redirect};
 use tokio::io::AsyncWriteExt;
 
+use crate::http_date;
 use crate::naming::{ReserveError, reserve_target, suggested_name};
-use crate::sanitize::ConfineError;
-use crate::state::{DownloadState, StateError, Validator, part_path, state_path};
+use crate::sanitize::{ConfineError, MAX_NAME_BYTES, confine, sanitize_file_name};
+use crate::state::{
+    DownloadState, StateError, Validator, final_path_for_state, part_path, state_path,
+};
 
 /// Engine settings. There is deliberately no setting that weakens TLS
 /// certificate checks.
@@ -65,8 +68,32 @@ pub enum Event {
     },
     /// Bytes of the file on disk so far.
     Progress { done: u64, total: Option<u64> },
+    /// A resumed download had to start again from byte 0.
+    Restarted { reason: RestartReason },
     /// The download is complete at `file`.
     Finished { file: PathBuf, bytes: u64 },
+}
+
+/// Why a resumed download started again from the beginning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartReason {
+    /// The file on the server is a different version (new `ETag`,
+    /// `Last-Modified` or size).
+    FileChanged,
+    /// The server answered a range request with the whole file.
+    RangesIgnored,
+    /// The partial range did not continue where our data ends.
+    RangeMismatch,
+    /// The server gave no strong validator (a strong `ETag`, or a
+    /// `Last-Modified` at least one second before its `Date`), so a change
+    /// could not be detected safely (RFC 9110 §13.1.5).
+    NoValidator,
+    /// No data had been written yet.
+    NothingDone,
+    /// The `.zajil-part` file was missing.
+    PartFileMissing,
+    /// The `.zajil-part` file is shorter than the state says.
+    PartFileTooShort,
 }
 
 /// The result of a complete download.
@@ -89,10 +116,17 @@ pub enum Error {
     Status(StatusCode),
     #[error("the download stopped ({reason}); resume it from {}", state_file.display())]
     Interrupted { state_file: PathBuf, reason: String },
+    #[error("refusing to resume {name:?}: {reason}")]
+    UnsafeName { name: String, reason: String },
     #[error("the download failed before any data arrived: {0}")]
     NoData(String),
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
+    #[error(
+        "refusing to use {}: it is a symbolic link, a hard link or not a regular file",
+        .0.display()
+    )]
+    NotRegularFile(PathBuf),
     #[error(transparent)]
     State(#[from] StateError),
     #[error(transparent)]
@@ -141,49 +175,259 @@ impl Engine {
             return Err(Error::Status(response.status()));
         }
 
-        let headers = response.headers();
-        let content_length = response.content_length();
-        let accept_ranges = header_str(headers, header::ACCEPT_RANGES).is_some_and(|v| {
-            v.split(',')
-                .any(|unit| unit.trim().eq_ignore_ascii_case("bytes"))
-        });
-        let validator = validator_from(headers);
         let name = suggested_name(
-            headers
+            response
+                .headers()
                 .get(header::CONTENT_DISPOSITION)
                 .map(|v| v.as_bytes()),
             response.url(),
         );
-
         let (final_path, part) = reserve_target(dir, &name)?;
         // From here until the first byte is written, any failure or
         // cancellation removes the new files again.
         let cleanup = EmptyDownloadCleanup::new(&final_path);
         lock(&part, &final_path)?;
-        if let Some(len) = content_length {
+        let state = state_from_response(without_credentials(&url), &response);
+        self.start(final_path, part, state, response, Some(cleanup), on_event)
+            .await
+    }
+
+    /// Continues the download described by `state_file`
+    /// (`<folder>/<name>.zajil-state`).
+    ///
+    /// Asks only for the bytes that are not on disk yet, with `Range` and
+    /// `If-Range` (RFC 9110 §14.2, §13.1.5). If the server sends the whole
+    /// file instead (it changed, or it ignores ranges), the download starts
+    /// over from that response. Old and new content are never mixed.
+    pub async fn resume(
+        &self,
+        state_file: &Path,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        // The state file and everything next to it are untrusted: they may
+        // come from another machine. Work with an absolute path inside the
+        // real folder, with a name that sanitizing leaves unchanged, and
+        // never follow a link (`.zajil-state`, `.zajil-part` and the
+        // temporary file are all opened without following links).
+        let state_file = std::path::absolute(state_file)?;
+        let final_path =
+            final_path_for_state(&state_file).ok_or(Error::State(StateError::NotAStateFile))?;
+        let name = final_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let sanitized = sanitize_file_name(name);
+        if sanitized != name {
+            let reason = if name.len() > MAX_NAME_BYTES {
+                format!(
+                    "the name is {} bytes long, more than the {MAX_NAME_BYTES}-byte limit",
+                    name.len()
+                )
+            } else if sanitized == format!("_{name}") {
+                // Windows reads the part before the first dot, without
+                // trailing spaces, as the device name.
+                let device = name.split('.').next().unwrap_or(name).trim_end();
+                format!(
+                    "`{device}` is a device name Windows reserves, so Zajil never uses it for a file"
+                )
+            } else {
+                format!("it is not a name Zajil would create (Zajil would write {sanitized:?})")
+            };
+            return Err(Error::UnsafeName {
+                name: name.to_owned(),
+                reason,
+            });
+        }
+        let final_path = confine(parent_dir(&final_path), name)?;
+        let state_file = state_path(&final_path);
+        let state = DownloadState::load(&state_file)?;
+        let part_file = part_path(&final_path);
+        let part = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {
+            Ok(part) => Some(part),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(err) if zajil_platform::fs::is_not_regular_file(&err) => {
+                return Err(Error::NotRegularFile(part_file));
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let Some(part) = part else {
+            // Nothing on disk to continue from.
+            let part = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&part_file)?;
+            lock(&part, &final_path)?;
+            return self
+                .restart(
+                    final_path,
+                    part,
+                    state,
+                    RestartReason::PartFileMissing,
+                    on_event,
+                )
+                .await;
+        };
+        lock(&part, &final_path)?;
+
+        let done = state.bytes_done();
+        let on_disk = part.metadata()?.len();
+        let if_range = if_range_value(&state.validator);
+        let reason = if on_disk < done {
+            Some(RestartReason::PartFileTooShort)
+        } else if done == 0 {
+            Some(RestartReason::NothingDone)
+        } else if if_range.is_none() {
+            // Without a validator a changed file could not be detected.
+            Some(RestartReason::NoValidator)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return self
+                .restart(final_path, part, state, reason, on_event)
+                .await;
+        }
+        let if_range = if_range.expect("checked above");
+
+        let response = self
+            .get_with_fallback(&state, Some((done, if_range)))
+            .await?;
+        match response.status() {
+            StatusCode::PARTIAL_CONTENT => {
+                if !continues_at(&response, &state, done) {
+                    return self
+                        .restart(
+                            final_path,
+                            part,
+                            state,
+                            RestartReason::RangeMismatch,
+                            on_event,
+                        )
+                        .await;
+                }
+                let mut part = part;
+                part.seek(SeekFrom::Start(done))?;
+                self.transfer(final_path, part, state, None)
+                    .receive(response, on_event)
+                    .await
+            }
+            StatusCode::OK => {
+                let reason = if changed(&state, &response) {
+                    RestartReason::FileChanged
+                } else {
+                    RestartReason::RangesIgnored
+                };
+                on_event(Event::Restarted { reason });
+                let state = state_from_response(state.url.clone(), &response);
+                self.start(final_path, part, state, response, None, on_event)
+                    .await
+            }
+            StatusCode::RANGE_NOT_SATISFIABLE if state.content_length == Some(done) => {
+                // Everything was already on disk; only the rename was missing.
+                self.transfer(final_path, part, state, None)
+                    .finish(on_event)
+                    .await
+            }
+            StatusCode::RANGE_NOT_SATISFIABLE => {
+                self.restart(
+                    final_path,
+                    part,
+                    state,
+                    RestartReason::RangeMismatch,
+                    on_event,
+                )
+                .await
+            }
+            status => Err(Error::Status(status)),
+        }
+    }
+
+    /// Starts over with a plain GET, reporting `reason`.
+    async fn restart(
+        &self,
+        final_path: PathBuf,
+        part: File,
+        old: DownloadState,
+        reason: RestartReason,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        on_event(Event::Restarted { reason });
+        let response = self.get_with_fallback(&old, None).await?;
+        if response.status() != StatusCode::OK {
+            return Err(Error::Status(response.status()));
+        }
+        let state = state_from_response(old.url, &response);
+        self.start(final_path, part, state, response, None, on_event)
+            .await
+    }
+
+    /// Writes a whole-file `200` response into `part` from byte 0.
+    /// `cleanup` is set for a new download (see [`EmptyDownloadCleanup`]).
+    async fn start(
+        &self,
+        final_path: PathBuf,
+        mut part: File,
+        mut state: DownloadState,
+        response: Response,
+        cleanup: Option<EmptyDownloadCleanup>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        part.set_len(0)?;
+        if let Some(len) = state.content_length {
             // Best effort reservation; sparse on some file systems.
             part.set_len(len)?;
         }
-        let mut state = DownloadState::new(
-            without_credentials(&url),
-            without_credentials(response.url()),
-            validator,
-            content_length,
-            accept_ranges,
-        );
-        let state_file = state_path(&final_path);
-        save_state(&mut state, &state_file, cleanup.watch()).await?;
+        part.seek(SeekFrom::Start(0))?;
+        let watch = cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
+        save_state(&mut state, &state_path(&final_path), watch).await?;
+        self.transfer(final_path, part, state, cleanup)
+            .receive(response, on_event)
+            .await
+    }
 
-        let transfer = Transfer {
+    fn transfer(
+        &self,
+        final_path: PathBuf,
+        part: File,
+        state: DownloadState,
+        cleanup: Option<EmptyDownloadCleanup>,
+    ) -> Transfer {
+        Transfer {
             file: tokio::fs::File::from_std(part),
             state,
-            state_file,
+            state_file: state_path(&final_path),
             final_path,
             last_save: Instant::now(),
             save_interval: self.options.save_interval,
-            cleanup: Some(cleanup),
+            cleanup,
+        }
+    }
+
+    /// Requests `final_url`, and the original URL if that fails: signed CDN
+    /// links often expire, while the original URL redirects to a fresh one.
+    async fn get_with_fallback(
+        &self,
+        state: &DownloadState,
+        range: Option<(u64, String)>,
+    ) -> Result<Response, Error> {
+        let final_url = parse_url(&state.final_url)?;
+        let first = self.get(final_url, range.clone()).await;
+        let usable = |r: &Result<Response, Error>| {
+            r.as_ref().is_ok_and(|r| {
+                matches!(
+                    r.status(),
+                    StatusCode::OK
+                        | StatusCode::PARTIAL_CONTENT
+                        | StatusCode::RANGE_NOT_SATISFIABLE
+                )
+            })
         };
-        transfer.receive(response, on_event).await
+        if usable(&first) || state.final_url == state.url {
+            return first;
+        }
+        self.get(parse_url(&state.url)?, range).await
     }
 
     async fn get(&self, url: Url, range_from: Option<(u64, String)>) -> Result<Response, Error> {
@@ -454,7 +698,7 @@ fn parse_url(raw: &str) -> Result<Url, Error> {
     }
 }
 
-fn lock(file: &std::fs::File, final_path: &Path) -> Result<(), Error> {
+fn lock(file: &File, final_path: &Path) -> Result<(), Error> {
     match file.try_lock() {
         Ok(()) => Ok(()),
         Err(TryLockError::WouldBlock) => Err(Error::Locked(final_path.to_path_buf())),
@@ -472,6 +716,88 @@ fn validator_from(headers: &HeaderMap) -> Validator {
         last_modified: header_str(headers, header::LAST_MODIFIED).map(str::to_owned),
         date: header_str(headers, header::DATE).map(str::to_owned),
     }
+}
+
+/// The first state for a whole-file response.
+fn state_from_response(url: String, response: &Response) -> DownloadState {
+    let headers = response.headers();
+    let accept_ranges = header_str(headers, header::ACCEPT_RANGES)
+        .is_some_and(|v| v.split(',').any(|u| u.trim().eq_ignore_ascii_case("bytes")));
+    DownloadState::new(
+        url,
+        without_credentials(response.url()),
+        validator_from(headers),
+        response.content_length(),
+        accept_ranges,
+    )
+}
+
+/// The `If-Range` value RFC 9110 §13.1.5 allows, or `None` when there is no
+/// strong validator and the download must start over rather than risk
+/// mixing two versions of the file:
+/// - a strong `ETag` (a weak one, `W/"…"`, must never be sent);
+/// - only when there is **no** `ETag` at all, `Last-Modified`, and only if
+///   it is strong (§8.8.2.2): at least one second before the `Date` of the
+///   same response. A file changed twice within that second would otherwise
+///   look unchanged.
+fn if_range_value(validator: &Validator) -> Option<String> {
+    match &validator.etag {
+        Some(etag) if !etag.trim_start().starts_with("W/") => Some(etag.clone()),
+        Some(_weak) => None,
+        None => {
+            let last_modified = validator.last_modified.as_ref()?;
+            let modified = http_date::parse(last_modified)?;
+            let date = http_date::parse(validator.date.as_ref()?)?;
+            let gap = date.checked_sub(modified)?;
+            (gap >= 1).then(|| last_modified.clone())
+        }
+    }
+}
+
+/// A `206` continues our download only if its `Content-Range` starts where
+/// our data ends, covers the same total size, and the validator matches.
+fn continues_at(response: &Response, state: &DownloadState, done: u64) -> bool {
+    let range = header_str(response.headers(), header::CONTENT_RANGE).and_then(parse_content_range);
+    let Some(ContentRange { start, end, total }) = range else {
+        return false;
+    };
+    let same_total = match (total, state.content_length) {
+        (Some(total), Some(expected)) => total == expected && end + 1 == total,
+        (None, None) => true,
+        _ => false,
+    };
+    start == done && same_total && !changed(state, response)
+}
+
+/// Whether `response` describes another version of the file than `state`.
+fn changed(state: &DownloadState, response: &Response) -> bool {
+    let now = validator_from(response.headers());
+    let differs = |old: &Option<String>, new: &Option<String>| matches!((old, new), (Some(old), Some(new)) if old != new);
+    differs(&state.validator.etag, &now.etag)
+        || differs(&state.validator.last_modified, &now.last_modified)
+        || (response.status() == StatusCode::OK
+            && response.content_length().is_some()
+            && response.content_length() != state.content_length)
+}
+
+/// A parsed `Content-Range: bytes start-end/total` (RFC 9110 §14.4).
+#[derive(Debug, PartialEq, Eq)]
+struct ContentRange {
+    start: u64,
+    end: u64,
+    total: Option<u64>,
+}
+
+fn parse_content_range(value: &str) -> Option<ContentRange> {
+    let rest = value.trim().strip_prefix("bytes ")?;
+    let (range, total) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let (start, end): (u64, u64) = (start.trim().parse().ok()?, end.trim().parse().ok()?);
+    let total = match total.trim() {
+        "*" => None,
+        n => Some(n.parse().ok()?),
+    };
+    (start <= end && total.is_none_or(|t| end < t)).then_some(ContentRange { start, end, total })
 }
 
 /// Saves the state file on a blocking thread: on Windows a save may wait up
@@ -568,4 +894,146 @@ fn error_chain(err: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FIVE_GIB: u64 = 5 * 1024 * 1024 * 1024;
+
+    #[test]
+    fn parses_content_range() {
+        assert_eq!(
+            parse_content_range("bytes 100-999/1000"),
+            Some(ContentRange {
+                start: 100,
+                end: 999,
+                total: Some(1000)
+            })
+        );
+        assert_eq!(
+            parse_content_range("bytes 0-9/*"),
+            Some(ContentRange {
+                start: 0,
+                end: 9,
+                total: None
+            })
+        );
+        for bad in [
+            "bytes 9-0/10",
+            "bytes 0-10/10",
+            "bytes */10",
+            "items 0-1/2",
+            "bytes 0-x/2",
+            "",
+        ] {
+            assert_eq!(parse_content_range(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn handles_offsets_beyond_4_gib() {
+        // Files larger than 4 GiB need 64-bit offsets end to end.
+        let start = 4_500_000_000;
+        let header = format!("bytes {start}-{}/{FIVE_GIB}", FIVE_GIB - 1);
+        assert_eq!(
+            parse_content_range(&header),
+            Some(ContentRange {
+                start,
+                end: FIVE_GIB - 1,
+                total: Some(FIVE_GIB)
+            })
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.iso.zajil-state");
+        let mut state = DownloadState::new(
+            "http://h/huge.iso".into(),
+            "http://h/huge.iso".into(),
+            Validator {
+                etag: Some("\"e\"".into()),
+                last_modified: None,
+                date: None,
+            },
+            Some(FIVE_GIB),
+            true,
+        );
+        state.segments[0].done = start;
+        state.save(&path).unwrap();
+        let loaded = DownloadState::load(&path).unwrap();
+        assert_eq!(loaded.bytes_done(), start);
+        assert_eq!(loaded.segments[0].end, Some(FIVE_GIB - 1));
+    }
+
+    fn validator(etag: Option<&str>, modified: Option<&str>, date: Option<&str>) -> Validator {
+        Validator {
+            etag: etag.map(str::to_owned),
+            last_modified: modified.map(str::to_owned),
+            date: date.map(str::to_owned),
+        }
+    }
+
+    const MODIFIED: &str = "Wed, 21 Oct 2026 07:28:00 GMT";
+    const ONE_SECOND_LATER: &str = "Wed, 21 Oct 2026 07:28:01 GMT";
+
+    #[test]
+    fn if_range_uses_a_strong_etag() {
+        let v = validator(Some("\"a\""), Some(MODIFIED), Some(ONE_SECOND_LATER));
+        assert_eq!(if_range_value(&v).as_deref(), Some("\"a\""));
+    }
+
+    #[test]
+    fn if_range_never_uses_a_weak_etag_nor_falls_back_to_the_date() {
+        // Review of #17: the date was sent next to a weak ETag.
+        for weak in ["W/\"a\"", " W/\"a\""] {
+            let v = validator(Some(weak), Some(MODIFIED), Some(ONE_SECOND_LATER));
+            assert_eq!(if_range_value(&v), None, "{weak}");
+        }
+    }
+
+    #[test]
+    fn if_range_uses_the_date_only_when_it_is_strong() {
+        let strong = validator(None, Some(MODIFIED), Some(ONE_SECOND_LATER));
+        assert_eq!(if_range_value(&strong).as_deref(), Some(MODIFIED));
+        // Same second as the response: weak (RFC 9110 §8.8.2.2).
+        let same_second = validator(None, Some(MODIFIED), Some(MODIFIED));
+        assert_eq!(if_range_value(&same_second), None);
+        // Unknown or unreadable Date: cannot prove it is strong.
+        assert_eq!(if_range_value(&validator(None, Some(MODIFIED), None)), None);
+        let garbage = validator(None, Some(MODIFIED), Some("soon"));
+        assert_eq!(if_range_value(&garbage), None);
+        let unreadable = validator(None, Some("last week"), Some(ONE_SECOND_LATER));
+        assert_eq!(if_range_value(&unreadable), None);
+        // Date before Last-Modified (clock trouble): weak.
+        let backwards = validator(None, Some(ONE_SECOND_LATER), Some(MODIFIED));
+        assert_eq!(if_range_value(&backwards), None);
+        // Absurd dates are ignored, never compared (no overflow).
+        let far = "Sun, 06 Nov 9223372036854775807 08:49:37 GMT";
+        assert_eq!(
+            if_range_value(&validator(None, Some(MODIFIED), Some(far))),
+            None
+        );
+        assert_eq!(
+            if_range_value(&validator(None, Some(far), Some(MODIFIED))),
+            None
+        );
+        assert_eq!(if_range_value(&Validator::default()), None);
+    }
+
+    #[test]
+    fn places_the_finished_file_next_to_a_taken_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let wanted = dir.path().join("a.zip");
+        std::fs::write(&wanted, b"old").unwrap();
+        std::fs::write(dir.path().join("a (1).zip"), b"old").unwrap();
+        // `a (2).zip` is another download in progress.
+        std::fs::write(dir.path().join("a (2).zip.zajil-part"), b"").unwrap();
+        let part = part_path(&wanted);
+        std::fs::write(&part, b"new").unwrap();
+        let placed = place_final(&part, &wanted).unwrap();
+        assert_eq!(placed, dir.path().join("a (3).zip"));
+        assert_eq!(std::fs::read(&wanted).unwrap(), b"old");
+        assert_eq!(std::fs::read(placed).unwrap(), b"new");
+    }
 }

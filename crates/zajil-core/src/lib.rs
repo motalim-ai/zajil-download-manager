@@ -6,8 +6,9 @@
 #![forbid(unsafe_code)]
 
 mod engine;
+mod http_date;
 pub mod naming;
 pub mod sanitize;
 pub mod state;
 
-pub use engine::{Engine, Error, Event, Finished, Options};
+pub use engine::{Engine, Error, Event, Finished, Options, RestartReason};
