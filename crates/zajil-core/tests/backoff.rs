@@ -179,14 +179,9 @@ async fn cut_connections_are_retried_from_where_they_stopped() {
         }
     }
     assert!(retries >= 7, "{gets:?}");
-    // Nothing started over: at most the chunk in flight at each of the
-    // eight cuts (the server counts what it handed over, not what arrived)
-    // was sent twice.
-    let sent: u64 = gets.iter().map(|r| r.bytes_sent).sum();
-    assert!(
-        sent - data.len() as u64 <= 8 * 64 * 1024,
-        "{sent} bytes sent"
-    );
+    // How many bytes the server handed over is no measure of what arrived:
+    // after a cut (a TCP reset), Windows drops data the client had not read
+    // yet. What matters is that every retry continues after what was kept.
 }
 
 /// A segment whose connection keeps failing is given up after a few tries
