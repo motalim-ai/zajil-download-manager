@@ -1093,7 +1093,15 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
                 return Ok(());
             }
         }
-        if (past_end || batch.len() >= WRITE_BATCH || last_write.elapsed() >= WRITE_AFTER)
+        // Under a speed limit every piece is written at once: a batch that
+        // a split leaves behind is dropped, and near the end of a download
+        // nothing reads on to use the time it cost (CI measured 0.89 of
+        // the limit with 256 KiB batches). Limited, the writes are few.
+        let limited = ctx.limits.active();
+        if (past_end
+            || limited
+            || batch.len() >= WRITE_BATCH
+            || last_write.elapsed() >= WRITE_AFTER)
             && !write_batch(ctx, id, stream, &mut batch, &mut batch_at).await?
         {
             // The segment is full and the next one is not ours to take,

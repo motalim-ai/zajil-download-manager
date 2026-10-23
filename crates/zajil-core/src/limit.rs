@@ -295,6 +295,11 @@ impl Limits {
         }
     }
 
+    /// Whether any of the limits has a rate now.
+    pub fn active(&self) -> bool {
+        self.limits.iter().any(|limit| limit.rate().is_some())
+    }
+
     /// See [`SpeedLimit::give_back`].
     pub fn give_back(&self, bytes: u64) {
         for limit in &self.limits {
