@@ -179,11 +179,11 @@ async fn pausing_and_resuming_an_item_through_the_queues_file() {
 #[tokio::test]
 async fn a_stopped_runner_leaves_its_downloads_waiting_and_resumable() {
     let server = TestServer::http();
-    let data = random_bytes(4 * MIB, 403);
-    server.put(
-        "/f.bin",
-        FileSpec::new(data.clone()).throttle(2 * MIB as u64),
-    );
+    // Each connection 1 MiB/s, 8 MiB: no download can finish in the
+    // moment between "both have more than 1 MiB" and the stop (on a fast
+    // CI one sometimes did, with 4 MiB at 2 MiB/s).
+    let data = random_bytes(8 * MIB, 403);
+    server.put("/f.bin", FileSpec::new(data.clone()).throttle(MIB as u64));
     let data_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data_dir.path());
@@ -194,17 +194,18 @@ async fn a_stopped_runner_leaves_its_downloads_waiting_and_resumable() {
     ];
 
     let stop = Stop::new();
-    let mut started = 0;
+    // Stop once both downloads have more than 1 MiB on disk.
+    let mut far = std::collections::HashSet::new();
     let summary = runner(&store)
         .run(&stop.clone(), &mut |event| {
             if let QueueEvent::Download {
+                item,
                 event: zajil_core::Event::Progress { done, .. },
-                ..
             } = event
                 && done > MIB as u64
             {
-                started += 1;
-                if started == 4 {
+                far.insert(item);
+                if far.len() == 2 {
                     stop.request();
                 }
             }
