@@ -17,9 +17,14 @@ dirs = "7.0.0"
 http-body-util = { version = "0.1.5", features = ["channel"] }
 hyper = { version = "1.12.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
+percent-encoding = "2.3.2"
 # Test certificates only. `ring`, never `aws-lc-rs` (its license includes the
 # GPL-incompatible OpenSSL license).
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
+# HTTP client. No default features: rustls without a built-in provider (we
+# install `ring`), no system proxy (proxies arrive in M3), no decompression.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls-platform-verifier = "0.7.1"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -28,7 +33,7 @@ sha2 = "0.11.1"
 dunce = "1.0.5"
 icu_properties = "2.4.0"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 tempfile = "3.27.0"
@@ -36,3 +41,8 @@ tempfile = "3.27.0"
 # Workspace crates
 zajil-platform = { path = "crates/zajil-platform" }
 zajil-testserver = { path = "crates/zajil-testserver" }
+
+# Hashing 50 MB test files in unoptimized builds is slow; optimize just the
+# hash crate in dev and test builds.
+[profile.dev.package.sha2]
+opt-level = 3

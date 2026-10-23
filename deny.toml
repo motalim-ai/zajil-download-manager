@@ -4,6 +4,16 @@
 
 [graph]
 all-features = true
+# Only the systems we ship for (ADR-0006). Dependencies used solely on other
+# targets (for example wasm32) are not part of any Zajil build.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
 
 [advisories]
 # Known vulnerabilities (RustSec) fail the build.

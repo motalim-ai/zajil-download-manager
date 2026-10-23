@@ -7,7 +7,7 @@
 - سبب الحاجة إليها.
 - تأكيد أن الترخيص متوافق مع GPL-3.0 (انظر [ADR-0002](adr/0002-license.md)).
 
-الـ CI يفحص التراخيص تلقائيًا بأداة `cargo-deny` حسب الإعدادات في [`deny.toml`](../deny.toml). لكن هذا السجل يبقى ضروريًا، لأنه يوثّق **سبب** اختيار كل مكتبة، ويشمل أيضًا ما لا يفحصه `cargo-deny`، مثل مكتبات الواجهة (npm)، والأدوات الخارجية (ffmpeg وyt-dlp)، والخطوط والأيقونات.
+الـ CI يفحص التراخيص تلقائيًا بأداة `cargo-deny` حسب الإعدادات في [`deny.toml`](../deny.toml)، **لمعماريات الأنظمة الثلاثة فقط** (x86_64 وarm64). مثلًا `webpki-root-certs` (ترخيص CDLA-Permissive-2.0) يستخدمه `rustls-platform-verifier` في wasm32 فقط، فلا يدخل في أي نسخة من زاجِل. لكن هذا السجل يبقى ضروريًا، لأنه يوثّق **سبب** اختيار كل مكتبة، ويشمل أيضًا ما لا يفحصه `cargo-deny`، مثل مكتبات الواجهة (npm)، والأدوات الخارجية (ffmpeg وyt-dlp)، والخطوط والأيقونات.
 
 ## مكتبات Rust
 
@@ -17,12 +17,15 @@
 | `serde` | 1.0.229 | MIT أو Apache-2.0 | `zajil-core` | قراءة ملف الحالة وكتابته | M1 |
 | `serde_json` | 1.0.154 | MIT أو Apache-2.0 | `zajil-core` | صيغة JSON لملف الحالة (ADR-0004) | M1 |
 | `sha2` | 0.11.1 | MIT أو Apache-2.0 | `zajil-core` | بصمة ملف الحالة، وبصمات الملفات | M1 |
-| `tokio` | 1.54.1 | MIT | `zajil-testserver` (وبعده المحرّك) | التشغيل غير المتزامن (async) | M1 |
+| `tokio` | 1.54.1 | MIT | `zajil-core` و`zajil-testserver` | التشغيل غير المتزامن (async) | M1 |
 | `hyper` | 1.12.0 | MIT | `zajil-testserver` (اختبار فقط) | سيرفر HTTP/1.1 للحالات الصعبة | M1 |
 | `hyper-util` | 0.1.21 | MIT | `zajil-testserver` (اختبار فقط) | ربط hyper بـ tokio | M1 |
 | `http-body-util` | 0.1.5 | MIT | `zajil-testserver` (اختبار فقط) | إرسال الجسم على دفعات، وقطعه في المنتصف | M1 |
 | `bytes` | 1.12.1 | MIT | `zajil-testserver` (اختبار فقط) | مخازن البيانات | M1 |
-| `rustls` | 0.23.46 | Apache-2.0 أو ISC أو MIT | `zajil-testserver` (وبعده المحرّك) | TLS. **بمزوّد التشفير `ring` فقط** | M1 |
+| `reqwest` | 0.13.5 | MIT أو Apache-2.0 | `zajil-core` | عميل HTTP: التحويلات، والمهلات، والبث. **دون الميزات الافتراضية**: rustls دون مزوّد مدمج (نضع `ring`)، ودون بروكسي النظام (M3)، ودون فك الضغط | M1 |
+| `rustls-platform-verifier` | 0.7.1 | MIT أو Apache-2.0 | `zajil-core` | التحقق من الشهادات بمخزن النظام وقواعده (ADR-0003). يعتمد في لينكس على `rustls-native-certs` و`openssl-probe` (MIT أو Apache-2.0)، ولا يستخدم OpenSSL نفسه | M1 |
+| `percent-encoding` | 2.3.2 | MIT أو Apache-2.0 | `zajil-core` | فك ترميز اسم الملف من الرابط ومن `filename*` (RFC 8187) | M1 |
+| `rustls` | 0.23.46 | Apache-2.0 أو ISC أو MIT | `zajil-core` و`zajil-testserver` | TLS. **بمزوّد التشفير `ring` فقط** | M1 |
 | `ring` | 0.17.14 | Apache-2.0 و ISC | عبر `rustls` و`rcgen` | مزوّد التشفير. اخترناه بدل `aws-lc-rs` لأن ترخيص `aws-lc-sys` يتضمن رخصة OpenSSL غير المتوافقة مع GPL-3.0 | M1 |
 | `tokio-rustls` | 0.26.6 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | سيرفر HTTPS للاختبار | M1 |
 | `rcgen` | 0.14.10 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | ينشئ في كل تشغيل للاختبارات جهة إصدار (CA) مؤقتة في الذاكرة، ويوقّع بها شهادات السيرفر التجريبي (صالحة، ومنتهية)، وشهادة موقّعة ذاتيًا. **لا توجد أي شهادة أو مفتاح في المستودع**. بمزوّد `ring` فقط | M1 |

@@ -5,5 +5,9 @@
 
 #![forbid(unsafe_code)]
 
+mod engine;
+pub mod naming;
 pub mod sanitize;
 pub mod state;
+
+pub use engine::{Engine, Error, Event, Finished, Options};
