@@ -1,0 +1,22 @@
+[package]
+name = "zajil-cli"
+description = "The zajil command: download and resume from the command line"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "zajil"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+tokio.workspace = true
+zajil-core.workspace = true
+zajil-platform.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zajil-testserver.workspace = true

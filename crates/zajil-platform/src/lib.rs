@@ -8,13 +8,16 @@
 //! the [`fs`] helpers for the safe-write rules of ADR-0004.
 //!
 //! `unsafe` is denied everywhere except the small, commented system calls in
-//! [`fs`] that the standard library does not offer (no-replace and
-//! write-through renames, hard-link counts on Windows).
+//! [`fs`] and [`console`] that the standard library does not offer
+//! (no-replace and write-through renames, hard-link counts and the console
+//! mode on Windows).
 
 #![deny(unsafe_code)]
 
+pub mod console;
 pub mod fs;
 pub mod ids;
 mod paths;
+pub mod shell;
 
 pub use paths::{AppPaths, PathsError, SystemPaths, linux, macos, windows};

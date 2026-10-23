@@ -13,6 +13,7 @@ publish = false
 # reason in docs/DEPENDENCIES.md.
 [workspace.dependencies]
 bytes = "1.12.1"
+clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
 http-body-util = { version = "0.1.5", features = ["channel"] }
 hyper = { version = "1.12.0", features = ["http1", "server"] }
@@ -32,12 +33,13 @@ sha2 = "0.11.1"
 dunce = "1.0.5"
 icu_properties = "2.4.0"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
 tempfile = "3.27.0"
 
 # Workspace crates
+zajil-core = { path = "crates/zajil-core" }
 zajil-platform = { path = "crates/zajil-platform" }
 zajil-testserver = { path = "crates/zajil-testserver" }
 
