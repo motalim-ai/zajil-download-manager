@@ -8,3 +8,9 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/motalim-ai/zajil-download-manager"
 publish = false
+
+# Shared dependency versions. Every entry is listed with its license and
+# reason in docs/DEPENDENCIES.md.
+[workspace.dependencies]
+dirs = "7.0.0"
+thiserror = "2.0.21"

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- M1: `zajil-platform` crate with the `AppPaths` interface and its Windows, macOS and Linux implementations, plus the ADR-0001 identifiers as constants.
 - M0 foundation:
   - README, PRD, architecture, roadmap (M1–M8) and IDM feature-parity table.
   - ADRs 0001–0006.

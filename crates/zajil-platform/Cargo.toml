@@ -1,0 +1,12 @@
+[package]
+name = "zajil-platform"
+description = "Zajil platform layer: one interface, one implementation per OS (ADR-0006)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+dirs.workspace = true
+thiserror.workspace = true
