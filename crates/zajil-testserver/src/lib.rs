@@ -759,14 +759,7 @@ fn respond(
         Some((slow, bytes_per_sec)) if slow == start => Some(bytes_per_sec),
         _ => spec.bytes_per_sec,
     };
-    tokio::spawn(stream_body(
-        sender,
-        body,
-        cut,
-        stall,
-        throttle,
-        bytes_sent,
-    ));
+    tokio::spawn(stream_body(sender, body, cut, stall, throttle, bytes_sent));
     builder.body(channel.boxed()).unwrap()
 }
 
