@@ -12,7 +12,7 @@
 
 | الرقم | القرار | الحالة |
 |---|---|---|
-| [0001](0001-naming.md) | تسمية المشروع والمعرّفات (`io.github.motalim_ai.zajil`) | مقبول، وفيه مسألة مفتوحة لمعرّف ماك قبل M4 |
+| [0001](0001-naming.md) | تسمية المشروع والمعرّفات: `io.github.motalim-ai.zajil` لماك وTauri، و`io.github.motalim_ai.zajil` للينكس ولمضيف Native Messaging | مقبول |
 | [0002](0002-license.md) | الرخصة: GPL-3.0-or-later | مقبول |
 | [0003](0003-language-and-ui-framework.md) | اللغة وإطار الواجهة: Rust + Tauri 2 + Fluent | مقبول |
 | [0004](0004-state-file-format.md) | تنسيق ملف الحالة: JSON بجانب الملف الجزئي | مقبول |

@@ -21,5 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Owner decisions recorded:
   - ADR-0003, ADR-0004 and ADR-0005 accepted.
   - License set to GPL-3.0-or-later.
-  - App id `io.github.motalim_ai.zajil`.
+  - App ids:
+    - `io.github.motalim-ai.zajil` for macOS and Tauri.
+    - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
