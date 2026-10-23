@@ -8,12 +8,13 @@
 mod engine;
 mod http_date;
 pub mod naming;
+pub mod queue;
 mod retry;
 pub mod sanitize;
 mod segmented;
 pub mod state;
 
-pub use engine::{Engine, Error, Event, Finished, Options, RestartReason};
+pub use engine::{Engine, Error, Event, Finished, Options, RestartReason, Stop};
 pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};
 
 /// How many times in a row a failing request or connection is tried by

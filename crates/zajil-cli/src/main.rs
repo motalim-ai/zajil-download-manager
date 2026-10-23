@@ -9,6 +9,8 @@
 
 #![forbid(unsafe_code)]
 
+mod queue;
+
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -59,6 +61,9 @@ struct Cli {
         value_parser = clap::value_parser!(u32).range(1..=100)
     )]
     tries: u32,
+    /// Where Zajil keeps its queues. Defaults to the system data folder.
+    #[arg(long, global = true, value_name = "FOLDER")]
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -76,10 +81,36 @@ enum Command {
         /// The `<name>.zajil-state` file next to the partial download.
         state_file: PathBuf,
     },
+    /// Manage and run download queues.
+    Queue {
+        #[command(subcommand)]
+        command: queue::QueueCommand,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Queue { command } = cli.command {
+        let store = match queue_store(cli.data_dir.as_deref()) {
+            Ok(store) => store,
+            Err(message) => return fail(&message),
+        };
+        if !matches!(command, queue::QueueCommand::Run) {
+            return queue::manage(&store, command);
+        }
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(err) => return fail(&format!("could not start: {err}")),
+        };
+        let engine = match Engine::new(options(cli.connections.into(), cli.tries)) {
+            Ok(engine) => engine,
+            Err(err) => return fail(&err.to_string()),
+        };
+        return runtime.block_on(queue::run(store, engine));
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -90,13 +121,28 @@ fn main() -> ExitCode {
     runtime.block_on(run(cli.command, cli.connections.into(), cli.tries))
 }
 
-async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
-    let options = Options {
+fn options(connections: usize, tries: u32) -> Options {
+    Options {
         connections,
         max_failures: tries,
         ..Options::default()
+    }
+}
+
+/// The queues file, in `--data-dir` or the system data folder.
+fn queue_store(chosen: Option<&Path>) -> Result<zajil_core::queue::QueueStore, String> {
+    let dir = match chosen {
+        Some(dir) => dir.to_path_buf(),
+        None => SystemPaths::new()
+            .map_err(|err| err.to_string())?
+            .data_dir()
+            .to_path_buf(),
     };
-    let engine = match Engine::new(options) {
+    Ok(zajil_core::queue::QueueStore::new(dir))
+}
+
+async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
+    let engine = match Engine::new(options(connections, tries)) {
         Ok(engine) => engine,
         Err(err) => return fail(&err.to_string()),
     };
@@ -118,6 +164,7 @@ async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
                 .resume(state_file, &mut |e| progress.show(e))
                 .await
                 .map_err(Failure::Engine),
+            Command::Queue { .. } => unreachable!("handled in main"),
         }
     };
 

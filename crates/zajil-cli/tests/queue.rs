@@ -1,0 +1,263 @@
+//! `zajil queue` (M3): managing queues from the command line, and a
+//! runner killed without warning.
+
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+use zajil_core::queue::{QueueStore, Status};
+use zajil_core::state::DownloadState;
+use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
+
+const MIB: usize = 1024 * 1024;
+
+fn zajil(data: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_zajil"))
+        .arg("--data-dir")
+        .arg(data)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn printed(out: &Output) -> String {
+    format!("{}{}", text(&out.stdout), text(&out.stderr))
+}
+
+/// M3 success criterion: `zajil queue run` killed without warning, then run
+/// again. The queues, the progress and the settings are as they were, and
+/// the downloads resume (none starts over).
+#[test]
+fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
+    let server = TestServer::http();
+    let files: Vec<(String, Vec<u8>)> = ["a", "b", "c"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            (
+                format!("/{name}.bin"),
+                random_bytes(8 * MIB, 600 + i as u64),
+            )
+        })
+        .collect();
+    let spec =
+        |data: &Vec<u8>, path: &str| FileSpec::new(data.clone()).etag(Some(&format!("\"{path}\"")));
+    for (path, data) in &files {
+        server.put(path, spec(data, path).throttle(MIB as u64));
+    }
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let dir = downloads.path().to_str().unwrap();
+
+    let out = zajil(data.path(), &["queue", "set", "--max-active", "2"]);
+    assert!(out.status.success(), "{}", printed(&out));
+    let urls: Vec<String> = files.iter().map(|(path, _)| server.url(path)).collect();
+    let mut add = vec!["queue", "add", "--dir", dir];
+    add.extend(urls.iter().map(String::as_str));
+    let out = zajil(data.path(), &add);
+    assert!(out.status.success(), "{}", printed(&out));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["--connections", "2", "queue", "run"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // Wait until both running downloads have durable progress, then kill.
+    let store = QueueStore::new(data.path());
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let done_before = loop {
+        assert!(Instant::now() < deadline, "no progress was saved");
+        assert!(child.try_wait().unwrap().is_none(), "zajil exited early");
+        let done: Vec<u64> = store
+            .load()
+            .unwrap()
+            .queue("main")
+            .unwrap()
+            .items
+            .iter()
+            .filter_map(|item| item.state_file.as_deref())
+            .filter_map(|path| DownloadState::load(path).ok())
+            .map(|state| state.bytes_done())
+            .filter(|&done| done >= MIB as u64)
+            .collect();
+        if done.len() == 2 {
+            break done;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let requests_before: Vec<usize> = files
+        .iter()
+        .map(|(path, _)| server.gets(path).len())
+        .collect();
+
+    // Everything is still there: the setting, the three downloads in
+    // order, and the progress of the two that ran.
+    let queues = store.load().unwrap();
+    let queue = queues.queue("main").unwrap();
+    assert_eq!(queue.max_active, 2);
+    let urls_kept: Vec<&str> = queue.items.iter().map(|i| i.url.as_str()).collect();
+    assert_eq!(urls_kept, urls);
+    assert_eq!(queue.items[2].status, Status::Waiting);
+    assert!(queue.items[2].state_file.is_none());
+    let out = zajil(data.path(), &["queue", "list"]);
+    let list = printed(&out);
+    assert!(
+        list.contains("Queue main (2 at once, 3 downloads)"),
+        "{list}"
+    );
+    assert!(list.contains("a.bin") && list.contains("b.bin"), "{list}");
+    assert!(done_before.iter().all(|&d| d < 8 * MIB as u64));
+
+    // The server is fast now (same version of each file).
+    for (path, data) in &files {
+        server.put(path, spec(data, path));
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_zajil"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["--connections", "2", "queue", "run"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", printed(&out));
+    let resumed = printed(&out);
+    assert_eq!(resumed.matches("resuming").count(), 2, "{resumed}");
+
+    let queues = store.load().unwrap();
+    for (item, (path, data)) in queues.queue("main").unwrap().items.iter().zip(&files) {
+        assert_eq!(item.status, Status::Done, "{item:?}");
+        let file = item.file.as_deref().unwrap();
+        assert_eq!(sha256_hex(&fs::read(file).unwrap()), sha256_hex(data));
+        assert_eq!(file.file_name().unwrap().to_str().unwrap(), &path[1..]);
+    }
+    // The two that had progress went on with ranges: no request of the
+    // second run asked for a whole file.
+    for (i, (path, _)) in files.iter().enumerate().take(2) {
+        let after = &server.gets(path)[requests_before[i]..];
+        assert!(!after.is_empty());
+        assert!(after.iter().all(|r| r.range.is_some()), "{after:?}");
+    }
+    // Nothing is left but the three files.
+    let names = fs::read_dir(downloads.path()).unwrap().count();
+    assert_eq!(names, 3);
+}
+
+#[test]
+fn queue_commands_change_the_queues_file() {
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let dir = downloads.path().to_str().unwrap();
+
+    let out = zajil(
+        data.path(),
+        &[
+            "queue",
+            "add",
+            "--dir",
+            dir,
+            "http://127.0.0.1:9/a.bin?sig=SECRET-TOKEN",
+            "http://127.0.0.1:9/b.bin",
+        ],
+    );
+    assert!(out.status.success(), "{}", printed(&out));
+    assert!(!printed(&out).contains("SECRET-TOKEN"), "{}", printed(&out));
+
+    // Never with a user name or password: they would have to be saved.
+    let out = zajil(data.path(), &["queue", "add", "http://u:S3cret@h/x"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!printed(&out).contains("S3cret"));
+
+    for args in [
+        &["queue", "set", "--max-active", "4", "--queue", "night"][..],
+        &[
+            "queue",
+            "add",
+            "--queue",
+            "night",
+            "--dir",
+            dir,
+            "http://h/c",
+        ],
+        &["queue", "pause", "1"],
+        &["queue", "remove", "2"],
+    ] {
+        let out = zajil(data.path(), args);
+        assert!(out.status.success(), "{args:?}: {}", printed(&out));
+    }
+    let out = zajil(data.path(), &["queue", "list"]);
+    let list = printed(&out);
+    assert!(!list.contains("SECRET-TOKEN"), "{list}");
+    assert!(
+        list.contains("Queue main (3 at once, 1 downloads)"),
+        "{list}"
+    );
+    assert!(
+        list.contains("Queue night (4 at once, 1 downloads)"),
+        "{list}"
+    );
+    assert!(list.contains("paused"), "{list}");
+    assert!(!list.contains("b.bin"), "{list}");
+
+    let store = QueueStore::new(data.path());
+    let queues = store.load().unwrap();
+    assert_eq!(queues.item(1).unwrap().status, Status::Paused);
+    assert!(queues.item(2).is_none());
+    // The token is kept for the download, in a file only its owner reads.
+    assert!(queues.item(1).unwrap().url.contains("SECRET-TOKEN"));
+    assert!(zajil_platform::fs::only_owner_can_access(&store.path()).unwrap());
+
+    let out = zajil(data.path(), &["queue", "resume", "1"]);
+    assert!(printed(&out).contains("1 is waiting"), "{}", printed(&out));
+    for (args, code) in [
+        (&["queue", "pause", "99"][..], 1),
+        (&["queue", "set", "--max-active", "0"], 2),
+        (&["queue", "set", "--max-active", "33"], 2),
+        (&["queue", "set", "--queue", "a b"], 1),
+    ] {
+        let out = zajil(data.path(), args);
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {}", printed(&out));
+    }
+}
+
+#[test]
+fn queue_run_downloads_everything_and_reports_failures() {
+    let server = TestServer::http();
+    let data_a = random_bytes(300_000, 610);
+    server.put("/a.bin", FileSpec::new(data_a.clone()));
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let dir = downloads.path().to_str().unwrap();
+    let missing = server.url("/missing.bin");
+    let out = zajil(
+        data.path(),
+        &[
+            "queue",
+            "add",
+            "--dir",
+            dir,
+            &server.url("/a.bin"),
+            &missing,
+        ],
+    );
+    assert!(out.status.success());
+
+    let out = zajil(data.path(), &["--tries", "1", "queue", "run"]);
+    assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
+    let shown = printed(&out);
+    assert!(shown.contains("[1] saved"), "{shown}");
+    assert!(shown.contains("[2] failed"), "{shown}");
+    assert_eq!(fs::read(downloads.path().join("a.bin")).unwrap(), data_a);
+    let list = printed(&zajil(data.path(), &["queue", "list"]));
+    assert!(list.contains("done") && list.contains("failed"), "{list}");
+    assert!(list.contains("404"), "{list}");
+}

@@ -62,11 +62,14 @@ struct Attempt {
     /// that cannot continue from the middle and always breaks at the same
     /// place is given up, not tried forever.
     furthest: u64,
+    /// Set when the caller wants the download to stop ([`Stop`]).
+    stop: Stop,
 }
 
 impl Attempt {
-    fn new(url: Option<&Url>) -> Self {
+    fn new(url: Option<&Url>, stop: &Stop) -> Self {
         Attempt {
+            stop: stop.clone(),
             restarts_left: MAX_RESTARTS,
             split: true,
             credentials: url
@@ -116,6 +119,45 @@ impl Attempt {
             let _ = url.set_password(with.password());
         }
         url
+    }
+}
+
+/// Asks a running download to stop and lets its caller know when it has
+/// ([`Engine::download_until`], [`Engine::resume_until`]). Cheap to clone:
+/// every clone is the same signal.
+#[derive(Debug, Clone)]
+pub struct Stop {
+    sender: Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+impl Default for Stop {
+    fn default() -> Self {
+        Stop::new()
+    }
+}
+
+impl Stop {
+    /// A signal that nothing has requested yet.
+    pub fn new() -> Self {
+        Stop {
+            sender: Arc::new(tokio::sync::watch::Sender::new(false)),
+        }
+    }
+
+    /// Asks every download that uses this signal to stop.
+    pub fn request(&self) {
+        self.sender.send_replace(true);
+    }
+
+    pub fn is_requested(&self) -> bool {
+        *self.sender.borrow()
+    }
+
+    /// Resolves once a stop is requested (at once if it already was).
+    pub async fn requested(&self) {
+        let mut receiver = self.sender.subscribe();
+        // The sender lives in `self`, so this never fails.
+        let _ = receiver.wait_for(|stop| *stop).await;
     }
 }
 
@@ -241,6 +283,14 @@ pub enum Error {
     ServerBusy { wait: Duration },
     #[error("the download stopped ({reason}); resume it from {}", state_file.display())]
     Interrupted { state_file: PathBuf, reason: String },
+    /// The caller asked the download to stop ([`Stop`]). `state_file` is
+    /// where to resume it; `None` when nothing was written (a new download
+    /// then leaves no files).
+    #[error("{}", match state_file {
+        Some(path) => format!("the download was stopped; resume it from {}", path.display()),
+        None => "the download was stopped before any data was written".to_owned(),
+    })]
+    Stopped { state_file: Option<PathBuf> },
     #[error("refusing to resume {name:?}: {reason}")]
     UnsafeName { name: String, reason: String },
     #[error("the download failed before any data arrived: {0}")]
@@ -321,10 +371,29 @@ impl Engine {
         &self,
         url: &str,
         dir: &Path,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<Finished, Error> {
+        self.download_until(url, dir, &Stop::new(), on_event).await
+    }
+
+    /// Like [`Engine::download`], until `stop` is requested: then the data
+    /// on disk is synced and recorded, and the call returns
+    /// [`Error::Stopped`] only once nothing of the download runs any more
+    /// (no write, no save, the part file closed and unlocked). So the
+    /// download can be resumed at once in the same process, and no older
+    /// save can land after the resume's own (#5).
+    ///
+    /// Dropping the future instead also stops it, but its last writes and
+    /// saves may still finish on blocking threads afterwards.
+    pub async fn download_until(
+        &self,
+        url: &str,
+        dir: &Path,
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let url = parse_url(url)?;
-        let mut attempt = Attempt::new(Some(&url));
+        let mut attempt = Attempt::new(Some(&url), stop);
         let response = self
             .retrying(&mut attempt, on_event, || self.get(url.clone(), None))
             .await?;
@@ -376,7 +445,18 @@ impl Engine {
     pub async fn resume(
         &self,
         state_file: &Path,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<Finished, Error> {
+        self.resume_until(state_file, &Stop::new(), on_event).await
+    }
+
+    /// Like [`Engine::resume`], until `stop` is requested (see
+    /// [`Engine::download_until`]).
+    pub async fn resume_until(
+        &self,
+        state_file: &Path,
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         // The state file and everything next to it are untrusted: they may
         // come from another machine. Work with an absolute path inside the
@@ -440,7 +520,7 @@ impl Engine {
                     state,
                     RestartReason::PartFileMissing,
                     None,
-                    Attempt::new(None),
+                    Attempt::new(None, stop),
                     on_event,
                 )
                 .await;
@@ -475,7 +555,7 @@ impl Engine {
                     state,
                     reason,
                     None,
-                    Attempt::new(None),
+                    Attempt::new(None, stop),
                     on_event,
                 )
                 .await;
@@ -483,14 +563,15 @@ impl Engine {
         let if_range = if_range.expect("checked above");
         if state.segments.len() > 1 {
             return self
-                .resume_segments(final_path, part, state, if_range, on_event)
+                .resume_segments(final_path, part, state, if_range, stop, on_event)
                 .await;
         }
 
-        let mut attempt = Attempt::new(None);
+        let mut attempt = Attempt::new(None, stop);
         let response = self
             .get_with_fallback(&state, Some((done, None, if_range)), &mut attempt, on_event)
-            .await?;
+            .await
+            .map_err(|err| resumable_stop(err, &final_path, false))?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
                 if !continues_at(&response, &state, done) {
@@ -554,7 +635,8 @@ impl Engine {
         part: File,
         state: DownloadState,
         if_range: String,
-        on_event: &mut dyn FnMut(Event),
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let missing = state
             .segments
@@ -566,7 +648,7 @@ impl Engine {
             return finish_download(part, state, final_path, on_event).await;
         };
         let (from, to) = (segment.start + segment.done, segment.end.expect("checked"));
-        let mut attempt = Attempt::new(None);
+        let mut attempt = Attempt::new(None, stop);
         let response = self
             .get_with_fallback(
                 &state,
@@ -574,7 +656,8 @@ impl Engine {
                 &mut attempt,
                 on_event,
             )
-            .await?;
+            .await
+            .map_err(|err| resumable_stop(err, &final_path, false))?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
                 let range = header_str(response.headers(), header::CONTENT_RANGE)
@@ -598,6 +681,7 @@ impl Engine {
                     min_segment: self.options.min_segment_size,
                     save_interval: self.options.save_interval,
                     max_failures: self.options.max_failures,
+                    stop: attempt.stop.clone(),
                     url: response.url().clone(),
                     if_range,
                     final_path,
@@ -641,7 +725,7 @@ impl Engine {
         &self,
         job: Job,
         attempt: Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let final_path = job.final_path.clone();
         let old = job.state.clone();
@@ -691,13 +775,14 @@ impl Engine {
         reason: RestartReason,
         cleanup: Option<EmptyDownloadCleanup>,
         attempt: Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         on_event(Event::Restarted { reason });
         let mut attempt = attempt;
         let response = self
             .get_with_fallback(&old, None, &mut attempt, on_event)
-            .await?;
+            .await
+            .map_err(|err| resumable_stop(err, &final_path, cleanup.is_some()))?;
         if response.status() != StatusCode::OK {
             return Err(refused(response.status(), &old, &final_path, &attempt));
         }
@@ -720,7 +805,7 @@ impl Engine {
         response: Response,
         cleanup: Option<EmptyDownloadCleanup>,
         attempt: Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let Some(restarts_left) = attempt.restarts_left.checked_sub(1) else {
             return Err(Error::Interrupted {
@@ -767,6 +852,7 @@ impl Engine {
                 min_segment: self.options.min_segment_size,
                 save_interval: self.options.save_interval,
                 max_failures: self.options.max_failures,
+                stop: attempt.stop.clone(),
                 url: attempt.authorize(response.url()),
                 if_range,
                 final_path,
@@ -827,7 +913,7 @@ impl Engine {
         mut transfer: Transfer,
         mut response: Response,
         mut attempt: Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         on_event(Event::Started {
             file: transfer.final_path.clone(),
@@ -836,10 +922,12 @@ impl Engine {
             from: transfer.done(),
         });
         loop {
-            let reason = match transfer.pump(&mut response, on_event).await {
+            let stop = attempt.stop.clone();
+            let reason = match transfer.pump(&mut response, &stop, on_event).await {
                 Ok(()) => return transfer.finish(on_event).await,
-                Err(Stop::Fatal(reason)) => return Err(transfer.interrupt(reason).await),
-                Err(Stop::Broken(reason)) => reason,
+                Err(Halt::Fatal(reason)) => return Err(transfer.interrupt(reason).await),
+                Err(Halt::Requested) => return Err(transfer.stopped().await),
+                Err(Halt::Broken(reason)) => reason,
             };
             drop(response);
             let done = transfer.done();
@@ -857,7 +945,10 @@ impl Engine {
             }
             let wait = crate::retry::backoff(attempt.failures);
             on_event(Event::Retrying { wait, reason });
-            tokio::time::sleep(wait).await;
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                () = stop.requested() => return Err(transfer.stopped().await),
+            }
 
             let if_range = if done > 0 {
                 if_range_value(&transfer.state.validator)
@@ -870,6 +961,7 @@ impl Engine {
                 .await
             {
                 Ok(response) => response,
+                Err(Error::Stopped { .. }) => return Err(transfer.stopped().await),
                 Err(err) => return Err(transfer.interrupt(err.to_string()).await),
             };
             match response.status() {
@@ -952,7 +1044,7 @@ impl Engine {
         state: &DownloadState,
         range: Option<(u64, Option<u64>, String)>,
         attempt: &mut Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Response, Error> {
         let final_url = attempt.authorize(&parse_url(&state.final_url)?);
         let url = attempt.authorize(&parse_url(&state.url)?);
@@ -1002,11 +1094,14 @@ impl Engine {
     async fn retrying<F: Future<Output = Result<Response, Error>>>(
         &self,
         attempt: &mut Attempt,
-        on_event: &mut dyn FnMut(Event),
+        on_event: &mut (dyn FnMut(Event) + Send),
         mut send: impl FnMut() -> F,
     ) -> Result<Response, Error> {
         loop {
-            let result = send().await;
+            let result = tokio::select! {
+                result = send() => result,
+                () = attempt.stop.requested() => return Err(Error::Stopped { state_file: None }),
+            };
             let (reason, asked) = match &result {
                 Ok(response) if response.status() == StatusCode::TOO_MANY_REQUESTS => {
                     let asked = header_str(response.headers(), header::RETRY_AFTER)
@@ -1043,7 +1138,10 @@ impl Engine {
             }
             drop(result);
             on_event(Event::Retrying { wait, reason });
-            tokio::time::sleep(wait).await;
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                () = attempt.stop.requested() => return Err(Error::Stopped { state_file: None }),
+            }
         }
     }
 
@@ -1069,12 +1167,14 @@ impl Engine {
 }
 
 /// Why [`Transfer::pump`] stopped before the end of the body.
-enum Stop {
+enum Halt {
     /// The connection broke or closed early: worth trying again.
     Broken(String),
     /// Trying again would not help (a write failed, or the server sent
     /// more than it announced).
     Fatal(String),
+    /// The caller asked the download to stop ([`Stop`]).
+    Requested,
 }
 
 /// An open download: the locked part file and its state.
@@ -1187,22 +1287,27 @@ impl Transfer {
     async fn pump(
         &mut self,
         response: &mut Response,
-        on_event: &mut dyn FnMut(Event),
-    ) -> Result<(), Stop> {
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<(), Halt> {
         let total = self.state.content_length;
         loop {
-            let chunk = match response.chunk().await {
+            let chunk = tokio::select! {
+                chunk = response.chunk() => chunk,
+                () = stop.requested() => return Err(Halt::Requested),
+            };
+            let chunk = match chunk {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break,
-                Err(err) => return Err(Stop::Broken(http_error(err))),
+                Err(err) => return Err(Halt::Broken(http_error(err))),
             };
             if total.is_some_and(|t| self.done().saturating_add(chunk.len() as u64) > t) {
-                return Err(Stop::Fatal(
+                return Err(Halt::Fatal(
                     "the server sent more data than it announced".into(),
                 ));
             }
             if let Err(err) = self.file.write_all(&chunk).await {
-                return Err(Stop::Fatal(err.to_string()));
+                return Err(Halt::Fatal(err.to_string()));
             }
             if let Some(cleanup) = self.cleanup.take() {
                 cleanup.disarm();
@@ -1215,19 +1320,37 @@ impl Transfer {
             if self.last_save.elapsed() >= self.save_interval
                 && let Err(err) = self.checkpoint().await
             {
-                return Err(Stop::Fatal(err.to_string()));
+                return Err(Halt::Fatal(err.to_string()));
             }
         }
 
         if let Some(total) = total
             && self.done() < total
         {
-            return Err(Stop::Broken(format!(
+            return Err(Halt::Broken(format!(
                 "the connection closed after {} of {total} bytes",
                 self.done()
             )));
         }
         Ok(())
+    }
+
+    /// The caller asked to stop: records what is on disk, and returns only
+    /// when nothing of the download runs any more. A new download with no
+    /// data yet is removed (when `self` is dropped, here: every save was
+    /// awaited, so nothing else holds it).
+    async fn stopped(mut self) -> Error {
+        if self.cleanup.is_some() {
+            return Error::Stopped { state_file: None };
+        }
+        if let Err(err) = self.checkpoint().await {
+            return err;
+        }
+        // Waits for anything the file still does, then closes it.
+        drop(self.file.into_std().await);
+        Error::Stopped {
+            state_file: Some(self.state_file),
+        }
     }
 
     /// The part file and the new-download guard, to start over with.
@@ -1262,7 +1385,7 @@ impl Transfer {
         }
     }
 
-    async fn finish(mut self, on_event: &mut dyn FnMut(Event)) -> Result<Finished, Error> {
+    async fn finish(mut self, on_event: &mut (dyn FnMut(Event) + Send)) -> Result<Finished, Error> {
         if let Some(cleanup) = self.cleanup.take() {
             cleanup.disarm(); // an empty file is a complete download
         }
@@ -1279,7 +1402,7 @@ pub(crate) async fn finish_download(
     part: File,
     mut state: DownloadState,
     final_path: PathBuf,
-    on_event: &mut dyn FnMut(Event),
+    on_event: &mut (dyn FnMut(Event) + Send),
 ) -> Result<Finished, Error> {
     let bytes = state.bytes_done();
     let state_file = state_path(&final_path);
@@ -1317,6 +1440,18 @@ pub(crate) async fn finish_download(
         bytes,
     });
     Ok(Finished { file, bytes })
+}
+
+/// A stop requested before any transfer began, for a download whose files
+/// are on disk: it can be resumed from its state file. A new download with
+/// no data (`new`) leaves no files.
+fn resumable_stop(err: Error, final_path: &Path, new: bool) -> Error {
+    match err {
+        Error::Stopped { state_file: None } if !new => Error::Stopped {
+            state_file: Some(state_path(final_path)),
+        },
+        other => other,
+    }
 }
 
 /// The error for a refusal (`status`) of a request made for `state`. A `401`
@@ -1397,7 +1532,7 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
         .map_err(Error::Http)
 }
 
-fn parse_url(raw: &str) -> Result<Url, Error> {
+pub(crate) fn parse_url(raw: &str) -> Result<Url, Error> {
     let url = Url::parse(raw).map_err(|err| Error::InvalidUrl {
         url: shown_url(raw),
         reason: err.to_string(),

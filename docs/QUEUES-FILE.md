@@ -1,0 +1,68 @@
+<div dir="rtl">
+
+# مواصفات ملف القوائم `queues.json` (المخطط v1)
+
+| البند | القيمة |
+|---|---|
+| الحالة | مُطبَّق في M3 |
+| القرار | [ADR-0007](adr/0007-queues-and-settings-storage.md) |
+| الكود | `crates/zajil-core/src/queue/store.rs` |
+
+## المكان
+
+في مجلد البيانات: `AppPaths::data_dir()`، أو المجلد الذي يحدده `zajil --data-dir`. ومعه ملفان:
+- `queues.lock`: قفل تأخذه كل عملية تعدّل الملف.
+- `runner.lock`: قفل يأخذه `zajil queue run` طوال عمله.
+
+## الحقول
+
+| الحقل | النوع | المعنى |
+|---|---|---|
+| `format` | نص | دائمًا `"zajil-queues"` |
+| `schema_version` | عدد | دائمًا `1` في هذا المخطط |
+| `next_id` | عدد | الرقم الذي يأخذه التحميل التالي. الأرقام لا تُعاد أبدًا |
+| `queues` | قائمة | القوائم بترتيبها |
+| `queues[].name` | نص | اسم القائمة: من 1 إلى 64 حرفًا (حروف من أي لغة، وأرقام، و`-` و`_`). القائمة الافتراضية `main` |
+| `queues[].max_active` | عدد | عدد تحميلاتها المتزامنة، من 1 إلى 32. الافتراضي 3 |
+| `queues[].items` | قائمة | تحميلاتها بالترتيب |
+| `items[].id` | عدد | رقم التحميل، فريد، وأصغر من `next_id` |
+| `items[].url` | نص | الرابط، **بلا اسم مستخدم ولا كلمة مرور** (لا يُضاف رابط فيه أحدهما). وقد يحمل توكنًا (`?sig=…`)، ولا يُطبع معه أبدًا |
+| `items[].dir` | نص | مجلد الحفظ، مسار مطلق |
+| `items[].status` | نص | `waiting`، أو `active`، أو `paused`، أو `done`، أو `failed` |
+| `items[].state_file` | نص أو `null` | ملف `.zajil-state` الخاص بالتحميل، بعد أن يبدأ. **التقدم فيه** (ADR-0004) |
+| `items[].file` | نص أو `null` | الملف المكتمل |
+| `items[].error` | نص أو `null` | سبب الفشل أو التوقف |
+| `items[].added_at` | نص | وقت الإضافة بصيغة RFC 3339 بتوقيت UTC |
+| `updated_at` | نص | وقت آخر تعديل |
+| `checksum` | نص | `sha256:` ثم البصمة، بنفس الصيغة القانونية التي يستعملها ملف الحالة ([STATE-FILE](STATE-FILE.md#البصمة-والصيغة-القانونية)) |
+
+## قواعد القراءة
+
+يُرفض الملف، **ولا يُكتب فوقه**، إذا:
+- كان رابطًا رمزيًا أو رابطًا صلبًا أو غير ملف عادي.
+- كان أكبر من 16 ميجابايت.
+- لم يكن JSON صالحًا، أو كان `format` غيره، أو `schema_version` غير مدعوم.
+- احتوى حقلًا غير معروف، أو لم تطابق البصمة.
+- كان فيه رقم مكرر أو أكبر من `next_id`، أو اسم قائمة مكرر أو غير صالح، أو `max_active` خارج حدوده.
+
+والملف غير الموجود يعني قائمة `main` فارغة.
+
+## قواعد الكتابة
+
+- **كل تعديل يمر عبر `QueueStore::update`**: يأخذ `queues.lock`، ثم يقرأ الملف ويتحقق منه، ثم يعدّل، ثم يكتب، ثم يحرر القفل. فلا يضيع تعديل عمليتين في نفس الوقت.
+- **الكتابة** بنفس قواعد ملف الحالة: ملف مؤقت (`queues.json.tmp`) لا يقرؤه إلا صاحبه، يُنشأ دون أن يتبع أي رابط، ثم `fsync`، ثم إعادة تسمية فوق القديم، ثم `fsync` للمجلد.
+- **القراءة دون قفل**: القارئ يرى الملف القديم أو الجديد. وإذا فتح القديم في اللحظة التي استُبدل فيها، فعدد روابطه يصبح 0. هذا مقبول، لأنه ليس رابطًا صلبًا (وجدته اختبارات الـ CLI: كانت القراءة تُرفض).
+
+## المشغّل (`zajil queue run`)
+
+- **حالة `active` يتركها مشغّل قُتل** تعود إلى `waiting` عند التشغيل التالي، ويُستكمل التحميل من `state_file`.
+- **الإيقاف المؤقت والحذف**: يغيّر المستخدم الحالة في الملف، فيوقف المشغّل التحميل بطريقة «أوقف وانتظر» (`Stop`): يُسجَّل ما على القرص، ثم يُكتب الوضع الجديد بعد أن يتوقف كل شيء.
+- **حد معروف**: إذا قُتل المشغّل بعد أن ينشئ التحميل ملفاته وقبل أن يُسجَّل `state_file` (أجزاء من الثانية)، يبدأ التشغيل التالي التحميل من جديد باسم مرقّم، ويبقى الملفان القديمان.
+
+</div>
+
+---
+
+## English summary
+
+`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `queues [{name, max_active, items [{id, url, dir, status, state_file, file, error, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.

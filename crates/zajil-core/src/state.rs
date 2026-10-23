@@ -204,36 +204,7 @@ impl DownloadState {
         self.checksum = self.compute_checksum();
         let mut json = serde_json::to_vec_pretty(self).expect("state serializes");
         json.push(b'\n');
-
-        let tmp = temporary_path(path);
-        // A leftover temporary file, or a link planted in its place, is
-        // removed first. Removing a link never touches what it points to,
-        // and `create_new` then refuses anything that reappears.
-        match fs::remove_file(&tmp) {
-            Ok(()) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        }
-        let written = (|| {
-            // Only the user may read it: the URL may hold a token that
-            // resuming needs (`?sig=…`, owner's decision on #28).
-            let mut file = zajil_platform::fs::create_private(&tmp)?;
-            file.write_all(&json)?;
-            file.sync_all()?;
-            drop(file);
-            #[cfg(feature = "test-support")]
-            test_hooks::after_temporary_written(&tmp);
-            zajil_platform::fs::replace_file(&tmp, path)
-        })();
-        if let Err(err) = written {
-            let _ = fs::remove_file(&tmp);
-            return Err(err.into());
-        }
-        let folder = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p,
-            _ => Path::new("."),
-        };
-        zajil_platform::fs::sync_dir(folder)?;
+        write_safely(path, &json)?;
         Ok(())
     }
 
@@ -300,7 +271,44 @@ impl DownloadState {
 
 /// `sha256:` and the hex SHA-256 of the canonical form of `value` with its
 /// `checksum` member set to the empty string.
-fn checksum_of(value: &serde_json::Value) -> String {
+/// Replaces `path` with `bytes` in one step, by the safe-write rules of
+/// ADR-0004 (also used for the queues file, ADR-0007): a temporary file
+/// `<path>.tmp` only the user may read (a token may be in a URL), synced,
+/// then renamed over `path`, then the folder synced.
+pub(crate) fn write_safely(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp = temporary_path(path);
+    // A leftover temporary file, or a link planted in its place, is
+    // removed first. Removing a link never touches what it points to,
+    // and `create_private` (like `create_new`) then refuses anything that
+    // reappears.
+    match fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+    let written = (|| {
+        // Only the user may read it: the URL may hold a token that
+        // resuming needs (`?sig=…`, owner's decision on #28).
+        let mut file = zajil_platform::fs::create_private(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        #[cfg(feature = "test-support")]
+        test_hooks::after_temporary_written(&tmp);
+        zajil_platform::fs::replace_file(&tmp, path)
+    })();
+    if let Err(err) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
+    let folder = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    zajil_platform::fs::sync_dir(folder)
+}
+
+pub(crate) fn checksum_of(value: &serde_json::Value) -> String {
     let mut unsigned = value.clone();
     if let Some(object) = unsigned.as_object_mut() {
         object.insert("checksum".into(), serde_json::Value::String(String::new()));
@@ -413,7 +421,7 @@ fn temporary_path(path: &Path) -> PathBuf {
     with_suffix(path, ".tmp")
 }
 
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     rfc3339_utc(SystemTime::now())
 }
 

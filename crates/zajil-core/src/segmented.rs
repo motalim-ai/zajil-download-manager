@@ -50,7 +50,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
 use crate::engine::{
-    EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, blocking,
+    EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, Stop, blocking,
     changed_from, finish_download, http_error, parse_content_range, save_state,
 };
 use crate::retry;
@@ -129,6 +129,9 @@ pub(crate) struct Job {
     /// A segment whose connection fails this many times in a row, without
     /// writing in between, is given up.
     pub max_failures: u32,
+    /// The caller's request to stop: every connection ends, what is on
+    /// disk is recorded, and only then does [`run`] return.
+    pub stop: Stop,
     /// The URL range requests go to.
     pub url: Url,
     /// The `If-Range` value: a strong validator (see `if_range_value`).
@@ -145,13 +148,17 @@ pub(crate) struct Job {
 }
 
 /// Downloads every missing byte of `job.state.segments`.
-pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Outcome, Error> {
+pub(crate) async fn run(
+    job: Job,
+    on_event: &mut (dyn FnMut(Event) + Send),
+) -> Result<Outcome, Error> {
     let Job {
         client,
         connections,
         min_segment,
         save_interval,
         max_failures,
+        stop: user_stop,
         url,
         if_range,
         final_path,
@@ -216,6 +223,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
 
     let mut done = from;
     let mut restart = None;
+    let mut stopped_by_user = false;
     let mut last_save = Instant::now();
     let mut tick = tokio::time::interval(save_interval);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -252,6 +260,10 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                 }
                 None => break,
             },
+            () = user_stop.requested(), if !stopped_by_user => {
+                stopped_by_user = true;
+                let _ = stop.send(true);
+            }
             _ = tick.tick() => {
                 if last_save.elapsed() >= save_interval {
                     checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
@@ -283,6 +295,18 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                 restart.get_or_insert((reason, response));
             }
         }
+    }
+
+    if stopped_by_user {
+        // Every worker has ended. A new download with nothing written is
+        // removed when `cleanup` is dropped; nothing else holds it now.
+        if cleanup.is_some() {
+            return Err(Error::Stopped { state_file: None });
+        }
+        checkpoint(&ctx, &state_file, None).await?;
+        return Err(Error::Stopped {
+            state_file: Some(state_file),
+        });
     }
 
     if let Some((reason, response)) = restart {

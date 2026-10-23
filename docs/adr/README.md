@@ -18,6 +18,7 @@
 | [0004](0004-state-file-format.md) | تنسيق ملف الحالة: JSON بجانب الملف الجزئي | مقبول |
 | [0005](0005-extension-communication.md) | اتصال الإضافة: Native Messaging مع zajil-host | مقبول |
 | [0006](0006-platform-abstraction.md) | الأنظمة الثلاثة: واجهة واحدة وثلاثة تنفيذات | مقبول (مطلب من المالك) |
+| [0007](0007-queues-and-settings-storage.md) | تخزين القوائم والإعدادات: ملف JSON بقواعد ملف الحالة، مع قفل بين العمليات | مقبول |
 
 لكتابة قرار جديد، انسخ [القالب](template.md).
 

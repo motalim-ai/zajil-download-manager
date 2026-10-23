@@ -94,7 +94,8 @@ pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 /// Opens `path` for reading, and for writing when `write` is true, only if
-/// it is a regular file with a single name. A symbolic link, junction or
+/// it is a regular file with a single name (or none any more: a file
+/// replaced or removed right after it was opened, which is not a link). A symbolic link, junction or
 /// other reparse point, hard link, folder, device or pipe is refused with a
 /// [`NotRegularFile`] error, checked on the opened handle itself so the file
 /// cannot be swapped between the check and the use.
@@ -262,7 +263,10 @@ mod imp {
                 _ => err,
             })?;
         let meta = file.metadata()?;
-        if !meta.file_type().is_file() || meta.nlink() != 1 {
+        // A second name is a hard link. No name at all (0) is a file that
+        // was replaced or removed after we opened it (a reader racing a
+        // safe save): no link, so it is allowed.
+        if !meta.file_type().is_file() || meta.nlink() > 1 {
             return Err(not_regular(path));
         }
         Ok(file)
@@ -632,7 +636,8 @@ mod imp {
         let meta = file.metadata()?;
         if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
             || !meta.file_type().is_file()
-            || link_count(&file)? != 1
+            // 0: replaced or removed after it was opened (see unix).
+            || link_count(&file)? > 1
         {
             return Err(not_regular(path));
         }
