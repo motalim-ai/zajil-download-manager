@@ -1,5 +1,7 @@
 //! End-to-end tests of the `zajil` binary against the local test server.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -9,7 +11,7 @@ use zajil_core::state::DownloadState;
 use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 
 fn zajil(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_zajil"))
+    common::zajil_command()
         .args(args)
         .output()
         .expect("run zajil")
@@ -262,7 +264,7 @@ fn resume_works_with_a_relative_path() {
     ]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
 
-    let out = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let out = common::zajil_command()
         .args(["resume", "f.bin.zajil-state"])
         .current_dir(dir.path())
         .output()
@@ -287,7 +289,7 @@ fn a_killed_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let mut child = common::zajil_command()
         .args([
             "get",
             &server.url("/big.bin"),
@@ -356,7 +358,7 @@ fn a_killed_parallel_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let mut child = common::zajil_command()
         .args([
             "get",
             &server.url("/big.bin"),

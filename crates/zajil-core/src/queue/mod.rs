@@ -1,10 +1,12 @@
 //! Queues (M3, ADR-0007): named lists of downloads, each with a number of
 //! downloads that run at once, kept in `queues.json` across restarts.
 
+mod power;
 mod runner;
 mod schedule;
 mod store;
 
+pub use power::{AfterQueue, after_queue};
 pub use runner::{QueueEvent, Runner, Summary};
 pub use schedule::{Day, Schedule, ScheduleError, TimeOfDay};
 pub use store::{

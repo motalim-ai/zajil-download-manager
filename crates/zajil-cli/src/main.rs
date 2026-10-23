@@ -102,9 +102,15 @@ fn main() -> ExitCode {
             Ok(store) => store,
             Err(message) => return fail(&message),
         };
-        if !matches!(command, queue::QueueCommand::Run) {
+        let queue::QueueCommand::Run {
+            shutdown_after,
+            sleep_after,
+            countdown,
+        } = command
+        else {
             return queue::manage(&store, command);
-        }
+        };
+        let power = queue::PowerRequest::from_flags(shutdown_after, sleep_after, countdown);
         let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -116,7 +122,7 @@ fn main() -> ExitCode {
             Ok(engine) => engine,
             Err(err) => return fail(&err.to_string()),
         };
-        return runtime.block_on(queue::run(store, engine));
+        return runtime.block_on(queue::run(store, engine, power));
     }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -112,7 +112,7 @@ flowchart LR
 - **الحد الأدنى**: لا يُقسم جزء إذا كان نصف ما بقي منه أقل من الحد الأدنى للجزء (1 ميجابايت افتراضيًا)، حتى لا نضيّع الوقت في فتح اتصالات لا داعي لها.
 - **الانتظار**: إذا كانت كل الاتصالات أحدث من أن يُحكم عليها، ينتظر الاتصال الحر قليلًا ثم ينظر مرة أخرى. وإذا لم يبقَ ما يستحق التقسيم، ينتهي.
 - **التسجيل**: كل تقسيم يُعلن بحدث `Event::Split { segment, at }`، ويُحفظ في ملف الحالة مع الحفظ التالي، فيمكن الاستكمال بعده.
-- **ملاحظة للواجهات**: إلغاء التحميل بإسقاط الـ future يوقف الاتصالات، لكن الملف الجزئي يبقى مقفولًا لحظات، حتى تنتهي مهامها وكتاباتها الجارية. هذا مقصود: تحرير القفل قبل ذلك قد يسمح لكتابة متأخرة أن تقع في ملف بدأ من جديد. والاستكمال الفوري في نفس العملية قد يرى `Locked`. وطريقة «أوقف وانتظر» للواجهة تأتي مع القوائم (M3).
+- **ملاحظة للواجهات**: إلغاء التحميل بإسقاط الـ future يوقف الاتصالات، لكن الملف الجزئي يبقى مقفولًا لحظات، حتى تنتهي مهامها وكتاباتها الجارية. هذا مقصود: تحرير القفل قبل ذلك قد يسمح لكتابة متأخرة أن تقع في ملف بدأ من جديد. والاستكمال الفوري في نفس العملية قد يرى `Locked`. وطريقة «أوقف وانتظر» (`Stop`) جاءت مع القوائم في M3 (القسم 3.3): لا تعود إلا بعد أن يتوقف كل شيء.
 
 **إعادة المحاولة والسيرفر المشغول** (`crates/zajil-core/src/retry.rs`):
 - **الأعطال المؤقتة**: إذا انقطع اتصال، أو انتهت مهلته، أو رد السيرفر بـ `5xx` أو `408`، يعود جزؤه إلى الطابور بعد انتظار.
@@ -182,7 +182,13 @@ flowchart LR
 
 كل ما يختلف بين الأنظمة يمر عبر **واجهة واحدة (trait)** لها ثلاثة تنفيذات. الكود الذي فوقها لا يحتوي أي `if windows`. التفاصيل في [ADR-0006](adr/0006-platform-abstraction.md).
 
-**`unsafe`**: ممنوع في كل المكتبات (`forbid`)، إلا في `zajil-platform` حيث هو `deny`، ومسموح فقط في وحدة `fs` لاستدعاءات نظام لا توفرها المكتبة القياسية: إعادة التسمية دون استبدال (`renameat2` في لينكس، و`renamex_np` في ماك، و`MoveFileExW` في ويندوز)، و`MOVEFILE_WRITE_THROUGH`، وعدد الروابط الصلبة في ويندوز. ومنذ M2: حجز المساحة (`fallocate` في لينكس، و`F_PREALLOCATE` في ماك)، والملف المتناثر في ويندوز (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`statvfs` و`statfs` و`GetDiskFreeSpaceExW`). ومنذ M3: حذف قائمة الصلاحيات الموروثة في ماك (`acl_set_fd_np`، وقراءتها بـ `acl_get_fd_np` للفحص)، وملف لا يقرؤه إلا صاحبه في ويندوز (`CreateFileW` مع قائمة صلاحيات محمية من `ConvertStringSecurityDescriptorToSecurityDescriptorW`، وقراءتها بـ `GetNamedSecurityInfoW` للفحص). كل استدعاء معه تعليق `SAFETY`.
+**`unsafe`**: ممنوع في كل المكتبات (`forbid`)، إلا في `zajil-platform` حيث هو `deny`، ومسموح فقط في وحدة `fs` لاستدعاءات نظام لا توفرها المكتبة القياسية: إعادة التسمية دون استبدال (`renameat2` في لينكس، و`renamex_np` في ماك، و`MoveFileExW` في ويندوز)، و`MOVEFILE_WRITE_THROUGH`، وعدد الروابط الصلبة في ويندوز. ومنذ M2: حجز المساحة (`fallocate` في لينكس، و`F_PREALLOCATE` في ماك)، والملف المتناثر في ويندوز (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`statvfs` و`statfs` و`GetDiskFreeSpaceExW`). ومنذ M3: حذف قائمة الصلاحيات الموروثة في ماك (`acl_set_fd_np`، وقراءتها بـ `acl_get_fd_np` للفحص)، وملف لا يقرؤه إلا صاحبه في ويندوز (`CreateFileW` مع قائمة صلاحيات محمية من `ConvertStringSecurityDescriptorToSecurityDescriptorW`، وقراءتها بـ `GetNamedSecurityInfoW` للفحص). ومنذ M3 أيضًا وحدة `power` في ويندوز: `AdjustTokenPrivileges` و`InitiateShutdownW` و`SetSuspendState`. كل استدعاء معه تعليق `SAFETY`.
+
+**`PowerControl` (M3)**:
+- **لا يُستدعى إلا بطلب صريح** من المستخدم لقائمة واحدة في تشغيل واحد (`--shutdown-after` أو `--sleep-after`)، والطلب لا يُحفظ.
+- **لا يحدث إلا إذا اكتملت كل تحميلات القائمة**، وبعد عد تنازلي يلغيه Ctrl+C (`zajil_core::queue::after_queue`).
+- **الاختبارات تستعمل تنفيذًا وهميًا فقط**، و`power_guard.rs` يتأكد من ذلك.
+- **سياج أخير**: التنفيذ الحقيقي يرفض العمل ما دام `ZAJIL_NO_POWER_ACTIONS` مضبوطًا، والـ CI يضبطه. هذا المتغير يمنع فقط، ولا يسبب إيقافًا أبدًا.
 
 **الملفات في M2** (`zajil_platform::fs`):
 - `write_at`: كل الاتصالات تكتب عبر الـ handle المقفول نفسه، كلٌّ في موضعه. السبب: القفل في ويندوز خاص بكل handle، فلا يستطيع handle آخر أن يكتب.
@@ -196,7 +202,7 @@ flowchart LR
 | الإشعارات | Windows notifications | Notification Center | freedesktop notifications (D-Bus) |
 | التشغيل مع بدء النظام | مفتاح `Run` في الريجستري | Login Item | ملف `.desktop` في `~/.config/autostart` |
 | المسارات (الإعدادات، والبيانات، ومجلد التحميل) | `%APPDATA%` و`Known Folders` | `~/Library/Application Support` | معيار XDG |
-| إيقاف الجهاز أو إدخاله في السكون بعد الانتهاء | Windows Shutdown API | macOS power APIs | systemd-logind (D-Bus) |
+| إيقاف الجهاز أو إدخاله في السكون بعد الانتهاء (`zajil_platform::power`، M3) | `InitiateShutdownW` بعد تفعيل `SeShutdownPrivilege`، و`SetSuspendState` | حدث Apple «إيقاف» إلى `loginwindow` عبر `osascript` (QA1134)، و`pmset sleepnow` | `systemctl poweroff` و`systemctl suspend` (systemd-logind وpolkit) |
 | الاتصال المحلي (IPC) | Named Pipe خاص بالمستخدم | Unix domain socket بصلاحية 0700 | Unix domain socket بصلاحية 0700 |
 
 المثبّتات (M8): ‎.exe أو ‎.msi لويندوز، و‎.dmg لماك، وAppImage و‎.deb لينكس.

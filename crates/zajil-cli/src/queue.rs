@@ -8,12 +8,16 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Subcommand;
+use std::time::Duration;
+
+use zajil_core::limit::Clock;
 use zajil_core::queue::{
-    DEFAULT_QUEUE, Day, Item, MAX_ACTIVE, QueueEvent, QueueStore, Runner, Schedule, ScheduleError,
-    Status, StoreError, TimeOfDay, shown_url,
+    AfterQueue, DEFAULT_QUEUE, Day, Item, MAX_ACTIVE, QueueEvent, QueueStore, Runner, Schedule,
+    ScheduleError, Status, StoreError, Summary, TimeOfDay, after_queue, shown_url,
 };
 use zajil_core::state::{DownloadState, STATE_SUFFIX};
 use zajil_core::{Engine, Event, Stop};
+use zajil_platform::power::{PowerAction, SystemPower};
 
 use crate::{EXIT_RESUMABLE, describe, fail, human_bytes};
 
@@ -100,7 +104,25 @@ pub enum QueueCommand {
     },
     /// Run every queue until nothing is left to download. Ctrl+C stops the
     /// downloads after recording their progress; run it again to go on.
-    Run,
+    Run {
+        /// When this queue has finished (every download in it done), stop
+        /// the other downloads and shut the computer down, after a
+        /// countdown that Ctrl+C cancels. Asked for this run only; never
+        /// saved.
+        #[arg(long, value_name = "QUEUE", conflicts_with = "sleep_after")]
+        shutdown_after: Option<String>,
+        /// The same, but put the computer to sleep.
+        #[arg(long, value_name = "QUEUE")]
+        sleep_after: Option<String>,
+        /// Seconds of the countdown before shutting down or sleeping.
+        #[arg(
+            long,
+            value_name = "SECONDS",
+            default_value_t = 60,
+            value_parser = clap::value_parser!(u64).range(10..=3600)
+        )]
+        countdown: u64,
+    },
 }
 
 /// The commands that only change or read the queues file.
@@ -135,7 +157,9 @@ fn manage_queues(store: &QueueStore, command: QueueCommand) -> Result<(), StoreE
         QueueCommand::Resume { ids } => set_status(store, &ids, Status::Waiting, "waiting"),
         QueueCommand::Remove { ids } => remove(store, &ids),
         QueueCommand::Set { queue, max_active } => set(store, &queue, max_active),
-        QueueCommand::Run | QueueCommand::Schedule { .. } => unreachable!("handled before"),
+        QueueCommand::Run { .. } | QueueCommand::Schedule { .. } => {
+            unreachable!("handled before")
+        }
     }
 }
 
@@ -323,19 +347,66 @@ fn set(store: &QueueStore, queue: &str, max_active: Option<u32>) -> Result<(), S
     Ok(())
 }
 
+/// What `zajil queue run` does with the computer after a queue, if the
+/// user asked for it.
+pub struct PowerRequest {
+    pub queue: String,
+    pub action: PowerAction,
+    pub countdown: Duration,
+}
+
+impl PowerRequest {
+    pub fn from_flags(
+        shutdown_after: Option<String>,
+        sleep_after: Option<String>,
+        countdown: u64,
+    ) -> Option<Self> {
+        let (queue, action) = match (shutdown_after, sleep_after) {
+            (Some(queue), _) => (queue, PowerAction::Shutdown),
+            (None, Some(queue)) => (queue, PowerAction::Sleep),
+            (None, None) => return None,
+        };
+        Some(PowerRequest {
+            queue,
+            action,
+            countdown: Duration::from_secs(countdown),
+        })
+    }
+}
+
 /// `zajil queue run`.
-pub async fn run(store: QueueStore, engine: Engine) -> ExitCode {
+pub async fn run(store: QueueStore, engine: Engine, power: Option<PowerRequest>) -> ExitCode {
     let stop = Stop::new();
     let on_ctrl_c = stop.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!("zajil: stopping; the downloads record their progress first");
+            eprintln!("zajil: stopping (Ctrl+C)");
             on_ctrl_c.request();
         }
     });
-    let result = Runner::new(engine, store)
-        .run(&stop, &mut |event| show(event))
-        .await;
+    if let Some(request) = &power
+        && let Err(err) = store.load().and_then(|queues| {
+            queues
+                .queue(&request.queue)
+                .map(|_| ())
+                .ok_or_else(|| StoreError::NoSuchQueue(request.queue.clone()))
+        })
+    {
+        return fail(&err.to_string());
+    }
+    let clock = engine.clock();
+    let mut runner = Runner::new(engine, store.clone());
+    if let Some(request) = &power {
+        eprintln!(
+            "zajil: the computer will {} when queue {} has finished (after a countdown)",
+            request.action, request.queue
+        );
+        runner = runner.until_queue_done(&request.queue);
+    }
+    let result = runner.run(&stop, &mut |event| show(event)).await;
+    if let (Some(request), Ok(summary)) = (&power, &result) {
+        return power_after(&store, request, summary, clock.as_ref(), &stop).await;
+    }
     match result {
         Ok(summary) if summary.stopped => {
             eprintln!("zajil: stopped; run `zajil queue run` again to go on");
@@ -355,6 +426,63 @@ pub async fn run(store: QueueStore, engine: Engine) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        Err(err) => fail(&err.to_string()),
+    }
+}
+
+/// The countdown and the action after the queue, or why there is none.
+async fn power_after(
+    store: &QueueStore,
+    request: &PowerRequest,
+    summary: &Summary,
+    clock: &dyn Clock,
+    cancel: &Stop,
+) -> ExitCode {
+    if summary.stopped {
+        eprintln!("zajil: stopped; the computer stays on");
+        return ExitCode::from(EXIT_RESUMABLE);
+    }
+    let action = request.action;
+    let mut announced = false;
+    let outcome = after_queue(
+        store,
+        &request.queue,
+        summary,
+        &SystemPower,
+        action,
+        request.countdown,
+        clock,
+        cancel,
+        &mut |left| {
+            // Whole seconds left, rounded up: the first line says the full
+            // countdown. Then every 10 seconds, and each of the last 5.
+            let secs = left.as_secs() + u64::from(left.subsec_nanos() > 0);
+            let first = std::mem::replace(&mut announced, true);
+            if !first || secs % 10 == 0 || secs <= 5 {
+                eprintln!(
+                    "zajil: queue {} has finished: the computer will {action} in {secs} s; \
+                     press Ctrl+C to cancel",
+                    request.queue
+                );
+            }
+        },
+    )
+    .await;
+    match outcome {
+        Ok(AfterQueue::Done) => {
+            eprintln!("zajil: asked the system to {action}");
+            ExitCode::SUCCESS
+        }
+        Ok(AfterQueue::Cancelled) => {
+            eprintln!("zajil: cancelled; the computer stays on");
+            ExitCode::SUCCESS
+        }
+        Ok(AfterQueue::NotFinished { left }) => fail(&format!(
+            "queue {} did not finish ({left} download(s) not done, see `zajil queue list`); \
+             the computer stays on",
+            request.queue
+        )),
+        Ok(AfterQueue::Failed(err)) => fail(&format!("could not {action}: {err}")),
         Err(err) => fail(&err.to_string()),
     }
 }

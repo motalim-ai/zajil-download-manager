@@ -18,5 +18,38 @@
 | 5 | سطر التقدم في طرفية ويندوز القديمة (conhost) | ويندوز | M1 |
 | 6 | انقطاع الكهرباء الحقيقي أثناء التحميل (إن أمكن، على جهاز اختبار) | الثلاثة | M1 |
 | 7 | تحميل كبير بـ 8 و32 اتصالًا من سيرفرات حقيقية (مرآة توزيعة لينكس، وCDN)، ومن سيرفر يحدد عدد الاتصالات: البصمة تطابق، والرسائل مفهومة | الثلاثة | #4 (M2) |
+| 8 | **إيقاف الجهاز بعد قائمة** (`PowerControl`، شرط نجاح في M3)، بالخطوات أدناه | الثلاثة | [#34](https://github.com/motalim-ai/zajil-download-manager/issues/34) (M3) |
+| 9 | **السكون بعد قائمة**، بنفس الخطوات مع `--sleep-after` | الثلاثة | [#34](https://github.com/motalim-ai/zajil-download-manager/issues/34) (M3) |
+| 10 | Ctrl+C على `zajil queue run`: التحميلات تتوقف بعد حفظ تقدمها، و`zajil queue run` مرة ثانية يكملها | الثلاثة | #5 (M3) |
+
+## خطوات البندين 8 و9 (إيقاف الجهاز والسكون)
+
+**قبل البدء**: احفظ كل عملك وأغلق البرامج، لأن الجهاز سيُطفأ فعلًا. ولا تضبط `ZAJIL_NO_POWER_ACTIONS`، فهو يمنع الإيقاف.
+
+1. **أضف تحميلًا صغيرًا إلى قائمة جديدة**:
+   ```bash
+   zajil queue add --queue power-test https://example.com/
+   ```
+2. **العد التنازلي والإلغاء** (لا يُطفأ الجهاز):
+   ```bash
+   zajil queue run --shutdown-after power-test --countdown 30
+   ```
+   - بعد اكتمال التحميل، يجب أن يظهر: `the computer will shut down in 30 s; press Ctrl+C to cancel`، ثم سطر كل 10 ثوانٍ، ثم كل ثانية في آخر 5.
+   - اضغط Ctrl+C قبل نهاية العد. يجب أن يظهر `cancelled; the computer stays on`، ويبقى الجهاز يعمل.
+3. **التنفيذ**:
+   - `zajil queue resume <الرقم>`، أو أضف تحميلًا جديدًا إلى نفس القائمة.
+   - ثم نفس الأمر دون إلغاء. بعد 30 ثانية يجب أن يُطفأ الجهاز.
+4. **السكون**: كرر الخطوتين 2 و3 بـ `--sleep-after`. ثم أيقظ الجهاز وتأكد أن `zajil` انتهى برسالة `asked the system to sleep`.
+5. **لا شيء دون طلب**: تحميل يفشل في القائمة (رابط غير موجود) مع `--shutdown-after`. يجب أن يظهر `did not finish … the computer stays on`، دون عد تنازلي.
+
+**ما يُسجَّل في #34**: النظام وإصداره، والتاريخ، ونتيجة كل خطوة. ويُسجَّل أيضًا:
+- في ماك: هل طلب النظام إذنًا لـ `osascript` (يرسل حدث Apple إلى `loginwindow`).
+- في لينكس: التوزيعة، وهل طلب polkit كلمة مرور.
+- في ويندوز: هل منع برنامج مفتوح الإيقاف.
+
+**ما يفعله زاجِل على كل نظام**:
+- ويندوز: `InitiateShutdownW` بعد تفعيل `SeShutdownPrivilege`، و`SetSuspendState` للسكون.
+- ماك: حدث Apple «إيقاف» إلى `loginwindow` (طريقة أبل في QA1134) عبر `osascript`، و`pmset sleepnow` للسكون.
+- لينكس: `systemctl poweroff` و`systemctl suspend`.
 
 </div>

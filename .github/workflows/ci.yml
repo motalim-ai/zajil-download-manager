@@ -19,6 +19,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Tests never shut down or put to sleep the runner: they use a mock, and
+  # with this set the real PowerControl refuses anyway (owner's decision on
+  # M3; checked by crates/zajil-cli/tests/power_guard.rs).
+  ZAJIL_NO_POWER_ACTIONS: "1"
 
 # Every third-party action is pinned to a full commit SHA, with its release
 # tag in a comment. Dependabot (.github/dependabot.yml) proposes updates.

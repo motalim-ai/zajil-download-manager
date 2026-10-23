@@ -1,9 +1,11 @@
 //! `zajil queue` (M3): managing queues from the command line, and a
 //! runner killed without warning.
 
+mod common;
+
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 
 use zajil_core::queue::{QueueStore, Status};
@@ -13,7 +15,7 @@ use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 const MIB: usize = 1024 * 1024;
 
 fn zajil(data: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_zajil"))
+    common::zajil_command()
         .arg("--data-dir")
         .arg(data)
         .args(args)
@@ -62,7 +64,7 @@ fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
     let out = zajil(data.path(), &add);
     assert!(out.status.success(), "{}", printed(&out));
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let mut child = common::zajil_command()
         .arg("--data-dir")
         .arg(data.path())
         .args(["--connections", "2", "queue", "run"])
@@ -123,7 +125,7 @@ fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
     for (path, data) in &files {
         server.put(path, spec(data, path));
     }
-    let out = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let out = common::zajil_command()
         .arg("--data-dir")
         .arg(data.path())
         .args(["--connections", "2", "queue", "run"])
@@ -329,7 +331,7 @@ fn the_real_clock_drives_limits_and_schedules() {
     );
     assert!(list.contains(&format!("runs from {start_text}")), "{list}");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+    let mut child = common::zajil_command()
         .arg("--data-dir")
         .arg(state.path())
         .args(["queue", "run"])

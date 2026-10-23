@@ -76,6 +76,9 @@ pub struct Summary {
     pub failed: usize,
     /// The run was asked to stop before the queues were done.
     pub stopped: bool,
+    /// The run ended because the queue of [`Runner::until_queue_done`] had
+    /// nothing left to run (other downloads were stopped and wait).
+    pub queue_ended: bool,
 }
 
 /// Runs every queue of one [`QueueStore`].
@@ -86,6 +89,8 @@ pub struct Runner {
     poll: Duration,
     /// The local time of schedules.
     time_zone: TimeZone,
+    /// End the run when this queue has nothing left to run.
+    until: Option<String>,
 }
 
 /// How the download of an item ended.
@@ -107,7 +112,16 @@ impl Runner {
             store,
             poll: Duration::from_millis(500),
             time_zone: TimeZone::system(),
+            until: None,
         }
+    }
+
+    /// Ends the run as soon as `queue` has nothing left to run, stopping
+    /// (and waiting for) the downloads of other queues, which go back to
+    /// waiting. For an action after that queue ([`super::after_queue`]).
+    pub fn until_queue_done(mut self, queue: &str) -> Self {
+        self.until = Some(queue.to_owned());
+        self
     }
 
     /// The time zone of schedules (the system's by default).
@@ -167,10 +181,29 @@ impl Runner {
                 let store = self.store.clone();
                 let queues = blocking(move || store.load()).await?;
                 speed_limit.set_rate(queues.settings.speed_limit);
+                if let Some(until) = &self.until
+                    && !summary.stopped
+                    && !summary.queue_ended
+                {
+                    let queue = queues
+                        .queue(until)
+                        .ok_or_else(|| StoreError::NoSuchQueue(until.clone()))?;
+                    let busy = queue.items.iter().any(|i| {
+                        matches!(i.status, Status::Waiting | Status::Active)
+                            || running.contains_key(&i.id)
+                    });
+                    if !busy {
+                        summary.queue_ended = true;
+                        for run in running.values_mut() {
+                            run.by_runner = true;
+                            run.stop.request();
+                        }
+                    }
+                }
                 let windows = self.windows(&queues, &mut announced, on_event);
                 change_at = windows.next_change;
                 self.stop_unwanted(&queues, &windows.closed, &mut running);
-                if !summary.stopped {
+                if !summary.stopped && !summary.queue_ended {
                     self.start_waiting(
                         &engine,
                         &queues,
@@ -182,7 +215,9 @@ impl Runner {
                     )
                     .await?;
                 }
-                if running.is_empty() && (summary.stopped || !has_waiting(&queues)) {
+                if running.is_empty()
+                    && (summary.stopped || summary.queue_ended || !has_waiting(&queues))
+                {
                     return Ok(summary);
                 }
             }
