@@ -39,5 +39,9 @@
 | الأداة | الترخيص | الاستخدام |
 |---|---|---|
 | cargo-deny | MIT أو Apache-2.0 | فحص التراخيص والثغرات في الـ CI |
+| actions/checkout (v7.0.1) | MIT | سحب الكود في الـ CI |
+| Swatinem/rust-cache (v2.9.3) | LGPL-3.0 | تخزين مؤقت لبناء Rust في الـ CI |
+| EmbarkStudios/cargo-deny-action (v2.1.1) | Apache-2.0 | تشغيل cargo-deny في الـ CI |
+| Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>

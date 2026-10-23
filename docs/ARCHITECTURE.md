@@ -94,7 +94,7 @@ flowchart LR
 
 | الواجهة | ويندوز | ماك | لينكس |
 |---|---|---|---|
-| تسجيل مضيف Native Messaging | مفتاح في الريجستري (`HKCU\Software\…\NativeMessagingHosts\app.zajil.host`) يشير إلى ملف manifest | ملف manifest في مجلد كل متصفح داخل `~/Library/Application Support/…` | ملف manifest في `~/.config/…` لـ Chrome وChromium وEdge، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
+| تسجيل مضيف Native Messaging | مفتاح في الريجستري (`HKCU\Software\…\NativeMessagingHosts\io.github.motalim_ai.zajil.host`) يشير إلى ملف manifest | ملف manifest في مجلد كل متصفح داخل `~/Library/Application Support/…` | ملف manifest في `~/.config/…` لـ Chrome وChromium وEdge، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
 | الحافظة | Win32 Clipboard | NSPasteboard | X11 أو Wayland |
 | الإشعارات | Windows notifications | Notification Center | freedesktop notifications (D-Bus) |
 | التشغيل مع بدء النظام | مفتاح `Run` في الريجستري | Login Item | ملف `.desktop` في `~/.config/autostart` |
@@ -116,7 +116,7 @@ sequenceDiagram
 
     Note over B: المستخدم ضغط رابط تحميل
     B->>B: downloads.onCreated → هل يطابق قواعد الالتقاط؟
-    B->>H: connectNative("app.zajil.host") + رسالة JSON<br/>{url, filename, referrer, cookies…}
+    B->>H: connectNative("io.github.motalim_ai.zajil.host") + رسالة JSON<br/>{url, filename, referrer, cookies…}
     Note over H: المتصفح شغّل المضيف وتحقق<br/>من أن الإضافة مسموح لها (allowed_origins)
     H->>H: تحقق من شكل الرسالة وحجمها
     H->>A: يمرر الرسالة عبر IPC محلي (Named Pipe / Unix socket)

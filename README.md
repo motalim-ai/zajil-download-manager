@@ -41,11 +41,12 @@
 | [docs/adr/](docs/adr/) | سجل القرارات المعمارية |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | سجل تراخيص المكتبات |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | كيف تساهم، وقاعدة الغرفة النظيفة |
+| [AGENTS.md](AGENTS.md) | قواعد العمل لوكلاء الذكاء الاصطناعي الذين يبنون المشروع |
 | [SECURITY.md](SECURITY.md) | كيف تبلّغ عن ثغرة أمنية |
 
 ## الرخصة
 
-زاجِل برنامج حر بترخيص [GPL-3.0](LICENSE).
+زاجِل برنامج حر بترخيص [GPL-3.0-or-later](LICENSE).
 
 ## تنبيه
 
@@ -57,7 +58,7 @@
 
 ## English summary
 
-**Zajil Download Manager** is a free, open-source (GPL-3.0) download manager for **Windows, macOS and Linux**, designed **Arabic-first (RTL)** with one-click English.
+**Zajil Download Manager** is a free, open-source (GPL-3.0-or-later) download manager for **Windows, macOS and Linux**, designed **Arabic-first (RTL)** with one-click English.
 
 **Status: under construction.** The project is in phase **M0 (foundation)**. The repository holds docs, decisions and CI only; there is no runnable program yet.
 
