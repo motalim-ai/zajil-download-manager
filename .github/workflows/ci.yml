@@ -68,20 +68,24 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get $APT_OPTIONS update -q
-          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends dosfstools exfatprogs
-          # The runner's kernel ships the exFAT driver as an extra module.
-          if ! sudo modprobe exfat; then
-            sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
-            sudo modprobe exfat
-          fi
+          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends dosfstools exfatprogs exfat-fuse
           truncate -s 256M "$RUNNER_TEMP/fat32.img" "$RUNNER_TEMP/exfat.img"
           mkfs.vfat -F 32 -n ZFAT32 "$RUNNER_TEMP/fat32.img"
           mkfs.exfat -L ZEXFAT "$RUNNER_TEMP/exfat.img"
           sudo mkdir -p /mnt/zfat32 /mnt/zexfat
           sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/fat32.img" /mnt/zfat32
-          sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/exfat.img" /mnt/zexfat
+          # The kernel's exFAT driver if this runner has it; otherwise the
+          # FUSE one (the kernel module comes in a 51 MB package that a slow
+          # mirror could not deliver in 10 minutes).
+          if sudo modprobe exfat 2>/dev/null; then
+            sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/exfat.img" /mnt/zexfat
+          else
+            sudo mount.exfat-fuse -o uid="$(id -u)",gid="$(id -g)",allow_other "$RUNNER_TEMP/exfat.img" /mnt/zexfat
+          fi
+          findmnt /mnt/zfat32 /mnt/zexfat
           test "$(findmnt -no FSTYPE /mnt/zfat32)" = vfat
-          test "$(findmnt -no FSTYPE /mnt/zexfat)" = exfat
+          case "$(findmnt -no FSTYPE /mnt/zexfat)" in exfat|fuseblk) ;; *) exit 1 ;; esac
+          touch /mnt/zexfat/probe && rm /mnt/zexfat/probe
           echo "ZAJIL_TEST_FAT32=/mnt/zfat32" >> "$GITHUB_ENV"
           echo "ZAJIL_TEST_EXFAT=/mnt/zexfat" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (macOS)
