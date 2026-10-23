@@ -90,7 +90,10 @@ fn every_test_starts_zajil_with_power_actions_forbidden() {
 
 #[test]
 fn ci_forbids_power_actions_for_the_whole_workflow() {
-    let ci = fs::read_to_string(root().join(".github/workflows/ci.yml")).unwrap();
+    // Windows checks files out with CRLF line ends.
+    let ci = fs::read_to_string(root().join(".github/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let env = ci
         .split("\nenv:\n")
         .nth(1)
