@@ -1,0 +1,5 @@
+# Pinned Rust toolchain for local builds and CI. Bump deliberately in its own PR.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
