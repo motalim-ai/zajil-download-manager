@@ -83,7 +83,8 @@ jobs:
             loop="$(sudo losetup --find --show "$RUNNER_TEMP/exfat.img")"
             sudo mount.exfat-fuse -o uid="$(id -u)",gid="$(id -g)",allow_other "$loop" /mnt/zexfat
           fi
-          findmnt /mnt/zfat32 /mnt/zexfat
+          findmnt /mnt/zfat32
+          findmnt /mnt/zexfat
           test "$(findmnt -no FSTYPE /mnt/zfat32)" = vfat
           case "$(findmnt -no FSTYPE /mnt/zexfat)" in exfat|fuseblk) ;; *) exit 1 ;; esac
           touch /mnt/zexfat/probe && rm /mnt/zexfat/probe
