@@ -232,6 +232,19 @@ impl Progress {
                 self.clear_line();
                 eprintln!("Starting over: {}", describe(reason));
             }
+            Event::ServerBusy {
+                status,
+                connections,
+                wait,
+            } => {
+                self.clear_line();
+                let wait = wait
+                    .map(|w| format!(", waiting {} s", w.as_secs_f64().ceil()))
+                    .unwrap_or_default();
+                eprintln!(
+                    "The server answered {status}: {connections} connection(s) from now on{wait}"
+                );
+            }
             Event::Split { .. } | Event::Finished { .. } => {}
         }
     }

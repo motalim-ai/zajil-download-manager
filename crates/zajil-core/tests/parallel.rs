@@ -196,14 +196,20 @@ async fn a_huge_announced_size_is_refused_before_any_file_is_created() {
     assert_eq!(server.gets("/f.bin").len(), 1);
 }
 
-/// Every connection is cut after 300 kB; the download stops with a state of
-/// several segments. Resuming asks for exactly the missing bytes of each.
+/// Every connection is cut after 300 kB, and the server then refuses every
+/// request (so the retries fail too): the download stops with a state of
+/// several segments. Then the server serves the same version again.
 async fn cut_parallel_download(server: &TestServer, dir: &Path, data: Vec<u8>) -> PathBuf {
-    server.put("/f.bin", FileSpec::new(data).cut_after(300_000, 8));
-    match engine(8)
+    let spec = |data: Vec<u8>| FileSpec::new(data).etag(Some("\"same\""));
+    server.put(
+        "/f.bin",
+        spec(data.clone()).cut_after(300_000, 8).forbid_after(8),
+    );
+    let result = engine(8)
         .download(&server.url("/f.bin"), dir, &mut |_| {})
-        .await
-    {
+        .await;
+    server.put("/f.bin", spec(data));
+    match result {
         Err(Error::Interrupted { state_file, .. }) => state_file,
         other => panic!("expected an interruption, got {other:?}"),
     }
@@ -384,8 +390,10 @@ async fn a_long_numbered_name_of_a_parallel_download_resumes() {
     server.put(
         "/f.bin",
         FileSpec::new(data.clone())
+            .etag(Some("\"same\""))
             .content_disposition(&disposition)
-            .cut_after(300_000, 8),
+            .cut_after(300_000, 8)
+            .forbid_after(8),
     );
     let state_file = match engine(8)
         .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
@@ -394,6 +402,12 @@ async fn a_long_numbered_name_of_a_parallel_download_resumes() {
         Err(Error::Interrupted { state_file, .. }) => state_file,
         other => panic!("expected an interruption, got {other:?}"),
     };
+    server.put(
+        "/f.bin",
+        FileSpec::new(data.clone())
+            .etag(Some("\"same\""))
+            .content_disposition(&disposition),
+    );
 
     let done = engine(8).resume(&state_file, &mut |_| {}).await.unwrap();
     let file_name = done.file.file_name().unwrap().to_str().unwrap().to_owned();

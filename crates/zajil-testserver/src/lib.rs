@@ -76,6 +76,8 @@ pub struct FileSpec {
     slow_at: Option<(u64, u64)>,
     fail_first: Vec<Failure>,
     forbid_after: Option<usize>,
+    busy_beyond: Option<(usize, Failure)>,
+    fail_ranges: Option<Failure>,
     replaced_after: Option<(usize, Box<FileSpec>)>,
 }
 
@@ -104,6 +106,8 @@ impl FileSpec {
             slow_at: None,
             fail_first: Vec::new(),
             forbid_after: None,
+            busy_beyond: None,
+            fail_ranges: None,
             replaced_after: None,
         }
     }
@@ -226,6 +230,39 @@ impl FileSpec {
         self
     }
 
+    /// While `connections` bodies of this file are being sent, any other GET
+    /// gets `403 Forbidden`: a server that allows that many connections at
+    /// once.
+    pub fn max_concurrent(mut self, connections: usize) -> Self {
+        self.busy_beyond = Some((
+            connections,
+            Failure {
+                status: 403,
+                retry_after: None,
+            },
+        ));
+        self
+    }
+
+    /// Like [`FileSpec::max_concurrent`], but the extra requests get
+    /// `429 Too Many Requests` with `Retry-After: retry_after` seconds.
+    pub fn too_many_beyond(mut self, connections: usize, retry_after: u64) -> Self {
+        self.busy_beyond = Some((
+            connections,
+            Failure {
+                status: 429,
+                retry_after: Some(retry_after),
+            },
+        ));
+        self
+    }
+
+    /// Every GET with a `Range` header gets `failure`; plain GETs are served.
+    pub fn fail_range_requests(mut self, failure: Failure) -> Self {
+        self.fail_ranges = Some(failure);
+        self
+    }
+
     /// After `gets` GET requests, the file is replaced by `next` (a new
     /// version): the file changes on the server in the middle of a
     /// download, at a known moment.
@@ -266,6 +303,8 @@ pub struct RequestRecord {
     /// Bodies of this file being sent at the moment this request arrived,
     /// this one included (0 for a response without a body).
     pub concurrent: usize,
+    /// When the request arrived, from the start of the server.
+    pub at: Duration,
 }
 
 struct LogEntry {
@@ -277,6 +316,15 @@ struct Served {
     spec: FileSpec,
     gets: usize,
     sending: Arc<Sending>,
+}
+
+/// A failure response, with `Retry-After` if it has one.
+fn failure_response(failure: &Failure) -> Response<Body> {
+    let mut builder = Response::builder().status(failure.status);
+    if let Some(secs) = failure.retry_after {
+        builder = builder.header(header::RETRY_AFTER, secs.to_string());
+    }
+    builder.body(empty()).unwrap()
 }
 
 /// Bodies of one file being sent right now, and the most at once.
@@ -330,8 +378,8 @@ impl hyper::body::Body for Counted {
     }
 }
 
-#[derive(Default)]
 struct Shared {
+    started: std::time::Instant,
     files: HashMap<String, Served>,
     redirects: HashMap<String, (String, u16)>,
     log: Vec<LogEntry>,
@@ -392,7 +440,12 @@ impl TestServer {
         scheme: &str,
         host: Option<&str>,
     ) -> io::Result<Self> {
-        let shared = Arc::new(Mutex::new(Shared::default()));
+        let shared = Arc::new(Mutex::new(Shared {
+            started: std::time::Instant::now(),
+            files: HashMap::new(),
+            redirects: HashMap::new(),
+            log: Vec::new(),
+        }));
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let (bound_tx, bound_rx) = std::sync::mpsc::channel();
         let server_shared = shared.clone();
@@ -591,6 +644,7 @@ fn handle(
         tls_version,
         connection,
         concurrent: 0,
+        at: shared.started.elapsed(),
     };
 
     let response = if let Some((to, status)) = shared.redirects.get(&path) {
@@ -611,13 +665,36 @@ fn handle(
         if !is_head {
             served.gets += 1;
         }
-        let response = respond(
-            &served.spec,
-            &record,
-            is_head,
-            get_index,
-            bytes_sent.clone(),
-        );
+        let refused = if is_head {
+            None
+        } else if let Some(failure) = served
+            .spec
+            .fail_ranges
+            .as_ref()
+            .filter(|_| record.range.is_some())
+        {
+            Some(failure_response(failure))
+        } else {
+            served
+                .spec
+                .busy_beyond
+                .as_ref()
+                .filter(|(connections, _)| {
+                    served.sending.now.load(Ordering::SeqCst) >= *connections
+                })
+                .map(|(_, failure)| failure_response(failure))
+        };
+        let response = if let Some(refused) = refused {
+            refused
+        } else {
+            respond(
+                &served.spec,
+                &record,
+                is_head,
+                get_index,
+                bytes_sent.clone(),
+            )
+        };
         // Count the bodies of this file while they are being sent.
         if !is_head
             && matches!(
@@ -677,11 +754,7 @@ fn respond(
             return status_only(StatusCode::FORBIDDEN);
         }
         if let Some(failure) = spec.fail_first.get(get_index) {
-            let mut builder = Response::builder().status(failure.status);
-            if let Some(secs) = failure.retry_after {
-                builder = builder.header(header::RETRY_AFTER, secs.to_string());
-            }
-            return builder.body(empty()).unwrap();
+            return failure_response(failure);
         }
     }
 

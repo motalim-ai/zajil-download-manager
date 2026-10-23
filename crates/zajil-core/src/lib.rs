@@ -8,6 +8,7 @@
 mod engine;
 mod http_date;
 pub mod naming;
+mod retry;
 pub mod sanitize;
 mod segmented;
 pub mod state;

@@ -30,11 +30,19 @@
 //! if each half is at least the minimum segment size. The old connection
 //! stops where the new segment begins. Every split is reported as
 //! [`Event::Split`] and saved with the next checkpoint.
+//!
+//! **Retries and busy servers** (`retry`): a connection that fails (cut,
+//! timeout, `5xx`, `408`) gives its segment back with a wait that grows
+//! each time, with a random part; after [`retry::MAX_FAILURES`] failures in
+//! a row without progress the segment is given up and the download stops,
+//! resumable. A `429` makes every connection wait for `Retry-After`; a `429`
+//! or a `403` while other connections work means the server limits
+//! connections, so the limit drops to the connections it accepted.
 
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use reqwest::header;
 use reqwest::{Client, Response, StatusCode, Url};
@@ -45,6 +53,7 @@ use crate::engine::{
     EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, blocking,
     changed_from, error_chain, finish_download, parse_content_range, save_state,
 };
+use crate::retry;
 use crate::state::{DownloadState, Segment, Validator, state_path};
 
 /// Most connections for one download.
@@ -153,12 +162,14 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
     let state_file = state_path(&final_path);
     let (events, mut messages) = mpsc::unbounded_channel();
     let (stop, stopped) = watch::channel(false);
-    let mut board = Board::new(state, min_segment);
+    let connections = connections.clamp(1, MAX_CONNECTIONS);
+    let mut board = Board::new(state, min_segment, connections);
     if let Some((_, start)) = &first {
         let index = board
             .index_of(*start)
             .expect("the first response's segment");
         board.live[index].take(0, Instant::now());
+        board.active = 1;
     }
     let ctx = Arc::new(Ctx {
         client,
@@ -183,7 +194,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
 
     let mut workers = JoinSet::new();
     let mut first = first;
-    for id in 0..connections.clamp(1, MAX_CONNECTIONS) {
+    for id in 0..connections {
         let stream = match (id, first.take()) {
             (0, Some((response, start))) => Some(Stream {
                 response,
@@ -219,6 +230,9 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                 Some(Message::Split { segment, at }) => {
                     on_event(Event::Split { segment, at });
                 }
+                Some(Message::ServerBusy { status, connections, wait }) => {
+                    on_event(Event::ServerBusy { status, connections, wait });
+                }
                 Some(Message::Restart { reason, response }) if restart.is_none() => {
                     restart = Some((reason, response));
                     let _ = stop.send(true);
@@ -252,6 +266,15 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
                 }
             }
             Message::Split { segment, at } => on_event(Event::Split { segment, at }),
+            Message::ServerBusy {
+                status,
+                connections,
+                wait,
+            } => on_event(Event::ServerBusy {
+                status,
+                connections,
+                wait,
+            }),
             Message::Restart { reason, response } => {
                 restart.get_or_insert((reason, response));
             }
@@ -358,6 +381,12 @@ enum Message {
     /// The segment starting at `segment` was split; the new one starts at
     /// `at`.
     Split { segment: u64, at: u64 },
+    /// The server answered `status` (`403` or `429`).
+    ServerBusy {
+        status: u16,
+        connections: usize,
+        wait: Option<Duration>,
+    },
     Restart {
         reason: RestartReason,
         response: Option<Response>,
@@ -369,6 +398,12 @@ struct Board {
     state: DownloadState,
     /// No split leaves a segment smaller than this.
     min_segment: u64,
+    /// Connections allowed at once; drops when the server refuses more.
+    limit: usize,
+    /// Connections asking for or reading a response right now.
+    active: usize,
+    /// No new request before this moment (`Retry-After`).
+    pause_until: Option<Instant>,
     /// One entry per segment of `state`, in the same order.
     live: Vec<Live>,
     /// The server answered a range request with the whole file.
@@ -382,9 +417,12 @@ struct Live {
     owner: Option<usize>,
     /// Bytes after `done` that the owner is writing right now.
     pending: u64,
-    /// A connection failed on this segment; no other one retries it (M2
-    /// retries arrive with backoff in a later change).
+    /// The segment was given up: no connection asks for it again.
     failed: bool,
+    /// Failures in a row without writing anything in between.
+    failures: u32,
+    /// No connection asks for the segment again before this moment.
+    retry_at: Option<Instant>,
     /// When the owner took the segment, and the bytes it wrote since: its
     /// speed.
     since: Option<Instant>,
@@ -412,11 +450,14 @@ enum Steal {
 }
 
 impl Board {
-    fn new(state: DownloadState, min_segment: u64) -> Self {
+    fn new(state: DownloadState, min_segment: u64, connections: usize) -> Self {
         let live = vec![Live::default(); state.segments.len()];
         Board {
             state,
             min_segment: min_segment.max(1),
+            limit: connections.max(1),
+            active: 0,
+            pause_until: None,
             live,
             ranges_refused: false,
             failure: None,
@@ -452,13 +493,17 @@ impl Board {
         (0..self.live.len()).all(|i| self.is_complete(i))
     }
 
-    /// Takes the first segment nobody works on that still needs bytes.
-    fn take_free(&mut self, id: usize) -> Option<(u64, u64, u64)> {
+    /// Takes the first segment nobody works on that still needs bytes and
+    /// may be asked for now.
+    fn take_free(&mut self, id: usize, now: Instant) -> Option<(u64, u64, u64)> {
         let index = (0..self.live.len()).find(|&i| {
             let live = &self.live[i];
-            live.owner.is_none() && !live.failed && !self.is_complete(i)
+            live.owner.is_none()
+                && !live.failed
+                && live.retry_at.is_none_or(|at| at <= now)
+                && !self.is_complete(i)
         })?;
-        self.live[index].take(id, Instant::now());
+        self.live[index].take(id, now);
         let segment = &self.state.segments[index];
         Some((
             segment.start,
@@ -474,6 +519,57 @@ impl Board {
         {
             self.live[index].owner = None;
         }
+    }
+
+    /// The earliest moment a segment waiting for a retry may be asked for.
+    fn soonest_retry(&self) -> Option<Instant> {
+        (0..self.live.len())
+            .filter(|&i| {
+                let live = &self.live[i];
+                live.owner.is_none() && !live.failed && !self.is_complete(i)
+            })
+            .filter_map(|i| self.live[i].retry_at)
+            .min()
+    }
+
+    /// The connection on the segment starting at `start` failed for
+    /// `reason`: the segment waits `wait` (or a growing wait) before another
+    /// try, or is given up after too many failures in a row.
+    fn retry_later(
+        &mut self,
+        id: usize,
+        start: u64,
+        reason: String,
+        now: Instant,
+        wait: Option<Duration>,
+    ) {
+        let Some(index) = self.index_of(start) else {
+            return;
+        };
+        let live = &mut self.live[index];
+        if live.owner.is_some_and(|owner| owner != id) {
+            // Another connection took it over before anything was written.
+            return;
+        }
+        live.owner = None;
+        live.failures = live.failures.saturating_add(1);
+        if live.failures >= retry::MAX_FAILURES {
+            let failures = live.failures;
+            self.fail(
+                Some(start),
+                format!("{reason} (gave up after {failures} tries)"),
+            );
+        } else {
+            let wait = wait.unwrap_or_else(|| retry::backoff(live.failures));
+            live.retry_at = now.checked_add(wait);
+        }
+    }
+
+    /// The server refused a connection while others worked: allow only as
+    /// many as it accepted. Returns the new limit.
+    fn fewer_connections(&mut self) -> usize {
+        self.limit = self.limit.min(self.active.saturating_sub(1)).max(1);
+        self.limit
     }
 
     /// Marks the segment starting at `start` failed (if any) and remembers
@@ -510,8 +606,11 @@ impl Board {
     /// Counts `bytes` reserved by [`Board::reserve`] as written.
     fn wrote(&mut self, start: u64, bytes: u64) {
         let index = self.index_of(start).expect("a reserved segment stays");
-        self.live[index].pending -= bytes;
-        self.live[index].written += bytes;
+        let live = &mut self.live[index];
+        live.pending -= bytes;
+        live.written += bytes;
+        live.failures = 0;
+        live.retry_at = None;
         self.state.segments[index].done += bytes;
     }
 
@@ -650,10 +749,11 @@ async fn worker(ctx: Arc<Ctx>, id: usize, mut stream: Option<Stream>) {
                 Work::Done => return,
             },
         };
-        let segment = current.segment;
-        if let Err(reason) = pump(&ctx, id, current).await {
-            ctx.board().fail(Some(segment), reason);
-            return;
+        let result = pump(&ctx, id, current).await;
+        let mut board = ctx.board();
+        board.active -= 1;
+        if let Err((segment, reason)) = result {
+            board.retry_later(id, segment, reason, Instant::now(), None);
         }
     }
 }
@@ -666,41 +766,61 @@ enum Work {
     Done,
 }
 
-/// A free segment, or else the second half of the slowest one.
+/// A free segment, or else the second half of the slowest one. On
+/// [`Work::Stream`] the connection holds one of the allowed slots
+/// (`Board::active`) until its stream ends.
 async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
+    let now = Instant::now();
     let found = {
         let mut board = ctx.board();
-        if board.ranges_refused {
+        if board.ranges_refused || board.active >= board.limit {
+            // Nothing to ask for, or the server allows fewer connections.
             return Work::Done;
         }
-        match board.take_free(id) {
-            Some(free) => Ok(free),
-            None => Err(board.split_slowest(id, Instant::now())),
+        let paused = board.pause_until.filter(|&until| until > now);
+        let found = match paused {
+            Some(until) => Err(until),
+            None => match board.take_free(id, now) {
+                Some(free) => Ok(free),
+                None => match board.soonest_retry() {
+                    Some(at) => Err(at),
+                    None => match board.split_slowest(id, now) {
+                        Steal::Split { from, start, end } => {
+                            let _ = ctx.events.send(Message::Split {
+                                segment: from,
+                                at: start,
+                            });
+                            Ok((start, start, end))
+                        }
+                        Steal::Wait => Err(now + LOOK_AGAIN),
+                        Steal::Nothing => return Work::Done,
+                    },
+                },
+            },
+        };
+        if found.is_ok() {
+            board.active += 1;
         }
+        found
     };
     let (start, from, to) = match found {
-        Ok(free) => free,
-        Err(Steal::Split { from, start, end }) => {
-            let _ = ctx.events.send(Message::Split {
-                segment: from,
-                at: start,
-            });
-            (start, start, end)
-        }
-        Err(Steal::Wait) => {
+        Ok(work) => work,
+        Err(until) => {
             tokio::select! {
-                _ = tokio::time::sleep(LOOK_AGAIN) => {}
+                _ = tokio::time::sleep_until(until.into()) => {}
                 _ = ctx.stop_requested() => {}
             }
             return Work::Again;
         }
-        Err(Steal::Nothing) => return Work::Done,
     };
     match request_range(ctx, id, start, from, to).await {
         Some(stream) => Work::Stream(stream),
-        // The segment failed or was given back: another connection may
-        // still need help.
-        None => Work::Again,
+        None => {
+            // The segment failed, waits or was given back: another one may
+            // still need this connection.
+            ctx.board().active -= 1;
+            Work::Again
+        }
     }
 }
 
@@ -729,7 +849,8 @@ async fn request_range(
     let response = match response {
         Ok(response) => response,
         Err(err) => {
-            ctx.board().fail(Some(start), error_chain(&err));
+            ctx.board()
+                .retry_later(id, start, error_chain(&err), Instant::now(), None);
             return None;
         }
     };
@@ -772,12 +893,92 @@ async fn request_range(
             board.release(id, start);
             None
         }
+        StatusCode::TOO_MANY_REQUESTS => {
+            too_many_requests(ctx, id, start, &response);
+            None
+        }
+        StatusCode::FORBIDDEN => {
+            let mut board = ctx.board();
+            if board.active > 1 {
+                // Others work: the server limits connections. The segment
+                // goes back to them.
+                let connections = board.fewer_connections();
+                board.release(id, start);
+                drop(board);
+                let _ = ctx.events.send(Message::ServerBusy {
+                    status: 403,
+                    connections,
+                    wait: None,
+                });
+            } else {
+                board.fail(Some(start), "the server answered 403 Forbidden".into());
+            }
+            None
+        }
+        status if status.is_server_error() || status == StatusCode::REQUEST_TIMEOUT => {
+            ctx.board().retry_later(
+                id,
+                start,
+                format!("the server answered {status}"),
+                Instant::now(),
+                None,
+            );
+            None
+        }
         status => {
             ctx.board()
                 .fail(Some(start), format!("the server answered {status}"));
             None
         }
     }
+}
+
+/// `429 Too Many Requests`: no request to the server before its
+/// `Retry-After` (or a growing wait without one), and fewer connections if
+/// others are working. A wait longer than [`retry::LONGEST_RETRY_AFTER`]
+/// gives the segment up, so the download stops and can be resumed later.
+fn too_many_requests(ctx: &Ctx, id: usize, start: u64, response: &Response) {
+    let now = Instant::now();
+    let asked = response
+        .headers()
+        .get(header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| retry::retry_after(v, SystemTime::now()));
+    let mut board = ctx.board();
+    if let Some(wait) = asked.filter(|&wait| wait > retry::LONGEST_RETRY_AFTER) {
+        board.fail(
+            Some(start),
+            format!(
+                "the server asks to wait {} s before more requests; resume the download later",
+                wait.as_secs()
+            ),
+        );
+        return;
+    }
+    let connections = if board.active > 1 {
+        board.fewer_connections()
+    } else {
+        board.limit
+    };
+    let failures = board
+        .index_of(start)
+        .map_or(0, |index| board.live[index].failures);
+    let wait = asked.unwrap_or_else(|| retry::backoff(failures.saturating_add(1)));
+    let until = now.checked_add(wait);
+    board.pause_until = board.pause_until.max(until);
+    board.retry_later(
+        id,
+        start,
+        "the server answered 429 Too Many Requests".into(),
+        now,
+        Some(wait),
+    );
+    drop(board);
+    let _ = ctx.events.send(Message::ServerBusy {
+        status: 429,
+        connections,
+        wait: Some(wait),
+    });
 }
 
 fn restart(ctx: &Ctx, reason: RestartReason, response: Option<Response>) {
@@ -788,7 +989,13 @@ fn restart(ctx: &Ctx, reason: RestartReason, response: Option<Response>) {
 /// are untouched. Ends without error when the segment (or the response)
 /// ends, or another connection took the segment; `Err` with the reason when
 /// the connection failed.
-async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), String> {
+async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), (u64, String)> {
+    read_into_file(ctx, id, &mut stream)
+        .await
+        .map_err(|reason| (stream.segment, reason))
+}
+
+async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Result<(), String> {
     let mut batch: Vec<u8> = Vec::with_capacity(WRITE_BATCH);
     let mut batch_at = stream.next;
     let mut last_write = Instant::now();
@@ -796,7 +1003,7 @@ async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), Strin
         let chunk = tokio::select! {
             chunk = stream.response.chunk() => chunk,
             _ = ctx.stop_requested() => {
-                let _ = write_batch(ctx, id, &mut stream, &mut batch, &mut batch_at).await;
+                let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
                 ctx.board().release(id, stream.segment);
                 return Ok(());
             }
@@ -804,7 +1011,7 @@ async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), Strin
         let chunk = match chunk {
             Ok(Some(chunk)) => chunk,
             Ok(None) => {
-                write_batch(ctx, id, &mut stream, &mut batch, &mut batch_at).await?;
+                write_batch(ctx, id, stream, &mut batch, &mut batch_at).await?;
                 ctx.board().release(id, stream.segment);
                 return if stream.next > stream.last {
                     Ok(())
@@ -816,7 +1023,7 @@ async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), Strin
                 };
             }
             Err(err) => {
-                let _ = write_batch(ctx, id, &mut stream, &mut batch, &mut batch_at).await;
+                let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
                 return Err(error_chain(&err));
             }
         };
@@ -828,7 +1035,7 @@ async fn pump(ctx: &Arc<Ctx>, id: usize, mut stream: Stream) -> Result<(), Strin
         batch.extend_from_slice(&chunk);
         stream.next += chunk.len() as u64;
         if batch.len() >= WRITE_BATCH || last_write.elapsed() >= WRITE_AFTER {
-            if !write_batch(ctx, id, &mut stream, &mut batch, &mut batch_at).await? {
+            if !write_batch(ctx, id, stream, &mut batch, &mut batch_at).await? {
                 // The segment is full and the next one is not ours to take,
                 // or another connection took this one.
                 ctx.board().release(id, stream.segment);
@@ -940,7 +1147,7 @@ mod tests {
                 done: written[i as usize],
             })
             .collect();
-        let mut board = Board::new(state, 100);
+        let mut board = Board::new(state, 100, 8);
         for (i, live) in board.live.iter_mut().enumerate() {
             live.take(i, now - ages[i]);
             live.written = written[i];

@@ -413,3 +413,56 @@ fn slows_only_the_response_that_starts_at_the_given_byte() {
     assert!(started.elapsed() >= Duration::from_millis(800));
     assert_eq!(slow.body.len(), 100_000);
 }
+
+#[test]
+fn refuses_requests_beyond_a_number_of_bodies_at_once() {
+    for (spec, status, retry_after) in [
+        (
+            FileSpec::new(random_bytes(100_000, 26)).max_concurrent(1),
+            403,
+            None,
+        ),
+        (
+            FileSpec::new(random_bytes(100_000, 26)).too_many_beyond(1, 2),
+            429,
+            Some("2"),
+        ),
+    ] {
+        let server = TestServer::http();
+        server.put("/f", spec.throttle(100_000));
+        // One body is being sent (slowly) while a second request arrives.
+        let addr = server.addr();
+        let first = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            stream
+                .write_all(b"GET /f HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            let mut sink = Vec::new();
+            let _ = stream.read_to_end(&mut sink);
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        let second = get(&server, "/f", &[]);
+        assert_eq!(second.status, status);
+        assert_eq!(second.header("retry-after"), retry_after);
+        first.join().unwrap();
+        // Once nothing is being sent, requests are served again.
+        assert_eq!(get(&server, "/f", &[]).status, 200);
+    }
+}
+
+#[test]
+fn can_fail_only_range_requests_and_records_when_requests_arrived() {
+    let server = TestServer::http();
+    server.put(
+        "/f",
+        FileSpec::new(random_bytes(1000, 27)).fail_range_requests(Failure {
+            status: 503,
+            retry_after: None,
+        }),
+    );
+    assert_eq!(get(&server, "/f", &[("Range", "bytes=0-9")]).status, 503);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(get(&server, "/f", &[]).status, 200);
+    let gets = server.gets("/f");
+    assert!(gets[1].at >= gets[0].at + Duration::from_millis(50));
+}

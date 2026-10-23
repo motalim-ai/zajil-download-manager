@@ -131,6 +131,14 @@ pub enum Event {
     /// what remained of the slowest segment. The segment that starts at
     /// `segment` now ends just before `at`, where a new one starts.
     Split { segment: u64, at: u64 },
+    /// The server answered `status` (`403 Forbidden` or `429 Too Many
+    /// Requests`): at most `connections` connections from now on, and no
+    /// new request for `wait`.
+    ServerBusy {
+        status: u16,
+        connections: usize,
+        wait: Option<Duration>,
+    },
     /// The download is complete at `file`.
     Finished { file: PathBuf, bytes: u64 },
 }
