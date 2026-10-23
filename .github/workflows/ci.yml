@@ -80,7 +80,8 @@ jobs:
           if sudo modprobe exfat 2>/dev/null; then
             sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/exfat.img" /mnt/zexfat
           else
-            sudo mount.exfat-fuse -o uid="$(id -u)",gid="$(id -g)",allow_other "$RUNNER_TEMP/exfat.img" /mnt/zexfat
+            loop="$(sudo losetup --find --show "$RUNNER_TEMP/exfat.img")"
+            sudo mount.exfat-fuse -o uid="$(id -u)",gid="$(id -g)",allow_other "$loop" /mnt/zexfat
           fi
           findmnt /mnt/zfat32 /mnt/zexfat
           test "$(findmnt -no FSTYPE /mnt/zfat32)" = vfat
