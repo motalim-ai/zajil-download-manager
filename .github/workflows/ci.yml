@@ -65,6 +65,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends dosfstools exfatprogs
+          # The runner's kernel ships the exFAT driver as an extra module.
+          if ! sudo modprobe exfat; then
+            sudo apt-get install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
+            sudo modprobe exfat
+          fi
           truncate -s 256M "$RUNNER_TEMP/fat32.img" "$RUNNER_TEMP/exfat.img"
           mkfs.vfat -F 32 -n ZFAT32 "$RUNNER_TEMP/fat32.img"
           mkfs.exfat -L ZEXFAT "$RUNNER_TEMP/exfat.img"
