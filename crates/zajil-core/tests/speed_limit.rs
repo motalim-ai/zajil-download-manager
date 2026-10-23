@@ -155,3 +155,48 @@ async fn the_runner_applies_the_limits_of_the_queues_file() {
     assert_eq!(summary.finished, 1);
     assert_rate(4 * MIB, clock.now() - start, MIB / 2);
 }
+
+/// Review of #32: on many connections, each wrote a whole batch (256 KiB)
+/// before the limit counted anything, so the first second went 3 to 6
+/// times faster than the limit (only the average was right). Now every
+/// piece is counted as it arrives: at no moment is more on disk than the
+/// rate allows by then, plus a burst and a piece or so per connection.
+#[tokio::test]
+async fn the_limit_holds_from_the_first_second_not_only_on_average() {
+    use std::sync::Mutex;
+    let server = TestServer::http();
+    server.put("/f.bin", FileSpec::new(random_bytes(8 * MIB as usize, 705)));
+    let dir = tempfile::tempdir().unwrap();
+    for connections in [8, 32] {
+        let clock = ManualClock::new();
+        let rate = MIB / 2;
+        let engine = engine(&clock, connections).with_download_limit(Some(rate));
+        let worst = Mutex::new((0i64, Duration::ZERO, 0u64));
+        let at = clock.clone();
+        engine
+            .download(&server.url("/f.bin"), dir.path(), &mut |event| {
+                if let zajil_core::Event::Progress { done, .. } = event {
+                    let now = at.now();
+                    let allowed = (rate as f64 * now.as_secs_f64()) as i64;
+                    let ahead = done as i64 - allowed;
+                    let mut worst = worst.lock().unwrap();
+                    if ahead > worst.0 {
+                        *worst = (ahead, now, done);
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        let (ahead, when, done) = *worst.lock().unwrap();
+        // A tenth of a second of burst, and 512 KiB for pieces in flight.
+        let slack = rate / 10 + 512 * 1024;
+        assert!(
+            ahead <= slack as i64,
+            "{connections} connections: {done} bytes on disk at {when:?}, \
+             {ahead} ahead of the limit"
+        );
+        for entry in fs::read_dir(dir.path()).unwrap() {
+            fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+    }
+}

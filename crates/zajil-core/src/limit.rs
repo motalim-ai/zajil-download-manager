@@ -108,6 +108,10 @@ pub struct SpeedLimit {
 struct Bucket {
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
+    /// Counts rate changes, so that waiting connections wake up and wait
+    /// by the new rate (review of #32: removing a limit did not reach
+    /// them for minutes).
+    changes: tokio::sync::watch::Sender<u64>,
 }
 
 struct State {
@@ -138,6 +142,7 @@ impl SpeedLimit {
                     tokens: 0.0,
                     at,
                 }),
+                changes: tokio::sync::watch::Sender::new(0),
             }),
         }
     }
@@ -148,22 +153,79 @@ impl SpeedLimit {
 
     /// Changes the rate for what comes next (`None`: no limit). A debt
     /// already owed is forgiven when the limit is removed.
+    /// Connections waiting for this limit wake up and wait by the new rate
+    /// (not at all without one).
     pub fn set_rate(&self, rate: Option<u64>) {
-        let mut state = self.state();
-        let now = self.now(&state);
-        refill(&mut state, now);
-        state.rate = rate.filter(|&r| r > 0);
-        if state.rate.is_none() {
-            state.tokens = 0.0;
+        let rate = rate.filter(|&r| r > 0);
+        {
+            let mut state = self.state();
+            if state.rate == rate {
+                return;
+            }
+            let now = self.now(&state);
+            refill(&mut state, now);
+            state.rate = rate;
+            if state.rate.is_none() {
+                state.tokens = 0.0;
+            }
         }
+        self.inner.changes.send_modify(|count| *count += 1);
     }
 
     /// Takes `bytes` that a connection received, and waits as long as the
     /// limit asks before it may read more.
     pub async fn take(&self, bytes: u64) {
+        let changes = self.inner.changes.subscribe();
         if let Some(until) = self.reserve(bytes) {
-            self.inner.clock.sleep_until(until).await;
+            self.wait(until, changes).await;
         }
+    }
+
+    /// Gives back bytes taken but then dropped, not written (a connection
+    /// read past the end of its part): the limit counts what is saved.
+    ///
+    /// The wait for them is usually over already, so they become credit
+    /// that the next reads use without waiting, even above the burst: the
+    /// average of what is saved stays at the rate.
+    pub fn give_back(&self, bytes: u64) {
+        let mut state = self.state();
+        if state.rate.is_some() {
+            let now = self.now(&state);
+            refill(&mut state, now);
+            state.tokens += bytes as f64;
+        }
+    }
+
+    /// Waits until `until`, or, when the rate changes meanwhile, until the
+    /// debt is paid at the new rate.
+    async fn wait(&self, mut until: Duration, mut changes: tokio::sync::watch::Receiver<u64>) {
+        loop {
+            tokio::select! {
+                () = self.inner.clock.sleep_until(until) => return,
+                changed = changes.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    match self.deadline() {
+                        Some(next) => until = next,
+                        None => return,
+                    }
+                }
+            }
+        }
+    }
+
+    /// When the current debt is paid, if there is one.
+    fn deadline(&self) -> Option<Duration> {
+        let mut state = self.state();
+        let rate = state.rate?;
+        let now = self.now(&state);
+        refill(&mut state, now);
+        (state.tokens < 0.0).then(|| {
+            now.saturating_add(Duration::from_secs_f64(
+                (-state.tokens / rate as f64).min(86_400.0),
+            ))
+        })
     }
 
     /// Takes `bytes` without waiting, and returns when the wait it asks for
@@ -193,13 +255,15 @@ impl SpeedLimit {
     }
 }
 
-/// Adds what the rate gave since the last update, up to [`BURST`].
+/// Adds what the rate gave since the last update, up to [`BURST`]. Credit
+/// above it (bytes given back) is kept, not cut.
 fn refill(state: &mut State, now: Duration) {
     let elapsed = now.saturating_sub(state.at);
     state.at = now;
     if let Some(rate) = state.rate {
         let most = rate as f64 * BURST.as_secs_f64();
-        state.tokens = (state.tokens + elapsed.as_secs_f64() * rate as f64).min(most);
+        let refilled = (state.tokens + elapsed.as_secs_f64() * rate as f64).min(most);
+        state.tokens = state.tokens.max(refilled);
     }
 }
 
@@ -219,12 +283,22 @@ impl Limits {
         let waits: Vec<_> = self
             .limits
             .iter()
-            .filter_map(|limit| Some((limit, limit.reserve(bytes)?)))
+            .filter_map(|limit| {
+                let changes = limit.inner.changes.subscribe();
+                Some((limit, limit.reserve(bytes)?, changes))
+            })
             .collect();
         // The waits are moments, not lengths: on one clock, sleeping until
         // each in turn ends at the latest.
-        for (limit, until) in waits {
-            limit.inner.clock.sleep_until(until).await;
+        for (limit, until, changes) in waits {
+            limit.wait(until, changes).await;
+        }
+    }
+
+    /// See [`SpeedLimit::give_back`].
+    pub fn give_back(&self, bytes: u64) {
+        for limit in &self.limits {
+            limit.give_back(bytes);
         }
     }
 }
@@ -330,6 +404,56 @@ mod tests {
         let took = (clock.now() - before).as_secs_f64();
         // A full minute idle saves only 0.1 s of the rate.
         assert!((2.85..=2.95).contains(&took), "{took}");
+    }
+
+    /// Review of #32: removing or raising a limit did not reach the
+    /// connections already waiting (256 s for one waiting 256 KiB at
+    /// 1 KiB/s). Real clock: without the fix these waits take 256 s and
+    /// 64 s; the test allows 5 s each.
+    #[tokio::test]
+    async fn a_new_rate_reaches_connections_already_waiting() {
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
+        let limit = SpeedLimit::new(Some(1024), clock);
+        let waiting = tokio::spawn({
+            let limit = limit.clone();
+            async move { limit.take(256 * 1024).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!waiting.is_finished());
+        limit.set_rate(None);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("still waiting after the limit was removed")
+            .unwrap();
+
+        // Raised: the debt of 64 KiB takes 1 s at 64 KiB/s, not 64 s.
+        limit.set_rate(Some(1024));
+        let waiting = tokio::spawn({
+            let limit = limit.clone();
+            async move { limit.take(64 * 1024).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        limit.set_rate(Some(64 * 1024));
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("still waiting long after the new deadline")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn bytes_given_back_are_not_counted() {
+        let clock = ManualClock::new();
+        let limit = SpeedLimit::new(Some(MIB), clock.clone());
+        // 1 MiB taken and waited for, half of it dropped and given back:
+        // the next half MiB passes without waiting.
+        limit.take(MIB).await;
+        let waited = clock.now();
+        limit.give_back(MIB / 2);
+        limit.take(MIB / 2).await;
+        assert_eq!(clock.now(), waited);
+        // And the credit is spent: the next byte waits again.
+        limit.take(MIB / 4).await;
+        assert!(clock.now() > waited);
     }
 
     #[tokio::test]

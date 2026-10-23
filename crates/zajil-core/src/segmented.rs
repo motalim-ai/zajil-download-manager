@@ -1081,6 +1081,18 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
                 .index_of(stream.segment)
                 .is_some_and(|index| stream.next > board.end_of(index) + 1)
         };
+        // The speed limits, for each piece as it arrives: wait before
+        // reading more (review of #32: taking only once a batch of 256 KiB
+        // was written let every connection's first batch through at full
+        // speed). Bytes later dropped, not written, are given back.
+        tokio::select! {
+            () = ctx.limits.take(chunk.len() as u64) => {}
+            _ = ctx.stop_requested() => {
+                let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
+                ctx.board().release(id, stream.segment);
+                return Ok(());
+            }
+        }
         if (past_end || batch.len() >= WRITE_BATCH || last_write.elapsed() >= WRITE_AFTER)
             && !write_batch(ctx, id, stream, &mut batch, &mut batch_at).await?
         {
@@ -1120,6 +1132,8 @@ async fn write_batch(
                     continue;
                 }
                 _ => {
+                    // Read but never written: not counted by the limits.
+                    ctx.limits.give_back((batch.len() - offset) as u64);
                     batch.clear();
                     *batch_at = stream.next;
                     return Ok(false);
@@ -1150,15 +1164,6 @@ async fn write_batch(
         }
         let _ = ctx.events.send(Message::Wrote(granted));
         offset += granted as usize;
-        // The speed limits count what is saved: this connection waits for
-        // it before it reads more. Bytes read past the end of a part and
-        // dropped (about one piece per stream at most) are not counted, so
-        // the file arrives at the limit and the wire may carry a little
-        // more.
-        tokio::select! {
-            () = ctx.limits.take(granted) => {}
-            _ = ctx.stop_requested() => {}
-        }
     }
     batch.clear();
     *batch_at = stream.next;
