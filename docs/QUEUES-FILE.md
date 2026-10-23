@@ -21,6 +21,7 @@
 | `format` | نص | دائمًا `"zajil-queues"` |
 | `schema_version` | عدد | دائمًا `1` في هذا المخطط |
 | `next_id` | عدد | الرقم الذي يأخذه التحميل التالي. الأرقام لا تُعاد أبدًا |
+| `settings.speed_limit` | عدد أو `null` | حد السرعة للبرنامج كله، بالبايت في الثانية (أكبر من 0). `null` أو غيابه: بلا حد |
 | `queues` | قائمة | القوائم بترتيبها |
 | `queues[].name` | نص | اسم القائمة: من 1 إلى 64 حرفًا (حروف من أي لغة، وأرقام، و`-` و`_`). القائمة الافتراضية `main` |
 | `queues[].max_active` | عدد | عدد تحميلاتها المتزامنة، من 1 إلى 32. الافتراضي 3 |
@@ -32,6 +33,7 @@
 | `items[].state_file` | نص أو `null` | ملف `.zajil-state` الخاص بالتحميل، بعد أن يبدأ. **التقدم فيه** (ADR-0004). يُمسح إذا توقف التحميل أو فشل قبل أول بايت (تُحذف ملفاته، وقد يأخذ اسمه تحميل آخر). ولا يُستكمل إلا إذا كان `url` فيه هو رابط العنصر نفسه، وإلا يبدأ تحميل جديد (مراجعة #31) |
 | `items[].file` | نص أو `null` | الملف المكتمل |
 | `items[].error` | نص أو `null` | سبب الفشل أو التوقف |
+| `items[].limit` | عدد أو `null` | حد السرعة لهذا التحميل وحده، بالبايت في الثانية (أكبر من 0). وحد البرنامج يبقى. `null` أو غيابه: بلا حد خاص |
 | `items[].added_at` | نص | وقت الإضافة بصيغة RFC 3339 بتوقيت UTC |
 | `updated_at` | نص | وقت آخر تعديل |
 | `checksum` | نص | `sha256:` ثم البصمة، بنفس الصيغة القانونية التي يستعملها ملف الحالة ([STATE-FILE](STATE-FILE.md#البصمة-والصيغة-القانونية)) |
@@ -43,7 +45,7 @@
 - كان أكبر من 16 ميجابايت.
 - لم يكن JSON صالحًا، أو كان `format` غيره، أو `schema_version` غير مدعوم.
 - احتوى حقلًا غير معروف، أو لم تطابق البصمة.
-- كان فيه رقم مكرر أو أكبر من `next_id`، أو اسم قائمة مكرر أو غير صالح، أو `max_active` خارج حدوده.
+- كان فيه رقم مكرر أو أكبر من `next_id`، أو اسم قائمة مكرر أو غير صالح، أو `max_active` خارج حدوده، أو حد سرعة يساوي 0.
 
 والملف غير الموجود يعني قائمة `main` فارغة.
 
@@ -65,4 +67,4 @@
 
 ## English summary
 
-`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `queues [{name, max_active, items [{id, url, dir, status, state_file, file, error, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.
+`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, items [{id, url, dir, status, state_file, file, error, limit, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.
