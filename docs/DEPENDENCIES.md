@@ -35,6 +35,7 @@
 | `dunce` | 1.0.5 | CC0-1.0 أو MIT-0 أو Apache-2.0 | `zajil-core` | مسار مجلد التحميل الحقيقي دون بادئة `\\?\` في ويندوز حين لا تلزم، حتى تبقى المسارات المعروضة للمستخدم مقروءة | M1 |
 | `icu_properties` | 2.4.0 | Unicode-3.0 | `zajil-core` | بيانات يونيكود (Joining_Type وCanonical_Combining_Class) لقواعد ContextJ في RFC 5892: متى يبقى ZWNJ وZWJ في اسم الملف. موجودة أصلًا في البرنامج عبر `reqwest` ← `url` ← `idna`، فلا تضيف كودًا جديدًا إلى النسخة النهائية | M1 |
 | `thiserror` | 2.0.21 | MIT أو Apache-2.0 | كل المكتبات | تعريف أنواع الأخطاء | M1 |
+| `jiff` | 0.2.38 | Unlicense أو MIT | `zajil-core` و`zajil-cli` (اختبارات) | الوقت المحلي والمنطقة الزمنية للنظام وقواعد التوقيت الصيفي، لجدولة القوائم. بميزاتها الافتراضية: منطقة النظام على الأنظمة الثلاثة، وقاعدة بيانات المناطق مضمّنة في ويندوز فقط (`jiff-tzdb-platform` و`jiff-tzdb`، بترخيص Unlicense أو MIT، والبيانات نفسها من IANA في الملكية العامة). ومعها `jiff-static` و`jiff-core` (Unlicense أو MIT)، و`portable-atomic` و`portable-atomic-util` (Apache-2.0 أو MIT) | M3 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 
 ## مكتبات الواجهة والإضافة (npm)

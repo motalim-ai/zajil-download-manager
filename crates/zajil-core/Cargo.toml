@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 icu_properties.workspace = true
+jiff.workspace = true
 dunce.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

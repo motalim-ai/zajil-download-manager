@@ -17,7 +17,6 @@
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -25,10 +24,13 @@ use std::time::Duration;
 /// after an idle moment, small enough that the average stays exact.
 const BURST: Duration = Duration::from_millis(100);
 
-/// Where limits (and, in M3, schedules) take their time from.
+/// Where limits and schedules take their time from.
 pub trait Clock: Send + Sync + fmt::Debug {
     /// Time since an arbitrary start; it never goes back.
     fn now(&self) -> Duration;
+    /// The time of day and date, for schedules. It moves with [`Clock::now`]
+    /// (the system clock may also be set by the user meanwhile).
+    fn wall(&self) -> jiff::Timestamp;
     /// Resolves when [`Clock::now`] reaches `at` (at once if it has).
     fn sleep_until(&self, at: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
@@ -52,6 +54,10 @@ impl Clock for SystemClock {
         self.start.elapsed()
     }
 
+    fn wall(&self) -> jiff::Timestamp {
+        jiff::Timestamp::now()
+    }
+
     fn sleep_until(&self, at: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         let deadline = self
             .start
@@ -61,39 +67,73 @@ impl Clock for SystemClock {
     }
 }
 
-/// A clock for tests: it stands still, and a sleep moves it forward to its
-/// end at once. So the time it shows is exactly the time that limits made
-/// downloads wait, whatever the speed of the machine.
-#[derive(Debug, Default)]
+/// A clock for tests, which only the test and the waits move.
+///
+/// - [`ManualClock::new`]: it stands still, and a wait moves it forward to
+///   its end at once. So the time it shows is exactly the time that limits
+///   made downloads wait, whatever the speed of the machine.
+/// - [`ManualClock::frozen`]: a wait waits until the test moves the clock
+///   past its end with [`ManualClock::advance`]. For schedules: the test
+///   decides when it is 23:00.
+#[derive(Debug)]
 pub struct ManualClock {
-    nanos: AtomicU64,
+    /// Nanoseconds since the start; waiters watch it.
+    nanos: tokio::sync::watch::Sender<u64>,
+    /// [`Clock::wall`] at the start.
+    start: jiff::Timestamp,
+    frozen: bool,
 }
 
 impl ManualClock {
+    /// A clock that jumps to the end of each wait (for limits).
     pub fn new() -> Arc<Self> {
-        Arc::new(ManualClock::default())
+        Self::make(jiff::Timestamp::UNIX_EPOCH, false)
     }
 
-    /// Moves the clock forward by `by`.
+    /// A clock at `start` that only [`ManualClock::advance`] moves (for
+    /// schedules).
+    pub fn frozen(start: jiff::Timestamp) -> Arc<Self> {
+        Self::make(start, true)
+    }
+
+    fn make(start: jiff::Timestamp, frozen: bool) -> Arc<Self> {
+        Arc::new(ManualClock {
+            nanos: tokio::sync::watch::Sender::new(0),
+            start,
+            frozen,
+        })
+    }
+
+    /// Moves the clock forward by `by`, waking the waits that end.
     pub fn advance(&self, by: Duration) {
         let by = u64::try_from(by.as_nanos()).unwrap_or(u64::MAX);
-        let _ = self
-            .nanos
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
-                Some(now.saturating_add(by))
-            });
+        self.nanos.send_modify(|now| *now = now.saturating_add(by));
     }
 }
 
 impl Clock for ManualClock {
     fn now(&self) -> Duration {
-        Duration::from_nanos(self.nanos.load(Ordering::SeqCst))
+        Duration::from_nanos(*self.nanos.borrow())
+    }
+
+    fn wall(&self) -> jiff::Timestamp {
+        let since = jiff::SignedDuration::try_from(self.now()).unwrap_or(jiff::SignedDuration::MAX);
+        self.start
+            .checked_add(since)
+            .unwrap_or(jiff::Timestamp::MAX)
     }
 
     fn sleep_until(&self, at: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         let at = u64::try_from(at.as_nanos()).unwrap_or(u64::MAX);
-        self.nanos.fetch_max(at, Ordering::SeqCst);
-        Box::pin(std::future::ready(()))
+        if !self.frozen {
+            self.nanos.send_modify(|now| *now = (*now).max(at));
+            return Box::pin(std::future::ready(()));
+        }
+        let mut now = self.nanos.subscribe();
+        Box::pin(async move {
+            // The sender lives in `self`, so this only ends at `at`.
+            let _ = now.wait_for(|&now| now >= at).await;
+        })
     }
 }
 

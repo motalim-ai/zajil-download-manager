@@ -60,7 +60,7 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             QueueEvent::Finished { .. }
             | QueueEvent::Failed { .. }
             | QueueEvent::Stopped { .. } => now -= 1,
-            QueueEvent::Download { .. } => {}
+            QueueEvent::Download { .. } | QueueEvent::Waiting { .. } => {}
         })
         .await
         .unwrap();

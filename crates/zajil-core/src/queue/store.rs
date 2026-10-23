@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::schedule::Schedule;
 use crate::state::{checksum_of, now_rfc3339, write_safely};
 
 /// Value of the `format` field.
@@ -77,6 +78,9 @@ pub struct Queue {
     pub name: String,
     /// Downloads of this queue that run at once, from 1 to [`MAX_ACTIVE`].
     pub max_active: u32,
+    /// When it may run; `None`: always.
+    #[serde(default)]
+    pub schedule: Option<Schedule>,
     pub items: Vec<Item>,
 }
 
@@ -281,6 +285,7 @@ impl Queue {
         Queue {
             name: name.to_owned(),
             max_active: DEFAULT_MAX_ACTIVE,
+            schedule: None,
             items: Vec::new(),
         }
     }

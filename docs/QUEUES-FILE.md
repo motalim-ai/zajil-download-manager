@@ -25,6 +25,10 @@
 | `queues` | قائمة | القوائم بترتيبها |
 | `queues[].name` | نص | اسم القائمة: من 1 إلى 64 حرفًا (حروف من أي لغة، وأرقام، و`-` و`_`). القائمة الافتراضية `main` |
 | `queues[].max_active` | عدد | عدد تحميلاتها المتزامنة، من 1 إلى 32. الافتراضي 3 |
+| `queues[].schedule` | كائن أو `null` | متى تعمل القائمة (بالتوقيت المحلي). `null` أو غيابه: في أي وقت |
+| `schedule.start` | نص أو `null` | بداية النافذة كل يوم، `HH:MM` أو `HH:MM:SS`. `null`: الساعة 00:00 |
+| `schedule.stop` | نص أو `null` | نهايتها، في نفس اليوم إذا كانت بعد البداية، وإلا في اليوم التالي (`23:00` إلى `07:00`). `null`: منتصف الليل |
+| `schedule.days` | قائمة | الأيام التي تبدأ فيها النافذة: `mon` و`tue` و`wed` و`thu` و`fri` و`sat` و`sun`. فارغة: كل يوم |
 | `queues[].items` | قائمة | تحميلاتها بالترتيب |
 | `items[].id` | عدد | رقم التحميل، فريد، وأصغر من `next_id` |
 | `items[].url` | نص | الرابط، **بلا اسم مستخدم ولا كلمة مرور** (لا يُضاف رابط فيه أحدهما). وقد يحمل توكنًا (`?sig=…`)، ولا يُطبع معه أبدًا |
@@ -59,6 +63,7 @@
 
 - **حالة `active` يتركها مشغّل قُتل** تعود إلى `waiting` عند التشغيل التالي، ويُستكمل التحميل من `state_file`.
 - **الإيقاف المؤقت والحذف**: يغيّر المستخدم الحالة في الملف، فيوقف المشغّل التحميل بطريقة «أوقف وانتظر» (`Stop`): يُسجَّل ما على القرص، ثم يُكتب الوضع الجديد بعد أن يتوقف كل شيء.
+- **الجدولة**: خارج نافذة القائمة لا يبدأ شيء منها، وتحميلاتها الجارية تتوقف بطريقة «أوقف وانتظر» وتعود إلى `waiting`، ثم تُستكمل في النافذة التالية. والمشغّل لا ينتهي ما دام في قائمة مجدولة تحميل ينتظر، بل ينام حتى تفتح.
 - **حد معروف**: إذا قُتل المشغّل بعد أن ينشئ التحميل ملفاته وقبل أن يُسجَّل `state_file` (أجزاء من الثانية)، يبدأ التشغيل التالي التحميل من جديد باسم مرقّم، ويبقى الملفان القديمان.
 
 </div>
@@ -67,4 +72,4 @@
 
 ## English summary
 
-`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, items [{id, url, dir, status, state_file, file, error, limit, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.
+`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, schedule {start, stop, days}, items [{id, url, dir, status, state_file, file, error, limit, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.

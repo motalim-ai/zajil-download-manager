@@ -18,5 +18,6 @@ zajil-core.workspace = true
 zajil-platform.workspace = true
 
 [dev-dependencies]
+jiff.workspace = true
 tempfile.workspace = true
 zajil-testserver.workspace = true

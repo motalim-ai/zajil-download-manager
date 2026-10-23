@@ -12,10 +12,12 @@
 //! next runner puts them back to waiting, and they resume from their state
 //! files.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -45,10 +47,26 @@ pub enum QueueEvent {
         item: u64,
         error: String,
     },
-    /// The download was stopped (paused, removed, or the runner stops).
+    /// The download was stopped (paused, removed, its queue's window
+    /// closed, or the runner stops).
     Stopped {
         item: u64,
     },
+    /// `queue` has downloads but is outside its window until `until`
+    /// (local time).
+    Waiting {
+        queue: String,
+        until: jiff::Zoned,
+    },
+}
+
+/// What the schedules say at one look.
+#[derive(Debug, Default)]
+struct Windows {
+    /// Queues outside their window.
+    closed: HashSet<String>,
+    /// When the next window opens or closes, on the engine's clock.
+    next_change: Option<Duration>,
 }
 
 /// How a run ended.
@@ -66,6 +84,8 @@ pub struct Runner {
     engine: Engine,
     store: QueueStore,
     poll: Duration,
+    /// The local time of schedules.
+    time_zone: TimeZone,
 }
 
 /// How the download of an item ended.
@@ -86,7 +106,14 @@ impl Runner {
             engine,
             store,
             poll: Duration::from_millis(500),
+            time_zone: TimeZone::system(),
         }
+    }
+
+    /// The time zone of schedules (the system's by default).
+    pub fn time_zone(mut self, time_zone: TimeZone) -> Self {
+        self.time_zone = time_zone;
+        self
     }
 
     /// How often the queues file is read for changes made by others.
@@ -130,17 +157,24 @@ impl Runner {
         // Whether to read the queues file again: at each tick and after
         // each change, but not for every progress event.
         let mut look = true;
+        // When a queue's window next opens or closes (on the engine's
+        // clock), and what was last said about each closed queue.
+        let mut change_at: Option<Duration> = None;
+        let mut announced: HashMap<String, Timestamp> = HashMap::new();
         loop {
             if look {
                 look = false;
                 let store = self.store.clone();
                 let queues = blocking(move || store.load()).await?;
                 speed_limit.set_rate(queues.settings.speed_limit);
-                self.stop_unwanted(&queues, &mut running);
+                let windows = self.windows(&queues, &mut announced, on_event);
+                change_at = windows.next_change;
+                self.stop_unwanted(&queues, &windows.closed, &mut running);
                 if !summary.stopped {
                     self.start_waiting(
                         &engine,
                         &queues,
+                        &windows.closed,
                         &mut running,
                         &mut tasks,
                         &events,
@@ -152,6 +186,13 @@ impl Runner {
                     return Ok(summary);
                 }
             }
+            let clock = self.engine.clock();
+            let next_window = async {
+                match change_at {
+                    Some(at) => clock.sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 Some(joined) = tasks.join_next_with_id() => {
                     // Events the task sent before it ended come first: a
@@ -175,13 +216,74 @@ impl Runner {
                     look = true;
                 }
                 _ = tick.tick() => look = true,
+                () = next_window => look = true,
             }
         }
     }
 
+    /// Which queues with work are outside their window now, and when the
+    /// next window opens or closes (as a time of the engine's clock).
+    /// Tells once about each queue that waits for its window.
+    fn windows(
+        &self,
+        queues: &QueuesFile,
+        announced: &mut HashMap<String, Timestamp>,
+        on_event: &mut (dyn FnMut(QueueEvent) + Send),
+    ) -> Windows {
+        let clock = self.engine.clock();
+        let (now, wall) = (clock.now(), clock.wall());
+        let mut windows = Windows::default();
+        for queue in &queues.queues {
+            let Some(schedule) = &queue.schedule else {
+                continue;
+            };
+            let has_work = queue
+                .items
+                .iter()
+                .any(|i| matches!(i.status, Status::Waiting | Status::Active));
+            if !has_work {
+                announced.remove(&queue.name);
+                continue;
+            }
+            let change = schedule.next_change(wall, &self.time_zone);
+            let wait = Duration::try_from(change.duration_since(wall)).unwrap_or(Duration::ZERO);
+            let at = now.saturating_add(wait);
+            windows.next_change = Some(windows.next_change.map_or(at, |next| next.min(at)));
+            if schedule.is_open(wall, &self.time_zone) {
+                announced.remove(&queue.name);
+            } else {
+                windows.closed.insert(queue.name.clone());
+                if announced.insert(queue.name.clone(), change) != Some(change) {
+                    on_event(QueueEvent::Waiting {
+                        queue: queue.name.clone(),
+                        until: change.to_zoned(self.time_zone.clone()),
+                    });
+                }
+            }
+        }
+        windows
+    }
+
     /// Stops the downloads whose items the user paused or removed (or set
-    /// to anything but active).
-    fn stop_unwanted(&self, queues: &QueuesFile, running: &mut HashMap<u64, Running>) {
+    /// to anything but active), and those of queues whose window closed:
+    /// those go back to waiting.
+    fn stop_unwanted(
+        &self,
+        queues: &QueuesFile,
+        closed: &HashSet<String>,
+        running: &mut HashMap<u64, Running>,
+    ) {
+        for queue in &queues.queues {
+            for item in &queue.items {
+                if let Some(run) = running.get_mut(&item.id)
+                    && item.status == Status::Active
+                    && closed.contains(&queue.name)
+                {
+                    run.by_runner = true;
+                    run.stop.request();
+                }
+            }
+        }
         for (id, run) in running.iter() {
             let wanted = queues
                 .item(*id)
@@ -193,16 +295,18 @@ impl Runner {
     }
 
     /// Starts waiting items, in order, while their queue has room.
+    #[allow(clippy::too_many_arguments)]
     async fn start_waiting(
         &self,
         engine: &Engine,
         queues: &QueuesFile,
+        closed: &HashSet<String>,
         running: &mut HashMap<u64, Running>,
         tasks: &mut JoinSet<Ended>,
         events: &mpsc::UnboundedSender<(u64, Event)>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
-        for queue in &queues.queues {
+        for queue in queues.queues.iter().filter(|q| !closed.contains(&q.name)) {
             let busy = queue
                 .items
                 .iter()

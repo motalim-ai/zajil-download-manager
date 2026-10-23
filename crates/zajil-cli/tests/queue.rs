@@ -263,23 +263,53 @@ fn queue_run_downloads_everything_and_reports_failures() {
 }
 
 /// The one test on the real clock (owner's decision on the M3 plan): every
-/// other limit test runs on a clock the test owns. This one checks that the
-/// program-wide limit set with `zajil queue speed-limit` reaches the
-/// downloads of `zajil queue run` and slows them on the real clock: 3 MiB
-/// at 1 MiB/s cannot take less than about 2.7 s (the server alone needs a
-/// fraction of a second). Only the lower bound is checked: a slow CI can
-/// only make it longer.
+/// other limit and schedule test runs on a clock the test owns. This one
+/// checks that both reach `zajil queue run` through the system clock and
+/// time zone:
+/// - a queue scheduled to start 3 seconds from now (local time) starts
+///   then, not before, and within 2 seconds (generous for a slow CI);
+/// - the program-wide limit of 1 MiB/s set with `zajil queue speed-limit`
+///   makes its 3 MiB take at least about 2.7 s. Only that lower bound is
+///   checked: a slow CI can only make it longer.
 #[test]
-fn the_real_clock_drives_the_limits() {
+fn the_real_clock_drives_limits_and_schedules() {
+    use std::io::{BufRead, BufReader};
+
     let server = TestServer::http();
     let data = random_bytes(3 * MIB / 2, 620);
     server.put("/f.bin", FileSpec::new(data.clone()));
     let state = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let dir = downloads.path().to_str().unwrap();
+    // Whole seconds, as the schedule is.
+    let now = jiff::Zoned::now();
+    let start = now
+        .round(
+            jiff::ZonedRound::new()
+                .smallest(jiff::Unit::Second)
+                .mode(jiff::RoundMode::Ceil),
+        )
+        .unwrap()
+        .checked_add(jiff::SignedDuration::from_secs(3))
+        .unwrap();
+    let stop = start
+        .checked_add(jiff::SignedDuration::from_hours(1))
+        .unwrap();
+    let (start_text, stop_text) = (
+        start.strftime("%H:%M:%S").to_string(),
+        stop.strftime("%H:%M:%S").to_string(),
+    );
     for args in [
         &["queue", "speed-limit", "1M"][..],
         &["queue", "set", "--max-active", "2"],
+        &[
+            "queue",
+            "schedule",
+            "--start",
+            &start_text,
+            "--stop",
+            &stop_text,
+        ],
         &[
             "queue",
             "add",
@@ -297,15 +327,85 @@ fn the_real_clock_drives_the_limits() {
         list.contains("Speed limit for all downloads: 1.0 MiB/s"),
         "{list}"
     );
+    assert!(list.contains(&format!("runs from {start_text}")), "{list}");
 
-    let started = Instant::now();
-    let out = zajil(state.path(), &["queue", "run"]);
-    let took = started.elapsed();
-    assert!(out.status.success(), "{}", printed(&out));
-    assert!(took >= Duration::from_millis(2600), "{took:?}");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+        .arg("--data-dir")
+        .arg(state.path())
+        .args(["queue", "run"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Each line of the runner, with the time it arrived.
+    let lines: Vec<(jiff::Timestamp, String)> = BufReader::new(child.stderr.take().unwrap())
+        .lines()
+        .map(|line| (jiff::Timestamp::now(), line.unwrap()))
+        .collect();
+    let ended = jiff::Timestamp::now();
+    assert!(child.wait().unwrap().success(), "{lines:?}");
+
+    let waits = lines
+        .iter()
+        .any(|(_, l)| l.contains("waits for its schedule"));
+    assert!(waits, "{lines:?}");
+    let started = lines
+        .iter()
+        .find(|(_, l)| l.starts_with("[1] starting"))
+        .map(|(at, _)| *at)
+        .unwrap_or_else(|| panic!("{lines:?}"));
+    let late = started.duration_since(start.timestamp());
+    assert!(
+        late >= jiff::SignedDuration::ZERO && late <= jiff::SignedDuration::from_secs(2),
+        "started {late:?} after {start_text}"
+    );
+    let took = ended.duration_since(started);
+    assert!(took >= jiff::SignedDuration::from_millis(2600), "{took:?}");
     for entry in fs::read_dir(downloads.path()).unwrap() {
         assert_eq!(fs::read(entry.unwrap().path()).unwrap(), data);
     }
+}
+
+#[test]
+fn schedules_are_checked_and_can_be_removed() {
+    let data = tempfile::tempdir().unwrap();
+    for (args, code) in [
+        (&["queue", "schedule", "--start", "25:00"][..], 2),
+        (&["queue", "schedule", "--start", "7:00"], 2),
+        (&["queue", "schedule", "--days", "funday"], 2),
+        (&["queue", "schedule"], 1),
+        (&["queue", "schedule", "--none", "--start", "07:00"], 2),
+        (
+            &[
+                "queue", "schedule", "--start", "23:00", "--stop", "07:00", "--days", "fri,sat",
+            ],
+            0,
+        ),
+    ] {
+        let out = zajil(data.path(), args);
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {}", printed(&out));
+    }
+    let list = printed(&zajil(data.path(), &["queue", "list"]));
+    assert!(
+        list.contains("runs from 23:00 to 07:00, on fri,sat"),
+        "{list}"
+    );
+    let out = zajil(data.path(), &["queue", "schedule", "--none"]);
+    assert!(
+        printed(&out).contains("runs at any time"),
+        "{}",
+        printed(&out)
+    );
+    let store = QueueStore::new(data.path());
+    assert!(
+        store
+            .load()
+            .unwrap()
+            .queue("main")
+            .unwrap()
+            .schedule
+            .is_none()
+    );
 }
 
 #[test]

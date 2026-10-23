@@ -9,7 +9,8 @@ use std::process::ExitCode;
 
 use clap::Subcommand;
 use zajil_core::queue::{
-    DEFAULT_QUEUE, Item, MAX_ACTIVE, QueueEvent, QueueStore, Runner, Status, StoreError, shown_url,
+    DEFAULT_QUEUE, Day, Item, MAX_ACTIVE, QueueEvent, QueueStore, Runner, Schedule, ScheduleError,
+    Status, StoreError, TimeOfDay, shown_url,
 };
 use zajil_core::state::{DownloadState, STATE_SUFFIX};
 use zajil_core::{Engine, Event, Stop};
@@ -74,6 +75,29 @@ pub enum QueueCommand {
         #[arg(value_name = "RATE|none", value_parser = limit_or_none)]
         rate: LimitSetting,
     },
+    /// Let a queue run only in a window each day (local time). Outside it,
+    /// its downloads stop after recording their progress, and resume at
+    /// the next window.
+    Schedule {
+        /// The queue (created if needed).
+        #[arg(short, long, value_name = "NAME", default_value = DEFAULT_QUEUE)]
+        queue: String,
+        /// When the window begins, HH:MM or HH:MM:SS (24-hour). Default
+        /// 00:00.
+        #[arg(long, value_name = "TIME", value_parser = time_of_day)]
+        start: Option<TimeOfDay>,
+        /// When it ends; if not after the start, it ends the next day.
+        /// Default: midnight.
+        #[arg(long, value_name = "TIME", value_parser = time_of_day)]
+        stop: Option<TimeOfDay>,
+        /// The days a window begins on, such as sat,sun. Default: every
+        /// day.
+        #[arg(long, value_name = "DAYS", value_delimiter = ',', value_parser = day)]
+        days: Vec<Day>,
+        /// Remove the schedule: the queue runs at any time.
+        #[arg(long, conflicts_with_all = ["start", "stop", "days"])]
+        none: bool,
+    },
     /// Run every queue until nothing is left to download. Ctrl+C stops the
     /// downloads after recording their progress; run it again to go on.
     Run,
@@ -81,7 +105,24 @@ pub enum QueueCommand {
 
 /// The commands that only change or read the queues file.
 pub fn manage(store: &QueueStore, command: QueueCommand) -> ExitCode {
-    let result = match command {
+    let result: Result<(), String> = match command {
+        QueueCommand::Schedule {
+            queue,
+            start,
+            stop,
+            days,
+            none,
+        } => schedule(store, &queue, (!none).then_some((start, stop, days))),
+        other => manage_queues(store, other).map_err(|err| err.to_string()),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => fail(&message),
+    }
+}
+
+fn manage_queues(store: &QueueStore, command: QueueCommand) -> Result<(), StoreError> {
+    match command {
         QueueCommand::Add {
             urls,
             queue,
@@ -94,11 +135,7 @@ pub fn manage(store: &QueueStore, command: QueueCommand) -> ExitCode {
         QueueCommand::Resume { ids } => set_status(store, &ids, Status::Waiting, "waiting"),
         QueueCommand::Remove { ids } => remove(store, &ids),
         QueueCommand::Set { queue, max_active } => set(store, &queue, max_active),
-        QueueCommand::Run => unreachable!("run is async"),
-    };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => fail(&err.to_string()),
+        QueueCommand::Run | QueueCommand::Schedule { .. } => unreachable!("handled before"),
     }
 }
 
@@ -146,6 +183,40 @@ fn speed_limit(store: &QueueStore, rate: Option<u64>) -> Result<(), StoreError> 
     Ok(())
 }
 
+fn time_of_day(text: &str) -> Result<TimeOfDay, String> {
+    text.parse().map_err(|err: ScheduleError| err.to_string())
+}
+
+fn day(text: &str) -> Result<Day, String> {
+    text.parse().map_err(|err: ScheduleError| err.to_string())
+}
+
+/// Sets the schedule of `queue`, or removes it (`None`).
+fn schedule(
+    store: &QueueStore,
+    queue: &str,
+    window: Option<(Option<TimeOfDay>, Option<TimeOfDay>, Vec<Day>)>,
+) -> Result<(), String> {
+    let schedule = match window {
+        Some((start, stop, days)) => Some(
+            Schedule::new(start, stop, days)
+                .map_err(|_| "give --start, --stop or --days, or --none".to_owned())?,
+        ),
+        None => None,
+    };
+    store
+        .update(|queues| {
+            queues.queue_or_new(queue)?.schedule = schedule.clone();
+            Ok(())
+        })
+        .map_err(|err| err.to_string())?;
+    match schedule {
+        Some(schedule) => println!("Queue {queue} runs from {schedule} (local time)"),
+        None => println!("Queue {queue} runs at any time"),
+    }
+    Ok(())
+}
+
 fn describe_limit(rate: Option<u64>) -> String {
     match rate {
         Some(rate) => format!("Speed limit for all downloads: {}/s", human_bytes(rate)),
@@ -163,6 +234,9 @@ fn list(store: &QueueStore) -> Result<(), StoreError> {
             queue.max_active,
             queue.items.len()
         );
+        if let Some(schedule) = &queue.schedule {
+            println!("  runs from {schedule} (local time)");
+        }
         for item in &queue.items {
             let limit = item
                 .limit
@@ -324,6 +398,10 @@ fn show(event: QueueEvent) {
         QueueEvent::Finished { item, file } => eprintln!("[{item}] saved {}", file.display()),
         QueueEvent::Failed { item, error } => eprintln!("[{item}] failed: {error}"),
         QueueEvent::Stopped { item } => eprintln!("[{item}] stopped"),
+        QueueEvent::Waiting { queue, until } => eprintln!(
+            "queue {queue} waits for its schedule until {} (local time)",
+            until.strftime("%Y-%m-%d %H:%M:%S")
+        ),
     }
 }
 
