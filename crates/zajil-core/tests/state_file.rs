@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sha2::Digest;
-use zajil_core::state::{DownloadState, StateError, Validator, state_path};
+use zajil_core::state::{DownloadState, Segment, StateError, Validator, state_path};
 
 fn sample() -> DownloadState {
     let mut state = DownloadState::new(
@@ -178,6 +178,114 @@ fn rejects_impossible_segments_even_with_a_valid_checksum() {
         DownloadState::load(&path),
         Err(StateError::Corrupt(_))
     ));
+}
+
+fn segment(start: u64, end: Option<u64>, done: u64) -> Segment {
+    Segment { start, end, done }
+}
+
+/// Saves `segments` (with a valid checksum) and loads them back.
+fn load_segments(len: Option<u64>, segments: Vec<Segment>) -> Result<DownloadState, StateError> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("x.zajil-state");
+    let mut state = sample();
+    state.content_length = len;
+    state.segments = segments;
+    state.save(&path).unwrap();
+    DownloadState::load(&path)
+}
+
+#[test]
+fn accepts_segments_that_cover_the_file_in_order() {
+    let state = load_segments(
+        Some(1000),
+        vec![
+            segment(0, Some(399), 400),
+            segment(400, Some(699), 10),
+            segment(700, Some(999), 0),
+        ],
+    )
+    .unwrap();
+    assert_eq!(state.segments.len(), 3);
+    assert_eq!(state.bytes_done(), 410);
+    // An empty file, and a file of unknown size.
+    load_segments(Some(0), vec![segment(0, None, 0)]).unwrap();
+    load_segments(None, vec![segment(0, None, 12345)]).unwrap();
+}
+
+#[test]
+fn rejects_segments_with_gaps_overlaps_or_wrong_ends() {
+    let cases: Vec<(&str, Option<u64>, Vec<Segment>)> = vec![
+        (
+            "gap",
+            Some(1000),
+            vec![segment(0, Some(399), 0), segment(401, Some(999), 0)],
+        ),
+        (
+            "overlap",
+            Some(1000),
+            vec![segment(0, Some(400), 0), segment(400, Some(999), 0)],
+        ),
+        ("not from 0", Some(1000), vec![segment(1, Some(999), 0)]),
+        ("short", Some(1000), vec![segment(0, Some(998), 0)]),
+        (
+            "out of order",
+            Some(1000),
+            vec![segment(500, Some(999), 0), segment(0, Some(499), 0)],
+        ),
+        (
+            "open end",
+            Some(1000),
+            vec![segment(0, Some(499), 0), segment(500, None, 0)],
+        ),
+        (
+            "unknown size, two",
+            None,
+            vec![segment(0, Some(9), 0), segment(10, None, 0)],
+        ),
+        ("unknown size, closed", None, vec![segment(0, Some(9), 0)]),
+        ("empty file with data", Some(0), vec![segment(0, None, 1)]),
+        ("none", Some(1000), vec![]),
+    ];
+    for (name, len, segments) in cases {
+        let result = load_segments(len, segments);
+        assert!(
+            matches!(result, Err(StateError::Corrupt(_))),
+            "{name}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn huge_numbers_are_refused_without_overflowing() {
+    // Checked in debug builds (which panic on overflow) and in release
+    // builds (CI runs this file in release mode too).
+    for (len, segments) in [
+        // The end is past the last byte.
+        (Some(u64::MAX), vec![segment(0, Some(u64::MAX), 0)]),
+        // One more byte done than the second segment holds.
+        (
+            Some(u64::MAX),
+            vec![
+                segment(0, Some(u64::MAX / 2), u64::MAX / 2 + 1),
+                segment(u64::MAX / 2 + 1, Some(u64::MAX - 1), u64::MAX),
+            ],
+        ),
+    ] {
+        assert!(matches!(
+            load_segments(len, segments),
+            Err(StateError::Corrupt(_))
+        ));
+    }
+    let whole = load_segments(
+        Some(u64::MAX),
+        vec![
+            segment(0, Some(u64::MAX / 2), u64::MAX / 2 + 1),
+            segment(u64::MAX / 2 + 1, Some(u64::MAX - 1), u64::MAX / 2),
+        ],
+    )
+    .unwrap();
+    assert_eq!(whole.bytes_done(), u64::MAX);
 }
 
 #[test]

@@ -259,7 +259,13 @@ fn a_killed_download_resumes_from_the_state_file() {
     let state_file = dir.path().join("big.bin.zajil-state");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
-        .args(["get", &server.url("/big.bin"), "--dir"])
+        .args([
+            "get",
+            &server.url("/big.bin"),
+            "--connections",
+            "1",
+            "--dir",
+        ])
         .arg(dir.path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -286,7 +292,7 @@ fn a_killed_download_resumes_from_the_state_file() {
         "/big.bin",
         FileSpec::new(data.clone()).etag(Some("\"fixed\"")),
     );
-    let out = zajil(&["resume", state_file.to_str().unwrap()]);
+    let out = zajil(&["resume", state_file.to_str().unwrap(), "--connections", "1"]);
     assert!(out.status.success(), "{}", text(&out.stderr));
     let saved = dir.path().join("big.bin");
     assert_eq!(sha256_hex(&fs::read(&saved).unwrap()), sha256_hex(&data));
@@ -302,6 +308,94 @@ fn a_killed_download_resumes_from_the_state_file() {
         .expect("a range request");
     assert!(from >= done_before_kill);
     assert_eq!(resumed.status, 206);
+}
+
+/// M2 success criterion: kill in the middle of a download of several
+/// segments, then resume from the state file. The file is whole, and no byte
+/// the state file counted was asked for again.
+#[test]
+fn a_killed_parallel_download_resumes_from_the_state_file() {
+    let server = TestServer::http();
+    let data = random_bytes(20 * 1024 * 1024, 4);
+    // Each connection is slow, so the kill lands in the middle.
+    server.put(
+        "/big.bin",
+        FileSpec::new(data.clone())
+            .etag(Some("\"fixed\""))
+            .throttle(512 * 1024),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let state_file = dir.path().join("big.bin.zajil-state");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zajil"))
+        .args([
+            "get",
+            &server.url("/big.bin"),
+            "--connections",
+            "8",
+            "--dir",
+        ])
+        .arg(dir.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // Wait until several segments have durable progress, then kill.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let before_kill = loop {
+        assert!(Instant::now() < deadline, "no progress was saved");
+        if let Ok(state) = DownloadState::load(&state_file)
+            && state.segments.len() == 8
+            && state.segments.iter().filter(|s| s.done > 0).count() >= 4
+        {
+            break state;
+        }
+        assert!(child.try_wait().unwrap().is_none(), "zajil exited early");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(!dir.path().join("big.bin").exists());
+    let requests_before = server.gets("/big.bin").len();
+
+    server.put(
+        "/big.bin",
+        FileSpec::new(data.clone()).etag(Some("\"fixed\"")),
+    );
+    let out = zajil(&["resume", state_file.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let saved = dir.path().join("big.bin");
+    assert_eq!(sha256_hex(&fs::read(&saved).unwrap()), sha256_hex(&data));
+    assert!(!state_file.exists());
+
+    // No resumed request covers bytes the state file had counted before the
+    // kill (the state saved at the kill may count even more).
+    for request in &server.gets("/big.bin")[requests_before..] {
+        let (from, to) = request
+            .range
+            .as_deref()
+            .and_then(|r| r.strip_prefix("bytes="))
+            .and_then(|r| r.split_once('-'))
+            .and_then(|(a, b)| Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?)))
+            .expect("resume asks for ranges");
+        assert_eq!(request.status, 206);
+        for segment in &before_kill.segments {
+            let counted = (segment.start, segment.start + segment.done);
+            assert!(
+                to < counted.0 || from >= counted.1,
+                "bytes {from}-{to} were already on disk ({counted:?})"
+            );
+        }
+    }
+}
+
+#[test]
+fn connections_must_be_between_1_and_32() {
+    for bad in ["0", "33", "many"] {
+        let out = zajil(&["get", "http://127.0.0.1:9/x", "--connections", bad]);
+        assert_eq!(out.status.code(), Some(2), "{bad}");
+    }
 }
 
 #[test]

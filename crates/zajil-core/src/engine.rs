@@ -1,13 +1,18 @@
-//! Downloading one file over HTTP or HTTPS with a single connection.
+//! Downloading one file over HTTP or HTTPS.
 //!
 //! Life cycle (docs/ARCHITECTURE.md §3.1):
 //! 1. One GET request; its headers are the probe (size, `Accept-Ranges`,
 //!    `ETag`, `Last-Modified`, name).
-//! 2. A free name is reserved in the download folder: `<name>.zajil-part`
-//!    (locked while we use it) and `<name>.zajil-state`.
-//! 3. The body is written to the part file. Every `save_interval` the data is
-//!    synced and then the state file records it as done.
-//! 4. If the transfer stops early, the state is saved and the error says how
+//! 2. If the size is known, it must fit in the free space of the folder
+//!    before any file is created.
+//! 3. A free name is reserved in the download folder: `<name>.zajil-part`
+//!    (locked while we use it) and `<name>.zajil-state`, and the part file is
+//!    given its size (`zajil_platform::fs::allocate`).
+//! 4. A server that announces ranges, the size and a strong validator gets
+//!    several connections (`segmented`); otherwise the body of the probe is
+//!    written on one connection. Every `save_interval` the data is synced and
+//!    then the state file records it as done.
+//! 5. If the transfer stops early, the state is saved and the error says how
 //!    to resume. Otherwise the part file is renamed to its final name in one
 //!    step and the state file is removed.
 
@@ -25,9 +30,14 @@ use tokio::io::AsyncWriteExt;
 use crate::http_date;
 use crate::naming::{ReserveError, reserve_target, suggested_name};
 use crate::sanitize::{ConfineError, MAX_NAME_BYTES, confine, sanitize_file_name};
+use crate::segmented::{self, Job, Outcome};
 use crate::state::{
     DownloadState, StateError, Validator, final_path_for_state, part_path, state_path,
 };
+
+/// How many times one call may start over because the file changed on the
+/// server, before giving up for now.
+const MAX_RESTARTS: u8 = 3;
 
 /// Engine settings. There is deliberately no setting that weakens TLS
 /// certificate checks.
@@ -41,6 +51,12 @@ pub struct Options {
     pub idle_timeout: Duration,
     /// How often progress is made durable in the state file.
     pub save_interval: Duration,
+    /// Connections for one download, from 1 to [`crate::MAX_CONNECTIONS`] (other
+    /// values are clamped). A file is split only if its server announces
+    /// `Accept-Ranges: bytes`, its size and a strong validator.
+    pub connections: usize,
+    /// No segment is made smaller than this many bytes.
+    pub min_segment_size: u64,
 }
 
 impl Default for Options {
@@ -50,6 +66,8 @@ impl Default for Options {
             connect_timeout: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(60),
             save_interval: Duration::from_secs(1),
+            connections: crate::DEFAULT_CONNECTIONS,
+            min_segment_size: 1024 * 1024,
         }
     }
 }
@@ -120,6 +138,22 @@ pub enum Error {
     UnsafeName { name: String, reason: String },
     #[error("the download failed before any data arrived: {0}")]
     NoData(String),
+    #[error(
+        "not enough free space in {}: the file needs {needed} bytes and {available} are free",
+        dir.display()
+    )]
+    NotEnoughSpace {
+        dir: PathBuf,
+        needed: u64,
+        available: u64,
+    },
+    #[error("could not make room for {bytes} bytes in {}: {source}", file.display())]
+    Allocate {
+        file: PathBuf,
+        bytes: u64,
+        #[source]
+        source: io::Error,
+    },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
     #[error(
@@ -174,6 +208,11 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
+        // The size comes from the server: before creating anything, make
+        // sure it fits (a huge or false size fails here, clearly).
+        if let Some(len) = response.content_length() {
+            check_space(dir, len, 0).await?;
+        }
 
         let name = suggested_name(
             response
@@ -188,8 +227,16 @@ impl Engine {
         let cleanup = EmptyDownloadCleanup::new(&final_path);
         lock(&part, &final_path)?;
         let state = state_from_response(without_credentials(&url), &response);
-        self.start(final_path, part, state, response, Some(cleanup), on_event)
-            .await
+        self.start(
+            final_path,
+            part,
+            state,
+            response,
+            Some(cleanup),
+            MAX_RESTARTS,
+            on_event,
+        )
+        .await
     }
 
     /// Continues the download described by `state_file`
@@ -265,6 +312,8 @@ impl Engine {
                     part,
                     state,
                     RestartReason::PartFileMissing,
+                    None,
+                    MAX_RESTARTS,
                     on_event,
                 )
                 .await;
@@ -272,9 +321,16 @@ impl Engine {
         lock(&part, &final_path)?;
 
         let done = state.bytes_done();
+        // The data must reach the last byte the state counts as written.
+        let written_end = state
+            .segments
+            .iter()
+            .map(|s| s.start.saturating_add(s.done))
+            .max()
+            .unwrap_or(0);
         let on_disk = part.metadata()?.len();
         let if_range = if_range_value(&state.validator);
-        let reason = if on_disk < done {
+        let reason = if on_disk < written_end {
             Some(RestartReason::PartFileTooShort)
         } else if done == 0 {
             Some(RestartReason::NothingDone)
@@ -286,13 +342,26 @@ impl Engine {
         };
         if let Some(reason) = reason {
             return self
-                .restart(final_path, part, state, reason, on_event)
+                .restart(
+                    final_path,
+                    part,
+                    state,
+                    reason,
+                    None,
+                    MAX_RESTARTS,
+                    on_event,
+                )
                 .await;
         }
         let if_range = if_range.expect("checked above");
+        if state.segments.len() > 1 {
+            return self
+                .resume_segments(final_path, part, state, if_range, on_event)
+                .await;
+        }
 
         let response = self
-            .get_with_fallback(&state, Some((done, if_range)))
+            .get_with_fallback(&state, Some((done, None, if_range)))
             .await?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
@@ -303,6 +372,8 @@ impl Engine {
                             part,
                             state,
                             RestartReason::RangeMismatch,
+                            None,
+                            MAX_RESTARTS,
                             on_event,
                         )
                         .await;
@@ -321,8 +392,16 @@ impl Engine {
                 };
                 on_event(Event::Restarted { reason });
                 let state = state_from_response(state.url.clone(), &response);
-                self.start(final_path, part, state, response, None, on_event)
-                    .await
+                self.start(
+                    final_path,
+                    part,
+                    state,
+                    response,
+                    None,
+                    MAX_RESTARTS,
+                    on_event,
+                )
+                .await
             }
             StatusCode::RANGE_NOT_SATISFIABLE if state.content_length == Some(done) => {
                 // Everything was already on disk; only the rename was missing.
@@ -336,6 +415,8 @@ impl Engine {
                     part,
                     state,
                     RestartReason::RangeMismatch,
+                    None,
+                    MAX_RESTARTS,
                     on_event,
                 )
                 .await
@@ -344,13 +425,161 @@ impl Engine {
         }
     }
 
+    /// Resumes a download made of several segments: the first missing range
+    /// is checked like a single-connection resume (with a fallback to the
+    /// original URL), then every missing range gets a connection.
+    async fn resume_segments(
+        &self,
+        final_path: PathBuf,
+        part: File,
+        state: DownloadState,
+        if_range: String,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        let missing = state
+            .segments
+            .iter()
+            .find(|s| s.end.is_some_and(|end| s.start + s.done <= end))
+            .cloned();
+        let Some(segment) = missing else {
+            // Every byte is on disk; only the rename was missing.
+            return finish_download(part, state, final_path, on_event).await;
+        };
+        let (from, to) = (segment.start + segment.done, segment.end.expect("checked"));
+        let response = self
+            .get_with_fallback(&state, Some((from, Some(to), if_range.clone())))
+            .await?;
+        match response.status() {
+            StatusCode::PARTIAL_CONTENT => {
+                let range = header_str(response.headers(), header::CONTENT_RANGE)
+                    .and_then(parse_content_range);
+                let exact = range.is_some_and(|r| {
+                    r.start == from && r.end == to && r.total == state.content_length
+                });
+                if !exact || changed(&state, &response) {
+                    let reason = if exact {
+                        RestartReason::FileChanged
+                    } else {
+                        RestartReason::RangeMismatch
+                    };
+                    return self
+                        .restart(
+                            final_path,
+                            part,
+                            state,
+                            reason,
+                            None,
+                            MAX_RESTARTS,
+                            on_event,
+                        )
+                        .await;
+                }
+                let job = Job {
+                    client: self.client.clone(),
+                    connections: self.options.connections,
+                    save_interval: self.options.save_interval,
+                    url: response.url().clone(),
+                    if_range,
+                    final_path,
+                    part,
+                    state,
+                    first: Some((response, segment.start)),
+                    cleanup: None,
+                };
+                self.run_segments(job, MAX_RESTARTS, on_event).await
+            }
+            StatusCode::OK => {
+                let reason = if changed(&state, &response) {
+                    RestartReason::FileChanged
+                } else {
+                    RestartReason::RangesIgnored
+                };
+                on_event(Event::Restarted { reason });
+                let state = state_from_response(state.url.clone(), &response);
+                self.start(
+                    final_path,
+                    part,
+                    state,
+                    response,
+                    None,
+                    MAX_RESTARTS,
+                    on_event,
+                )
+                .await
+            }
+            StatusCode::RANGE_NOT_SATISFIABLE => {
+                self.restart(
+                    final_path,
+                    part,
+                    state,
+                    RestartReason::RangeMismatch,
+                    None,
+                    MAX_RESTARTS,
+                    on_event,
+                )
+                .await
+            }
+            status => Err(Error::Status(status)),
+        }
+    }
+
+    /// Runs a segmented download, and starts over if the file changed.
+    async fn run_segments(
+        &self,
+        job: Job,
+        restarts_left: u8,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        let final_path = job.final_path.clone();
+        let old = job.state.clone();
+        match segmented::run(job, on_event).await? {
+            Outcome::Finished(finished) => Ok(finished),
+            Outcome::Restart {
+                part,
+                reason,
+                response,
+                cleanup,
+            } => match response {
+                Some(response) => {
+                    on_event(Event::Restarted { reason });
+                    let state = state_from_response(old.url, &response);
+                    Box::pin(self.start(
+                        final_path,
+                        part,
+                        state,
+                        response,
+                        cleanup,
+                        restarts_left,
+                        on_event,
+                    ))
+                    .await
+                }
+                None => {
+                    Box::pin(self.restart(
+                        final_path,
+                        part,
+                        old,
+                        reason,
+                        cleanup,
+                        restarts_left,
+                        on_event,
+                    ))
+                    .await
+                }
+            },
+        }
+    }
+
     /// Starts over with a plain GET, reporting `reason`.
+    #[allow(clippy::too_many_arguments)]
     async fn restart(
         &self,
         final_path: PathBuf,
         part: File,
         old: DownloadState,
         reason: RestartReason,
+        cleanup: Option<EmptyDownloadCleanup>,
+        restarts_left: u8,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         on_event(Event::Restarted { reason });
@@ -359,32 +588,95 @@ impl Engine {
             return Err(Error::Status(response.status()));
         }
         let state = state_from_response(old.url, &response);
-        self.start(final_path, part, state, response, None, on_event)
-            .await
+        self.start(
+            final_path,
+            part,
+            state,
+            response,
+            cleanup,
+            restarts_left,
+            on_event,
+        )
+        .await
     }
 
-    /// Writes a whole-file `200` response into `part` from byte 0.
-    /// `cleanup` is set for a new download (see [`EmptyDownloadCleanup`]).
+    /// Writes a whole-file `200` response into `part` from byte 0, over
+    /// several connections when the server allows it. `cleanup` is set for a
+    /// new download (see [`EmptyDownloadCleanup`]).
+    #[allow(clippy::too_many_arguments)]
     async fn start(
         &self,
         final_path: PathBuf,
-        mut part: File,
+        part: File,
         mut state: DownloadState,
         response: Response,
         cleanup: Option<EmptyDownloadCleanup>,
+        restarts_left: u8,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
-        part.set_len(0)?;
-        if let Some(len) = state.content_length {
-            // Best effort reservation; sparse on some file systems.
-            part.set_len(len)?;
-        }
-        part.seek(SeekFrom::Start(0))?;
+        let Some(restarts_left) = restarts_left.checked_sub(1) else {
+            return Err(Error::Interrupted {
+                state_file: state_path(&final_path),
+                reason: "the file kept changing on the server; try again later".into(),
+            });
+        };
+        let len = state.content_length;
+        let part_file = part_path(&final_path);
+        // Like a save, the allocation keeps a cancelled new download's name
+        // reserved until it is over (see `EmptyDownloadCleanup`). It hands
+        // the guard's share back next to the file, so if nobody waits for
+        // the result any more, the file is closed before the name is freed.
+        let keep_alive = cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
+        let (part, keep_alive) = blocking(move || {
+            let mut part = part;
+            part.set_len(0)?;
+            if let Some(len) = len {
+                zajil_platform::fs::allocate(&part, len).map_err(|source| Error::Allocate {
+                    file: part_file,
+                    bytes: len,
+                    source,
+                })?;
+            }
+            part.seek(SeekFrom::Start(0))?;
+            Ok::<_, Error>((part, keep_alive))
+        })
+        .await?;
+        drop(keep_alive);
+
+        let split = self.split(&state);
         let watch = cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
+        if let Some(segments) = split {
+            state.segments = segments;
+            save_state(&mut state, &state_path(&final_path), watch).await?;
+            let if_range = if_range_value(&state.validator).expect("checked by split");
+            let job = Job {
+                client: self.client.clone(),
+                connections: self.options.connections,
+                save_interval: self.options.save_interval,
+                url: response.url().clone(),
+                if_range,
+                final_path,
+                part,
+                state,
+                first: Some((response, 0)),
+                cleanup,
+            };
+            return self.run_segments(job, restarts_left, on_event).await;
+        }
         save_state(&mut state, &state_path(&final_path), watch).await?;
         self.transfer(final_path, part, state, cleanup)
             .receive(response, on_event)
             .await
+    }
+
+    /// The segments for a parallel download, or `None` for one connection:
+    /// the server must announce ranges, the size and a strong validator.
+    fn split(&self, state: &DownloadState) -> Option<Vec<crate::state::Segment>> {
+        let len = state.content_length?;
+        if !state.accept_ranges || if_range_value(&state.validator).is_none() {
+            return None;
+        }
+        segmented::plan(len, self.options.connections, self.options.min_segment_size)
     }
 
     fn transfer(
@@ -410,7 +702,7 @@ impl Engine {
     async fn get_with_fallback(
         &self,
         state: &DownloadState,
-        range: Option<(u64, String)>,
+        range: Option<(u64, Option<u64>, String)>,
     ) -> Result<Response, Error> {
         let final_url = parse_url(&state.final_url)?;
         let first = self.get(final_url, range.clone()).await;
@@ -430,11 +722,18 @@ impl Engine {
         self.get(parse_url(&state.url)?, range).await
     }
 
-    async fn get(&self, url: Url, range_from: Option<(u64, String)>) -> Result<Response, Error> {
+    /// GETs `url`; with `range`, only bytes `from` to `to` (or to the end)
+    /// and only if the file still matches `If-Range`.
+    async fn get(
+        &self,
+        url: Url,
+        range: Option<(u64, Option<u64>, String)>,
+    ) -> Result<Response, Error> {
         let mut request = self.client.get(url);
-        if let Some((from, if_range)) = range_from {
+        if let Some((from, to, if_range)) = range {
+            let to = to.map(|to| to.to_string()).unwrap_or_default();
             request = request
-                .header(header::RANGE, format!("bytes={from}-"))
+                .header(header::RANGE, format!("bytes={from}-{to}"))
                 .header(header::IF_RANGE, if_range);
         }
         request.send().await.map_err(Error::Http)
@@ -469,13 +768,14 @@ struct Transfer {
 /// lets go, after the guard and every save are done. Until then the
 /// `.zajil-part` file keeps the name reserved, so a new download takes
 /// `name (1)` instead. Nothing waits on the async thread.
-struct EmptyDownloadCleanup {
+pub(crate) struct EmptyDownloadCleanup {
     new: Arc<NewDownload>,
     armed: bool,
 }
 
-/// What the guard and the saves share.
-struct NewDownload {
+/// What the guard and the saves share (and, for a segmented download, the
+/// writes).
+pub(crate) struct NewDownload {
     final_path: PathBuf,
     abandoned: AtomicBool,
 }
@@ -504,11 +804,11 @@ impl EmptyDownloadCleanup {
     }
 
     /// For a save made while the guard is armed.
-    fn watch(&self) -> Option<Arc<NewDownload>> {
+    pub(crate) fn watch(&self) -> Option<Arc<NewDownload>> {
         self.armed.then(|| self.new.clone())
     }
 
-    fn disarm(mut self) {
+    pub(crate) fn disarm(mut self) {
         self.armed = false;
     }
 }
@@ -613,39 +913,72 @@ impl Transfer {
         if let Some(cleanup) = self.cleanup.take() {
             cleanup.disarm(); // an empty file is a complete download
         }
-        let bytes = self.done();
         self.file.flush().await?;
-        // A file of unknown size may have been pre-sized differently.
-        self.file.set_len(bytes).await?;
-        self.file.sync_all().await?;
-        // Record that everything is on disk before renaming, so a failed
-        // rename leaves a download that `resume` completes at once.
-        save_state(&mut self.state, &self.state_file, None).await?;
-        drop(self.file); // releases the lock before the rename
-
-        let part = part_path(&self.final_path);
-        let wanted = self.final_path.clone();
-        let placed = blocking(move || place_final(&part, &wanted)).await;
-        let file = match placed {
-            Ok(file) => file,
-            Err(err) => {
-                return Err(Error::Interrupted {
-                    state_file: self.state_file,
-                    reason: format!("could not give the finished file its name: {err}"),
-                });
-            }
-        };
-        // The download is complete. A state file that cannot be removed is
-        // left behind rather than reported as a failed download.
-        let _ = std::fs::remove_file(&self.state_file);
-        let dir = parent_dir(&file).to_path_buf();
-        let _ = blocking(move || zajil_platform::fs::sync_dir(&dir)).await;
-        on_event(Event::Finished {
-            file: file.clone(),
-            bytes,
-        });
-        Ok(Finished { file, bytes })
+        let file = self.file.into_std().await;
+        finish_download(file, self.state, self.final_path, on_event).await
     }
+}
+
+/// Completes a download whose bytes are all written to `part`: syncs it,
+/// records that everything is on disk, renames it to its final name (or a
+/// numbered one) and removes the state file.
+pub(crate) async fn finish_download(
+    part: File,
+    mut state: DownloadState,
+    final_path: PathBuf,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Finished, Error> {
+    let bytes = state.bytes_done();
+    let state_file = state_path(&final_path);
+    let part = blocking(move || {
+        // A file of unknown size may have been pre-sized differently.
+        part.set_len(bytes)?;
+        part.sync_all()?;
+        Ok::<_, io::Error>(part)
+    })
+    .await?;
+    // Record that everything is on disk before renaming, so a failed
+    // rename leaves a download that `resume` completes at once.
+    save_state(&mut state, &state_file, None).await?;
+    drop(part); // releases the lock before the rename
+
+    let part = part_path(&final_path);
+    let wanted = final_path.clone();
+    let placed = blocking(move || place_final(&part, &wanted)).await;
+    let file = match placed {
+        Ok(file) => file,
+        Err(err) => {
+            return Err(Error::Interrupted {
+                state_file,
+                reason: format!("could not give the finished file its name: {err}"),
+            });
+        }
+    };
+    // The download is complete. A state file that cannot be removed is
+    // left behind rather than reported as a failed download.
+    let _ = std::fs::remove_file(&state_file);
+    let dir = parent_dir(&file).to_path_buf();
+    let _ = blocking(move || zajil_platform::fs::sync_dir(&dir)).await;
+    on_event(Event::Finished {
+        file: file.clone(),
+        bytes,
+    });
+    Ok(Finished { file, bytes })
+}
+
+/// Fails with [`Error::NotEnoughSpace`] unless `needed` bytes fit in the free
+/// space of `dir`, counting `reusable` bytes already set aside there.
+async fn check_space(dir: &Path, needed: u64, reusable: u64) -> Result<(), Error> {
+    let folder = dir.to_path_buf();
+    let available = on_own_thread(move || zajil_platform::fs::available_space(&folder)).await??;
+    if needed > available.saturating_add(reusable) {
+        return Err(Error::NotEnoughSpace {
+            dir: dir.to_path_buf(),
+            needed,
+            available,
+        });
+    }
+    Ok(())
 }
 
 fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Error> {
@@ -771,24 +1104,34 @@ fn continues_at(response: &Response, state: &DownloadState, done: u64) -> bool {
 
 /// Whether `response` describes another version of the file than `state`.
 fn changed(state: &DownloadState, response: &Response) -> bool {
+    changed_from(&state.validator, state.content_length, response)
+}
+
+/// Whether `response` describes another version of the file than the one
+/// with `validator` and `content_length`.
+pub(crate) fn changed_from(
+    validator: &Validator,
+    content_length: Option<u64>,
+    response: &Response,
+) -> bool {
     let now = validator_from(response.headers());
     let differs = |old: &Option<String>, new: &Option<String>| matches!((old, new), (Some(old), Some(new)) if old != new);
-    differs(&state.validator.etag, &now.etag)
-        || differs(&state.validator.last_modified, &now.last_modified)
+    differs(&validator.etag, &now.etag)
+        || differs(&validator.last_modified, &now.last_modified)
         || (response.status() == StatusCode::OK
             && response.content_length().is_some()
-            && response.content_length() != state.content_length)
+            && response.content_length() != content_length)
 }
 
 /// A parsed `Content-Range: bytes start-end/total` (RFC 9110 §14.4).
 #[derive(Debug, PartialEq, Eq)]
-struct ContentRange {
-    start: u64,
-    end: u64,
-    total: Option<u64>,
+pub(crate) struct ContentRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: Option<u64>,
 }
 
-fn parse_content_range(value: &str) -> Option<ContentRange> {
+pub(crate) fn parse_content_range(value: &str) -> Option<ContentRange> {
     let rest = value.trim().strip_prefix("bytes ")?;
     let (range, total) = rest.split_once('/')?;
     let (start, end) = range.split_once('-')?;
@@ -804,7 +1147,7 @@ fn parse_content_range(value: &str) -> Option<ContentRange> {
 /// to about a second for another program to release the file, and that wait
 /// must not stop the async runtime. `new` is set for a new download that has
 /// no data yet (see [`EmptyDownloadCleanup`]).
-async fn save_state(
+pub(crate) async fn save_state(
     state: &mut DownloadState,
     path: &Path,
     new: Option<Arc<NewDownload>>,
@@ -829,8 +1172,26 @@ async fn save_state(
     Ok(())
 }
 
+/// Runs a quick system query (such as the free space) on a thread of its
+/// own: never on an async thread, and never queued behind slow file work on
+/// the blocking pool, so a new download does not wait there before it has
+/// created any file.
+async fn on_own_thread<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> io::Result<T> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("zajil-query".into())
+        .spawn(move || {
+            let _ = sender.send(work());
+        })?;
+    receiver
+        .await
+        .map_err(|_| io::Error::other("the query thread stopped"))
+}
+
 /// Runs blocking file-system work off the async threads.
-async fn blocking<T: Send + 'static, E: From<io::Error> + Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static, E: From<io::Error> + Send + 'static>(
     work: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, E> {
     tokio::task::spawn_blocking(work)
@@ -882,7 +1243,7 @@ fn without_credentials(url: &Url) -> String {
 }
 
 /// An error and all its sources, so TLS and connection details reach the user.
-fn error_chain(err: &dyn std::error::Error) -> String {
+pub(crate) fn error_chain(err: &dyn std::error::Error) -> String {
     let mut text = err.to_string();
     let mut source = err.source();
     while let Some(cause) = source {

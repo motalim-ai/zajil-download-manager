@@ -10,8 +10,14 @@ use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 const SIZE: usize = 10 * 1024 * 1024;
 const THIRTY_PERCENT: u64 = (SIZE as u64) * 3 / 10;
 
+/// These tests are about resuming on one connection (M1); resuming a
+/// download of several segments is tested in `parallel.rs`.
 fn engine() -> Engine {
-    Engine::new(Options::default()).unwrap()
+    Engine::new(Options {
+        connections: 1,
+        ..Options::default()
+    })
+    .unwrap()
 }
 
 /// Starts a download that the server cuts, and returns its state file.

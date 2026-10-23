@@ -53,8 +53,9 @@ pub struct DownloadState {
     pub content_length: Option<u64>,
     /// Whether the server announced `Accept-Ranges: bytes`.
     pub accept_ranges: bool,
-    /// Byte ranges of the file and how much of each is on disk. One segment
-    /// in M1.
+    /// Byte ranges of the file, in order and without gaps, and how much of
+    /// each is on disk. One segment for a single connection; one per
+    /// connection, then more as segments are split, for a parallel download.
     pub segments: Vec<Segment>,
     /// RFC 3339 time in UTC.
     pub created_at: String,
@@ -135,9 +136,12 @@ impl DownloadState {
         }
     }
 
-    /// Bytes on disk, summed over all segments.
+    /// Bytes on disk, summed over all segments. Saturates instead of
+    /// overflowing on a state that was never checked.
     pub fn bytes_done(&self) -> u64 {
-        self.segments.iter().map(|s| s.done).sum()
+        self.segments
+            .iter()
+            .fold(0u64, |sum, s| sum.saturating_add(s.done))
     }
 
     /// Reads and fully checks a state file. The file itself is untrusted
@@ -225,26 +229,57 @@ impl DownloadState {
     }
 
     /// Rejects values that cannot describe a real download, even when the
-    /// checksum matches (for example a file written by a buggy tool).
+    /// checksum matches (for example a file written by a buggy tool). The
+    /// segments must cover the file from byte 0 without gaps or overlaps, in
+    /// order; with an unknown size there is exactly one open-ended segment.
+    /// The numbers are untrusted, so no arithmetic here can overflow.
     fn check_consistency(&self) -> Result<(), StateError> {
         let bad = |why: &str| Err(StateError::Corrupt(why.to_owned()));
-        if self.segments.is_empty() {
+        let Some(first) = self.segments.first() else {
             return bad("no segments");
+        };
+        if first.start != 0 {
+            return bad("the first segment does not start at byte 0");
         }
+        let Some(len) = self.content_length else {
+            return match self.segments.as_slice() {
+                [Segment { end: None, .. }] => Ok(()),
+                _ => bad("a file of unknown size must have one open-ended segment"),
+            };
+        };
+        if len == 0 {
+            // An empty file has no byte to describe (`DownloadState::new`).
+            return match self.segments.as_slice() {
+                [
+                    Segment {
+                        end: None, done: 0, ..
+                    },
+                ] => Ok(()),
+                _ => bad("an empty file must have one empty segment"),
+            };
+        }
+        let mut next = 0u64;
         for segment in &self.segments {
-            if let Some(end) = segment.end {
-                if end < segment.start {
-                    return bad("a segment ends before it starts");
-                }
-                if segment.done > end - segment.start + 1 {
-                    return bad("a segment has more bytes done than its size");
-                }
+            let Some(end) = segment.end else {
+                return bad("a segment of a file of known size has no end");
+            };
+            if segment.start != next {
+                return bad("the segments leave a gap or overlap");
             }
-            if let (Some(len), Some(end)) = (self.content_length, segment.end)
-                && end >= len
-            {
+            if end < segment.start {
+                return bad("a segment ends before it starts");
+            }
+            if end >= len {
                 return bad("a segment goes past the end of the file");
             }
+            // `end < len <= u64::MAX`, so `end - start + 1` cannot overflow.
+            if segment.done > end - segment.start + 1 {
+                return bad("a segment has more bytes done than its size");
+            }
+            next = end + 1;
+        }
+        if next != len {
+            return bad("the segments do not reach the end of the file");
         }
         Ok(())
     }

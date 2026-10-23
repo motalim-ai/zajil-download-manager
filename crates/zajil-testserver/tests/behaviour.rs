@@ -303,3 +303,96 @@ fn last_modified_and_date_are_set_by_the_test() {
         "the current time by default"
     );
 }
+
+#[test]
+fn can_announce_ranges_and_still_ignore_them() {
+    let server = TestServer::http();
+    let data = random_bytes(1000, 20);
+    server.put("/f", FileSpec::new(data.clone()).ignore_ranges());
+    let reply = get(&server, "/f", &[("Range", "bytes=10-19")]);
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.header("accept-ranges"), Some("bytes"));
+    assert_eq!(reply.body, data);
+}
+
+#[test]
+fn can_announce_a_false_length() {
+    let server = TestServer::http();
+    server.put(
+        "/f",
+        FileSpec::new(random_bytes(100, 21)).announce_length(1 << 40),
+    );
+    let reply = request(&server, "HEAD", "/f", &[]);
+    assert_eq!(reply.header("content-length"), Some("1099511627776"));
+}
+
+#[test]
+fn replaces_the_file_after_some_requests() {
+    let server = TestServer::http();
+    let (old, new) = (random_bytes(100, 22), random_bytes(100, 23));
+    server.put(
+        "/f",
+        FileSpec::new(old.clone()).replaced_after(2, FileSpec::new(new.clone())),
+    );
+    let first = get(&server, "/f", &[]);
+    let second = get(&server, "/f", &[]);
+    let third = get(&server, "/f", &[]);
+    assert_eq!(first.body, old);
+    assert_eq!(second.body, old);
+    assert_eq!(third.body, new);
+    assert_ne!(third.header("etag"), first.header("etag"));
+}
+
+#[test]
+fn counts_bodies_sent_at_the_same_time_and_connections() {
+    let server = TestServer::http();
+    // Slow enough that three requests overlap.
+    server.put(
+        "/f",
+        FileSpec::new(random_bytes(200_000, 24)).throttle(400_000),
+    );
+    let threads: Vec<_> = (0..3)
+        .map(|_| {
+            let addr = server.addr();
+            std::thread::spawn(move || {
+                let mut stream = TcpStream::connect(addr).unwrap();
+                stream
+                    .write_all(b"GET /f HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+                    .unwrap();
+                let mut sink = Vec::new();
+                let _ = stream.read_to_end(&mut sink);
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    assert_eq!(server.most_concurrent("/f"), 3);
+    let gets = server.gets("/f");
+    let mut concurrent: Vec<_> = gets.iter().map(|r| r.concurrent).collect();
+    concurrent.sort();
+    assert_eq!(concurrent, [1, 2, 3]);
+    let mut connections: Vec<_> = gets.iter().map(|r| r.connection).collect();
+    connections.sort();
+    connections.dedup();
+    assert_eq!(connections.len(), 3);
+
+    // Two requests on one kept-alive connection share its number, and a
+    // finished body no longer counts.
+    let mut stream = TcpStream::connect(server.addr()).unwrap();
+    for _ in 0..2 {
+        stream
+            .write_all(b"HEAD /f HTTP/1.1\r\nHost: t\r\n\r\n")
+            .unwrap();
+        let mut head = [0u8; 1024];
+        let _ = stream.read(&mut head).unwrap();
+    }
+    let heads: Vec<_> = server
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "HEAD")
+        .collect();
+    assert_eq!(heads.len(), 2);
+    assert_eq!(heads[0].connection, heads[1].connection);
+    assert!(heads.iter().all(|r| r.concurrent == 0));
+}

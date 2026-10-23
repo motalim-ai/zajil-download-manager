@@ -9,6 +9,8 @@ mod engine;
 mod http_date;
 pub mod naming;
 pub mod sanitize;
+mod segmented;
 pub mod state;
 
 pub use engine::{Engine, Error, Event, Finished, Options, RestartReason};
+pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};

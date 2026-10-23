@@ -15,7 +15,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
-use zajil_core::{Engine, Error, Event, Finished, Options, RestartReason};
+use zajil_core::{
+    DEFAULT_CONNECTIONS, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options, RestartReason,
+};
 use zajil_platform::shell::{self, ShellCommand};
 use zajil_platform::{AppPaths, SystemPaths};
 
@@ -33,6 +35,17 @@ const EXIT_RESUMABLE: u8 = 3;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// Connections for the download, 1 to 32. A file is split only if its
+    /// server allows it.
+    #[arg(
+        short,
+        long,
+        global = true,
+        value_name = "N",
+        default_value_t = DEFAULT_CONNECTIONS as u16,
+        value_parser = clap::value_parser!(u16).range(1..=MAX_CONNECTIONS as i64)
+    )]
+    connections: u16,
 }
 
 #[derive(Debug, Subcommand)]
@@ -61,11 +74,15 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
-    runtime.block_on(run(cli.command))
+    runtime.block_on(run(cli.command, cli.connections.into()))
 }
 
-async fn run(command: Command) -> ExitCode {
-    let engine = match Engine::new(Options::default()) {
+async fn run(command: Command, connections: usize) -> ExitCode {
+    let options = Options {
+        connections,
+        ..Options::default()
+    };
+    let engine = match Engine::new(options) {
         Ok(engine) => engine,
         Err(err) => return fail(&err.to_string()),
     };
