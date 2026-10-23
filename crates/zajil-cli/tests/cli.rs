@@ -150,7 +150,8 @@ fn an_interrupted_get_exits_3_and_resume_finishes_it() {
     let work = tempfile::tempdir().unwrap();
     let dir_arg = dir.path().to_str().unwrap();
 
-    let out = zajil(&["get", &server.url("/f.bin"), "-d", dir_arg]);
+    // One connection, so the cut of the first response stops the download.
+    let out = zajil(&["get", &server.url("/f.bin"), "-c", "1", "-d", dir_arg]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     // The printed command is the one the user copies: run it in the shell
     // and resume with exactly the path the shell sees.
