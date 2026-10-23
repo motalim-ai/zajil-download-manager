@@ -384,13 +384,21 @@ async fn a_download_cancelled_before_any_byte_leaves_no_orphan_files() {
     let dir = tempfile::tempdir().unwrap();
     let engine = engine();
     let url = server.url("/f.bin");
-    let mut started = false;
-    let mut on_event = |event: Event| started |= matches!(event, Event::Started { .. });
+    // Cancel as soon as the files exist (`Started`), not after a fixed
+    // time: a slow CI took more than 500 ms to get there (M3, #32).
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let notify = started.clone();
+    let mut on_event = move |event: Event| {
+        if matches!(event, Event::Started { .. }) {
+            notify.notify_one();
+        }
+    };
     let download = engine.download(&url, dir.path(), &mut on_event);
-
-    let result = tokio::time::timeout(Duration::from_millis(500), download).await;
-    assert!(result.is_err(), "the download should still be waiting");
-    assert!(started, "the files existed before the cancellation");
+    tokio::select! {
+        result = download => panic!("the download should still be waiting: {result:?}"),
+        () = started.notified() => {}
+    }
+    // The download future is dropped here: cancelled.
     assert!(
         names_in(dir.path()).is_empty(),
         "{:?}",
