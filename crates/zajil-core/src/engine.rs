@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{self, HeaderMap};
 use reqwest::{Client, Response, StatusCode, Url, redirect};
-use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::naming::{ReserveError, reserve_target, suggested_name};
@@ -113,7 +112,19 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
-        let client = build_client(&options)?;
+        let client = build_client(&options, &[])?;
+        Ok(Engine { client, options })
+    }
+
+    /// **Test builds only.** Like [`Engine::new`], but also trusts the
+    /// certificate authority `ca_der` (DER), next to the system store.
+    ///
+    /// Compiled only with the `test-support` feature, which only
+    /// `dev-dependencies` enable: the shipped `zajil` has no way to add a
+    /// trusted root, and CI checks that its release build lacks the feature.
+    #[cfg(feature = "test-support")]
+    pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
+        let client = build_client(&options, &[ca_der.to_vec()])?;
         Ok(Engine { client, options })
     }
 
@@ -393,15 +404,12 @@ impl Transfer {
     }
 }
 
-fn build_client(options: &Options) -> Result<Client, Error> {
-    // rustls with the `ring` provider and the operating system's certificate
-    // store and checks. Nothing here can turn verification off.
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let tls = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .and_then(|builder| builder.with_platform_verifier())
-        .map_err(|err| io::Error::other(format!("TLS setup failed: {err}")))?
-        .with_no_client_auth();
+fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Error> {
+    // rustls with the `ring` provider, and reqwest's built-in use of the
+    // operating system's certificate store and checks
+    // (`rustls-platform-verifier`). Nothing here can turn verification off.
+    // Installing fails harmlessly if a provider is already installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let max_redirects = options.max_redirects;
     let policy = redirect::Policy::custom(move |attempt| {
@@ -418,8 +426,13 @@ fn build_client(options: &Options) -> Result<Client, Error> {
         }
     });
 
-    Client::builder()
-        .tls_backend_preconfigured(tls)
+    let mut builder = Client::builder().tls_backend_rustls();
+    for der in extra_roots {
+        // Test builds only (see `Engine::with_test_root`).
+        builder =
+            builder.tls_certs_merge([reqwest::Certificate::from_der(der).map_err(Error::Http)?]);
+    }
+    builder
         .redirect(policy)
         .connect_timeout(options.connect_timeout)
         .read_timeout(options.idle_timeout)

@@ -23,7 +23,7 @@
 | `http-body-util` | 0.1.5 | MIT | `zajil-testserver` (اختبار فقط) | إرسال الجسم على دفعات، وقطعه في المنتصف | M1 |
 | `bytes` | 1.12.1 | MIT | `zajil-testserver` (اختبار فقط) | مخازن البيانات | M1 |
 | `reqwest` | 0.13.5 | MIT أو Apache-2.0 | `zajil-core` | عميل HTTP: التحويلات، والمهلات، والبث. **دون الميزات الافتراضية**: rustls دون مزوّد مدمج (نضع `ring`)، ودون بروكسي النظام (M3)، ودون فك الضغط | M1 |
-| `rustls-platform-verifier` | 0.7.1 | MIT أو Apache-2.0 | `zajil-core` | التحقق من الشهادات بمخزن النظام وقواعده (ADR-0003). يعتمد في لينكس على `rustls-native-certs` و`openssl-probe` (MIT أو Apache-2.0)، ولا يستخدم OpenSSL نفسه | M1 |
+| `rustls-platform-verifier` | 0.7.1 | MIT أو Apache-2.0 | عبر `reqwest` | التحقق من الشهادات بمخزن النظام وقواعده (ADR-0003). `reqwest` يستخدمه تلقائيًا، ونحن نضع مزوّد التشفير `ring`. يعتمد في لينكس على `rustls-native-certs` و`openssl-probe` (MIT أو Apache-2.0)، ولا يستخدم OpenSSL نفسه | M1 |
 | `percent-encoding` | 2.3.2 | MIT أو Apache-2.0 | `zajil-core` | فك ترميز اسم الملف من الرابط ومن `filename*` (RFC 8187) | M1 |
 | `rustls` | 0.23.46 | Apache-2.0 أو ISC أو MIT | `zajil-core` و`zajil-testserver` | TLS. **بمزوّد التشفير `ring` فقط** | M1 |
 | `ring` | 0.17.14 | Apache-2.0 و ISC | عبر `rustls` و`rcgen` | مزوّد التشفير. اخترناه بدل `aws-lc-rs` لأن ترخيص `aws-lc-sys` يتضمن رخصة OpenSSL غير المتوافقة مع GPL-3.0 | M1 |

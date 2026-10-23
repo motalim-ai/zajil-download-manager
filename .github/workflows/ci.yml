@@ -62,6 +62,26 @@ jobs:
         run: cargo build --workspace --all-targets --locked
       - name: Test
         run: cargo test --workspace --locked
+      # `test-support` lets tests trust their temporary CA. Only
+      # dev-dependencies may enable it; a release build must not contain it.
+      - name: Release build has no test-only features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --workspace --bins
+          # Write the graph to a file first: if `cargo tree` itself fails
+          # (for example after a rename), `set -e` stops the step here
+          # instead of letting an empty search look like success.
+          cargo tree --locked --workspace -e normal,build,features -i zajil-core > release-features.txt
+          if ! grep -q '^zajil-core v' release-features.txt; then
+            echo "::error::cargo tree did not list zajil-core; the check cannot run"
+            exit 1
+          fi
+          if grep 'test-support' release-features.txt; then
+            echo "::error::a release build enables zajil-core/test-support"
+            exit 1
+          fi
+          echo "zajil-core/test-support is off in release builds"
 
   licenses:
     name: Licenses & advisories (cargo-deny)

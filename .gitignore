@@ -17,3 +17,6 @@ Thumbs.db
 # Never commit third-party installers (clean-room rule)
 *.exe
 *.msi
+
+# Written by the CI release-feature check when run locally
+release-features.txt

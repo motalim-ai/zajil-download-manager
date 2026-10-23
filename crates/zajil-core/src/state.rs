@@ -204,6 +204,8 @@ impl DownloadState {
             file.write_all(&json)?;
             file.sync_all()?;
             drop(file);
+            #[cfg(feature = "test-support")]
+            test_hooks::after_temporary_written(&tmp);
             zajil_platform::fs::replace_file(&tmp, path)
         })();
         if let Err(err) = written {
@@ -298,6 +300,37 @@ fn write_canonical(value: &serde_json::Value, out: &mut String) {
             out.push('}');
         }
         scalar => out.push_str(&serde_json::to_string(scalar).expect("scalar serializes")),
+    }
+}
+
+/// **Test builds only** (`test-support` feature): a hook called right after
+/// the temporary state file is written and closed, before it replaces the
+/// state file. That is the moment an antivirus scans a new file, so tests
+/// use it to hold the file the way a scanner does.
+#[cfg(feature = "test-support")]
+pub mod test_hooks {
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    type Hook = Box<dyn Fn(&Path) + Send + Sync>;
+
+    static AFTER_TEMPORARY_WRITTEN: Mutex<Option<Hook>> = Mutex::new(None);
+
+    /// Sets (or with `None`, clears) the hook. It is global: tests that use
+    /// it must run in their own test binary.
+    pub fn set_after_temporary_written(hook: Option<Hook>) {
+        *AFTER_TEMPORARY_WRITTEN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = hook;
+    }
+
+    pub(crate) fn after_temporary_written(tmp: &Path) {
+        if let Some(hook) = &*AFTER_TEMPORARY_WRITTEN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+        {
+            hook(tmp);
+        }
     }
 }
 
