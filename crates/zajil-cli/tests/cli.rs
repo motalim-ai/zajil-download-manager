@@ -436,16 +436,19 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
     for secret in ["u:p@", ":p@", "SECRET-TOKEN"] {
         assert!(!stderr.contains(secret), "{secret} printed: {stderr}");
     }
-    // The two files to delete and the folder, as the engine knows them.
+    // The two files to delete, as the engine knows them: compare the real
+    // paths, since Windows may show a folder by its long or short name.
     let shown = |path: &Path| {
-        stderr
-            .lines()
-            .any(|line| line.trim_start_matches("zajil:").trim() == path.to_str().unwrap())
+        let real = path.canonicalize().unwrap();
+        stderr.lines().any(|line| {
+            let printed = line.trim_start_matches("zajil:").trim();
+            Path::new(printed)
+                .canonicalize()
+                .is_ok_and(|printed| printed == real)
+        })
     };
-    let real_state = state_file.canonicalize().unwrap();
-    let real_part = part_file.canonicalize().unwrap();
-    assert!(shown(&real_state) || shown(&state_file), "{stderr}");
-    assert!(shown(&real_part) || shown(&part_file), "{stderr}");
+    assert!(shown(&state_file), "{stderr}");
+    assert!(shown(&part_file), "{stderr}");
     assert!(stderr.contains("`--dir` set to"), "{stderr}");
 
     // Follow the steps: delete both files, run the same `zajil get`.
