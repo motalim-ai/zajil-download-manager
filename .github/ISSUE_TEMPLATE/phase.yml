@@ -1,0 +1,35 @@
+name: "🗺️ مرحلة من الـ Roadmap (Roadmap phase)"
+description: "Issue لمرحلة كاملة (M1–M8) — للمشرفين. One issue per roadmap phase (maintainers)."
+labels: ["phase"]
+body:
+  - type: input
+    id: phase
+    attributes:
+      label: "المرحلة (Phase)"
+      placeholder: "M1 — محرّك التحميل: اتصال واحد واستكمال"
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "ما تحتويه (Scope)"
+      description: "انسخه من docs/ROADMAP.md."
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: "شرط النجاح — اختبارات على الأنظمة الثلاثة (Exit criteria)"
+      description: "قائمة اختيار؛ لا تُغلق المرحلة قبل اكتمالها."
+      value: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: out
+    attributes:
+      label: "خارج المرحلة (Out of scope)"
+  - type: textarea
+    id: prs
+    attributes:
+      label: "الـ Pull Requests المرتبطة (Linked PRs)"

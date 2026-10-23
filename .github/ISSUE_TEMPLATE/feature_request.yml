@@ -1,0 +1,31 @@
+name: "💡 اقتراح ميزة (Feature request)"
+description: "فكرة لتحسين زاجِل — An idea to improve Zajil"
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: "ما المشكلة التي تحلها؟ (What problem does it solve?)"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "الاقتراح (Proposal)"
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: "قبل الإرسال (Before submitting)"
+      options:
+        - label: "الميزة يمكن أن تعمل على ويندوز وماك ولينكس. (Works on Windows, macOS and Linux.)"
+          required: true
+        - label: "الاقتراح لا يعتمد على تحليل IDM أو نسخ أي شيء منه (قاعدة الغرفة النظيفة). (Clean-room rule respected.)"
+          required: true
+        - label: "الميزة لا تتجاوز DRM ولا تضيف تتبعًا. (No DRM circumvention, no telemetry.)"
+          required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "بدائل فكّرت فيها (Alternatives considered)"

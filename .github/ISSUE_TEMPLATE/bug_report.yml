@@ -1,0 +1,58 @@
+name: "🐞 بلاغ عن خطأ (Bug report)"
+description: "شيء لا يعمل كما يجب — Something isn't working"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        شكرًا على البلاغ! إذا كانت المشكلة **ثغرة أمنية** فلا تكتبها هنا؛ اتبع SECURITY.md.
+        Thanks! For **security issues**, do not use this form — see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: "ماذا حدث؟ (What happened?)"
+      description: "صف المشكلة بوضوح."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "خطوات إعادة المشكلة (Steps to reproduce)"
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "ماذا كنت تتوقع؟ (Expected behavior)"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: "نظام التشغيل (OS)"
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "الإصدار أو الـ commit (Version / commit)"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: "المتصفح وإصداره، إن كان له علاقة (Browser, if relevant)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: "السجلات (Logs)"
+      description: "احذف أي روابط خاصة أو كوكيز أو بيانات شخصية قبل اللصق. Remove private URLs, cookies and personal data."
+      render: text
