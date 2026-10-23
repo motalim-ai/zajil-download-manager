@@ -708,6 +708,12 @@ mod tests {
         write_at(&file, b"0123", 0).unwrap();
         write_at(&file, b"4567", 4).unwrap();
         file.sync_all().unwrap();
+        // While the lock is held, Windows refuses even reads through another
+        // handle: the reason every connection writes through this one.
+        if cfg!(windows) {
+            assert!(fs::read(&path).is_err());
+        }
+        drop(file);
         assert_eq!(fs::read(&path).unwrap(), b"0123456789ab");
     }
 
