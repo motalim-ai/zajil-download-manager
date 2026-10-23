@@ -344,10 +344,20 @@ mod imp {
             let err = io::Error::last_os_error();
             // SAFETY: `empty` came from `acl_init` and is freed once.
             unsafe { acl_free(empty) };
-            if result != 0 {
+            if result != 0 && !unsupported(&err) {
                 return Err(err);
             }
             Ok(())
+        }
+
+        /// File systems without access lists (FAT32 and exFAT on macOS)
+        /// refuse the calls: nothing can be inherited there (found by CI
+        /// on the FAT32 test volume).
+        fn unsupported(err: &io::Error) -> bool {
+            matches!(
+                err.raw_os_error(),
+                Some(libc::ENOTSUP) | Some(libc::EOPNOTSUPP)
+            )
         }
 
         /// Whether `file` has any access list entry at all.
@@ -356,8 +366,8 @@ mod imp {
             let list = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
             if list.is_null() {
                 let err = io::Error::last_os_error();
-                // No list at all.
-                return if err.raw_os_error() == Some(libc::ENOENT) {
+                // No list at all, or none possible on this file system.
+                return if err.raw_os_error() == Some(libc::ENOENT) || unsupported(&err) {
                     Ok(false)
                 } else {
                     Err(err)
