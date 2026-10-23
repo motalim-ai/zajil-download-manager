@@ -53,6 +53,7 @@ use crate::engine::{
     EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, Stop, blocking,
     changed_from, finish_download, http_error, parse_content_range, save_state,
 };
+use crate::limit::Limits;
 use crate::retry;
 use crate::state::{DownloadState, Segment, Validator, state_path};
 
@@ -132,6 +133,8 @@ pub(crate) struct Job {
     /// The caller's request to stop: every connection ends, what is on
     /// disk is recorded, and only then does [`run`] return.
     pub stop: Stop,
+    /// The speed limits every connection goes through.
+    pub limits: Limits,
     /// The URL range requests go to.
     pub url: Url,
     /// The `If-Range` value: a strong validator (see `if_range_value`).
@@ -159,6 +162,7 @@ pub(crate) async fn run(
         save_interval,
         max_failures,
         stop: user_stop,
+        limits,
         url,
         if_range,
         final_path,
@@ -183,6 +187,7 @@ pub(crate) async fn run(
         board.active = 1;
     }
     let ctx = Arc::new(Ctx {
+        limits,
         client,
         url,
         if_range,
@@ -373,6 +378,7 @@ async fn checkpoint(
 
 /// What workers share.
 struct Ctx {
+    limits: Limits,
     client: Client,
     url: Url,
     if_range: String,
@@ -1065,13 +1071,25 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
         }
         batch.extend_from_slice(&chunk);
         stream.next += chunk.len() as u64;
-        if batch.len() >= WRITE_BATCH || last_write.elapsed() >= WRITE_AFTER {
-            if !write_batch(ctx, id, stream, &mut batch, &mut batch_at).await? {
-                // The segment is full and the next one is not ours to take,
-                // or another connection took this one.
-                ctx.board().release(id, stream.segment);
-                return Ok(());
-            }
+        // Past the end of our segment (it may have been split): write now,
+        // to learn at once whether this stream goes on into the next one,
+        // rather than read on into bytes it may have to drop (M3: with a
+        // speed limit, every byte read counts).
+        let past_end = {
+            let board = ctx.board();
+            board
+                .index_of(stream.segment)
+                .is_some_and(|index| stream.next > board.end_of(index) + 1)
+        };
+        if (past_end || batch.len() >= WRITE_BATCH || last_write.elapsed() >= WRITE_AFTER)
+            && !write_batch(ctx, id, stream, &mut batch, &mut batch_at).await?
+        {
+            // The segment is full and the next one is not ours to take,
+            // or another connection took this one.
+            ctx.board().release(id, stream.segment);
+            return Ok(());
+        }
+        if past_end || batch.is_empty() {
             last_write = Instant::now();
         }
     }
@@ -1120,17 +1138,27 @@ async fn write_batch(
             result
         })
         .await;
-        let mut board = ctx.board();
-        match written {
-            Ok(()) => board.wrote(stream.segment, granted),
-            Err(err) => {
-                board.unreserve(stream.segment, granted);
-                return Err(format!("could not write the file: {err}"));
+        {
+            let mut board = ctx.board();
+            match written {
+                Ok(()) => board.wrote(stream.segment, granted),
+                Err(err) => {
+                    board.unreserve(stream.segment, granted);
+                    return Err(format!("could not write the file: {err}"));
+                }
             }
         }
-        drop(board);
         let _ = ctx.events.send(Message::Wrote(granted));
         offset += granted as usize;
+        // The speed limits count what is saved: this connection waits for
+        // it before it reads more. Bytes read past the end of a part and
+        // dropped (about one piece per stream at most) are not counted, so
+        // the file arrives at the limit and the wire may carry a little
+        // more.
+        tokio::select! {
+            () = ctx.limits.take(granted) => {}
+            _ = ctx.stop_requested() => {}
+        }
     }
     batch.clear();
     *batch_at = stream.next;

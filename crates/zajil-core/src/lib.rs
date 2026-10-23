@@ -7,6 +7,7 @@
 
 mod engine;
 mod http_date;
+pub mod limit;
 pub mod naming;
 pub mod queue;
 mod retry;

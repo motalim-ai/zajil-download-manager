@@ -31,6 +31,7 @@ use reqwest::{Client, Response, StatusCode, Url, redirect};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::http_date;
+use crate::limit::{Clock, Limits, SpeedLimit, SystemClock};
 use crate::naming::{ReserveError, reserve_target, suggested_name};
 use crate::sanitize::{ConfineError, MAX_NAME_BYTES, confine, sanitize_file_name};
 use crate::segmented::{self, Job, Outcome};
@@ -64,12 +65,15 @@ struct Attempt {
     furthest: u64,
     /// Set when the caller wants the download to stop ([`Stop`]).
     stop: Stop,
+    /// The speed limits every byte of this download goes through.
+    limits: Limits,
 }
 
 impl Attempt {
-    fn new(url: Option<&Url>, stop: &Stop) -> Self {
+    fn new(url: Option<&Url>, stop: &Stop, limits: &Limits) -> Self {
         Attempt {
             stop: stop.clone(),
+            limits: limits.clone(),
             restarts_left: MAX_RESTARTS,
             split: true,
             credentials: url
@@ -185,6 +189,14 @@ pub struct Options {
     /// download stops and can be resumed later. At least 1 (1 means no
     /// retry). The waits in between grow (`retry::backoff`).
     pub max_failures: u32,
+    /// A limit shared by every download of this engine and its clones:
+    /// the program-wide speed limit. Its rate can change while they run.
+    pub speed_limit: Option<SpeedLimit>,
+    /// Bytes per second for each download on its own.
+    pub download_limit: Option<u64>,
+    /// Where the limits take their time from (tests use a
+    /// [`crate::limit::ManualClock`]).
+    pub clock: Arc<dyn Clock>,
 }
 
 impl Default for Options {
@@ -197,6 +209,9 @@ impl Default for Options {
             connections: crate::DEFAULT_CONNECTIONS,
             min_segment_size: 1024 * 1024,
             max_failures: crate::retry::MAX_FAILURES,
+            speed_limit: None,
+            download_limit: None,
+            clock: Arc::new(SystemClock::default()),
         }
     }
 }
@@ -366,6 +381,45 @@ impl Engine {
         Ok(Engine { client, options })
     }
 
+    /// This engine, with `limit` shared by all its downloads (and those of
+    /// its clones) as the program-wide speed limit.
+    pub fn with_speed_limit(&self, limit: Option<SpeedLimit>) -> Engine {
+        let mut engine = self.clone();
+        engine.options.speed_limit = limit;
+        engine
+    }
+
+    /// The clock the engine's limits use.
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.options.clock.clone()
+    }
+
+    /// This engine, with `rate` bytes per second for each download (`None`:
+    /// no limit of its own). The program-wide limit stays shared.
+    pub fn with_download_limit(&self, rate: Option<u64>) -> Engine {
+        let mut engine = self.clone();
+        engine.options.download_limit = rate;
+        engine
+    }
+
+    /// The limits a new download goes through: the program's, shared, and
+    /// a fresh one of its own.
+    fn limits(&self) -> Limits {
+        let own = self
+            .options
+            .download_limit
+            .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()));
+        Limits {
+            limits: self
+                .options
+                .speed_limit
+                .iter()
+                .cloned()
+                .chain(own)
+                .collect(),
+        }
+    }
+
     /// Downloads `url` into the existing folder `dir`.
     pub async fn download(
         &self,
@@ -393,7 +447,7 @@ impl Engine {
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let url = parse_url(url)?;
-        let mut attempt = Attempt::new(Some(&url), stop);
+        let mut attempt = Attempt::new(Some(&url), stop, &self.limits());
         let response = self
             .retrying(&mut attempt, on_event, || self.get(url.clone(), None))
             .await?;
@@ -458,6 +512,7 @@ impl Engine {
         stop: &Stop,
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
+        let limits = self.limits();
         // The state file and everything next to it are untrusted: they may
         // come from another machine. Work with an absolute path inside the
         // real folder, with a name that sanitizing leaves unchanged, and
@@ -520,7 +575,7 @@ impl Engine {
                     state,
                     RestartReason::PartFileMissing,
                     None,
-                    Attempt::new(None, stop),
+                    Attempt::new(None, stop, &limits),
                     on_event,
                 )
                 .await;
@@ -555,7 +610,7 @@ impl Engine {
                     state,
                     reason,
                     None,
-                    Attempt::new(None, stop),
+                    Attempt::new(None, stop, &limits),
                     on_event,
                 )
                 .await;
@@ -563,11 +618,18 @@ impl Engine {
         let if_range = if_range.expect("checked above");
         if state.segments.len() > 1 {
             return self
-                .resume_segments(final_path, part, state, if_range, stop, on_event)
+                .resume_segments(
+                    final_path,
+                    part,
+                    state,
+                    if_range,
+                    Attempt::new(None, stop, &limits),
+                    on_event,
+                )
                 .await;
         }
 
-        let mut attempt = Attempt::new(None, stop);
+        let mut attempt = Attempt::new(None, stop, &limits);
         let response = self
             .get_with_fallback(&state, Some((done, None, if_range)), &mut attempt, on_event)
             .await
@@ -635,7 +697,7 @@ impl Engine {
         part: File,
         state: DownloadState,
         if_range: String,
-        stop: &Stop,
+        attempt: Attempt,
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let missing = state
@@ -648,7 +710,7 @@ impl Engine {
             return finish_download(part, state, final_path, on_event).await;
         };
         let (from, to) = (segment.start + segment.done, segment.end.expect("checked"));
-        let mut attempt = Attempt::new(None, stop);
+        let mut attempt = attempt;
         let response = self
             .get_with_fallback(
                 &state,
@@ -682,6 +744,7 @@ impl Engine {
                     save_interval: self.options.save_interval,
                     max_failures: self.options.max_failures,
                     stop: attempt.stop.clone(),
+                    limits: attempt.limits.clone(),
                     url: response.url().clone(),
                     if_range,
                     final_path,
@@ -853,6 +916,7 @@ impl Engine {
                 save_interval: self.options.save_interval,
                 max_failures: self.options.max_failures,
                 stop: attempt.stop.clone(),
+                limits: attempt.limits.clone(),
                 url: attempt.authorize(response.url()),
                 if_range,
                 final_path,
@@ -923,7 +987,10 @@ impl Engine {
         });
         loop {
             let stop = attempt.stop.clone();
-            let reason = match transfer.pump(&mut response, &stop, on_event).await {
+            let reason = match transfer
+                .pump(&mut response, &stop, &attempt.limits, on_event)
+                .await
+            {
                 Ok(()) => return transfer.finish(on_event).await,
                 Err(Halt::Fatal(reason)) => return Err(transfer.interrupt(reason).await),
                 Err(Halt::Requested) => return Err(transfer.stopped().await),
@@ -1288,6 +1355,7 @@ impl Transfer {
         &mut self,
         response: &mut Response,
         stop: &Stop,
+        limits: &Limits,
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<(), Halt> {
         let total = self.state.content_length;
@@ -1317,6 +1385,11 @@ impl Transfer {
                 done: self.done(),
                 total,
             });
+            // The speed limits: wait before reading more.
+            tokio::select! {
+                () = limits.take(chunk.len() as u64) => {}
+                () = stop.requested() => return Err(Halt::Requested),
+            }
             if self.last_save.elapsed() >= self.save_interval
                 && let Err(err) = self.checkpoint().await
             {

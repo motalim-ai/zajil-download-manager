@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use super::store::{QueueStore, QueuesFile, Status, StoreError};
+use crate::limit::SpeedLimit;
 use crate::{Engine, Error, Event, Finished, Stop};
 
 /// What a runner reports. Interfaces show these; the runner never prints.
@@ -116,6 +117,10 @@ impl Runner {
         })
         .await?;
 
+        // The program-wide limit: one bucket for every download of this
+        // run, its rate read from the settings at each look.
+        let speed_limit = SpeedLimit::new(None, self.engine.clock());
+        let engine = self.engine.with_speed_limit(Some(speed_limit.clone()));
         let (events, mut messages) = mpsc::unbounded_channel::<(u64, Event)>();
         let mut tasks: JoinSet<Ended> = JoinSet::new();
         let mut running: HashMap<u64, Running> = HashMap::new();
@@ -130,10 +135,18 @@ impl Runner {
                 look = false;
                 let store = self.store.clone();
                 let queues = blocking(move || store.load()).await?;
+                speed_limit.set_rate(queues.settings.speed_limit);
                 self.stop_unwanted(&queues, &mut running);
                 if !summary.stopped {
-                    self.start_waiting(&queues, &mut running, &mut tasks, &events, on_event)
-                        .await?;
+                    self.start_waiting(
+                        &engine,
+                        &queues,
+                        &mut running,
+                        &mut tasks,
+                        &events,
+                        on_event,
+                    )
+                    .await?;
                 }
                 if running.is_empty() && (summary.stopped || !has_waiting(&queues)) {
                     return Ok(summary);
@@ -182,6 +195,7 @@ impl Runner {
     /// Starts waiting items, in order, while their queue has room.
     async fn start_waiting(
         &self,
+        engine: &Engine,
         queues: &QueuesFile,
         running: &mut HashMap<u64, Running>,
         tasks: &mut JoinSet<Ended>,
@@ -226,7 +240,7 @@ impl Runner {
                     item: id,
                 });
                 let stop = Stop::new();
-                let engine = self.engine.clone();
+                let engine = engine.with_download_limit(item.limit);
                 let events = events.clone();
                 let task_stop = stop.clone();
                 let task = tasks.spawn(async move {

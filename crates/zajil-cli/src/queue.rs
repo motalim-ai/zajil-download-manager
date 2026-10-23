@@ -30,6 +30,10 @@ pub enum QueueCommand {
         /// Folder to save into. Defaults to the system Downloads folder.
         #[arg(short, long, value_name = "FOLDER")]
         dir: Option<PathBuf>,
+        /// A speed limit for each of these downloads, like `zajil get
+        /// --limit`. The limit for the whole program applies too.
+        #[arg(long, value_name = "RATE", value_parser = crate::rate)]
+        limit: Option<u64>,
     },
     /// Show the queues and their downloads.
     List,
@@ -62,6 +66,14 @@ pub enum QueueCommand {
         )]
         max_active: Option<u32>,
     },
+    /// Set or remove the speed limit for all downloads together.
+    SpeedLimit {
+        /// Bytes per second, or with K, M or G (such as 2M); `none` removes
+        /// the limit. A running `zajil queue run` applies it within a
+        /// second.
+        #[arg(value_name = "RATE|none", value_parser = limit_or_none)]
+        rate: LimitSetting,
+    },
     /// Run every queue until nothing is left to download. Ctrl+C stops the
     /// downloads after recording their progress; run it again to go on.
     Run,
@@ -70,7 +82,13 @@ pub enum QueueCommand {
 /// The commands that only change or read the queues file.
 pub fn manage(store: &QueueStore, command: QueueCommand) -> ExitCode {
     let result = match command {
-        QueueCommand::Add { urls, queue, dir } => add(store, &urls, &queue, dir.as_deref()),
+        QueueCommand::Add {
+            urls,
+            queue,
+            dir,
+            limit,
+        } => add(store, &urls, &queue, dir.as_deref(), limit),
+        QueueCommand::SpeedLimit { rate } => speed_limit(store, rate.0),
         QueueCommand::List => list(store),
         QueueCommand::Pause { ids } => set_status(store, &ids, Status::Paused, "paused"),
         QueueCommand::Resume { ids } => set_status(store, &ids, Status::Waiting, "waiting"),
@@ -84,16 +102,33 @@ pub fn manage(store: &QueueStore, command: QueueCommand) -> ExitCode {
     }
 }
 
+/// A rate, or no limit.
+#[derive(Debug, Clone, Copy)]
+pub struct LimitSetting(Option<u64>);
+
+fn limit_or_none(text: &str) -> Result<LimitSetting, String> {
+    if text.eq_ignore_ascii_case("none") {
+        Ok(LimitSetting(None))
+    } else {
+        crate::rate(text).map(|rate| LimitSetting(Some(rate)))
+    }
+}
+
 fn add(
     store: &QueueStore,
     urls: &[String],
     queue: &str,
     dir: Option<&Path>,
+    limit: Option<u64>,
 ) -> Result<(), StoreError> {
     let dir = crate::download_dir(dir).map_err(|message| StoreError::Io(io_error(message)))?;
     let ids = store.update(|queues| {
         urls.iter()
-            .map(|url| queues.add(queue, url, &dir))
+            .map(|url| {
+                let id = queues.add(queue, url, &dir)?;
+                queues.item_mut(id).expect("just added").limit = limit;
+                Ok(id)
+            })
             .collect::<Result<Vec<_>, _>>()
     })?;
     for (id, url) in ids.iter().zip(urls) {
@@ -102,8 +137,25 @@ fn add(
     Ok(())
 }
 
+fn speed_limit(store: &QueueStore, rate: Option<u64>) -> Result<(), StoreError> {
+    store.update(|queues| {
+        queues.settings.speed_limit = rate;
+        Ok(())
+    })?;
+    println!("{}", describe_limit(rate));
+    Ok(())
+}
+
+fn describe_limit(rate: Option<u64>) -> String {
+    match rate {
+        Some(rate) => format!("Speed limit for all downloads: {}/s", human_bytes(rate)),
+        None => "No speed limit for all downloads".to_owned(),
+    }
+}
+
 fn list(store: &QueueStore) -> Result<(), StoreError> {
     let queues = store.load()?;
+    println!("{}", describe_limit(queues.settings.speed_limit));
     for queue in &queues.queues {
         println!(
             "Queue {} ({} at once, {} downloads)",
@@ -112,8 +164,12 @@ fn list(store: &QueueStore) -> Result<(), StoreError> {
             queue.items.len()
         );
         for item in &queue.items {
+            let limit = item
+                .limit
+                .map(|rate| format!("  (limit {}/s)", human_bytes(rate)))
+                .unwrap_or_default();
             println!(
-                "  {:>4}  {:<8} {:>6}  {}",
+                "  {:>4}  {:<8} {:>6}  {}{limit}",
                 item.id,
                 status_name(item.status),
                 progress(item),

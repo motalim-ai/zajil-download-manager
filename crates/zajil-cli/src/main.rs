@@ -75,11 +75,18 @@ enum Command {
         /// Folder to save into. Defaults to the system Downloads folder.
         #[arg(short, long, value_name = "FOLDER")]
         dir: Option<PathBuf>,
+        /// Speed limit, in bytes per second, or with K, M or G (KiB/s,
+        /// MiB/s, GiB/s), such as 500K or 1.5M.
+        #[arg(long, value_name = "RATE", value_parser = rate)]
+        limit: Option<u64>,
     },
     /// Continue an interrupted download from its .zajil-state file.
     Resume {
         /// The `<name>.zajil-state` file next to the partial download.
         state_file: PathBuf,
+        /// Speed limit, like `zajil get --limit`.
+        #[arg(long, value_name = "RATE", value_parser = rate)]
+        limit: Option<u64>,
     },
     /// Manage and run download queues.
     Queue {
@@ -121,6 +128,15 @@ fn main() -> ExitCode {
     runtime.block_on(run(cli.command, cli.connections.into(), cli.tries))
 }
 
+/// A speed limit given on the command line (`zajil_core::limit::parse_rate`).
+fn rate(text: &str) -> Result<u64, String> {
+    zajil_core::limit::parse_rate(text).ok_or_else(|| {
+        format!(
+            "{text:?} is not a speed: use bytes per second, or K, M or G (such as 500K or 1.5M)"
+        )
+    })
+}
+
 fn options(connections: usize, tries: u32) -> Options {
     Options {
         connections,
@@ -150,17 +166,19 @@ async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
 
     let work = async {
         match &command {
-            Command::Get { url, dir } => {
+            Command::Get { url, dir, limit } => {
                 let dir = match download_dir(dir.as_deref()) {
                     Ok(dir) => dir,
                     Err(message) => return Err(Failure::Message(message)),
                 };
                 engine
+                    .with_download_limit(*limit)
                     .download(url, &dir, &mut |e| progress.show(e))
                     .await
                     .map_err(Failure::Engine)
             }
-            Command::Resume { state_file } => engine
+            Command::Resume { state_file, limit } => engine
+                .with_download_limit(*limit)
                 .resume(state_file, &mut |e| progress.show(e))
                 .await
                 .map_err(Failure::Engine),

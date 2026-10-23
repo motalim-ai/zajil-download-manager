@@ -52,11 +52,22 @@ pub struct QueuesFile {
     pub schema_version: u32,
     /// The id the next item gets. Ids are never reused.
     pub next_id: u64,
+    /// Settings for the whole program.
+    #[serde(default)]
+    pub settings: Settings,
     pub queues: Vec<Queue>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
     pub checksum: String,
+}
+
+/// Settings for the whole program.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Settings {
+    /// Bytes per second for all downloads together; `None`: no limit.
+    pub speed_limit: Option<u64>,
 }
 
 /// A named list of downloads, run in order.
@@ -87,6 +98,10 @@ pub struct Item {
     pub file: Option<PathBuf>,
     /// Why it failed or stopped, for the user.
     pub error: Option<String>,
+    /// Bytes per second for this download alone; `None`: no limit of its
+    /// own (the program's limit still applies).
+    #[serde(default)]
+    pub limit: Option<u64>,
     /// RFC 3339 time in UTC.
     pub added_at: String,
 }
@@ -155,6 +170,7 @@ impl QueuesFile {
             format: FORMAT.to_owned(),
             schema_version: SCHEMA_VERSION,
             next_id: 1,
+            settings: Settings::default(),
             queues: vec![Queue::new(DEFAULT_QUEUE)],
             updated_at: now_rfc3339(),
             checksum: String::new(),
@@ -209,6 +225,7 @@ impl QueuesFile {
             state_file: None,
             file: None,
             error: None,
+            limit: None,
             added_at: now_rfc3339(),
         };
         self.queue_or_new(queue)?.items.push(item);
@@ -233,6 +250,9 @@ impl QueuesFile {
     /// checksum matches: repeated or too large ids, repeated or invalid
     /// queue names, impossible limits.
     fn check_consistency(&self) -> Result<(), String> {
+        if self.settings.speed_limit == Some(0) {
+            return Err("a speed limit of 0".into());
+        }
         let mut names = std::collections::HashSet::new();
         let mut ids = std::collections::HashSet::new();
         for queue in &self.queues {
@@ -246,6 +266,9 @@ impl QueuesFile {
             for item in &queue.items {
                 if item.id >= self.next_id || !ids.insert(item.id) {
                     return Err(format!("impossible or repeated id {}", item.id));
+                }
+                if item.limit == Some(0) {
+                    return Err(format!("a speed limit of 0 for item {}", item.id));
                 }
             }
         }

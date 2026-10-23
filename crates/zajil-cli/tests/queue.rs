@@ -261,3 +261,79 @@ fn queue_run_downloads_everything_and_reports_failures() {
     assert!(list.contains("done") && list.contains("failed"), "{list}");
     assert!(list.contains("404"), "{list}");
 }
+
+/// The one test on the real clock (owner's decision on the M3 plan): every
+/// other limit test runs on a clock the test owns. This one checks that the
+/// program-wide limit set with `zajil queue speed-limit` reaches the
+/// downloads of `zajil queue run` and slows them on the real clock: 3 MiB
+/// at 1 MiB/s cannot take less than about 2.7 s (the server alone needs a
+/// fraction of a second). Only the lower bound is checked: a slow CI can
+/// only make it longer.
+#[test]
+fn the_real_clock_drives_the_limits() {
+    let server = TestServer::http();
+    let data = random_bytes(3 * MIB / 2, 620);
+    server.put("/f.bin", FileSpec::new(data.clone()));
+    let state = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let dir = downloads.path().to_str().unwrap();
+    for args in [
+        &["queue", "speed-limit", "1M"][..],
+        &["queue", "set", "--max-active", "2"],
+        &[
+            "queue",
+            "add",
+            "--dir",
+            dir,
+            &server.url("/f.bin"),
+            &server.url("/f.bin"),
+        ],
+    ] {
+        let out = zajil(state.path(), args);
+        assert!(out.status.success(), "{args:?}: {}", printed(&out));
+    }
+    let list = printed(&zajil(state.path(), &["queue", "list"]));
+    assert!(
+        list.contains("Speed limit for all downloads: 1.0 MiB/s"),
+        "{list}"
+    );
+
+    let started = Instant::now();
+    let out = zajil(state.path(), &["queue", "run"]);
+    let took = started.elapsed();
+    assert!(out.status.success(), "{}", printed(&out));
+    assert!(took >= Duration::from_millis(2600), "{took:?}");
+    for entry in fs::read_dir(downloads.path()).unwrap() {
+        assert_eq!(fs::read(entry.unwrap().path()).unwrap(), data);
+    }
+}
+
+#[test]
+fn speed_limits_are_checked_and_can_be_removed() {
+    let data = tempfile::tempdir().unwrap();
+    for (args, code) in [
+        (&["queue", "speed-limit", "fast"][..], 2),
+        (&["queue", "speed-limit", "0"], 2),
+        (&["get", "http://h/f", "--limit", "1X"], 2),
+        (&["queue", "add", "http://h/f", "--limit", "-1"], 2),
+        (&["queue", "speed-limit", "500K"], 0),
+        (&["queue", "add", "http://h/f", "--limit", "1.5M"], 0),
+    ] {
+        let out = zajil(data.path(), args);
+        assert_eq!(out.status.code(), Some(code), "{args:?}: {}", printed(&out));
+    }
+    let list = printed(&zajil(data.path(), &["queue", "list"]));
+    assert!(
+        list.contains("Speed limit for all downloads: 500.0 KiB/s"),
+        "{list}"
+    );
+    assert!(list.contains("(limit 1.5 MiB/s)"), "{list}");
+    let out = zajil(data.path(), &["queue", "speed-limit", "none"]);
+    assert!(
+        printed(&out).contains("No speed limit"),
+        "{}",
+        printed(&out)
+    );
+    let store = QueueStore::new(data.path());
+    assert_eq!(store.load().unwrap().settings.speed_limit, None);
+}
