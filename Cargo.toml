@@ -13,4 +13,7 @@ publish = false
 # reason in docs/DEPENDENCIES.md.
 [workspace.dependencies]
 dirs = "7.0.0"
+dunce = "1.0.5"
+icu_properties = "2.4.0"
 thiserror = "2.0.21"
+tempfile = "3.27.0"

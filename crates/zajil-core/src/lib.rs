@@ -1,4 +1,8 @@
 //! Zajil download engine.
 //!
-//! Placeholder crate for phase M0 (foundation). The engine is implemented
-//! starting in phase M1; see `docs/ROADMAP.md`.
+//! A UI-less library: it takes commands and reports events, and never prints
+//! or reads user settings (see `docs/ARCHITECTURE.md`).
+
+#![forbid(unsafe_code)]
+
+pub mod sanitize;
