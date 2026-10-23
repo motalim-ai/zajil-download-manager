@@ -56,6 +56,67 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # USB drives use FAT32 or exFAT, where hard links and (on macOS exFAT)
+      # the no-replace rename are refused. Tests in zajil-platform and
+      # zajil-core run on a small image of each and fail on CI without them.
+      - name: Mount FAT32 and exFAT test volumes (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends dosfstools exfatprogs
+          truncate -s 256M "$RUNNER_TEMP/fat32.img" "$RUNNER_TEMP/exfat.img"
+          mkfs.vfat -F 32 -n ZFAT32 "$RUNNER_TEMP/fat32.img"
+          mkfs.exfat -L ZEXFAT "$RUNNER_TEMP/exfat.img"
+          sudo mkdir -p /mnt/zfat32 /mnt/zexfat
+          sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/fat32.img" /mnt/zfat32
+          sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/exfat.img" /mnt/zexfat
+          test "$(findmnt -no FSTYPE /mnt/zfat32)" = vfat
+          test "$(findmnt -no FSTYPE /mnt/zexfat)" = exfat
+          echo "ZAJIL_TEST_FAT32=/mnt/zfat32" >> "$GITHUB_ENV"
+          echo "ZAJIL_TEST_EXFAT=/mnt/zexfat" >> "$GITHUB_ENV"
+      - name: Mount FAT32 and exFAT test volumes (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          hdiutil create -quiet -size 256m -fs "MS-DOS FAT32" -volname ZFAT32 "$RUNNER_TEMP/fat32.dmg"
+          hdiutil create -quiet -size 256m -fs ExFAT -volname ZEXFAT "$RUNNER_TEMP/exfat.dmg"
+          hdiutil attach -quiet -nobrowse "$RUNNER_TEMP/fat32.dmg"
+          hdiutil attach -quiet -nobrowse "$RUNNER_TEMP/exfat.dmg"
+          mount | grep -q '/Volumes/ZFAT32 (msdos'
+          mount | grep -q '/Volumes/ZEXFAT (exfat'
+          echo "ZAJIL_TEST_FAT32=/Volumes/ZFAT32" >> "$GITHUB_ENV"
+          echo "ZAJIL_TEST_EXFAT=/Volumes/ZEXFAT" >> "$GITHUB_ENV"
+      - name: Mount FAT32 and exFAT test volumes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fat = Join-Path $env:RUNNER_TEMP 'fat32.vhdx'
+          $exfat = Join-Path $env:RUNNER_TEMP 'exfat.vhdx'
+          $script = Join-Path $env:RUNNER_TEMP 'volumes.txt'
+          @(
+            "create vdisk file=`"$fat`" maximum=256 type=expandable"
+            "select vdisk file=`"$fat`""
+            'attach vdisk'
+            'convert mbr'
+            'create partition primary'
+            'format fs=fat32 quick label=ZFAT32'
+            'assign letter=Y'
+            "create vdisk file=`"$exfat`" maximum=256 type=expandable"
+            "select vdisk file=`"$exfat`""
+            'attach vdisk'
+            'convert mbr'
+            'create partition primary'
+            'format fs=exfat quick label=ZEXFAT'
+            'assign letter=Z'
+          ) | Set-Content -Encoding ascii $script
+          diskpart /s $script
+          if ($LASTEXITCODE -ne 0) { throw "diskpart failed: $LASTEXITCODE" }
+          if ((Get-Volume -DriveLetter Y).FileSystemType -ne 'FAT32') { throw 'Y: is not FAT32' }
+          if ((Get-Volume -DriveLetter Z).FileSystemType -ne 'exFAT') { throw 'Z: is not exFAT' }
+          'ZAJIL_TEST_FAT32=Y:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          'ZAJIL_TEST_EXFAT=Z:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build

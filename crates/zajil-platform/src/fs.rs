@@ -6,6 +6,10 @@
 //!   download).
 //! - [`open_regular_nofollow`]: open a file only if it is a plain file, never
 //!   through a symbolic link, junction or hard link.
+//! - [`write_at`]: write at a byte offset through one shared handle (many
+//!   connections writing one download).
+//! - [`allocate`] and [`available_space`]: size a new download and check
+//!   that it fits before any data arrives.
 //!
 //! On Windows, renames retry briefly when another program (antivirus, search
 //! indexer, OneDrive, backup tools) holds one of the files open, and pass
@@ -66,8 +70,23 @@ pub fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 /// Renames `from` to `to`, failing with [`io::ErrorKind::AlreadyExists`] if
-/// `to` exists. It never replaces an existing file, even if one appears at
-/// the last moment.
+/// `to` exists. It never replaces an existing file that is there when the
+/// call starts.
+///
+/// The rename itself refuses to replace (`renameat2(RENAME_NOREPLACE)` on
+/// Linux, `renamex_np(RENAME_EXCL)` on macOS, `MoveFileExW` without
+/// `MOVEFILE_REPLACE_EXISTING` on Windows), so even a file that appears at the
+/// last moment is safe. Only where the file system refuses that call, a hard
+/// link and then removing the old name is used instead, which is just as
+/// safe.
+///
+/// **Last resort, with a documented race.** Some file systems refuse both:
+/// exFAT on macOS (tested), and FAT or exFAT with older kernels. Only then,
+/// the name is checked and a plain `rename` follows ([`check_then_rename`]).
+/// A file that another program creates at `to` in the instant between the
+/// check and the rename would be replaced. Zajil's own downloads cannot race
+/// each other there: a download only renames to a name whose `.zajil-part`
+/// it holds, or to a free name nobody else reserved.
 pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     with_retry(|| imp::rename_noreplace(from, to))
 }
@@ -97,6 +116,74 @@ pub fn open_like_a_scanner(path: &Path) -> io::Result<File> {
     imp::open_like_a_scanner(path)
 }
 
+/// Writes all of `buf` at byte `offset` of `file`.
+///
+/// Many connections write one download through the same handle, the one
+/// that holds the lock (on Windows a lock belongs to a handle, so a second
+/// handle could not write at all). On macOS and Linux this is `pwrite`,
+/// which leaves the file position alone; on Windows it moves the position,
+/// so a handle used with this function must only be written with it.
+pub fn write_at(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+    imp::write_at(file, buf, offset)
+}
+
+/// Bytes that this user may still write on the volume holding `dir` (an
+/// existing folder).
+pub fn available_space(dir: &Path) -> io::Result<u64> {
+    imp::available_space(dir)
+}
+
+/// Gives the empty `file` the length `len`, for a download whose size is
+/// known and whose pieces arrive in any order.
+///
+/// - **Linux**: `fallocate` reserves the space for real. File systems
+///   without it get a plain `set_len` (a sparse file).
+/// - **macOS**: `F_PREALLOCATE` reserves the space where the file system
+///   supports it, then `set_len`.
+/// - **Windows**: the file is marked sparse, then `set_len`. Nothing is
+///   reserved: on NTFS a plain `set_len` would make every write far from the
+///   start fill the gap before it with zeros first, writing a split download
+///   about twice. Callers check [`available_space`] before starting instead
+///   (owner decision, M2).
+///
+/// File systems that cannot have holes (FAT and exFAT) may write zeros up to
+/// `len`, and FAT32 refuses files of 4 GiB or more; both are errors from the
+/// system, reported as they are. A `file` that is not empty is refused.
+pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+    if file.metadata()?.len() != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "allocate needs an empty file",
+        ));
+    }
+    if len == 0 {
+        return Ok(());
+    }
+    if i64::try_from(len).is_err() {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("{len} bytes is larger than any file can be"),
+        ));
+    }
+    imp::allocate(file, len)
+}
+
+/// The last-resort rename of [`rename_noreplace`]: fails with
+/// [`io::ErrorKind::AlreadyExists`] if anything (a file, folder or link) is
+/// at `to`, and otherwise renames. **Not atomic**: something created at `to`
+/// between the check and the rename is replaced. Only for file systems that
+/// refuse both the no-replace rename and hard links.
+pub fn check_then_rename(from: &Path, to: &Path) -> io::Result<()> {
+    match to.symlink_metadata() {
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} already exists", to.display()),
+        )),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => std::fs::rename(from, to),
+        Err(err) => Err(err),
+    }
+}
+
 /// Retries `op` while it fails with an error another program can cause for
 /// a moment (Windows sharing and access errors). About one second in total.
 fn with_retry(mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
@@ -119,10 +206,11 @@ mod imp {
     use std::fs::{File, OpenOptions};
     use std::io;
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
+    use std::os::unix::io::AsRawFd;
     use std::path::Path;
 
-    use super::not_regular;
+    use super::{check_then_rename, not_regular};
 
     pub fn sync_dir(dir: &Path) -> io::Result<()> {
         File::open(dir)?.sync_all()
@@ -164,7 +252,10 @@ mod imp {
         File::open(path)
     }
 
-    #[allow(dead_code)]
+    pub fn write_at(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+        file.write_all_at(buf, offset)
+    }
+
     fn c_path(path: &Path) -> io::Result<CString> {
         CString::new(path.as_os_str().as_bytes())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))
@@ -196,6 +287,38 @@ mod imp {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[allow(unsafe_code)]
+    // The field types are 32 bits on some targets.
+    #[allow(clippy::useless_conversion)]
+    pub fn available_space(dir: &Path) -> io::Result<u64> {
+        let dir_c = c_path(dir)?;
+        // SAFETY: an all-zero statvfs is a valid value to be overwritten.
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `dir_c` is a valid NUL-terminated string and `stats` a
+        // valid, writable structure, both alive for the call.
+        if unsafe { libc::statvfs(dir_c.as_ptr(), &mut stats) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(u64::from(stats.f_bavail).saturating_mul(u64::from(stats.f_frsize)))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[allow(unsafe_code)]
+    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+        let len_off = len as libc::off_t; // checked by the caller
+        // SAFETY: the descriptor is open for the lifetime of `file`.
+        if unsafe { libc::fallocate(file.as_raw_fd(), 0, 0, len_off) } == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            // The file system cannot reserve: a sparse file instead.
+            Some(libc::EOPNOTSUPP) | Some(libc::ENOSYS) => file.set_len(len),
+            _ => Err(err),
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[allow(unsafe_code)]
     pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
@@ -213,16 +336,86 @@ mod imp {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    #[allow(unsafe_code)]
+    pub fn available_space(dir: &Path) -> io::Result<u64> {
+        let dir_c = c_path(dir)?;
+        // `statfs`, not `statvfs`: on macOS the latter counts blocks in 32
+        // bits and is wrong on large volumes.
+        // SAFETY: an all-zero statfs is a valid value to be overwritten.
+        let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `dir_c` is a valid NUL-terminated string and `stats` a
+        // valid, writable structure, both alive for the call.
+        if unsafe { libc::statfs(dir_c.as_ptr(), &mut stats) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(stats.f_bavail.saturating_mul(u64::from(stats.f_bsize)))
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(unsafe_code)]
+    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+        let length = len as libc::off_t; // checked by the caller
+        // Contiguous space if possible, otherwise any space.
+        for flags in [
+            libc::F_ALLOCATECONTIG | libc::F_ALLOCATEALL,
+            libc::F_ALLOCATEALL,
+        ] {
+            let mut store = libc::fstore_t {
+                fst_flags: flags,
+                fst_posmode: libc::F_PEOFPOSMODE,
+                fst_offset: 0,
+                fst_length: length,
+                fst_bytesalloc: 0,
+            };
+            // SAFETY: the descriptor is open for the lifetime of `file`, and
+            // `store` is a valid fstore_t that outlives the call.
+            if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PREALLOCATE, &mut store) } != -1 {
+                return file.set_len(len);
+            }
+            let err = io::Error::last_os_error();
+            match err.raw_os_error() {
+                Some(libc::ENOSPC) if flags & libc::F_ALLOCATECONTIG != 0 => continue,
+                // The file system cannot reserve: a sparse file instead.
+                Some(libc::ENOTSUP) | Some(libc::EINVAL) => return file.set_len(len),
+                _ => return Err(err),
+            }
+        }
+        unreachable!("the last attempt always returns")
+    }
+
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
         link_then_unlink(from, to)
     }
 
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub fn available_space(_dir: &Path) -> io::Result<u64> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+        file.set_len(len)
+    }
+
     /// `link` fails if `to` exists, so it is a no-replace rename on file
-    /// systems with hard links.
+    /// systems with hard links. Where hard links are refused too (FAT and
+    /// exFAT), the last resort of `rename_noreplace` follows.
     fn link_then_unlink(from: &Path, to: &Path) -> io::Result<()> {
-        std::fs::hard_link(from, to)?;
-        std::fs::remove_file(from)
+        match std::fs::hard_link(from, to) {
+            Ok(()) => std::fs::remove_file(from),
+            Err(err) if links_unsupported(&err) => check_then_rename(from, to),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Errors with which a file system says it has no hard links: `EPERM`
+    /// on Linux (vfat, exfat), `ENOTSUP` or `EOPNOTSUPP` elsewhere.
+    pub(super) fn links_unsupported(err: &io::Error) -> bool {
+        // ENOTSUP and EOPNOTSUPP are the same number on Linux.
+        matches!(err.raw_os_error(), Some(code)
+            if code == libc::EPERM || code == libc::ENOTSUP || code == libc::EOPNOTSUPP)
     }
 }
 
@@ -232,18 +425,21 @@ mod imp {
     use std::fs::{File, OpenOptions};
     use std::io;
     use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::windows::fs::{FileExt, MetadataExt, OpenOptionsExt};
     use std::os::windows::io::AsRawHandle;
     use std::path::Path;
 
     use windows_sys::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION, HANDLE,
+        ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_LOCK_VIOLATION, ERROR_NOT_SUPPORTED,
+        ERROR_SHARING_VIOLATION, HANDLE,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_SHARE_READ, GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING,
-        MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        FILE_SHARE_READ, GetDiskFreeSpaceExW, GetFileInformationByHandle,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+    use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
 
     use super::not_regular;
 
@@ -294,6 +490,75 @@ mod imp {
             .read(true)
             .share_mode(FILE_SHARE_READ)
             .open(path)
+    }
+
+    pub fn write_at(file: &File, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
+        while !buf.is_empty() {
+            match file.seek_write(buf, offset) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(n) => {
+                    buf = &buf[n..];
+                    offset = offset
+                        .checked_add(n as u64)
+                        .ok_or(io::ErrorKind::FileTooLarge)?;
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn available_space(dir: &Path) -> io::Result<u64> {
+        let dir_w = wide(dir);
+        let mut available = 0u64;
+        // SAFETY: `dir_w` is a NUL-terminated UTF-16 string and `available`
+        // a writable u64, both alive for the call; the other outputs are
+        // optional and passed as null.
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                dir_w.as_ptr(),
+                &mut available,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(available)
+    }
+
+    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+        let mut returned = 0u32;
+        // SAFETY: the handle is open for the lifetime of `file`; this
+        // control code takes no input or output buffer, and `returned` is a
+        // writable u32 alive for the call. No OVERLAPPED: the call is
+        // synchronous.
+        let ok = unsafe {
+            DeviceIoControl(
+                file.as_raw_handle() as HANDLE,
+                FSCTL_SET_SPARSE,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            let err = io::Error::last_os_error();
+            // FAT and exFAT have no sparse files; the file is simply longer.
+            let unsupported = matches!(
+                err.raw_os_error().map(|code| code as u32),
+                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED)
+            );
+            if !unsupported {
+                return Err(err);
+            }
+        }
+        file.set_len(len)
     }
 
     fn link_count(file: &File) -> io::Result<u32> {
@@ -425,6 +690,131 @@ mod tests {
         assert!(open_regular_nofollow(&dir, false).is_err());
     }
 
+    #[test]
+    fn write_at_fills_pieces_in_any_order_through_the_locked_handle() {
+        let dir = tempdir();
+        let path = dir.join("part");
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        // The download's lock: on Windows it belongs to this handle, so the
+        // writes must go through it.
+        file.try_lock().unwrap();
+        allocate(&file, 12).unwrap();
+        write_at(&file, b"89ab", 8).unwrap();
+        write_at(&file, b"0123", 0).unwrap();
+        write_at(&file, b"4567", 4).unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"0123456789ab");
+    }
+
+    #[test]
+    fn allocate_gives_the_length_and_reads_back_zeros() {
+        let dir = tempdir();
+        let path = dir.join("part");
+        let file = fs::File::create(&path).unwrap();
+        allocate(&file, 1 << 20).unwrap();
+        drop(file);
+        let data = fs::read(&path).unwrap();
+        assert_eq!(data.len(), 1 << 20);
+        assert!(data.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn allocate_refuses_a_file_that_is_not_empty() {
+        let dir = tempdir();
+        let path = dir.join("part");
+        fs::write(&path, b"data").unwrap();
+        let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let err = allocate(&file, 10).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(&path).unwrap(), b"data");
+    }
+
+    #[test]
+    fn allocate_refuses_absurd_sizes_without_panicking() {
+        let dir = tempdir();
+        let file = fs::File::create(dir.join("part")).unwrap();
+        for len in [u64::MAX, i64::MAX as u64 + 1] {
+            let err = allocate(&file, len).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::FileTooLarge, "{len}");
+        }
+        // Valid as a number, but no disk is that large.
+        assert!(allocate(&file, i64::MAX as u64).is_err());
+        assert_eq!(file.metadata().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn allocate_of_zero_is_an_empty_file() {
+        let dir = tempdir();
+        let file = fs::File::create(dir.join("part")).unwrap();
+        allocate(&file, 0).unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn reports_available_space() {
+        let dir = tempdir();
+        let free = available_space(&dir).unwrap();
+        assert!(free > 0);
+        assert!(available_space(&dir.join("missing")).is_err());
+    }
+
+    #[test]
+    fn check_then_rename_refuses_anything_at_the_target() {
+        let dir = tempdir();
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        fs::write(&a, b"new").unwrap();
+        fs::write(&b, b"old").unwrap();
+        let err = check_then_rename(&a, &b).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&a).unwrap(), b"new");
+        assert_eq!(fs::read(&b).unwrap(), b"old");
+
+        // A dangling symbolic link counts as taken, and is left alone.
+        let link = dir.join("link");
+        if symlinks_available(&dir.join("nowhere"), &link) {
+            let err = check_then_rename(&a, &link).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+            assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+            assert!(!dir.join("nowhere").exists());
+        }
+
+        let c = dir.join("c");
+        check_then_rename(&a, &c).unwrap();
+        assert_eq!(fs::read(&c).unwrap(), b"new");
+        assert!(!a.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_link_errors_that_mean_no_hard_links_choose_the_last_resort() {
+        for code in [libc::EPERM, libc::ENOTSUP, libc::EOPNOTSUPP] {
+            assert!(imp::links_unsupported(&io::Error::from_raw_os_error(code)));
+        }
+        for code in [libc::EEXIST, libc::EACCES, libc::ENOSPC, libc::EXDEV] {
+            assert!(!imp::links_unsupported(&io::Error::from_raw_os_error(code)));
+        }
+    }
+
+    /// On the file systems CI and developers use (ext4, APFS) the space is
+    /// really reserved, not a sparse file.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn allocate_reserves_blocks_on_linux_and_macos() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempdir();
+        let file = fs::File::create(dir.join("part")).unwrap();
+        let len = 8 << 20;
+        allocate(&file, len).unwrap();
+        let meta = file.metadata().unwrap();
+        assert_eq!(meta.len(), len);
+        assert!(meta.blocks() * 512 >= len, "{} blocks", meta.blocks());
+    }
+
     /// Creates a symbolic link, or reports that this machine cannot. On CI
     /// (where `CI` is set) that is a failure, so the test cannot silently
     /// stop testing anything.
@@ -462,6 +852,24 @@ mod windows_tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+
+    /// Owner decision (M2): a sparse file on Windows, so writes far from the
+    /// start do not fill the gap with zeros first.
+    #[test]
+    fn allocate_makes_a_sparse_file_on_windows() {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_SPARSE_FILE;
+        let dir = std::env::temp_dir().join(format!("zajil-sparse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = fs::File::create(dir.join("part")).unwrap();
+        allocate(&file, 64 << 20).unwrap();
+        let meta = file.metadata().unwrap();
+        assert_eq!(meta.len(), 64 << 20);
+        assert_ne!(meta.file_attributes() & FILE_ATTRIBUTE_SPARSE_FILE, 0);
+        drop(file);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn replace_file_waits_for_a_scanner_to_let_go() {
