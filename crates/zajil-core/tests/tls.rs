@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::Path;
 
-use zajil_core::{Engine, Error, Options};
+use zajil_core::{Engine, Error, Event, Options};
 use zajil_testserver::{FileSpec, TestServer, Tls, random_bytes, sha256_hex, test_ca_der};
 
 fn trusting_engine() -> Engine {
@@ -25,10 +25,17 @@ fn system_engine() -> Engine {
 async fn assert_refused(engine: Engine, server: &TestServer, expected: &str) {
     server.put("/f.bin", FileSpec::new(vec![1u8; 1000]));
     let dir = tempfile::tempdir().unwrap();
+    let mut events = Vec::new();
     let err = engine
-        .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
+        .download(&server.url("/f.bin"), dir.path(), &mut |e| events.push(e))
         .await
         .expect_err("the certificate must be refused");
+    // A certificate that cannot be trusted does not pass by itself: it is
+    // never tried again (M3 retries only failures that may pass).
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Retrying { .. })),
+        "{events:?}"
+    );
 
     assert!(matches!(err, Error::Http(_)), "unexpected error: {err}");
     let message = err.to_string().to_lowercase();

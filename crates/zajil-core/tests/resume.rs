@@ -15,6 +15,9 @@ const THIRTY_PERCENT: u64 = (SIZE as u64) * 3 / 10;
 fn engine() -> Engine {
     Engine::new(Options {
         connections: 1,
+        // These tests stop at the first failure, to check what is left on
+        // disk and how it resumes. Retrying has its own tests (retry.rs).
+        max_failures: 1,
         ..Options::default()
     })
     .unwrap()
@@ -644,4 +647,36 @@ async fn a_restart_that_needs_credentials_says_so() {
         matches!(result, Err(Error::CredentialsNeeded { .. })),
         "{result:?}"
     );
+}
+
+/// Owner's decision on #28: a `401` while resuming a download that never had
+/// a user name or password (an expired signed link, an expired session) is
+/// a plain `401`, not a request for a password it never had.
+#[tokio::test]
+async fn a_401_for_a_download_without_credentials_does_not_ask_for_a_password() {
+    let server = TestServer::http();
+    let data = random_bytes(1_000_000, 97);
+    let spec = || FileSpec::new(data.clone()).etag(Some("\"same\""));
+    server.put("/f.bin", spec().cut_after(300_000, 1));
+    let dir = tempfile::tempdir().unwrap();
+    let state_file = match engine()
+        .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
+        .await
+    {
+        Err(Error::Interrupted { state_file, .. }) => state_file,
+        other => panic!("expected an interruption, got {other:?}"),
+    };
+    assert!(!DownloadState::load(&state_file).unwrap().had_credentials);
+    let text = fs::read_to_string(&state_file).unwrap();
+    assert!(text.contains("\"had_credentials\": false"), "{text}");
+
+    server.put("/f.bin", spec().require_authorization("Basic dTpw"));
+    let (result, _) = resume(&state_file).await;
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, Error::Status(status) if status.as_u16() == 401),
+        "{err:?}"
+    );
+    assert!(!err.to_string().contains("password"), "{err}");
+    assert!(state_file.exists());
 }

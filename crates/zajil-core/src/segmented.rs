@@ -33,8 +33,8 @@
 //!
 //! **Retries and busy servers** (`retry`): a connection that fails (cut,
 //! timeout, `5xx`, `408`) gives its segment back with a wait that grows
-//! each time, with a random part; after [`retry::MAX_FAILURES`] failures in
-//! a row without progress the segment is given up and the download stops,
+//! each time, with a random part; after `max_failures` failures in a row
+//! (by default [`retry::MAX_FAILURES`]) without progress the segment is given up and the download stops,
 //! resumable. A `429` makes every connection wait for `Retry-After`; a `429`
 //! or a `403` while other connections work means the server limits
 //! connections, so the limit drops to the connections it accepted.
@@ -51,7 +51,7 @@ use tokio::task::JoinSet;
 
 use crate::engine::{
     EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, blocking,
-    changed_from, error_chain, finish_download, parse_content_range, save_state,
+    changed_from, finish_download, http_error, parse_content_range, save_state,
 };
 use crate::retry;
 use crate::state::{DownloadState, Segment, Validator, state_path};
@@ -126,6 +126,9 @@ pub(crate) struct Job {
     /// No split leaves a segment smaller than this.
     pub min_segment: u64,
     pub save_interval: Duration,
+    /// A segment whose connection fails this many times in a row, without
+    /// writing in between, is given up.
+    pub max_failures: u32,
     /// The URL range requests go to.
     pub url: Url,
     /// The `If-Range` value: a strong validator (see `if_range_value`).
@@ -148,6 +151,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
         connections,
         min_segment,
         save_interval,
+        max_failures,
         url,
         if_range,
         final_path,
@@ -163,7 +167,7 @@ pub(crate) async fn run(job: Job, on_event: &mut dyn FnMut(Event)) -> Result<Out
     let (events, mut messages) = mpsc::unbounded_channel();
     let (stop, stopped) = watch::channel(false);
     let connections = connections.clamp(1, MAX_CONNECTIONS);
-    let mut board = Board::new(state, min_segment, connections);
+    let mut board = Board::new(state, min_segment, connections, max_failures);
     if let Some((_, start)) = &first {
         let index = board
             .index_of(*start)
@@ -410,6 +414,8 @@ struct Board {
     ranges_refused: bool,
     /// Why the first segment failed.
     failure: Option<String>,
+    /// Failures in a row after which a segment is given up (at least 1).
+    max_failures: u32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -450,7 +456,7 @@ enum Steal {
 }
 
 impl Board {
-    fn new(state: DownloadState, min_segment: u64, connections: usize) -> Self {
+    fn new(state: DownloadState, min_segment: u64, connections: usize, max_failures: u32) -> Self {
         let live = vec![Live::default(); state.segments.len()];
         Board {
             state,
@@ -461,6 +467,7 @@ impl Board {
             live,
             ranges_refused: false,
             failure: None,
+            max_failures: max_failures.max(1),
         }
     }
 
@@ -553,7 +560,7 @@ impl Board {
         }
         live.owner = None;
         live.failures = live.failures.saturating_add(1);
-        if live.failures >= retry::MAX_FAILURES {
+        if live.failures >= self.max_failures {
             let failures = live.failures;
             self.fail(
                 Some(start),
@@ -850,7 +857,7 @@ async fn request_range(
         Ok(response) => response,
         Err(err) => {
             ctx.board()
-                .retry_later(id, start, error_chain(&err), Instant::now(), None);
+                .retry_later(id, start, http_error(err), Instant::now(), None);
             return None;
         }
     };
@@ -1024,7 +1031,7 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
             }
             Err(err) => {
                 let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
-                return Err(error_chain(&err));
+                return Err(http_error(err));
             }
         };
         // Never past what was asked for.
@@ -1147,7 +1154,7 @@ mod tests {
                 done: written[i as usize],
             })
             .collect();
-        let mut board = Board::new(state, 100, 8);
+        let mut board = Board::new(state, 100, 8, retry::MAX_FAILURES);
         for (i, live) in board.live.iter_mut().enumerate() {
             live.take(i, now - ages[i]);
             live.written = written[i];

@@ -16,6 +16,9 @@ fn engine() -> Engine {
 fn quick_engine() -> Engine {
     Engine::new(Options {
         idle_timeout: Duration::from_millis(500),
+        // These tests stop at the first failure, to check what is left on
+        // disk and how it resumes. Retrying has its own tests (retry.rs).
+        max_failures: 1,
         ..Options::default()
     })
     .unwrap()
@@ -224,7 +227,7 @@ async fn a_cut_connection_leaves_a_resumable_state() {
         FileSpec::new(data.clone()).cut_after(300_000, 1),
     );
     let dir = tempfile::tempdir().unwrap();
-    let err = engine()
+    let err = quick_engine()
         .download(&server.url("/cut.bin"), dir.path(), &mut |_| {})
         .await
         .unwrap_err();
@@ -299,7 +302,7 @@ async fn credentials_in_the_url_are_never_written_to_the_state_file() {
         .url("/f.bin")
         .replace("http://", "http://alice:s3cret@");
     let dir = tempfile::tempdir().unwrap();
-    let err = engine()
+    let err = quick_engine()
         .download(&url, dir.path(), &mut |_| {})
         .await
         .unwrap_err();
@@ -310,6 +313,9 @@ async fn credentials_in_the_url_are_never_written_to_the_state_file() {
     assert!(!text.contains("alice"), "{text}");
     let state = DownloadState::load(&state_file).unwrap();
     assert_eq!(state.url, server.url("/f.bin"));
+    // Only that it had them (owner's decision on #28), never what they were.
+    assert!(state.had_credentials);
+    assert!(text.contains("\"had_credentials\": true"), "{text}");
 }
 
 #[tokio::test]
@@ -584,4 +590,51 @@ fn a_new_download_right_after_a_cancelled_one_never_loses_its_data() {
         assert_eq!(names_in(dir.path()), vec!["f (1).bin"]);
         assert_eq!(fs::read(&done.file).unwrap(), data);
     });
+}
+
+/// Owner's decision on #28: a token in the URL (`?sig=…`) stays in the
+/// state file, because resuming needs it, but that file is for its owner
+/// only, and no error message shows the token.
+#[tokio::test]
+async fn a_token_in_the_url_is_kept_privately_and_never_shown() {
+    const TOKEN: &str = "SECRET-TOKEN";
+    let server = TestServer::http();
+    server.put(
+        "/cut.bin",
+        FileSpec::new(random_bytes(1_000_000, 33)).cut_after(300_000, 1),
+    );
+    server.put(
+        "/stall.bin",
+        FileSpec::new(random_bytes(1_000_000, 34)).stall_after(1_000),
+    );
+    let dir = tempfile::tempdir().unwrap();
+
+    // Cut, and stalled (a read timeout from the HTTP library).
+    for path in ["/cut.bin", "/stall.bin"] {
+        let url = format!("{}?sig={TOKEN}#{TOKEN}", server.url(path));
+        let err = quick_engine()
+            .download(&url, dir.path(), &mut |_| {})
+            .await
+            .unwrap_err();
+        assert!(!format!("{err} {err:?}").contains(TOKEN), "{err:?}");
+        let state_file = interrupted(err);
+        let text = fs::read_to_string(&state_file).unwrap();
+        assert!(text.contains(TOKEN), "resuming needs it: {text}");
+        assert!(zajil_platform::fs::only_owner_can_access(&state_file).unwrap());
+    }
+
+    // No server there, and a URL that does not parse.
+    for url in [
+        format!("http://127.0.0.1:1/f.bin?sig={TOKEN}"),
+        format!("http://u:p@127.0.0.1:99999/f.bin?sig={TOKEN}"),
+        format!("http://127.0.0.1:99999/f.bin#{TOKEN}"),
+    ] {
+        let err = quick_engine()
+            .download(&url, dir.path(), &mut |_| {})
+            .await
+            .unwrap_err();
+        let shown = err.to_string();
+        assert!(!shown.contains(TOKEN), "{shown}");
+        assert!(shown.contains("127.0.0.1"), "{shown}");
+    }
 }

@@ -10,7 +10,8 @@
 //! `unsafe` is denied everywhere except the small, commented system calls in
 //! [`fs`] and [`console`] that the standard library does not offer
 //! (no-replace and write-through renames, hard-link counts, space
-//! reservation, sparse files, free space, and the console mode on Windows).
+//! reservation, sparse files, free space, files only their owner may read,
+//! and the console mode on Windows).
 
 #![deny(unsafe_code)]
 

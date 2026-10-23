@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use zajil_core::{
-    DEFAULT_CONNECTIONS, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options, RestartReason,
+    DEFAULT_CONNECTIONS, DEFAULT_TRIES, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options,
+    RestartReason,
 };
 use zajil_platform::shell::{self, ShellCommand};
 use zajil_platform::{AppPaths, SystemPaths};
@@ -46,6 +47,18 @@ struct Cli {
         value_parser = clap::value_parser!(u16).range(1..=MAX_CONNECTIONS as i64)
     )]
     connections: u16,
+    /// How many times in a row a failing request or connection is tried
+    /// before the download stops (it can be resumed later). 1 means no
+    /// retry. The waits in between grow, and a server's Retry-After is
+    /// respected.
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        default_value_t = DEFAULT_TRIES,
+        value_parser = clap::value_parser!(u32).range(1..=100)
+    )]
+    tries: u32,
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,12 +87,13 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
-    runtime.block_on(run(cli.command, cli.connections.into()))
+    runtime.block_on(run(cli.command, cli.connections.into(), cli.tries))
 }
 
-async fn run(command: Command, connections: usize) -> ExitCode {
+async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
     let options = Options {
         connections,
+        max_failures: tries,
         ..Options::default()
     };
     let engine = match Engine::new(options) {
@@ -294,6 +308,10 @@ impl Progress {
                 eprintln!(
                     "The server answered {status}: {connections} connection(s) from now on{wait}"
                 );
+            }
+            Event::Retrying { wait, reason } => {
+                self.clear_line();
+                eprintln!("Trying again in {} s: {reason}", wait.as_secs_f64().ceil());
             }
             Event::Split { .. } | Event::Finished { .. } => {}
         }

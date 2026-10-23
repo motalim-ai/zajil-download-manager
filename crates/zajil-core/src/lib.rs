@@ -15,3 +15,7 @@ pub mod state;
 
 pub use engine::{Engine, Error, Event, Finished, Options, RestartReason};
 pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};
+
+/// How many times in a row a failing request or connection is tried by
+/// default ([`Options::max_failures`]).
+pub const DEFAULT_TRIES: u32 = retry::MAX_FAILURES;

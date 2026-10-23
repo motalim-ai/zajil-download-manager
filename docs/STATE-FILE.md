@@ -29,6 +29,7 @@
 | `validator.date` | نص أو `null` | قيمة `Date` من نفس الرد. نحتاجها لنعرف هل `last_modified` مُحقِّق «قوي» (RFC 9110 §8.8.2.2) |
 | `content_length` | عدد أو `null` | حجم الملف كاملًا إن كان معروفًا |
 | `accept_ranges` | منطقي | هل أعلن السيرفر `Accept-Ranges: bytes` |
+| `had_credentials` | منطقي، اختياري | هل كان في الرابط الذي أعطاه المستخدم اسم مستخدم أو كلمة مرور. **القيمتان نفسهما لا تُحفظان أبدًا** (القاعدة 7 في ADR-0004). فائدته: إذا رد السيرفر بـ 401 عند الاستكمال، يقول زاجِل إن التحميل يحتاج بيانات الدخول من جديد **فقط** عندما يكون `true`. وإلا فهو 401 عادية (رابط موقّع انتهت صلاحيته مثلًا). أُضيف إلى المخطط v1 قبل نشره، بقرار المالك على #28. وإذا غاب عن الملف (مثل الملف الثابت للاختبار) فقيمته `false` |
 | `segments` | قائمة | الأجزاء، مرتبة ومتصلة: تبدأ من البايت 0 وتصل إلى آخر بايت دون فجوات أو تداخل. جزء واحد للاتصال الواحد، وجزء لكل اتصال في التحميل المتوازي (M2) |
 | `segments[].start` | عدد | أول بايت في الجزء |
 | `segments[].end` | عدد أو `null` | آخر بايت (شامل). `null` إذا كان الحجم غير معروف |
@@ -63,10 +64,11 @@
 
 ## قواعد الكتابة
 
+0. **لا يقرأ الملفَ إلا صاحبه** (قرار المالك على #28): `url` و`final_url` قد يحملان توكنًا يحتاجه الاستكمال (`?sig=…`)، فيُنشأ الملف المؤقت بـ `zajil_platform::fs::create_private`: صلاحيات `0600` في ماك ولينكس، وفي ويندوز قائمة صلاحيات محمية (لا ترث شيئًا من المجلد) فيها إذن واحد للمستخدم الحالي. وإعادة التسمية فوق الملف القديم تحفظ ذلك. والتوكن لا يُطبع أبدًا.
 1. البيانات تُثبَّت في `.zajil-part` (`fsync`) **قبل** حفظ حالة تعدّها مكتملة.
 2. الحفظ في خطوة واحدة:
    - يُحذف أي `<الاسم>.zajil-state.tmp` قديم أولًا. وإذا كان رابطًا رمزيًا، يُحذف الرابط نفسه ولا يُلمس ما يشير إليه.
-   - يُنشأ الملف المؤقت بـ `create_new`، فيُرفض أي شيء يظهر مكانه في اللحظة نفسها.
+   - يُنشأ الملف المؤقت بـ `create_private` (مثل `create_new`)، فيُرفض أي شيء يظهر مكانه في اللحظة نفسها.
    - `fsync`، ثم استبدال الملف القديم (`zajil_platform::fs::replace_file`).
    - في ماك ولينكس: `rename` ثم `fsync` للمجلد (`sync_dir`).
    - في ويندوز: `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، وإعادة محاولة لمدة ثانية تقريبًا إذا كان برنامج حماية أو فهرسة أو OneDrive يمسك الملف.
@@ -81,4 +83,4 @@
 
 ## English summary
 
-Schema v1 of `<name>.zajil-state`: a JSON file next to `<name>.zajil-part`. Fields: `format`, `schema_version`, `url`, `final_url`, `validator {etag, last_modified}`, `content_length`, `accept_ranges`, `segments [{start, end (inclusive), done}]`, `created_at`, `updated_at` and `checksum`. The checksum is `sha256:` plus the hex SHA-256 of the compact JSON of the state with an empty checksum. Any parse error, unknown field, unknown version, checksum mismatch or impossible segment rejects the file. Writes go through a temporary file, `fsync`, an atomic rename and a folder sync.
+Schema v1 of `<name>.zajil-state`: a JSON file next to `<name>.zajil-part`. Fields: `format`, `schema_version`, `url`, `final_url`, `validator {etag, last_modified, date}`, `content_length`, `accept_ranges`, `had_credentials` (optional, `false` when absent; never the credentials themselves), `segments [{start, end (inclusive), done}]`, `created_at`, `updated_at` and `checksum`. Only its owner may read it (mode `0600`, or a protected access list for the current user on Windows), because the URL may hold a token that resuming needs; the token is never printed. The checksum is `sha256:` plus the hex SHA-256 of the compact JSON of the state with an empty checksum. Any parse error, unknown field, unknown version, checksum mismatch or impossible segment rejects the file. Writes go through a temporary file, `fsync`, an atomic rename and a folder sync.

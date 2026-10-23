@@ -12,8 +12,11 @@
 //!    several connections (`segmented`); otherwise the body of the probe is
 //!    written on one connection. Every `save_interval` the data is synced and
 //!    then the state file records it as done.
-//! 5. If the transfer stops early, the state is saved and the error says how
-//!    to resume. Otherwise the part file is renamed to its final name in one
+//! 5. A request or a connection that fails for a reason that may pass (a
+//!    broken connection, a timeout, `5xx`, `408`, `429`) is tried again
+//!    after a growing wait (`retry.rs`, the policy of M2). If the transfer
+//!    still stops early, the state is saved and the error says how to
+//!    resume. Otherwise the part file is renamed to its final name in one
 //!    step and the state file is removed.
 
 use std::fs::{File, OpenOptions, TryLockError};
@@ -21,11 +24,11 @@ use std::io::{self, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use reqwest::header::{self, HeaderMap};
 use reqwest::{Client, Response, StatusCode, Url, redirect};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::http_date;
 use crate::naming::{ReserveError, reserve_target, suggested_name};
@@ -40,8 +43,9 @@ use crate::state::{
 const MAX_RESTARTS: u8 = 3;
 
 /// What one call of the engine may still do as it starts over: how many
-/// restarts are left, and whether the file may still be split. Not `Debug`:
-/// it holds the user name and password of the URL.
+/// restarts are left, whether the file may still be split, and how many
+/// requests or connections failed in a row. Not `Debug`: it holds the user
+/// name and password of the URL.
 #[derive(Clone)]
 struct Attempt {
     restarts_left: u8,
@@ -50,6 +54,14 @@ struct Attempt {
     /// memory only, never in the state file (ADR-0004, rule 7), so range
     /// requests carry them too.
     credentials: Option<Url>,
+    /// Failures in a row (requests, and connections of a single-connection
+    /// download) since the download last reached further into the file.
+    failures: u32,
+    /// The furthest byte a single connection has written in this call. A
+    /// connection that breaks before passing it made no progress: a server
+    /// that cannot continue from the middle and always breaks at the same
+    /// place is given up, not tried forever.
+    furthest: u64,
 }
 
 impl Attempt {
@@ -60,6 +72,36 @@ impl Attempt {
             credentials: url
                 .filter(|url| !url.username().is_empty() || url.password().is_some())
                 .cloned(),
+            failures: 0,
+            furthest: 0,
+        }
+    }
+
+    /// Counts a failure of a single connection that had written up to
+    /// `done`. `false` when the download must give up: `max_failures`
+    /// failures in a row without reaching further into the file.
+    fn connection_failed(&mut self, done: u64, max_failures: u32) -> bool {
+        if done > self.furthest {
+            self.furthest = done;
+            self.failures = 0;
+        }
+        self.failed(max_failures)
+    }
+
+    /// Counts a failure; `false` once there were `max_failures` in a row.
+    fn failed(&mut self, max_failures: u32) -> bool {
+        self.failures = self.failures.saturating_add(1);
+        self.failures < max_failures
+    }
+
+    /// For a start from byte 0 after a broken connection on a server that
+    /// cannot continue from the middle: that is not a new version of the
+    /// file, so it does not use up one of the restarts that [`Engine::start`]
+    /// counts.
+    fn after_broken_connection(self) -> Self {
+        Attempt {
+            restarts_left: self.restarts_left.saturating_add(1),
+            ..self
         }
     }
 
@@ -96,6 +138,11 @@ pub struct Options {
     /// No segment is made smaller than this many bytes, at the start or by
     /// dynamic splitting.
     pub min_segment_size: u64,
+    /// A request or a connection that fails this many times in a row,
+    /// without the download reaching further in between, is given up: the
+    /// download stops and can be resumed later. At least 1 (1 means no
+    /// retry). The waits in between grow (`retry::backoff`).
+    pub max_failures: u32,
 }
 
 impl Default for Options {
@@ -107,6 +154,7 @@ impl Default for Options {
             save_interval: Duration::from_secs(1),
             connections: crate::DEFAULT_CONNECTIONS,
             min_segment_size: 1024 * 1024,
+            max_failures: crate::retry::MAX_FAILURES,
         }
     }
 }
@@ -139,6 +187,9 @@ pub enum Event {
         connections: usize,
         wait: Option<Duration>,
     },
+    /// A request or a single connection failed for `reason`, which may
+    /// pass: it is tried again after `wait`.
+    Retrying { wait: Duration, reason: String },
     /// The download is complete at `file`.
     Finished { file: PathBuf, bytes: u64 },
 }
@@ -183,6 +234,11 @@ pub enum Error {
     Http(#[source] reqwest::Error),
     #[error("the server answered {0}")]
     Status(StatusCode),
+    #[error(
+        "the server asks to wait {} s before more requests; try again later",
+        .wait.as_secs()
+    )]
+    ServerBusy { wait: Duration },
     #[error("the download stopped ({reason}); resume it from {}", state_file.display())]
     Interrupted { state_file: PathBuf, reason: String },
     #[error("refusing to resume {name:?}: {reason}")]
@@ -205,6 +261,9 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    /// Only for a download that was started with a user name or password
+    /// in its URL (`had_credentials` in the state file); any other `401` is
+    /// [`Error::Status`].
     #[error(
         "the server asks for a user name and password (401 Unauthorized); Zajil never saves \
          them in the state file, so this download cannot be resumed and has to be downloaded \
@@ -265,7 +324,10 @@ impl Engine {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         let url = parse_url(url)?;
-        let response = self.get(url.clone(), None).await?;
+        let mut attempt = Attempt::new(Some(&url));
+        let response = self
+            .retrying(&mut attempt, on_event, || self.get(url.clone(), None))
+            .await?;
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
@@ -287,14 +349,18 @@ impl Engine {
         // cancellation removes the new files again.
         let cleanup = EmptyDownloadCleanup::new(&final_path);
         lock(&part, &final_path)?;
-        let state = state_from_response(without_credentials(&url), &response);
+        let state = state_from_response(
+            without_credentials(&url),
+            attempt.credentials.is_some(),
+            &response,
+        );
         self.start(
             final_path,
             part,
             state,
             response,
             Some(cleanup),
-            Attempt::new(Some(&url)),
+            attempt,
             on_event,
         )
         .await
@@ -421,8 +487,9 @@ impl Engine {
                 .await;
         }
 
+        let mut attempt = Attempt::new(None);
         let response = self
-            .get_with_fallback(&state, Some((done, None, if_range)), &Attempt::new(None))
+            .get_with_fallback(&state, Some((done, None, if_range)), &mut attempt, on_event)
             .await?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {
@@ -434,16 +501,15 @@ impl Engine {
                             state,
                             RestartReason::RangeMismatch,
                             None,
-                            Attempt::new(None),
+                            attempt,
                             on_event,
                         )
                         .await;
                 }
                 let mut part = part;
                 part.seek(SeekFrom::Start(done))?;
-                self.transfer(final_path, part, state, None)
-                    .receive(response, on_event)
-                    .await
+                let transfer = self.transfer(final_path, part, state, None);
+                self.receive(transfer, response, attempt, on_event).await
             }
             StatusCode::OK => {
                 let reason = if changed(&state, &response) {
@@ -452,17 +518,10 @@ impl Engine {
                     RestartReason::RangesIgnored
                 };
                 on_event(Event::Restarted { reason });
-                let state = state_from_response(state.url.clone(), &response);
-                self.start(
-                    final_path,
-                    part,
-                    state,
-                    response,
-                    None,
-                    Attempt::new(None),
-                    on_event,
-                )
-                .await
+                let state =
+                    state_from_response(state.url.clone(), state.had_credentials, &response);
+                self.start(final_path, part, state, response, None, attempt, on_event)
+                    .await
             }
             StatusCode::RANGE_NOT_SATISFIABLE if state.content_length == Some(done) => {
                 // Everything was already on disk; only the rename was missing.
@@ -477,12 +536,12 @@ impl Engine {
                     state,
                     RestartReason::RangeMismatch,
                     None,
-                    Attempt::new(None),
+                    attempt,
                     on_event,
                 )
                 .await
             }
-            status => Err(refused(status, &state, &final_path, &Attempt::new(None))),
+            status => Err(refused(status, &state, &final_path, &attempt)),
         }
     }
 
@@ -507,11 +566,13 @@ impl Engine {
             return finish_download(part, state, final_path, on_event).await;
         };
         let (from, to) = (segment.start + segment.done, segment.end.expect("checked"));
+        let mut attempt = Attempt::new(None);
         let response = self
             .get_with_fallback(
                 &state,
                 Some((from, Some(to), if_range.clone())),
-                &Attempt::new(None),
+                &mut attempt,
+                on_event,
             )
             .await?;
         match response.status() {
@@ -528,15 +589,7 @@ impl Engine {
                         RestartReason::RangeMismatch
                     };
                     return self
-                        .restart(
-                            final_path,
-                            part,
-                            state,
-                            reason,
-                            None,
-                            Attempt::new(None),
-                            on_event,
-                        )
+                        .restart(final_path, part, state, reason, None, attempt, on_event)
                         .await;
                 }
                 let job = Job {
@@ -544,6 +597,7 @@ impl Engine {
                     connections: self.options.connections,
                     min_segment: self.options.min_segment_size,
                     save_interval: self.options.save_interval,
+                    max_failures: self.options.max_failures,
                     url: response.url().clone(),
                     if_range,
                     final_path,
@@ -552,7 +606,7 @@ impl Engine {
                     first: Some((response, segment.start)),
                     cleanup: None,
                 };
-                self.run_segments(job, Attempt::new(None), on_event).await
+                self.run_segments(job, attempt, on_event).await
             }
             StatusCode::OK => {
                 let reason = if changed(&state, &response) {
@@ -561,17 +615,10 @@ impl Engine {
                     RestartReason::RangesIgnored
                 };
                 on_event(Event::Restarted { reason });
-                let state = state_from_response(state.url.clone(), &response);
-                self.start(
-                    final_path,
-                    part,
-                    state,
-                    response,
-                    None,
-                    Attempt::new(None),
-                    on_event,
-                )
-                .await
+                let state =
+                    state_from_response(state.url.clone(), state.had_credentials, &response);
+                self.start(final_path, part, state, response, None, attempt, on_event)
+                    .await
             }
             StatusCode::RANGE_NOT_SATISFIABLE => {
                 self.restart(
@@ -580,12 +627,12 @@ impl Engine {
                     state,
                     RestartReason::RangeMismatch,
                     None,
-                    Attempt::new(None),
+                    attempt,
                     on_event,
                 )
                 .await
             }
-            status => Err(refused(status, &state, &final_path, &Attempt::new(None))),
+            status => Err(refused(status, &state, &final_path, &attempt)),
         }
     }
 
@@ -617,7 +664,7 @@ impl Engine {
                 match response {
                     Some(response) => {
                         on_event(Event::Restarted { reason });
-                        let state = state_from_response(old.url, &response);
+                        let state = state_from_response(old.url, old.had_credentials, &response);
                         Box::pin(self.start(
                             final_path, part, state, response, cleanup, attempt, on_event,
                         ))
@@ -647,11 +694,14 @@ impl Engine {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Finished, Error> {
         on_event(Event::Restarted { reason });
-        let response = self.get_with_fallback(&old, None, &attempt).await?;
+        let mut attempt = attempt;
+        let response = self
+            .get_with_fallback(&old, None, &mut attempt, on_event)
+            .await?;
         if response.status() != StatusCode::OK {
             return Err(refused(response.status(), &old, &final_path, &attempt));
         }
-        let state = state_from_response(old.url, &response);
+        let state = state_from_response(old.url, old.had_credentials, &response);
         self.start(
             final_path, part, state, response, cleanup, attempt, on_event,
         )
@@ -716,6 +766,7 @@ impl Engine {
                 connections: self.options.connections,
                 min_segment: self.options.min_segment_size,
                 save_interval: self.options.save_interval,
+                max_failures: self.options.max_failures,
                 url: attempt.authorize(response.url()),
                 if_range,
                 final_path,
@@ -727,9 +778,8 @@ impl Engine {
             return self.run_segments(job, attempt, on_event).await;
         }
         save_state(&mut state, &state_path(&final_path), watch).await?;
-        self.transfer(final_path, part, state, cleanup)
-            .receive(response, on_event)
-            .await
+        let transfer = self.transfer(final_path, part, state, cleanup);
+        self.receive(transfer, response, attempt, on_event).await
     }
 
     /// The segments for a parallel download, or `None` for one connection:
@@ -760,18 +810,168 @@ impl Engine {
         }
     }
 
+    /// Writes the body of `response` into `transfer` from its current
+    /// position, then finishes.
+    ///
+    /// A connection that breaks is tried again (M3, owner's decision on
+    /// #28), with the policy of the segmented connections (`retry.rs`): what
+    /// is on disk is synced and recorded, and after a growing wait the rest
+    /// is asked for with `Range` and `If-Range`. If the server cannot
+    /// continue from there (no strong validator, ranges ignored, or the file
+    /// changed), the download starts again from byte 0 with the whole-file
+    /// answer: old and new data are never mixed. After `max_failures`
+    /// failures in a row without reaching further into the file, the
+    /// download stops and can be resumed later.
+    async fn receive(
+        &self,
+        mut transfer: Transfer,
+        mut response: Response,
+        mut attempt: Attempt,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Finished, Error> {
+        on_event(Event::Started {
+            file: transfer.final_path.clone(),
+            state_file: transfer.state_file.clone(),
+            total: transfer.state.content_length,
+            from: transfer.done(),
+        });
+        loop {
+            let reason = match transfer.pump(&mut response, on_event).await {
+                Ok(()) => return transfer.finish(on_event).await,
+                Err(Stop::Fatal(reason)) => return Err(transfer.interrupt(reason).await),
+                Err(Stop::Broken(reason)) => reason,
+            };
+            drop(response);
+            let done = transfer.done();
+            if !attempt.connection_failed(done, self.options.max_failures) {
+                let failures = attempt.failures;
+                return Err(transfer
+                    .interrupt(format!("{reason} (gave up after {failures} tries)"))
+                    .await);
+            }
+            // A new download with no data yet has nothing to record.
+            if transfer.cleanup.is_none()
+                && let Err(err) = transfer.checkpoint().await
+            {
+                return Err(transfer.interrupt(err.to_string()).await);
+            }
+            let wait = crate::retry::backoff(attempt.failures);
+            on_event(Event::Retrying { wait, reason });
+            tokio::time::sleep(wait).await;
+
+            let if_range = if done > 0 {
+                if_range_value(&transfer.state.validator)
+            } else {
+                None
+            };
+            let range = if_range.clone().map(|value| (done, None, value));
+            response = match self
+                .get_with_fallback(&transfer.state, range, &mut attempt, on_event)
+                .await
+            {
+                Ok(response) => response,
+                Err(err) => return Err(transfer.interrupt(err.to_string()).await),
+            };
+            match response.status() {
+                StatusCode::PARTIAL_CONTENT
+                    if if_range.is_some() && continues_at(&response, &transfer.state, done) =>
+                {
+                    if let Err(err) = transfer.file.seek(SeekFrom::Start(done)).await {
+                        return Err(transfer.interrupt(err.to_string()).await);
+                    }
+                }
+                StatusCode::OK => {
+                    // Nothing was written yet: simply the first answer again.
+                    let reason = if done == 0 {
+                        None
+                    } else if if_range.is_none() {
+                        Some(RestartReason::NoValidator)
+                    } else if changed(&transfer.state, &response) {
+                        Some(RestartReason::FileChanged)
+                    } else {
+                        Some(RestartReason::RangesIgnored)
+                    };
+                    if let Some(reason) = reason {
+                        on_event(Event::Restarted { reason });
+                    }
+                    let state = state_from_response(
+                        transfer.state.url.clone(),
+                        transfer.state.had_credentials,
+                        &response,
+                    );
+                    let attempt = if reason == Some(RestartReason::FileChanged) {
+                        attempt
+                    } else {
+                        attempt.after_broken_connection()
+                    };
+                    let (final_path, part, cleanup) = transfer.into_parts().await;
+                    return Box::pin(self.start(
+                        final_path, part, state, response, cleanup, attempt, on_event,
+                    ))
+                    .await;
+                }
+                StatusCode::RANGE_NOT_SATISFIABLE
+                    if if_range.is_some() && transfer.state.content_length == Some(done) =>
+                {
+                    // Everything was already on disk.
+                    return transfer.finish(on_event).await;
+                }
+                StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE => {
+                    let old = transfer.state.clone();
+                    let (final_path, part, cleanup) = transfer.into_parts().await;
+                    return Box::pin(self.restart(
+                        final_path,
+                        part,
+                        old,
+                        RestartReason::RangeMismatch,
+                        cleanup,
+                        attempt,
+                        on_event,
+                    ))
+                    .await;
+                }
+                status => {
+                    return Err(
+                        match refused(status, &transfer.state, &transfer.final_path, &attempt) {
+                            err @ Error::CredentialsNeeded { .. } => err,
+                            err => transfer.interrupt(err.to_string()).await,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     /// Requests `final_url`, and the original URL if that fails: signed CDN
     /// links often expire, while the original URL redirects to a fresh one.
     /// With `attempt`'s credentials, if it has any for that origin: the
     /// state file never holds them, but a restart within one call does.
+    /// Failures that may pass are tried again ([`Engine::retrying`]).
     async fn get_with_fallback(
         &self,
         state: &DownloadState,
         range: Option<(u64, Option<u64>, String)>,
-        attempt: &Attempt,
+        attempt: &mut Attempt,
+        on_event: &mut dyn FnMut(Event),
     ) -> Result<Response, Error> {
         let final_url = attempt.authorize(&parse_url(&state.final_url)?);
-        let first = self.get(final_url, range.clone()).await;
+        let url = attempt.authorize(&parse_url(&state.url)?);
+        let same = state.final_url == state.url;
+        self.retrying(attempt, on_event, || {
+            self.get_either(&final_url, &url, same, range.clone())
+        })
+        .await
+    }
+
+    /// One try of [`Engine::get_with_fallback`].
+    async fn get_either(
+        &self,
+        final_url: &Url,
+        url: &Url,
+        same: bool,
+        range: Option<(u64, Option<u64>, String)>,
+    ) -> Result<Response, Error> {
+        let first = self.get(final_url.clone(), range.clone()).await;
         let usable = |r: &Result<Response, Error>| {
             r.as_ref().is_ok_and(|r| {
                 matches!(
@@ -782,11 +982,69 @@ impl Engine {
                 )
             })
         };
-        if usable(&first) || state.final_url == state.url {
+        if usable(&first) || same {
             return first;
         }
-        self.get(attempt.authorize(&parse_url(&state.url)?), range)
-            .await
+        self.get(url.clone(), range).await
+    }
+
+    /// Sends a request with `send`, and again after a growing wait while it
+    /// fails for a reason that may pass: a connection that could not be
+    /// made or broke, a timeout, `5xx`, `408 Request Timeout` or `429 Too
+    /// Many Requests`. A `429` waits for its `Retry-After` (seconds or an
+    /// HTTP date); one that asks for more than
+    /// [`crate::retry::LONGEST_RETRY_AFTER`] is not waited for
+    /// ([`Error::ServerBusy`]). After `max_failures` failures in a row the
+    /// last answer is returned as it is. A certificate that cannot be
+    /// trusted, a redirect that is refused or another status (such as
+    /// `403` or `404`) is never retried. Same policy as the connections of
+    /// a segmented download (M2).
+    async fn retrying<F: Future<Output = Result<Response, Error>>>(
+        &self,
+        attempt: &mut Attempt,
+        on_event: &mut dyn FnMut(Event),
+        mut send: impl FnMut() -> F,
+    ) -> Result<Response, Error> {
+        loop {
+            let result = send().await;
+            let (reason, asked) = match &result {
+                Ok(response) if response.status() == StatusCode::TOO_MANY_REQUESTS => {
+                    let asked = header_str(response.headers(), header::RETRY_AFTER)
+                        .and_then(|v| crate::retry::retry_after(v, SystemTime::now()));
+                    if let Some(wait) =
+                        asked.filter(|&wait| wait > crate::retry::LONGEST_RETRY_AFTER)
+                    {
+                        return Err(Error::ServerBusy { wait });
+                    }
+                    (format!("the server answered {}", response.status()), asked)
+                }
+                Ok(response)
+                    if response.status().is_server_error()
+                        || response.status() == StatusCode::REQUEST_TIMEOUT =>
+                {
+                    (format!("the server answered {}", response.status()), None)
+                }
+                Ok(_) => return result,
+                Err(Error::Http(err)) if may_pass(err) => (error_chain(err), None),
+                Err(_) => return result,
+            };
+            if !attempt.failed(self.options.max_failures) {
+                return result;
+            }
+            let wait = asked.unwrap_or_else(|| crate::retry::backoff(attempt.failures));
+            if let Ok(response) = &result
+                && response.status() == StatusCode::TOO_MANY_REQUESTS
+            {
+                on_event(Event::ServerBusy {
+                    status: 429,
+                    connections: 1,
+                    wait: Some(wait),
+                });
+            }
+            drop(result);
+            on_event(Event::Retrying { wait, reason });
+            tokio::time::sleep(wait).await;
+        }
     }
 
     /// GETs `url`; with `range`, only bytes `from` to `to` (or to the end)
@@ -803,8 +1061,20 @@ impl Engine {
                 .header(header::RANGE, format!("bytes={from}-{to}"))
                 .header(header::IF_RANGE, if_range);
         }
-        request.send().await.map_err(Error::Http)
+        request
+            .send()
+            .await
+            .map_err(|err| Error::Http(without_secrets(err)))
     }
+}
+
+/// Why [`Transfer::pump`] stopped before the end of the body.
+enum Stop {
+    /// The connection broke or closed early: worth trying again.
+    Broken(String),
+    /// Trying again would not help (a write failed, or the server sent
+    /// more than it announced).
+    Fatal(String),
 }
 
 /// An open download: the locked part file and its state.
@@ -851,11 +1121,28 @@ impl Drop for NewDownload {
     /// Runs once the guard and every save are finished. The state file goes
     /// first and the part file last, so the name stays reserved (by the part
     /// file) until nothing of this download is left.
+    ///
+    /// Meanwhile a resume may have taken the files over: the state file
+    /// exists while the first save runs, and a cancelled download releases
+    /// the part file's lock at once. Files whose lock someone holds are
+    /// left alone, and the lock is held while they are removed, so a
+    /// resume cannot take them in between (found by the cancellation test
+    /// of M3, `retry.rs`).
     fn drop(&mut self) {
-        if self.abandoned.load(Ordering::SeqCst) {
-            let _ = std::fs::remove_file(state_path(&self.final_path));
-            let _ = std::fs::remove_file(part_path(&self.final_path));
+        if !self.abandoned.load(Ordering::SeqCst) {
+            return;
         }
+        let part = part_path(&self.final_path);
+        let held = match zajil_platform::fs::open_regular_nofollow(&part, true) {
+            Ok(file) => match file.try_lock() {
+                Ok(()) => Some(file),
+                Err(_) => return, // someone resumed it
+            },
+            Err(_) => None,
+        };
+        let _ = std::fs::remove_file(state_path(&self.final_path));
+        let _ = std::fs::remove_file(&part);
+        drop(held);
     }
 }
 
@@ -895,33 +1182,27 @@ impl Transfer {
         self.state.segments[0].done
     }
 
-    /// Writes the body after the current position, then finishes.
-    async fn receive(
-        mut self,
-        mut response: Response,
+    /// Writes the body of `response` after the current position. `Ok` when
+    /// the body ended where it should.
+    async fn pump(
+        &mut self,
+        response: &mut Response,
         on_event: &mut dyn FnMut(Event),
-    ) -> Result<Finished, Error> {
+    ) -> Result<(), Stop> {
         let total = self.state.content_length;
-        on_event(Event::Started {
-            file: self.final_path.clone(),
-            state_file: self.state_file.clone(),
-            total,
-            from: self.done(),
-        });
-
         loop {
             let chunk = match response.chunk().await {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break,
-                Err(err) => return Err(self.interrupt(error_chain(&err)).await),
+                Err(err) => return Err(Stop::Broken(http_error(err))),
             };
-            if total.is_some_and(|t| self.done() + chunk.len() as u64 > t) {
-                return Err(self
-                    .interrupt("the server sent more data than it announced".into())
-                    .await);
+            if total.is_some_and(|t| self.done().saturating_add(chunk.len() as u64) > t) {
+                return Err(Stop::Fatal(
+                    "the server sent more data than it announced".into(),
+                ));
             }
             if let Err(err) = self.file.write_all(&chunk).await {
-                return Err(self.interrupt(err.to_string()).await);
+                return Err(Stop::Fatal(err.to_string()));
             }
             if let Some(cleanup) = self.cleanup.take() {
                 cleanup.disarm();
@@ -934,20 +1215,25 @@ impl Transfer {
             if self.last_save.elapsed() >= self.save_interval
                 && let Err(err) = self.checkpoint().await
             {
-                return Err(self.interrupt(err.to_string()).await);
+                return Err(Stop::Fatal(err.to_string()));
             }
         }
 
         if let Some(total) = total
             && self.done() < total
         {
-            let reason = format!(
+            return Err(Stop::Broken(format!(
                 "the connection closed after {} of {total} bytes",
                 self.done()
-            );
-            return Err(self.interrupt(reason).await);
+            )));
         }
-        self.finish(on_event).await
+        Ok(())
+    }
+
+    /// The part file and the new-download guard, to start over with.
+    async fn into_parts(self) -> (PathBuf, File, Option<EmptyDownloadCleanup>) {
+        let part = self.file.into_std().await;
+        (self.final_path, part, self.cleanup)
     }
 
     /// Syncs the data, then records it in the state file (ADR-0004 rule 1).
@@ -1034,16 +1320,20 @@ pub(crate) async fn finish_download(
 }
 
 /// The error for a refusal (`status`) of a request made for `state`. A `401`
-/// without credentials in memory means the download needed a user name and
-/// password, which the state file never keeps (ADR-0004, rule 7): say so,
-/// rather than a bare 401.
+/// for a download that started with a user name and password, which are no
+/// longer in memory, means it needs them again, and the state file never
+/// keeps them (ADR-0004, rule 7): say so, rather than a bare 401.
 fn refused(
     status: StatusCode,
     state: &DownloadState,
     final_path: &Path,
     attempt: &Attempt,
 ) -> Error {
-    if status == StatusCode::UNAUTHORIZED && attempt.credentials.is_none() {
+    // Only a download that had them: an expired signed link or session
+    // also answers 401, and must not ask for a password it never had
+    // (review of #29, owner's decision on #28).
+    if status == StatusCode::UNAUTHORIZED && attempt.credentials.is_none() && state.had_credentials
+    {
         Error::CredentialsNeeded {
             url: state.url.clone(),
             state_file: state_path(final_path),
@@ -1109,13 +1399,74 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
 
 fn parse_url(raw: &str) -> Result<Url, Error> {
     let url = Url::parse(raw).map_err(|err| Error::InvalidUrl {
-        url: without_userinfo(raw),
+        url: shown_url(raw),
         reason: err.to_string(),
     })?;
     match url.scheme() {
         "http" | "https" => Ok(url),
         other => Err(Error::UnsupportedScheme(other.to_owned())),
     }
+}
+
+/// `raw` (a URL that did not parse) as an error message may show it:
+/// without what may be a user name and password ([`without_userinfo`]),
+/// and without the query and fragment, which may hold a token (`?sig=…`).
+/// Tokens are never printed (owner's decision on #28).
+fn shown_url(raw: &str) -> String {
+    let mut shown = without_userinfo(raw);
+    if let Some(end) = shown.find(['?', '#']) {
+        shown.truncate(end);
+    }
+    shown
+}
+
+/// `err` with the secrets its URL may hold removed, so its message never
+/// shows them: the user name and password, the query (`?sig=…`) and the
+/// fragment.
+pub(crate) fn without_secrets(mut err: reqwest::Error) -> reqwest::Error {
+    if let Some(url) = err.url_mut() {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+    }
+    err
+}
+
+/// The message of an HTTP error, without the secrets of its URL.
+pub(crate) fn http_error(err: reqwest::Error) -> String {
+    error_chain(&without_secrets(err))
+}
+
+/// Whether an HTTP error may pass if the request is sent again: a
+/// connection that could not be made or broke, or a timeout. A certificate
+/// that cannot be trusted does not pass by itself and is never retried;
+/// nor is a refused redirect.
+fn may_pass(err: &reqwest::Error) -> bool {
+    if err.is_builder() || err.is_redirect() || is_tls_error(err) {
+        return false;
+    }
+    err.is_timeout() || err.is_connect() || err.is_request() || err.is_body()
+}
+
+/// Whether a TLS error (such as an untrusted certificate) is behind `err`.
+/// `io::Error` skips its own inner error in `source()`, and the TLS error
+/// sits in an `io::Error` inside another one, so go into each `io::Error`
+/// instead of asking for its source.
+fn is_tls_error(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut next = Some(err);
+    while let Some(err) = next {
+        if err.is::<rustls::Error>() {
+            return true;
+        }
+        next = match err.downcast_ref::<io::Error>() {
+            Some(io) => io
+                .get_ref()
+                .map(|inner| inner as &(dyn std::error::Error + 'static)),
+            None => err.source(),
+        };
+    }
+    false
 }
 
 /// `raw` (a URL that did not parse) with what may be a user name and
@@ -1165,18 +1516,21 @@ fn validator_from(headers: &HeaderMap) -> Validator {
     }
 }
 
-/// The first state for a whole-file response.
-fn state_from_response(url: String, response: &Response) -> DownloadState {
+/// The first state for a whole-file response. `had_credentials`: the URL
+/// the user gave had a user name or password (never saved themselves).
+fn state_from_response(url: String, had_credentials: bool, response: &Response) -> DownloadState {
     let headers = response.headers();
     let accept_ranges = header_str(headers, header::ACCEPT_RANGES)
         .is_some_and(|v| v.split(',').any(|u| u.trim().eq_ignore_ascii_case("bytes")));
-    DownloadState::new(
+    let mut state = DownloadState::new(
         url,
         without_credentials(response.url()),
         validator_from(headers),
         response.content_length(),
         accept_ranges,
-    )
+    );
+    state.had_credentials = had_credentials;
+    state
 }
 
 /// The `If-Range` value RFC 9110 §13.1.5 allows, or `None` when there is no
@@ -1533,6 +1887,27 @@ mod tests {
         assert_eq!(without_userinfo("http://h:99999/f"), "http://h:99999/f");
         assert_eq!(without_userinfo("http:/u:p@h:1/f"), "http:/***@h:1/f");
         assert_eq!(without_userinfo("T:x@h:1/f"), "***@h:1/f");
+    }
+
+    #[test]
+    fn an_invalid_url_never_shows_a_token() {
+        // Review of #29 (owner's decision on #28): `?sig=…` was shown.
+        for raw in [
+            "http://h:99999/f.bin?sig=S3cret",
+            "http://h:99999/f.bin#S3cret",
+            "http://u:p@h:99999/f.bin?a=1&sig=S3cret#x",
+        ] {
+            let message = parse_url(raw).unwrap_err().to_string();
+            assert!(!message.contains("S3cret"), "{message}");
+            assert!(message.contains("h:99999/f.bin"), "{message}");
+        }
+        // An `@` in the query hides more than needed, never less.
+        let message = parse_url("http://h:99999/f.bin?next=http://u:p@x/?S3cret")
+            .unwrap_err()
+            .to_string();
+        assert!(!message.contains("S3cret"), "{message}");
+        assert_eq!(shown_url("http://h:1/f?sig=x#y"), "http://h:1/f");
+        assert_eq!(shown_url("http://h:1/f"), "http://h:1/f");
     }
 
     #[test]

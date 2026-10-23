@@ -441,3 +441,31 @@ fn the_checksum_does_not_depend_on_member_order_or_spacing() {
     fs::write(&path, reversed_json(&value)).unwrap();
     assert_eq!(DownloadState::load(&path).unwrap(), state);
 }
+
+/// Owner's decision on #28: the state file may hold a token from the URL
+/// (`?sig=…`), which resuming needs, so only its owner may read it. Read
+/// from the written file itself.
+#[test]
+fn only_its_owner_can_read_the_state_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = saved_sample(dir.path());
+    assert!(zajil_platform::fs::only_owner_can_access(&path).unwrap());
+    // Saving again replaces the file with a new one: still private.
+    let mut state = DownloadState::load(&path).unwrap();
+    state.segments[0].done = 1;
+    state.save(&path).unwrap();
+    assert!(zajil_platform::fs::only_owner_can_access(&path).unwrap());
+}
+
+/// `had_credentials` came after the golden file: a file without it is
+/// accepted, and counts as `false`.
+#[test]
+fn a_file_without_had_credentials_counts_as_without() {
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/state-v1.golden.json");
+    let text = fs::read_to_string(&golden).unwrap();
+    assert!(!text.contains("had_credentials"));
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("f.bin.zajil-state");
+    fs::write(&copy, text).unwrap();
+    assert!(!DownloadState::load(&copy).unwrap().had_credentials);
+}

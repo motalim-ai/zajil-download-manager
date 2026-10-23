@@ -9,11 +9,15 @@
 //!   rename it over the old one, then sync the folder.
 //! - A `checksum` field detects corruption. A corrupt file is rejected; we
 //!   never guess.
+//! - Only the user who downloads may read the file (mode `0600`, or an
+//!   access list for that user alone on Windows): `url` and `final_url` may
+//!   hold a token that resuming needs, such as `?sig=…` (owner's decision on
+//!   #28). It is never printed.
 //!
 //! The caller must sync the `.zajil-part` data *before* saving a state that
 //! counts it as done.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -53,6 +57,12 @@ pub struct DownloadState {
     pub content_length: Option<u64>,
     /// Whether the server announced `Accept-Ranges: bytes`.
     pub accept_ranges: bool,
+    /// Whether the URL the user gave had a user name or password. They are
+    /// never saved (ADR-0004, rule 7); this only says that a `401` while
+    /// resuming means they are needed again. Absent in files written before
+    /// it existed, which counts as `false`.
+    #[serde(default)]
+    pub had_credentials: bool,
     /// Byte ranges of the file, in order and without gaps, and how much of
     /// each is on disk. One segment for a single connection; one per
     /// connection, then more as segments are split, for a parallel download.
@@ -125,6 +135,7 @@ impl DownloadState {
             validator,
             content_length,
             accept_ranges,
+            had_credentials: false,
             segments: vec![Segment {
                 start: 0,
                 end: content_length.and_then(|len| len.checked_sub(1)),
@@ -204,7 +215,9 @@ impl DownloadState {
             Err(err) => return Err(err.into()),
         }
         let written = (|| {
-            let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+            // Only the user may read it: the URL may hold a token that
+            // resuming needs (`?sig=…`, owner's decision on #28).
+            let mut file = zajil_platform::fs::create_private(&tmp)?;
             file.write_all(&json)?;
             file.sync_all()?;
             drop(file);

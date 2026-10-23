@@ -15,7 +15,12 @@ async fn resumes_from_a_relative_state_file_path() {
     let data = random_bytes(1_000_000, 50);
     server.put("/f.bin", FileSpec::new(data.clone()).cut_after(300_000, 1));
     let dir = tempfile::tempdir().unwrap();
-    let engine = Engine::new(Options::default()).unwrap();
+    // One try, so the cut stops the download.
+    let engine = Engine::new(Options {
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
     match engine
         .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
         .await

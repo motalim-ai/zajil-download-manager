@@ -69,6 +69,21 @@ fn printed_commands(stderr: &str) -> Vec<(String, String)> {
     found
 }
 
+/// The POSIX shells that printed commands are run in. On CI all three must
+/// be there (zsh is installed on Linux for it): a missing shell fails the
+/// test instead of skipping it silently (owner's decision on #28). Locally
+/// a missing one is skipped.
+fn posix_shells() -> Vec<&'static str> {
+    let found: Vec<&str> = ["sh", "bash", "zsh"]
+        .into_iter()
+        .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
+        .collect();
+    if std::env::var_os("CI").is_some() {
+        assert_eq!(found, ["sh", "bash", "zsh"], "a shell is missing on CI");
+    }
+    found
+}
+
 /// Runs each printed command in its real shell, with `zajil resume`
 /// replaced by a command that only prints its argument, inside `work`.
 /// Returns what each shell passed as the argument.
@@ -109,9 +124,8 @@ fn run_in_shells(commands: &[(String, String)], work: &Path) -> Vec<String> {
                         .unwrap(),
                 ]
             }
-            _ => ["sh", "bash", "zsh"]
-                .iter()
-                .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
+            _ => posix_shells()
+                .into_iter()
                 .map(|sh| {
                     Command::new(sh)
                         .arg("-c")
@@ -150,8 +164,18 @@ fn an_interrupted_get_exits_3_and_resume_finishes_it() {
     let work = tempfile::tempdir().unwrap();
     let dir_arg = dir.path().to_str().unwrap();
 
-    // One connection, so the cut of the first response stops the download.
-    let out = zajil(&["get", &server.url("/f.bin"), "-c", "1", "-d", dir_arg]);
+    // One connection and one try, so the cut of the first response stops
+    // the download.
+    let out = zajil(&[
+        "get",
+        &server.url("/f.bin"),
+        "-c",
+        "1",
+        "--tries",
+        "1",
+        "-d",
+        dir_arg,
+    ]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     // The printed command is the one the user copies: run it in the shell
     // and resume with exactly the path the shell sees.
@@ -191,6 +215,8 @@ fn the_printed_resume_command_cannot_run_code_from_the_file_name() {
     let out = zajil(&[
         "get",
         &server.url("/f.bin"),
+        "--tries",
+        "1",
         "--dir",
         dir.path().to_str().unwrap(),
     ]);
@@ -229,6 +255,8 @@ fn resume_works_with_a_relative_path() {
     let out = zajil(&[
         "get",
         &server.url("/f.bin"),
+        "--tries",
+        "1",
         "--dir",
         dir.path().to_str().unwrap(),
     ]);
@@ -432,7 +460,7 @@ fn a_resume_that_needs_credentials_says_how_to_download_again() {
         server.url("/f.bin").replacen("http://", "http://u:p@", 1)
     );
 
-    let out = zajil(&["get", &url, "-c", "1", "-d", dir_arg]);
+    let out = zajil(&["get", &url, "-c", "1", "--tries", "1", "-d", dir_arg]);
     assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
     let state_file = only_state_file(dir.as_path());
     let part_file = dir.as_path().join(format!("{name}.zajil-part"));
@@ -575,9 +603,8 @@ fn run_in_shell(shell: &str, command: &str, work: &Path, check: impl Fn(Output))
                 out
             })]
         }
-        _ => ["sh", "bash", "zsh"]
+        _ => posix_shells()
             .into_iter()
-            .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
             .map(|sh| {
                 let script = format!("show() {{ printf '%s' \"$1\"; }}; {command}");
                 let work = work.clone();
@@ -662,4 +689,34 @@ fn wrong_usage_exits_2() {
     assert_eq!(zajil(&[]).status.code(), Some(2));
     assert_eq!(zajil(&["get"]).status.code(), Some(2));
     assert_eq!(zajil(&["get", "x", "--insecure"]).status.code(), Some(2));
+}
+
+/// Owner's decision on #28: a token in the URL (`?sig=…`) never appears in
+/// what `zajil` prints: retry messages, a stopped download, a connection
+/// error, an invalid URL.
+#[test]
+fn zajil_never_prints_a_token_from_the_url() {
+    const TOKEN: &str = "SECRET-TOKEN";
+    let server = TestServer::http();
+    let spec = || FileSpec::new(random_bytes(500_000, 12)).cut_after(100_000, 1);
+    let dir = tempfile::tempdir().unwrap();
+    let dir_arg = dir.path().to_str().unwrap();
+    let with_token = |base: &str| format!("{base}?sig={TOKEN}#{TOKEN}");
+    let cases: [(String, &str, Option<i32>); 4] = [
+        // Cut, tried again, finished.
+        (with_token(&server.url("/f.bin")), "2", Some(0)),
+        // Cut, stopped: resumable.
+        (with_token(&server.url("/g.bin")), "1", Some(3)),
+        // No server there: tried again, then failed.
+        (with_token("http://127.0.0.1:1/f.bin"), "2", Some(1)),
+        (with_token("http://127.0.0.1:99999/f.bin"), "2", Some(1)),
+    ];
+    server.put("/f.bin", spec());
+    server.put("/g.bin", spec());
+    for (url, tries, code) in cases {
+        let out = zajil(&["get", &url, "-c", "1", "--tries", tries, "-d", dir_arg]);
+        let printed = format!("{}{}", text(&out.stdout), text(&out.stderr));
+        assert_eq!(out.status.code(), code, "{printed}");
+        assert!(!printed.contains(TOKEN), "{printed}");
+    }
 }
