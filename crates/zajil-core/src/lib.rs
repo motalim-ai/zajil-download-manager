@@ -14,6 +14,7 @@ pub mod queue;
 mod retry;
 pub mod sanitize;
 mod segmented;
+pub mod settings;
 pub mod state;
 
 pub use engine::{Engine, Error, Event, Finished, Options, Probe, RestartReason, Stop};

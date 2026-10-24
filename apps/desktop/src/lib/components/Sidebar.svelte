@@ -7,7 +7,18 @@
 
   export type Filter = { kind: "all" | "active" | "done" | "uncategorized" } | { kind: "category"; id: string } | { kind: "queue"; name: string };
 
-  let { snapshot, filter = $bindable() }: { snapshot: Snapshot; filter: Filter } = $props();
+  export type View = "list" | "settings" | "categories";
+
+  let {
+    snapshot,
+    filter = $bindable(),
+    view = $bindable(),
+  }: { snapshot: Snapshot; filter: Filter; view: View } = $props();
+
+  function show(f: Filter) {
+    filter = f;
+    view = "list";
+  }
 
   // How many rows the table shows with that filter (review of #46).
   const count = (pick: (d: Snapshot["downloads"][number]) => boolean) =>
@@ -20,14 +31,14 @@
 <nav class="side" aria-label={locale.t("app-name")}>
   <div class="brand"><Mark size={28} /><span>{locale.t("app-name")}</span></div>
   {#each [{ f: { kind: "all" }, icon: "all", key: "nav-all", pick: () => true }, { f: { kind: "active" }, icon: "down", key: "nav-active", pick: (d: Snapshot["downloads"][number]) => d.status === "active" }, { f: { kind: "done" }, icon: "check", key: "nav-done", pick: (d: Snapshot["downloads"][number]) => d.status === "done" }] as item (item.key)}
-    <button class="nav" aria-current={same(filter, item.f as Filter) ? "page" : undefined} onclick={() => (filter = item.f as Filter)}>
+    <button class="nav" aria-current={view === "list" && same(filter, item.f as Filter) ? "page" : undefined} onclick={() => show(item.f as Filter)}>
       <Icon name={item.icon} /><span class="label">{locale.t(item.key)}</span><span class="count num">{count(item.pick)}</span>
     </button>
   {/each}
   <h2>{locale.t("nav-categories")}</h2>
   {#each snapshot.categories as c (c.id)}
     {@const f: Filter = { kind: "category", id: c.id }}
-    <button class="nav" aria-current={same(filter, f) ? "page" : undefined} onclick={() => (filter = f)}>
+    <button class="nav" aria-current={view === "list" && same(filter, f) ? "page" : undefined} onclick={() => show(f)}>
       <Icon name="tag" /><span class="label">{categoryName(c)}</span><span class="count num">{count((d) => d.category === c.id)}</span>
     </button>
   {/each}
@@ -39,7 +50,7 @@
   <h2>{locale.t("nav-queues")}</h2>
   {#each snapshot.queues as q (q.name)}
     {@const f: Filter = { kind: "queue", name: q.name }}
-    <button class="nav" aria-current={same(filter, f) ? "page" : undefined} onclick={() => (filter = f)}>
+    <button class="nav" aria-current={view === "list" && same(filter, f) ? "page" : undefined} onclick={() => show(f)}>
       <Icon name="queue" />
       <span class="label">
         <bdi>{q.name}</bdi>
@@ -48,6 +59,14 @@
       <span class="count num">{count((d) => d.queue === q.name)}</span>
     </button>
   {/each}
+  <div class="end">
+    <button class="nav" aria-current={view === "categories" ? "page" : undefined} onclick={() => (view = "categories")}>
+      <Icon name="tag" /><span class="label">{locale.t("categories-title")}</span>
+    </button>
+    <button class="nav" aria-current={view === "settings" ? "page" : undefined} onclick={() => (view = "settings")}>
+      <Icon name="sliders" /><span class="label">{locale.t("nav-settings")}</span>
+    </button>
+  </div>
 </nav>
 
 <style>
@@ -106,6 +125,11 @@
     color: var(--faint);
     font-size: 11.5px;
     line-height: 1.3;
+  }
+  .end {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
   }
   .count {
     margin-inline-start: auto;

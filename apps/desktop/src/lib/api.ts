@@ -7,6 +7,10 @@ import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
 import type { ProbeView } from "./bindings/ProbeView";
 import type { Snapshot } from "./bindings/Snapshot";
+import type { SettingsView } from "./bindings/SettingsView";
+import type { SettingsChange } from "./bindings/SettingsChange";
+import type { CategoryView } from "./bindings/CategoryView";
+import type { ImportView } from "./bindings/ImportView";
 
 export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
@@ -17,5 +21,14 @@ export const api = {
   resume: (ids: number[]) => invoke<void>("resume", { ids }),
   remove: (ids: number[]) => invoke<void>("remove", { ids }),
   details: (id: number) => invoke<DetailsView>("details", { id }),
+  settings: () => invoke<SettingsView>("settings"),
+  saveSettings: (change: SettingsChange) => invoke<SettingsView>("save_settings", { change }),
+  categories: () => invoke<CategoryView[]>("categories"),
+  saveCategories: (categories: CategoryView[]) => invoke<CategoryView[]>("save_categories", { categories }),
+  tryCategory: (categories: CategoryView[], name: string) =>
+    invoke<string | null>("try_category", { categories, name }),
+  exportQueues: (path: string) => invoke<void>("export_queues", { path }),
+  importQueues: (path: string, keepFolders: boolean) =>
+    invoke<ImportView>("import_queues", { path, keepFolders }),
   onChange: (handler: () => void): Promise<UnlistenFn> => listen("downloads-changed", handler),
 };

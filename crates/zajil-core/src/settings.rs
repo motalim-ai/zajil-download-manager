@@ -1,0 +1,255 @@
+//! `settings.json`: the desktop interface's settings (M4, plan on #6),
+//! by the same rules as `categories.json` and `queues.json` (ADR-0007):
+//! a schema version, strict reading, a checksum, owner-only safe writes,
+//! a lock from read to write, and never written over when damaged.
+//!
+//! The program-wide speed limit is not here: it stays in `queues.json`
+//! (`settings.speed_limit`), where the runner and `zajil` read it. The
+//! engine itself never reads this file; the interface hands the values
+//! over (`Engine::with_connections`, `Runner::connections`).
+
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::category::check_folder;
+use crate::state::{checksum_of, now_rfc3339, write_safely};
+
+/// The value of `format`.
+pub const FORMAT: &str = "zajil-settings";
+/// The only schema this version reads and writes.
+pub const SCHEMA_VERSION: u32 = 1;
+
+const FILE_NAME: &str = "settings.json";
+const LOCK_NAME: &str = "settings.lock";
+const MAX_FILE_BYTES: u64 = 64 * 1024;
+
+/// The interface's language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    #[default]
+    Ar,
+    En,
+}
+
+/// Light, dark, or as the system is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// Western digits (123, the default by the owner's choice of design) or
+/// Eastern Arabic digits (١٢٣).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Digits {
+    #[default]
+    Latn,
+    Arab,
+}
+
+/// Everything in `settings.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsFile {
+    /// Always [`FORMAT`].
+    pub format: String,
+    /// Always [`SCHEMA_VERSION`] when written by this version.
+    pub schema_version: u32,
+    pub language: Language,
+    pub theme: Theme,
+    pub digits: Digits,
+    /// Where new downloads go; `None`: the system's downloads folder.
+    pub download_dir: Option<PathBuf>,
+    /// Connections for each new download, from 1 to
+    /// [`crate::MAX_CONNECTIONS`].
+    pub connections: u32,
+    /// RFC 3339 time in UTC.
+    pub updated_at: String,
+    /// `sha256:` and the hex digest of the file with this field empty.
+    pub checksum: String,
+}
+
+/// Why the settings file could not be used or changed.
+#[derive(Debug, thiserror::Error)]
+pub enum SettingsError {
+    #[error("could not read or write the settings file: {0}")]
+    Io(#[from] io::Error),
+    #[error("{} is not a Zajil settings file", .0.display())]
+    NotASettingsFile(PathBuf),
+    #[error(
+        "{} uses schema version {version}, which this version of Zajil cannot read",
+        path.display()
+    )]
+    UnsupportedVersion { path: PathBuf, version: u64 },
+    #[error(
+        "the settings file {} is damaged ({reason}); Zajil leaves it as it is, so nothing in it \
+         is lost: move it away to start again with the default settings",
+        path.display()
+    )]
+    Corrupt { path: PathBuf, reason: String },
+    #[error(
+        "refusing to use {}: it is a symbolic link, a hard link or not a regular file",
+        .0.display()
+    )]
+    NotRegularFile(PathBuf),
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl Default for SettingsFile {
+    fn default() -> Self {
+        SettingsFile {
+            format: FORMAT.to_owned(),
+            schema_version: SCHEMA_VERSION,
+            language: Language::default(),
+            theme: Theme::default(),
+            digits: Digits::default(),
+            download_dir: None,
+            connections: crate::DEFAULT_CONNECTIONS as u32,
+            updated_at: now_rfc3339(),
+            checksum: String::new(),
+        }
+    }
+}
+
+impl SettingsFile {
+    /// Every value in its range: a file that breaks this is refused when
+    /// read, and never written.
+    pub fn check(&self) -> Result<(), String> {
+        if !(1..=crate::MAX_CONNECTIONS as u32).contains(&self.connections) {
+            return Err(format!(
+                "connections must be from 1 to {}, not {}",
+                crate::MAX_CONNECTIONS,
+                self.connections
+            ));
+        }
+        if let Some(dir) = &self.download_dir {
+            check_folder(dir).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+/// The settings file in one folder, and its lock.
+#[derive(Debug, Clone)]
+pub struct SettingsStore {
+    dir: PathBuf,
+}
+
+impl SettingsStore {
+    /// The store in `dir` (normally `AppPaths::data_dir`). Nothing is
+    /// created until the first change.
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        SettingsStore { dir: dir.into() }
+    }
+
+    /// `settings.json`.
+    pub fn path(&self) -> PathBuf {
+        self.dir.join(FILE_NAME)
+    }
+
+    /// Reads and fully checks the file; a missing file is the defaults.
+    /// Blocking.
+    pub fn load(&self) -> Result<SettingsFile, SettingsError> {
+        let path = self.path();
+        let file = match zajil_platform::fs::open_regular_nofollow(&path, false) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(SettingsFile::default());
+            }
+            Err(err) if zajil_platform::fs::is_not_regular_file(&err) => {
+                return Err(SettingsError::NotRegularFile(path));
+            }
+            Err(err) => return Err(err.into()),
+        };
+        let mut bytes = Vec::new();
+        file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+        let corrupt = |reason: String| SettingsError::Corrupt {
+            path: path.clone(),
+            reason,
+        };
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(corrupt("the file is too large".into()));
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| corrupt(e.to_string()))?;
+        if value.get("format").and_then(|v| v.as_str()) != Some(FORMAT) {
+            return Err(SettingsError::NotASettingsFile(path));
+        }
+        match value.get("schema_version").and_then(|v| v.as_u64()) {
+            Some(v) if v == u64::from(SCHEMA_VERSION) => {}
+            Some(version) => return Err(SettingsError::UnsupportedVersion { path, version }),
+            None => return Err(corrupt("missing schema_version".into())),
+        }
+        let Some(stored) = value.get("checksum").and_then(|v| v.as_str()) else {
+            return Err(corrupt("missing checksum".into()));
+        };
+        if stored != checksum_of(&value) {
+            return Err(corrupt("its checksum does not match".into()));
+        }
+        let file: SettingsFile =
+            serde_json::from_value(value).map_err(|e| corrupt(e.to_string()))?;
+        file.check().map_err(corrupt)?;
+        Ok(file)
+    }
+
+    /// Changes the file with `change`, holding `settings.lock` from the
+    /// read to the end of the write. A damaged file is never overwritten,
+    /// and nothing is written if the result is not valid. Blocking.
+    pub fn update<T>(
+        &self,
+        change: impl FnOnce(&mut SettingsFile) -> Result<T, SettingsError>,
+    ) -> Result<T, SettingsError> {
+        let _lock = self.lock()?;
+        let mut file = self.load()?;
+        let result = change(&mut file)?;
+        file.check().map_err(SettingsError::Invalid)?;
+        file.format = FORMAT.to_owned();
+        file.schema_version = SCHEMA_VERSION;
+        file.updated_at = now_rfc3339();
+        file.checksum = String::new();
+        file.checksum = checksum_of(&serde_json::to_value(&file).map_err(io::Error::other)?);
+        let mut json = serde_json::to_vec_pretty(&file).map_err(io::Error::other)?;
+        json.push(b'\n');
+        write_safely(&self.path(), &json)?;
+        Ok(result)
+    }
+
+    /// Opens (creating if needed) `settings.lock` and waits for its lock,
+    /// never through a link (AGENTS.md §10.1).
+    fn lock(&self) -> Result<File, SettingsError> {
+        std::fs::create_dir_all(&self.dir)?;
+        let path = self.dir.join(LOCK_NAME);
+        let file = loop {
+            match zajil_platform::fs::open_regular_nofollow(&path, true) {
+                Ok(file) => break file,
+                Err(err) if zajil_platform::fs::is_not_regular_file(&err) => {
+                    return Err(SettingsError::NotRegularFile(path));
+                }
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => break file,
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(err.into()),
+            }
+        };
+        file.lock()?;
+        Ok(file)
+    }
+}
+
+/// `dir` as a download folder the settings accept: absolute, without
+/// `..`, in valid text without control or invisible characters.
+pub fn check_download_dir(dir: &Path) -> Result<(), SettingsError> {
+    check_folder(dir).map_err(|e| SettingsError::Invalid(e.to_string()))
+}

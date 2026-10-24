@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may do: Zajil's own commands and events, and set its title. Nothing else: no file system, no shell, no network from the page.",
+  "description": "What the main window may do: Zajil's own commands and events, set its title, and show the system's open and save dialogs, so the user picks a folder or an import or export file. Nothing else: no file system, no shell, no network from the page.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:event:default",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

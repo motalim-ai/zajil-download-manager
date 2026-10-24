@@ -405,6 +405,15 @@ impl Engine {
         engine
     }
 
+    /// This engine, with `connections` for each download it starts
+    /// (clamped like [`Options::connections`]): for a setting the user
+    /// changes while the program runs (M4).
+    pub fn with_connections(&self, connections: usize) -> Engine {
+        let mut engine = self.clone();
+        engine.options.connections = connections.clamp(1, crate::MAX_CONNECTIONS);
+        engine
+    }
+
     /// The clock the engine's limits use.
     pub fn clock(&self) -> Arc<dyn Clock> {
         self.options.clock.clone()

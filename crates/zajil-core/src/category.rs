@@ -270,7 +270,7 @@ impl CategoriesFile {
 
     /// Rejects values that cannot be a real categories file even when the
     /// checksum matches.
-    fn check_consistency(&self) -> Result<(), String> {
+    pub fn check_consistency(&self) -> Result<(), String> {
         if self.categories.len() > MAX_CATEGORIES {
             return Err(format!("more than {MAX_CATEGORIES} categories"));
         }

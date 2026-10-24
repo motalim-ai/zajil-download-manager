@@ -566,3 +566,47 @@ async fn an_item_never_resumes_another_downloads_state_file() {
             .exists()
     );
 }
+
+/// The number of connections a runner is given can change while it runs:
+/// the next download takes the new number (the desktop's settings, M4).
+/// One download at a time; the first runs with 2 connections, the setting
+/// becomes 5 once its data flows, and the second uses 5. Counted by the
+/// server.
+#[tokio::test]
+async fn a_changed_number_of_connections_applies_to_the_next_download() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let server = TestServer::http();
+    // 8 MiB, slow per connection, so the segments overlap.
+    let data = random_bytes(8 * MIB, 401);
+    server.put(
+        "/a.bin",
+        FileSpec::new(data.clone()).throttle(4 * MIB as u64),
+    );
+    server.put(
+        "/b.bin",
+        FileSpec::new(data.clone()).throttle(4 * MIB as u64),
+    );
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    set_max_active(&store, "main", 1);
+    add(&store, "main", &server.url("/a.bin"), downloads.path());
+    add(&store, "main", &server.url("/b.bin"), downloads.path());
+
+    let count = Arc::new(AtomicUsize::new(2));
+    let setting = count.clone();
+    let summary = runner(&store)
+        .connections(count)
+        .run(&Stop::new(), &mut |event| {
+            // The first download's data flows: it has its connections.
+            if let QueueEvent::Download { .. } = event {
+                setting.store(5, Ordering::Relaxed);
+            }
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(summary.finished, 2, "{summary:?}");
+    assert_eq!(server.most_concurrent("/a.bin"), 2);
+    assert_eq!(server.most_concurrent("/b.bin"), 5);
+}

@@ -14,6 +14,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use jiff::Timestamp;
@@ -96,6 +98,8 @@ pub struct Runner {
     /// Where items added without a folder of their own find their
     /// category's folder (M4).
     categories: Option<CategoryStore>,
+    /// Connections for each download, read when it starts (M4).
+    connections: Option<Arc<AtomicUsize>>,
 }
 
 /// How the download of an item ended.
@@ -119,6 +123,7 @@ impl Runner {
             time_zone: TimeZone::system(),
             until: None,
             categories: None,
+            connections: None,
         }
     }
 
@@ -126,6 +131,15 @@ impl Runner {
     /// `store` when each of them starts.
     pub fn categories(mut self, store: CategoryStore) -> Self {
         self.categories = Some(store);
+        self
+    }
+
+    /// Each download takes its number of connections from `count` when it
+    /// starts, so a setting changed while the queues run applies to the
+    /// next download (the desktop's settings, M4). Without it, the
+    /// engine's own number.
+    pub fn connections(mut self, count: Arc<AtomicUsize>) -> Self {
+        self.connections = Some(count);
         self
     }
 
@@ -402,7 +416,10 @@ impl Runner {
                     item: id,
                 });
                 let stop = Stop::new();
-                let engine = engine.with_download_limit(item.limit);
+                let mut engine = engine.with_download_limit(item.limit);
+                if let Some(count) = &self.connections {
+                    engine = engine.with_connections(count.load(Ordering::Relaxed));
+                }
                 let categories = self.categories.clone().filter(|_| item.categorize);
                 let events = events.clone();
                 let task_stop = stop.clone();

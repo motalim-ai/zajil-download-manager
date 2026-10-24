@@ -1,19 +1,25 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import Sidebar, { type Filter } from "./lib/components/Sidebar.svelte";
+  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import Sidebar, { type Filter, type View } from "./lib/components/Sidebar.svelte";
+  import Settings from "./lib/components/Settings.svelte";
+  import Categories from "./lib/components/Categories.svelte";
   import PasteBar from "./lib/components/PasteBar.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
   import Details from "./lib/components/Details.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
-  import { locale, type Lang } from "./lib/i18n.svelte";
+  import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
   import { size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
   import type { DetailsView } from "./lib/bindings/DetailsView";
   import type { ProbeView } from "./lib/bindings/ProbeView";
   import type { AddRequest } from "./lib/bindings/AddRequest";
+  import type { SettingsView } from "./lib/bindings/SettingsView";
+  import type { SettingsChange } from "./lib/bindings/SettingsChange";
+  import type { CategoryView } from "./lib/bindings/CategoryView";
 
   let snapshot = $state<Snapshot>({ downloads: [], queues: [], categories: [], speed_limit: null, problem: null });
   let filter = $state<Filter>({ kind: "all" });
@@ -24,6 +30,13 @@
   let error = $state<string | null>(null);
   // What the last toolbar command answered, if it failed.
   let failed = $state<string | null>(null);
+  let view = $state<View>("list");
+  let settings = $state<SettingsView | null>(null);
+  let settingsMessage = $state<{ text: string; problem: boolean } | null>(null);
+  let keepFolders = $state(false);
+  // Said to screen readers when a download ends: not each progress event.
+  let announcement = $state("");
+  let lastStatus = new Map<number, string>();
   // The names test page, loaded only in a ui-test build.
   let NamesPage = $state<typeof import("./uitest/Names.svelte").default | null>(null);
 
@@ -59,6 +72,78 @@
     void getCurrentWindow().setTitle(locale.t("app-name")).catch(() => {});
   });
 
+  /// Language, digits and theme, at once, without a restart.
+  function applySettings(next: SettingsView) {
+    settings = next;
+    locale.set(next.language as Lang);
+    locale.digits = next.digits as Digits;
+    setTheme(next.theme);
+  }
+
+  async function changeSettings(change: SettingsChange) {
+    try {
+      applySettings(await api.saveSettings(change));
+      settingsMessage = null;
+      await refresh();
+    } catch (e) {
+      settingsMessage = { text: String(e), problem: true };
+    }
+  }
+
+  async function chooseFolder(): Promise<string | null> {
+    const chosen = await openDialog({ directory: true, multiple: false });
+    return typeof chosen === "string" ? chosen : null;
+  }
+
+  async function exportQueues() {
+    const path = await saveDialog({ defaultPath: "zajil-queues.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+    if (!path) return;
+    try {
+      await api.exportQueues(path);
+      settingsMessage = { text: locale.t("export-done"), problem: false };
+    } catch (e) {
+      settingsMessage = { text: String(e), problem: true };
+    }
+  }
+
+  async function importQueues() {
+    const path = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    try {
+      const done = await api.importQueues(path, keepFolders);
+      const kept = done.kept_settings.length
+        ? " " + locale.t("import-kept", { names: done.kept_settings.join("، ") })
+        : "";
+      settingsMessage = { text: locale.t("import-done", { count: done.items_added }) + kept, problem: false };
+      await refresh();
+    } catch (e) {
+      settingsMessage = { text: String(e), problem: true };
+    }
+  }
+
+  async function saveCategories(next: CategoryView[]): Promise<string | null> {
+    try {
+      await api.saveCategories(next);
+      await refresh();
+      return null;
+    } catch (e) {
+      return String(e);
+    }
+  }
+
+  /// Tells screen readers about downloads that just finished or failed.
+  function announce(downloads: Snapshot["downloads"]) {
+    const said: string[] = [];
+    for (const d of downloads) {
+      const before = lastStatus.get(d.id);
+      if (before && before !== d.status && (d.status === "done" || d.status === "failed")) {
+        said.push(`${locale.t(d.status === "done" ? "notify-done-title" : "notify-failed-title")}: ${d.name}`);
+      }
+      lastStatus.set(d.id, d.status);
+    }
+    if (said.length) announcement = said.join(". ");
+  }
+
   // Snapshots can come back out of order: only the latest asked counts
   // (review of #45: an older one could win and stay).
   let asked = 0;
@@ -68,6 +153,7 @@
       const next = await api.snapshot();
       if (mine !== asked) return;
       snapshot = next;
+      announce(snapshot.downloads);
       error = snapshot.problem;
       // The details follow the list: closed when their download is gone
       // (review of #48: they stayed, stale, and every refresh failed), and
@@ -155,13 +241,19 @@
     const test = await import("./uitest/api");
     const scenario = await test.uiTestScenario();
     if (!scenario) return false;
-    const [view = "list", lang = "ar", theme = "light"] = scenario.split("-");
+    const [screen = "list", lang = "ar", theme = "light"] = scenario.split("-");
     locale.set(lang as Lang);
     setTheme(theme);
     snapshot = await api.snapshot();
     selected = 1;
-    if (view === "details") details = await api.details(1);
-    if (view === "add")
+    if (screen === "settings" || screen === "switch") {
+      const loaded = await api.settings();
+      settings = { ...loaded, language: lang as SettingsView["language"], theme: theme as SettingsView["theme"] };
+      if (screen === "settings") view = "settings";
+    }
+    if (screen === "categories") view = "categories";
+    if (screen === "details") details = await api.details(1);
+    if (screen === "add")
       adding = {
         url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
         probe: {
@@ -177,11 +269,36 @@
         error: null,
         busy: false,
       };
-    if (view === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
-    await tick();
-    await document.fonts.ready;
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    if (view !== "names") await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect() });
+    if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
+    const settle = async () => {
+      await tick();
+      await document.fonts.ready;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    };
+    await settle();
+    // The language changes in the same session, through the settings'
+    // own code path: the direction and the texts change, nothing restarts.
+    let languageSwitch: unknown = undefined;
+    if (screen === "switch" && settings) {
+      const seen = () => ({ dir: document.documentElement.dir, lang: document.documentElement.lang, text: document.querySelector("nav")?.textContent ?? "" });
+      const before = seen();
+      await changeSettings({ ...settings, language: lang === "ar" ? "en" : "ar" });
+      await settle();
+      languageSwitch = { before, after: seen() };
+    }
+    if (screen !== "names") {
+      // Automatic accessibility check of what is on screen (axe-core,
+      // a test-only dependency loaded only in this build).
+      const axe = (await import("axe-core")).default;
+      const result = await axe.run(document, { resultTypes: ["violations"] });
+      const accessibility = result.violations.map((v) => ({
+        id: v.id,
+        impact: v.impact,
+        help: v.help,
+        nodes: v.nodes.slice(0, 5).map((n) => n.target.join(" ")),
+      }));
+      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch });
+    }
     return true;
   }
 
@@ -190,6 +307,11 @@
     let unlisten: (() => void) | undefined;
     void (async () => {
       if (await runUiTest()) return;
+      try {
+        applySettings(await api.settings());
+      } catch (e) {
+        error = String(e);
+      }
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
       await refresh();
@@ -202,9 +324,30 @@
   <NamesPage />
 {:else}
   <div class="window">
-    <Sidebar {snapshot} bind:filter />
+    <Sidebar {snapshot} bind:filter bind:view />
     <main class="main">
-      {#if details}
+      {#if view === "settings" && settings}
+        <Settings
+          {settings}
+          bind:keepFolders
+          onchange={(c) => void changeSettings(c)}
+          onchoosefolder={async () => {
+            const folder = await chooseFolder();
+            if (folder !== null && settings) void changeSettings({ ...settings, download_dir: folder });
+          }}
+          onexport={() => void exportQueues()}
+          onimport={() => void importQueues()}
+          message={settingsMessage}
+        />
+      {:else if view === "categories"}
+        <Categories
+          categories={snapshot.categories}
+          onsave={saveCategories}
+          onchoosefolder={chooseFolder}
+          ontry={(c, name) => api.tryCategory(c, name)}
+          problem={null}
+        />
+      {:else if details}
         {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
         <Details
           {details}
@@ -243,6 +386,7 @@
         />
       {/if}
     </main>
+    <div class="visually-hidden" aria-live="polite" role="status">{announcement}</div>
   </div>
 {/if}
 

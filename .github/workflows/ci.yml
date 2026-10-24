@@ -346,7 +346,7 @@ jobs:
       # Screenshots of the real window, captured with each system's own
       # tool, and the image test of mixed names (owner's decision on the
       # M4 plan).
-      - name: Screenshots and the image test of mixed names
+      - name: Screenshots, accessibility, language switch and the image test of mixed names
         shell: bash
         run: |
           set -euo pipefail
@@ -355,7 +355,14 @@ jobs:
             *) app=src-tauri/target/debug/zajil-desktop ;;
           esac
           shots="$RUNNER_TEMP/ui-shots"
-          scenarios="names list-ar-light list-ar-dark list-en-light list-en-dark add-ar-light details-ar-light details-en-dark"
+          # Every screen in Arabic and English, light and dark, each with
+          # its axe-core check, and the language switched in one session.
+          scenarios="names switch-ar-light switch-en-dark"
+          for screen in list add details settings categories; do
+            for lang in ar en; do
+              for theme in light dark; do scenarios="$scenarios $screen-$lang-$theme"; done
+            done
+          done
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/ui-shots.mjs "$app" "$shots" $scenarios
           else

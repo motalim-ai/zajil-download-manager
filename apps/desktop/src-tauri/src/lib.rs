@@ -15,7 +15,7 @@ pub mod view;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager, State};
@@ -23,12 +23,16 @@ use zajil_core::category::{CategoriesFile, CategoryStore};
 use zajil_core::queue::{
     DEFAULT_QUEUE, QueueEvent, QueueStore, QueuesFile, Runner, Status, StoreError,
 };
+use zajil_core::settings::SettingsStore;
 use zajil_core::state::DownloadState;
 use zajil_core::{Engine, Options, Stop};
 use zajil_platform::{AppPaths, SystemPaths};
 
 use crate::live::{Live, NOTIFY_EVERY, Notify};
-use crate::view::{AddRequest, DetailsView, ProbeView, Snapshot};
+use crate::view::{
+    AddRequest, CategoryView, DetailsView, ImportView, ProbeView, SettingsChange, SettingsView,
+    Snapshot,
+};
 
 /// How long the program waits for the downloads to record their progress
 /// when it is closed.
@@ -39,7 +43,11 @@ pub struct App {
     engine: Engine,
     store: QueueStore,
     categories: CategoryStore,
-    download_dir: PathBuf,
+    settings: SettingsStore,
+    /// The system's downloads folder, used when the settings name none.
+    system_download_dir: PathBuf,
+    /// Connections for the next download (the settings, M4).
+    connections: Arc<AtomicUsize>,
     live: Arc<Live>,
     stop: Stop,
     /// Set once the queues have stopped (their downloads recorded their
@@ -71,14 +79,23 @@ fn data_dir(args: &[String]) -> Result<PathBuf, String> {
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     let data = data_dir(&args).unwrap_or_else(|e| panic!("no data folder: {e}"));
-    let download_dir = SystemPaths::new()
+    let system_download_dir = SystemPaths::new()
         .map(|p| p.download_dir().to_path_buf())
         .unwrap_or_else(|_| data.join("Downloads"));
+    let settings = SettingsStore::new(&data);
+    // A damaged settings file is shown when the page asks for it; the
+    // downloads run with the defaults meanwhile.
+    let connections = settings
+        .load()
+        .map(|s| s.connections as usize)
+        .unwrap_or(zajil_core::DEFAULT_CONNECTIONS);
     let app = App {
         engine: Engine::new(Options::default()).expect("the engine starts"),
         store: QueueStore::new(&data),
         categories: CategoryStore::new(&data),
-        download_dir,
+        settings,
+        system_download_dir,
+        connections: Arc::new(AtomicUsize::new(connections)),
         live: Arc::new(Live::default()),
         stop: Stop::new(),
         stopped: tokio::sync::watch::Sender::new(false),
@@ -88,7 +105,9 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    let builder = tauri::Builder::default().manage(app);
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(app);
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -164,7 +183,14 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pause,
         resume,
         remove,
-        details
+        details,
+        settings,
+        save_settings,
+        categories,
+        save_categories,
+        try_category,
+        export_queues,
+        import_queues
     ]
 }
 
@@ -179,6 +205,13 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         resume,
         remove,
         details,
+        settings,
+        save_settings,
+        categories,
+        save_categories,
+        try_category,
+        export_queues,
+        import_queues,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -270,12 +303,13 @@ fn notify(handle: &tauri::AppHandle, live: &Arc<Live>) {
 /// Runs the queues for as long as the window is open. The runner ends when
 /// nothing is left to download; it starts again as soon as something is.
 async fn run_queues(handle: tauri::AppHandle) {
-    let (engine, store, categories, live, stop) = {
+    let (engine, store, categories, connections, live, stop) = {
         let app = handle.state::<App>();
         (
             app.engine.clone(),
             app.store.clone(),
             app.categories.clone(),
+            app.connections.clone(),
             app.live.clone(),
             app.stop.clone(),
         )
@@ -284,7 +318,9 @@ async fn run_queues(handle: tauri::AppHandle) {
         if stop.is_requested() {
             return;
         }
-        let runner = Runner::new(engine.clone(), store.clone()).categories(categories.clone());
+        let runner = Runner::new(engine.clone(), store.clone())
+            .categories(categories.clone())
+            .connections(connections.clone());
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 live.record(&event);
@@ -376,12 +412,16 @@ async fn probe(app: State<'_, App>, url: String) -> Result<ProbeView, String> {
         .probe_until(&url, &stop)
         .await
         .map_err(|e| e.to_string())?;
-    let categories = app.categories.clone();
-    let given = app.download_dir.clone();
+    let (categories, settings, system) = (
+        app.categories.clone(),
+        app.settings.clone(),
+        app.system_download_dir.clone(),
+    );
     tokio::task::spawn_blocking(move || {
         // A damaged categories file: none, as in the list, so a download
         // can still be added (review of #48).
         let categories = categories.load().unwrap_or_else(|_| no_categories());
+        let given = download_dir(&settings, &system);
         view::probe(&found, &categories, &given)
     })
     .await
@@ -416,12 +456,19 @@ async fn add<R: tauri::Runtime>(
     if handle.state::<ui_test::UiTest>().scenario.is_some() {
         return Err("a ui-test scene adds nothing".into());
     }
-    let store = app.store.clone();
-    let given = chosen_folder(request.folder.as_deref(), &app.download_dir)?;
-    let id = tokio::task::spawn_blocking(move || add_blocking(&store, &request, &given))
-        .await
-        .map_err(blocking_err)?
-        .map_err(|e| e.to_string())?;
+    let (store, settings, system) = (
+        app.store.clone(),
+        app.settings.clone(),
+        app.system_download_dir.clone(),
+    );
+    let id = tokio::task::spawn_blocking(move || {
+        let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
+            .map_err(StoreError::Refused)?;
+        add_blocking(&store, &request, &given)
+    })
+    .await
+    .map_err(blocking_err)?
+    .map_err(|e| e.to_string())?;
     let _ = handle.emit("downloads-changed", ());
     Ok(id)
 }
@@ -732,4 +779,191 @@ async fn details<R: tauri::Runtime>(
     })
     .await
     .map_err(blocking_err)?
+}
+
+/// The download folder: the one in the settings, or the system's. Blocking.
+fn download_dir(settings: &SettingsStore, system: &Path) -> PathBuf {
+    settings
+        .load()
+        .ok()
+        .and_then(|s| s.download_dir)
+        .unwrap_or_else(|| system.to_path_buf())
+}
+
+#[tauri::command]
+async fn settings(app: State<'_, App>) -> Result<SettingsView, String> {
+    let (settings, store, system) = (
+        app.settings.clone(),
+        app.store.clone(),
+        app.system_download_dir.clone(),
+    );
+    tokio::task::spawn_blocking(move || {
+        let file = settings.load().map_err(blocking_err)?;
+        let limit = store.load().map_err(blocking_err)?.settings.speed_limit;
+        Ok(view::settings(&file, limit, &system))
+    })
+    .await
+    .map_err(blocking_err)?
+}
+
+/// Saves the settings screen: `settings.json`, and the speed limit in the
+/// queues file, where the runner reads it within half a second. The next
+/// download takes the new number of connections.
+/// A `ui-test` scene shows demo data: nothing done in it may change the
+/// user's files (review of #47).
+fn in_scene<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> bool {
+    #[cfg(feature = "ui-test")]
+    {
+        handle.state::<ui_test::UiTest>().scenario.is_some()
+    }
+    #[cfg(not(feature = "ui-test"))]
+    {
+        let _ = handle;
+        false
+    }
+}
+
+#[tauri::command]
+async fn save_settings<R: tauri::Runtime>(
+    app: State<'_, App>,
+    change: SettingsChange,
+    handle: tauri::AppHandle<R>,
+) -> Result<SettingsView, String> {
+    if in_scene(&handle) {
+        // The language-switch scene goes through here: applied, not saved.
+        let mut file = app.settings.load().unwrap_or_default();
+        view::apply_settings(&mut file, &change);
+        return Ok(view::settings(
+            &file,
+            change.speed_limit,
+            &app.system_download_dir,
+        ));
+    }
+    let (settings, store, system, connections) = (
+        app.settings.clone(),
+        app.store.clone(),
+        app.system_download_dir.clone(),
+        app.connections.clone(),
+    );
+    let saved = tokio::task::spawn_blocking(move || {
+        if change.speed_limit == Some(0) {
+            return Err("a speed limit must be more than 0".to_owned());
+        }
+        let file = settings
+            .update(|file| {
+                view::apply_settings(file, &change);
+                Ok(file.clone())
+            })
+            .map_err(blocking_err)?;
+        store
+            .update(|queues| {
+                queues.settings.speed_limit = change.speed_limit;
+                Ok(())
+            })
+            .map_err(blocking_err)?;
+        connections.store(file.connections as usize, Ordering::Relaxed);
+        Ok(view::settings(&file, change.speed_limit, &system))
+    })
+    .await
+    .map_err(blocking_err)??;
+    let _ = handle.emit("downloads-changed", ());
+    Ok(saved)
+}
+
+#[tauri::command]
+async fn categories(app: State<'_, App>) -> Result<Vec<CategoryView>, String> {
+    let categories = app.categories.clone();
+    tokio::task::spawn_blocking(move || {
+        Ok(view::category_views(
+            &categories.load().map_err(blocking_err)?,
+        ))
+    })
+    .await
+    .map_err(blocking_err)?
+}
+
+/// Replaces the categories with the page's list, checked in full: nothing
+/// is written if any value is invalid.
+#[tauri::command]
+async fn save_categories<R: tauri::Runtime>(
+    app: State<'_, App>,
+    categories: Vec<CategoryView>,
+    handle: tauri::AppHandle<R>,
+) -> Result<Vec<CategoryView>, String> {
+    if in_scene(&handle) {
+        return Err("a ui-test scene saves nothing".into());
+    }
+    let store = app.categories.clone();
+    let saved = tokio::task::spawn_blocking(move || {
+        store
+            .update(|file| {
+                file.categories = view::categories_from(&categories);
+                Ok(view::category_views(file))
+            })
+            .map_err(blocking_err)
+    })
+    .await
+    .map_err(blocking_err)??;
+    let _ = handle.emit("downloads-changed", ());
+    Ok(saved)
+}
+
+/// The category `name` would go to with the page's list, before it is
+/// saved ("try a name").
+#[tauri::command]
+fn try_category(categories: Vec<CategoryView>, name: String) -> Result<Option<String>, String> {
+    let file = CategoriesFile {
+        categories: view::categories_from(&categories),
+        ..CategoriesFile::built_in()
+    };
+    file.check_consistency()?;
+    Ok(file.classify(&name, None).map(|c| c.id.clone()))
+}
+
+/// Writes the queues to a new file the user chose (never over a file).
+#[tauri::command]
+async fn export_queues(app: State<'_, App>, path: String) -> Result<(), String> {
+    let store = app.store.clone();
+    tokio::task::spawn_blocking(move || {
+        let queues = store.load().map_err(blocking_err)?;
+        zajil_core::queue::write_export(Path::new(&path), &queues.export()).map_err(blocking_err)
+    })
+    .await
+    .map_err(blocking_err)?
+}
+
+/// Imports a file the user chose, checked in full before anything changes.
+/// Its folders are used only if the user asked; otherwise the downloads go
+/// to the download folder, by category.
+#[tauri::command]
+async fn import_queues<R: tauri::Runtime>(
+    app: State<'_, App>,
+    path: String,
+    keep_folders: bool,
+    handle: tauri::AppHandle<R>,
+) -> Result<ImportView, String> {
+    if in_scene(&handle) {
+        return Err("a ui-test scene imports nothing".into());
+    }
+    let (store, settings, system) = (
+        app.store.clone(),
+        app.settings.clone(),
+        app.system_download_dir.clone(),
+    );
+    let done = tokio::task::spawn_blocking(move || {
+        let export = zajil_core::queue::read_export(Path::new(&path)).map_err(blocking_err)?;
+        let folders = if keep_folders {
+            zajil_core::queue::Folders::Keep
+        } else {
+            zajil_core::queue::Folders::Into(download_dir(&settings, &system))
+        };
+        store
+            .update(|queues| queues.import(&export, &folders))
+            .map(|summary| ImportView::from(&summary))
+            .map_err(blocking_err)
+    })
+    .await
+    .map_err(blocking_err)??;
+    let _ = handle.emit("downloads-changed", ());
+    Ok(done)
 }

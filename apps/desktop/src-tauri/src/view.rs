@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use zajil_core::Probe;
 use zajil_core::category::{CategoriesFile, Matched};
-use zajil_core::queue::{Item, QueuesFile, Status};
+use zajil_core::queue::{ImportSummary, Item, QueuesFile, Status};
+use zajil_core::settings::{Digits, Language, SettingsFile, Theme};
 use zajil_core::state::{DownloadState, STATE_SUFFIX};
 
 use crate::live::Live;
@@ -157,6 +158,156 @@ pub struct DetailsView {
     pub resumable: Option<bool>,
     #[ts(type = "number | null")]
     pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LanguageView {
+    Ar,
+    En,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ThemeView {
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DigitsView {
+    Latn,
+    Arab,
+}
+
+/// The settings screen: what the user chose, and what the choices mean.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SettingsView {
+    pub language: LanguageView,
+    pub theme: ThemeView,
+    pub digits: DigitsView,
+    /// The folder chosen; `null`: the system's downloads folder.
+    pub download_dir: Option<String>,
+    /// The system's downloads folder, shown when none is chosen.
+    pub system_download_dir: String,
+    pub connections: u32,
+    pub max_connections: u32,
+    /// Bytes per second for all downloads together; `null`: no limit.
+    #[ts(type = "number | null")]
+    pub speed_limit: Option<u64>,
+}
+
+/// What the settings screen saves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SettingsChange {
+    pub language: LanguageView,
+    pub theme: ThemeView,
+    pub digits: DigitsView,
+    pub download_dir: Option<String>,
+    pub connections: u32,
+    #[ts(type = "number | null")]
+    pub speed_limit: Option<u64>,
+}
+
+/// What an import did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ImportView {
+    pub items_added: u32,
+    pub queues_created: u32,
+    /// Queues that already had settings of their own, and kept them.
+    pub kept_settings: Vec<String>,
+    /// The file's speed limit was taken (there was none).
+    pub speed_limit_set: bool,
+}
+
+impl From<&ImportSummary> for ImportView {
+    fn from(s: &ImportSummary) -> Self {
+        ImportView {
+            items_added: u32::try_from(s.items_added).unwrap_or(u32::MAX),
+            queues_created: u32::try_from(s.queues_created).unwrap_or(u32::MAX),
+            kept_settings: s.kept_settings.clone(),
+            speed_limit_set: s.speed_limit_set,
+        }
+    }
+}
+
+pub fn settings(file: &SettingsFile, speed_limit: Option<u64>, system_dir: &Path) -> SettingsView {
+    SettingsView {
+        language: match file.language {
+            Language::Ar => LanguageView::Ar,
+            Language::En => LanguageView::En,
+        },
+        theme: match file.theme {
+            Theme::System => ThemeView::System,
+            Theme::Light => ThemeView::Light,
+            Theme::Dark => ThemeView::Dark,
+        },
+        digits: match file.digits {
+            Digits::Latn => DigitsView::Latn,
+            Digits::Arab => DigitsView::Arab,
+        },
+        download_dir: file.download_dir.as_ref().map(|d| d.display().to_string()),
+        system_download_dir: system_dir.display().to_string(),
+        connections: file.connections,
+        max_connections: zajil_core::MAX_CONNECTIONS as u32,
+        speed_limit,
+    }
+}
+
+/// `change` applied to `file` (the speed limit goes to the queues file).
+pub fn apply_settings(file: &mut SettingsFile, change: &SettingsChange) {
+    file.language = match change.language {
+        LanguageView::Ar => Language::Ar,
+        LanguageView::En => Language::En,
+    };
+    file.theme = match change.theme {
+        ThemeView::System => Theme::System,
+        ThemeView::Light => Theme::Light,
+        ThemeView::Dark => Theme::Dark,
+    };
+    file.digits = match change.digits {
+        DigitsView::Latn => Digits::Latn,
+        DigitsView::Arab => Digits::Arab,
+    };
+    file.download_dir = change.download_dir.as_ref().map(std::path::PathBuf::from);
+    file.connections = change.connections;
+}
+
+/// The categories as the page edits them, back into categories. Every
+/// value is checked when the file is written (`CategoryStore::update`).
+pub fn categories_from(views: &[CategoryView]) -> Vec<zajil_core::category::Category> {
+    views
+        .iter()
+        .map(|v| zajil_core::category::Category {
+            id: v.id.clone(),
+            name: v.name.clone(),
+            extensions: v.extensions.clone(),
+            sites: v.sites.clone(),
+            folder: v.folder.as_ref().map(std::path::PathBuf::from),
+        })
+        .collect()
+}
+
+pub fn category_views(categories: &CategoriesFile) -> Vec<CategoryView> {
+    categories
+        .categories
+        .iter()
+        .map(|c| CategoryView {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            extensions: c.extensions.clone(),
+            sites: c.sites.clone(),
+            folder: c.folder.as_ref().map(|f| f.display().to_string()),
+        })
+        .collect()
 }
 
 /// The name the engine would give a download of `url` before the server
@@ -322,17 +473,7 @@ pub fn snapshot(queues: &QueuesFile, categories: &CategoriesFile, live: &Live) -
                 }),
             })
             .collect(),
-        categories: categories
-            .categories
-            .iter()
-            .map(|c| CategoryView {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                extensions: c.extensions.clone(),
-                sites: c.sites.clone(),
-                folder: c.folder.as_ref().map(|f| f.display().to_string()),
-            })
-            .collect(),
+        categories: category_views(categories),
         speed_limit: queues.settings.speed_limit,
         problem: live.problem(),
     }

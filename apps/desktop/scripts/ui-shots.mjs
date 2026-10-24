@@ -6,7 +6,12 @@
 // refused, not captured (review of #47).
 //
 //   node scripts/ui-shots.mjs <app> <out-folder> <scenario>...
-//   scenario: <view>-<lang>-<theme>, e.g. list-ar-light, or names
+//   scenario: <view>-<lang>-<theme>, e.g. list-ar-light, or names; view is
+//   list, add, details, settings, categories, or switch (the language
+//   changes in the same session, checked here)
+//
+// Each scenario also carries an axe-core check of the page: a critical or
+// serious problem fails the run.
 //
 // macOS: screencapture (needs the Screen Recording permission); Linux:
 // ImageMagick `import` on the X display (Xvfb in CI); Windows: .NET
@@ -96,7 +101,20 @@ for (const scenario of scenarios) {
   else {
     // Let the window manager finish drawing the frame.
     await sleep(800);
-    const { window } = JSON.parse(readFileSync(report, "utf8"));
+    const { window, accessibility = [], languageSwitch } = JSON.parse(readFileSync(report, "utf8"));
+    // Any critical or serious accessibility problem fails (M4 criterion);
+    // the others are listed.
+    for (const v of accessibility) {
+      const blocking = v.impact === "critical" || v.impact === "serious";
+      (blocking ? console.error : console.log)(`${scenario}: accessibility ${v.impact}: ${v.id} (${v.help}) at ${v.nodes.join(", ")}`);
+      if (blocking) failed = true;
+    }
+    if (scenario.startsWith("switch-")) {
+      const { before, after } = languageSwitch ?? {};
+      const ok = before && after && before.dir !== after.dir && before.lang !== after.lang && before.text !== after.text;
+      console.log(`${scenario}: language switch ${ok ? "ok" : "FAILED"}: ${JSON.stringify(languageSwitch)}`);
+      if (!ok) failed = true;
+    }
     const why = outside(window);
     if (why) fail(`not captured: ${why}`);
     else {
