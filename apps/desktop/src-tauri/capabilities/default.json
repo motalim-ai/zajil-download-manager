@@ -1,12 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may do: Zajil's own commands and events, and set its title. Nothing else: no file system, no shell, no network from the page.",
+  "description": "What the main window may do: Zajil's own commands and events, set its title, and read where it is on screen (for the screenshots of the UI tests). Nothing else: no file system, no shell, no network from the page.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:event:default",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-inner-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor"
   ]
 }

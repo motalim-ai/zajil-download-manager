@@ -21,18 +21,24 @@ crate-type = ["rlib"]
 name = "zajil-desktop"
 path = "src/main.rs"
 
+[features]
+# Test pages and fixed demo data for the screenshots and the image test of
+# mixed names in CI. Never in a release build (checked in CI).
+ui-test = []
+
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 tauri = { version = "2.12.5", features = [] }
 serde = { version = "1.0.229", features = ["derive"] }
+# The reports of the UI tests (`ui_test.rs`), and the tests.
+serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["sync", "time", "rt-multi-thread", "macros", "signal"] }
 ts-rs = "12.0.1"
 zajil-core = { path = "../../../crates/zajil-core" }
 zajil-platform = { path = "../../../crates/zajil-platform" }
 
 [dev-dependencies]
-serde_json = "1.0.154"
 tempfile = "3.27.0"
 zajil-testserver = { path = "../../../crates/zajil-testserver" }
