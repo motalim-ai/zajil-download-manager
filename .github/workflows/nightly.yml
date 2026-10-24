@@ -2,8 +2,14 @@ name: Nightly
 
 # Tests that are too slow or too timing-dependent for pull requests. This
 # workflow never runs on a pull request, so it never blocks a merge: when
-# it fails, it opens an issue (or comments on the one already open).
+# it fails, it opens an issue (or comments on it, or reopens it).
 # Owner's decision on #36 (item 14).
+#
+# Measurements (owner's decision on #39): the test records every wait of
+# the speed limit and every write; on a failure the job uploads them with
+# the machine's cores and its load during the test. Nothing is retried and
+# the limits are unchanged. After 14 scheduled runs in a row without a
+# failure, the open issue is closed as "did not happen again".
 
 on:
   schedule:
@@ -11,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       check_alert:
-        description: "Fail on purpose (skips the tests) to check that a failure opens an issue"
+        description: "Run the test, then fail on purpose, to check that a failure uploads the measurements and opens an issue"
         type: boolean
         default: false
 
@@ -40,29 +46,64 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - name: Fail on purpose
-        if: inputs.check_alert
-        shell: bash
-        run: |
-          echo "::error::check_alert was set: failing on purpose to check the alert"
-          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned toolchain
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build the test
+        run: cargo test --locked -p zajil-core --test speed_limit_real_clock --no-run
       # The test is #[ignore]d so that `cargo test` on pull requests skips
       # it; here it runs alone. The count is checked, so a renamed test
-      # cannot pass by running nothing.
+      # cannot pass by running nothing. The machine's cores, and its load
+      # once a second while the test runs, go next to the measurements.
       - name: Test the speed limit on the real clock
         timeout-minutes: 15
         shell: bash
+        env:
+          ZAJIL_DIAG_DIR: ${{ runner.temp }}/nightly-measurements
+          ZAJIL_NIGHTLY_FAIL_ON_PURPOSE: ${{ inputs.check_alert && '1' || '' }}
         run: |
           set -euo pipefail
+          [ -n "$ZAJIL_NIGHTLY_FAIL_ON_PURPOSE" ] || unset ZAJIL_NIGHTLY_FAIL_ON_PURPOSE
+          mkdir -p "$ZAJIL_DIAG_DIR"
+          case "$RUNNER_OS" in
+            Linux) cores="$(nproc)" ;;
+            macOS) cores="$(sysctl -n hw.ncpu)" ;;
+            Windows) cores="$NUMBER_OF_PROCESSORS" ;;
+          esac
+          echo "runner: $RUNNER_OS, cores: $cores" > "$ZAJIL_DIAG_DIR/machine.txt"
+          sample() {
+            while :; do
+              case "$RUNNER_OS" in
+                Linux) echo "$(date -u +%T) loadavg $(cut -d' ' -f1-3 /proc/loadavg)" ;;
+                macOS) echo "$(date -u +%T) loadavg $(sysctl -n vm.loadavg)" ;;
+                Windows) echo "$(date -u +%T) cpu% $(powershell -NoProfile -Command \
+                  '(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average')" ;;
+              esac
+              sleep 1
+            done
+          }
+          sample > "$ZAJIL_DIAG_DIR/load.txt" 2>&1 &
+          sampler=$!
+          status=0
           cargo test --locked -p zajil-core --test speed_limit_real_clock -- \
             --ignored --exact --nocapture \
             on_the_real_clock_the_first_second_stays_under_twice_the_limit \
-            | tee real-clock.txt
-          grep -q 'test result: ok. 1 passed' real-clock.txt
+            | tee real-clock.txt || status=$?
+          kill "$sampler" 2>/dev/null || true
+          if [ "$status" -ne 0 ] || ! grep -q 'test result: ok. 1 passed' real-clock.txt; then
+            echo "::group::Machine and load during the test"
+            cat "$ZAJIL_DIAG_DIR/machine.txt" "$ZAJIL_DIAG_DIR/load.txt"
+            echo "::endgroup::"
+            exit 1
+          fi
+      - name: Upload the measurements
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-measurements-${{ matrix.os }}
+          path: ${{ runner.temp }}/nightly-measurements
+          if-no-files-found: warn
 
   alert:
     name: Open an issue on failure
@@ -74,7 +115,7 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Open or update the issue
+      - name: Open, update or reopen the issue
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -93,13 +134,72 @@ jobs:
             "فشل التشغيل الليلي: $RUN_URL" '' \
             "- الـ commit: \`$SHA\`" \
             "- السبب: \`$EVENT\`" \
-            '- الاختبار: `crates/zajil-core/tests/speed_limit_real_clock.rs`' '' \
-            'هذا لا يمنع الدمج. افتح السجل لترى النظام والأرقام.' '' '</div>')"
-          existing="$(gh issue list --state open --limit 100 --json number,title \
-            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-            echo "Commented on #$existing"
+            '- الاختبار: `crates/zajil-core/tests/speed_limit_real_clock.rs`' \
+            '- القياسات (كل انتظار وكل كتابة، وعدد الأنوية، وحمل الجهاز أثناء الاختبار): في الملفات المرفقة بالتشغيل (`nightly-measurements-<النظام>`)، وملخصها في السجل.' '' \
+            'هذا لا يمنع الدمج.' '' '</div>')"
+          find_issue() {
+            gh issue list --state "$1" --limit 100 --json number,title \
+              --jq ".[] | select(.title == \"$title\") | .number" | head -n 1
+          }
+          open="$(find_issue open)"
+          closed="$(find_issue closed)"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+            echo "Commented on #$open"
+          elif [ -n "$closed" ]; then
+            gh issue reopen "$closed" --comment "$body"
+            echo "Reopened #$closed"
           else
             gh issue create --title "$title" --body "$body"
           fi
+
+  quiet:
+    name: Close the issue after 14 quiet nights
+    needs: real-clock
+    if: success() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      actions: read
+    steps:
+      - name: Close the issue if the failure did not happen again
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          title="الاختبارات الليلية: فشل اختبار حد السرعة بالوقت الحقيقي"
+          issue="$(gh issue list --state open --limit 100 --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+          if [ -z "$issue" ]; then
+            echo "No open issue"
+            exit 0
+          fi
+          # This run (its test jobs passed) and the 13 scheduled runs before
+          # it, all finished without a failure.
+          previous="$(gh run list --workflow nightly.yml --event schedule --limit 30 \
+            --json databaseId,status,conclusion \
+            --jq "[.[] | select(.databaseId != $RUN_ID and .status == \"completed\")][:13]")"
+          count="$(jq 'length' <<<"$previous")"
+          good="$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$previous")"
+          echo "previous scheduled runs: $count, without a failure: $good"
+          if [ "$count" -lt 13 ] || [ "$good" -lt 13 ]; then
+            exit 0
+          fi
+          ids="$RUN_ID $(jq -r '.[].databaseId' <<<"$previous")"
+          measured=""
+          for id in $ids; do
+            # "<job>\t<step>\t<time> <line>": keep the job (the system) and
+            # the line.
+            lines="$(gh run view "$id" --log 2>/dev/null | grep '× the limit over' \
+              | awk -F'\t' '{ sub(/^[^ ]* /, "", $3); print $1 ": " $3 }' || true)"
+            measured+="- $SERVER/$GH_REPO/actions/runs/$id"$'\n'"$(sed 's/^/  - /' <<<"$lines")"$'\n'
+          done
+          body="$(printf '%s\n' \
+            '<div dir="rtl">' '' \
+            '**ما تكرر** (قرار المالك على #39): 14 تشغيلًا ليليًا متتاليًا دون فشل، على الأنظمة الثلاثة. تُغلق هذه الـ Issue، وتُفتح من جديد تلقائيًا إذا عاد الفشل.' '' \
+            'القياسات (معدّل التحميل من الحد في كل تشغيل):' '' "$measured" '</div>')"
+          gh issue close "$issue" --reason "not planned" --comment "$body"
+          echo "Closed #$issue"
