@@ -314,3 +314,43 @@ fn damaged_or_hostile_files_are_refused_clearly_and_change_nothing() {
         Err(TransferError::NotRegularFile(_))
     ));
 }
+
+/// Owner's review of #41: no header (`Cookie`, `Authorization` or any
+/// other) ever reaches an export. The file holds exactly the documented
+/// fields, at every level, and nothing that names a header.
+#[test]
+fn no_header_ever_goes_into_an_export() {
+    let (_tmp, path) = exported(&sample());
+    let text = fs::read_to_string(&path).unwrap();
+    let lower = text.to_lowercase();
+    for word in ["cookie", "authorization", "header", "bearer", "password"] {
+        assert!(!lower.contains(word), "{word} in the export:\n{text}");
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let keys = |v: &serde_json::Value| -> Vec<String> {
+        let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    assert_eq!(
+        keys(&value),
+        [
+            "checksum",
+            "exported_at",
+            "format",
+            "queues",
+            "schema_version",
+            "settings"
+        ]
+    );
+    assert_eq!(keys(&value["settings"]), ["speed_limit"]);
+    for queue in value["queues"].as_array().unwrap() {
+        assert_eq!(keys(queue), ["items", "max_active", "name", "schedule"]);
+        for item in queue["items"].as_array().unwrap() {
+            assert_eq!(
+                keys(item),
+                ["added_at", "categorize", "dir", "limit", "status", "url"]
+            );
+        }
+    }
+}

@@ -244,3 +244,136 @@ async fn a_site_rule_wins_and_a_file_without_a_category_stays_in_the_given_folde
         .unwrap();
     assert_same_file(&other.file, &given.join("notes.unknown"));
 }
+
+/// Every file under `dir`, at any depth (folders themselves are not
+/// counted).
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut todo = vec![dir.to_owned()];
+    while let Some(d) = todo.pop() {
+        for entry in fs::read_dir(&d).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                todo.push(entry.path());
+            } else {
+                found.push(entry.path());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The first download of a category whose folder does not exist yet
+/// (owner's review of #41): creating the folder waits for a blocking
+/// thread. Cancelled while it waits, behind a busy blocking pool, it
+/// leaves no file, reserves no name, and the next download of the same
+/// name takes that name and keeps its data.
+#[test]
+fn a_download_cancelled_while_its_category_folder_is_made_leaves_nothing() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let server = TestServer::http();
+        server.put("/a/f.zip", FileSpec::new(random_bytes(500_000, 94)));
+        let data = random_bytes(800_000, 95);
+        server.put("/b/f.zip", FileSpec::new(data.clone()));
+        let home = tempfile::tempdir().unwrap();
+        let given = home.path().join("downloads");
+        let archives = home.path().join("مضغوطات");
+        let categories = store_with_archives_in(home.path(), &archives)
+            .load()
+            .unwrap();
+        // The categories file itself is not a download's file.
+        let before = files_under(home.path());
+        let choose =
+            |name: &str, url: &zajil_core::Url| categories.folder_for(name, url.host_str(), &given);
+        let engine = Engine::new(Options::default()).unwrap();
+
+        // The only blocking thread is busy, so the folder cannot be made.
+        let busy = tokio::task::spawn_blocking(|| {
+            std::thread::sleep(std::time::Duration::from_millis(500))
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let cancelled = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            engine.download_choosing_until(
+                &server.url("/a/f.zip"),
+                &choose,
+                &Stop::new(),
+                &mut |_| {},
+            ),
+        )
+        .await;
+        assert!(
+            cancelled.is_err(),
+            "it should still be waiting for the folder"
+        );
+        assert!(!archives.exists(), "the folder could not be made yet");
+        // Let the busy thread and the folder creation it held back end.
+        busy.await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            files_under(home.path()),
+            before,
+            "the cancelled download left files"
+        );
+
+        // The next download of the same name takes that name.
+        let done = engine
+            .download_choosing_until(&server.url("/b/f.zip"), &choose, &Stop::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_same_file(&done.file, &archives.join("f.zip"));
+        assert_eq!(
+            sha256_hex(&fs::read(&done.file).unwrap()),
+            sha256_hex(&data)
+        );
+        let mut left = files_under(home.path());
+        left.retain(|f| !before.contains(f));
+        assert_eq!(left.len(), 1, "{left:?}");
+    });
+}
+
+/// Not cancelled: behind the same busy pool, the first download of a new
+/// category folder waits, then makes the folder and finishes there.
+#[test]
+fn the_first_download_of_a_new_category_folder_waits_for_a_busy_pool_and_finishes() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let server = TestServer::http();
+        let data = random_bytes(300_000, 96);
+        server.put("/f.zip", FileSpec::new(data.clone()));
+        let home = tempfile::tempdir().unwrap();
+        let given = home.path().join("downloads");
+        let archives = home.path().join("a").join("b").join("archives");
+        let categories = store_with_archives_in(home.path(), &archives)
+            .load()
+            .unwrap();
+        let choose =
+            |name: &str, url: &zajil_core::Url| categories.folder_for(name, url.host_str(), &given);
+        let engine = Engine::new(Options::default()).unwrap();
+        let _busy = tokio::task::spawn_blocking(|| {
+            std::thread::sleep(std::time::Duration::from_millis(300))
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let done = engine
+            .download_choosing_until(&server.url("/f.zip"), &choose, &Stop::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_same_file(&done.file, &archives.join("f.zip"));
+        assert_eq!(
+            sha256_hex(&fs::read(&done.file).unwrap()),
+            sha256_hex(&data)
+        );
+    });
+}

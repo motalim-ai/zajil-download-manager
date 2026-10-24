@@ -5,7 +5,7 @@ mod common;
 
 use std::fs;
 use std::path::Path;
-use std::process::{Output, Stdio};
+use std::process::Output;
 use std::time::{Duration, Instant};
 
 use zajil_core::category::CategoryStore;
@@ -106,19 +106,47 @@ fn a_zip_goes_to_archives_and_a_users_rule_survives_a_killed_run() {
             &server.url("/comic.cbz"),
         ],
     );
+    // What zajil prints is kept, and shown if the test fails, so a failure
+    // on CI says why (owner's review of #41).
+    let out_file = home.path().join("run-1.out");
+    let err_file = home.path().join("run-1.err");
+    // One connection: the server limits each connection to 1 MiB/s, so
+    // the 6 MiB take about 6 s and progress is saved (once a second)
+    // before the kill. With the default 8 connections they took under a
+    // second, so zajil finished everything (exit code 0, "3 finished;
+    // nothing is left to download") before any progress was saved, and
+    // the test failed with "zajil exited early" about one run in 20 here
+    // and on Linux and macOS CI (review of #41).
     let mut child = common::zajil_command()
         .arg("--data-dir")
         .arg(data.path())
-        .args(["queue", "run"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .args(["--connections", "1", "queue", "run"])
+        .stdout(fs::File::create(&out_file).unwrap())
+        .stderr(fs::File::create(&err_file).unwrap())
         .spawn()
         .unwrap();
+    let shown = || {
+        format!(
+            "stdout:\n{}\nstderr:\n{}",
+            fs::read_to_string(&out_file).unwrap_or_default(),
+            fs::read_to_string(&err_file).unwrap_or_default()
+        )
+    };
     let store = QueueStore::new(data.path());
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        assert!(Instant::now() < deadline, "no progress was saved");
-        assert!(child.try_wait().unwrap().is_none(), "zajil exited early");
+        assert!(
+            Instant::now() < deadline,
+            "no progress was saved\n{}",
+            shown()
+        );
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!(
+                "zajil exited early ({status}); queues: {:?}\n{}",
+                store.load().unwrap().queue("main").unwrap().items,
+                shown()
+            );
+        }
         let saved = store.load().unwrap().queue("main").unwrap().items[0]
             .state_file
             .as_deref()
@@ -269,6 +297,10 @@ fn export_then_import_through_the_command_line() {
     );
     let out = ok(data.path(), &["queue", "export", path(&file)]);
     assert!(!out.contains("SECRET-TOKEN"), "{out}");
+    assert!(
+        out.contains("some may contain temporary access keys. Do not share it."),
+        "{out}"
+    );
     assert!(zajil_platform::fs::only_owner_can_access(&file).unwrap());
     let again = zajil(data.path(), &["queue", "export", path(&file)]);
     assert_eq!(again.status.code(), Some(1));

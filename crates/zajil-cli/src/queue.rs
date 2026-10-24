@@ -252,6 +252,11 @@ fn export(store: &QueueStore, file: &Path) -> Result<(), String> {
         export.queues.len(),
         file.display()
     );
+    // Owner's decision on #41: say it, without printing any URL.
+    eprintln!(
+        "zajil: note: the file holds the URLs as they are, and some may contain temporary \
+         access keys. Do not share it."
+    );
     Ok(())
 }
 
