@@ -525,17 +525,23 @@ fn the_report_of_a_failed_test_holds_requests_connections_and_strays() {
         .write_all(b"GET /other HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
         .unwrap();
     let _ = stream.read_to_end(&mut Vec::new());
-    // Let the server record how the last connection ended.
-    std::thread::sleep(Duration::from_millis(200));
-
-    let report = server.report();
+    // The server writes down a connection's end just after closing it:
+    // wait for that, with a deadline (review of #52).
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let report = loop {
+        let report = server.report();
+        if report.contains("cut by test server") || std::time::Instant::now() > deadline {
+            break report;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
     assert!(
-        report.contains("request 0: GET /f.bin range=None"),
+        report.contains("request 1: GET /f.bin range=None"),
         "{report}"
     );
     assert!(report.contains("bytes_written=100000 conn=1"), "{report}");
     assert!(
-        report.contains("request 1: GET /f.bin range=Some(\"bytes=1000-\")"),
+        report.contains("request 2: GET /f.bin range=Some(\"bytes=1000-\")"),
         "{report}"
     );
     assert!(report.contains("status=206"), "{report}");
@@ -559,4 +565,36 @@ fn a_test_that_fails_with_a_server_alive_still_ends_cleanly() {
         panic!("a test fails while its server is alive");
     });
     assert!(failed.is_err());
+}
+
+/// Run only by `a_failed_test_shows_the_servers_report` below, in a process
+/// of its own: a test that fails with its server alive.
+#[test]
+#[ignore = "fails on purpose; run by a_failed_test_shows_the_servers_report"]
+fn fails_on_purpose_with_a_server_alive() {
+    let server = TestServer::http();
+    server.put("/f", FileSpec::new(vec![1u8; 10]));
+    let _ = get(&server, "/f", &[]);
+    panic!("failing on purpose");
+}
+
+/// #50 and review of #52: a test that fails with a server alive shows the
+/// server's report under it, in the test harness's own output.
+#[test]
+fn a_failed_test_shows_the_servers_report() {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "fails_on_purpose_with_a_server_alive",
+            "--exact",
+            "--ignored",
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("failing on purpose"), "{text}");
+    assert!(text.contains("test server http://127.0.0.1:"), "{text}");
+    assert!(text.contains("saw:"), "{text}");
+    assert!(text.contains("request 1: GET /f range=None"), "{text}");
+    assert!(text.contains("connection 1 from 127.0.0.1:"), "{text}");
 }

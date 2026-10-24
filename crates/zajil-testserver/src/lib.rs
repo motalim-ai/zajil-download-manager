@@ -525,19 +525,31 @@ impl TestServer {
     /// status and bytes; each connection, with who opened it and how it
     /// ended; and the stray requests.
     pub fn report(&self) -> String {
-        let requests = self.requests();
+        // One look at the log, so requests and connections agree (review
+        // of #52: a request could come between two looks).
         let shared = self.lock();
         let mut out = format!("test server {} saw:\n", self.base);
-        for (n, r) in requests.iter().enumerate() {
+        for (n, entry) in shared.log.iter().enumerate() {
+            let r = &entry.record;
             out.push_str(&format!(
-                "  request {n}: {} {} range={:?} if_range={:?} status={} bytes_written={} conn={} at={:?}\n",
-                r.method, r.path, r.range, r.if_range, r.status, r.bytes_sent, r.connection, r.at
+                "  request {}: {} {} range={:?} if_range={:?} status={} bytes_written={} conn={} at={:?}\n",
+                n + 1,
+                r.method,
+                r.path,
+                r.range,
+                r.if_range,
+                r.status,
+                entry.bytes_sent.load(Ordering::SeqCst),
+                r.connection,
+                r.at
             ));
         }
         for c in &shared.connections {
             let ended = match &c.ended {
                 Some((at, how)) => format!("ended at {at:?}: {how}"),
-                None => "still open".to_owned(),
+                // The client may already see it closed: its end is written
+                // down just after the socket closes.
+                None => "still open (or closing)".to_owned(),
             };
             out.push_str(&format!(
                 "  connection {} from {} at {:?}, {ended}\n",
@@ -546,6 +558,9 @@ impl TestServer {
         }
         for s in &shared.strays {
             out.push_str(&format!("  stray request (404, not counted): {s}\n"));
+        }
+        if shared.log.is_empty() && shared.connections.is_empty() && shared.strays.is_empty() {
+            out.push_str("  (nothing)\n");
         }
         out
     }
@@ -616,6 +631,12 @@ impl Drop for TestServer {
         // failure that comes once in many runs leaves its evidence the first
         // time (#50). Shown by the test harness under the failed test.
         if std::thread::panicking() {
+            // `eprintln!`, not a write to `std::io::stderr()`: only the
+            // macros go to the harness's capture, which shows them under the
+            // failed test (a direct write went past it, review of #52). The
+            // cost: with `--nocapture` and a stderr that is a closed pipe the
+            // macro panics, and a panic during a panic aborts the binary.
+            // Neither happens in CI.
             eprintln!("{}", self.report());
         }
         if let Some(tx) = self.shutdown.take() {
