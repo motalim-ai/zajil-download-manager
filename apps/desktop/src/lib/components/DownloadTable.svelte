@@ -15,9 +15,22 @@
   const extension = (name: string) => (/\.([A-Za-z0-9]{1,4})[A-Za-z0-9]*$/.exec(name)?.[1] ?? "").toUpperCase();
   const fraction = (d: DownloadView) => (d.size ? d.done / d.size : d.status === "done" ? 1 : 0);
 
-  // Arrows move the selection, Enter opens the details (keyboard first).
+  // The row Tab reaches: the selected one, else the first.
+  const current = $derived(Math.max(downloads.findIndex((d) => d.id === selected), 0));
+
+  // Keyboard first: the arrows, Home and End move the selection; Space
+  // selects the focused row; Enter opens its details (part 4 of the app:
+  // until then the table has no `onopen`). An arrow on a row that is not
+  // selected selects that row first (review of #46: it skipped it).
   function onkeydown(event: KeyboardEvent, index: number) {
-    const next = event.key === "ArrowDown" ? index + 1 : event.key === "ArrowUp" ? index - 1 : -1;
+    const here = downloads[index]?.id !== selected;
+    const next =
+      event.key === "ArrowDown" ? (here ? index : index + 1)
+      : event.key === "ArrowUp" ? (here ? index : index - 1)
+      : event.key === "Home" ? 0
+      : event.key === "End" ? downloads.length - 1
+      : event.key === " " ? index
+      : -1;
     if (next >= 0 && next < downloads.length) {
       event.preventDefault();
       const id = downloads[next]?.id ?? null;
@@ -31,7 +44,8 @@
 </script>
 
 <div class="scroll">
-  <table>
+  <!-- A grid, so screen readers say which row is selected. -->
+  <table role="grid" aria-label={locale.t("nav-all")}>
     <thead>
       <tr>
         <th scope="col">{locale.t("column-name")}</th>
@@ -46,7 +60,7 @@
       {#each downloads as d, i (d.id)}
         <tr
           id="row-{d.id}"
-          tabindex={selected === d.id || (selected === null && i === 0) ? 0 : -1}
+          tabindex={i === current ? 0 : -1}
           aria-selected={selected === d.id}
           onclick={() => (selected = d.id)}
           ondblclick={() => onopen?.(d.id)}
@@ -61,7 +75,7 @@
                 status={d.status}
                 label={locale.t("progress-label", {
                   percent: percent(locale.lang, locale.digits, fraction(d)),
-                  count: Math.max(d.parts.length, 1),
+                  count: d.segments,
                 })}
               />
               <span class="pct num" aria-hidden="true">{percent(locale.lang, locale.digits, fraction(d))}</span>

@@ -133,12 +133,12 @@ column-left = المتبقي
 column-status = الحالة
 progress-label =
     { PLURAL($count) ->
-        [zero] { $percent }، بلا اتصالات
-        [one] { $percent } على اتصال واحد
-        [two] { $percent } على اتصالين
-        [few] { $percent } على { $count } اتصالات
-        [many] { $percent } على { $count } اتصالًا
-       *[other] { $percent } على { $count } اتصال
+        [zero] { $percent }
+        [one] { $percent } في جزء واحد
+        [two] { $percent } في جزأين
+        [few] { $percent } في { $count } أجزاء
+        [many] { $percent } في { $count } جزءًا
+       *[other] { $percent } في { $count } جزء
     }
 
 ## الشريط السفلي

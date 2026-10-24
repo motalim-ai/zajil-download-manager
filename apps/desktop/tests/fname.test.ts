@@ -42,4 +42,24 @@ describe("nameParts", () => {
     expect(nameParts("README")).toEqual({ head: "README", tail: "" });
     expect(nameParts("ملف بلا امتداد")).toEqual({ head: "ملف بلا امتداد", tail: "" });
   });
+  // Review of #46: a word that starts with digits («1080p», «3D») was cut
+  // in two, and drawn «p.mkv1080».
+  it("keeps digits stuck to the Latin word with it", () => {
+    expect(nameParts("فيلم 1080p.mkv")).toEqual({ head: "فيلم ", tail: "1080p.mkv" });
+    expect(nameParts("تقرير 3D.pdf")).toEqual({ head: "تقرير ", tail: "3D.pdf" });
+    expect(nameParts("درس 12-Part.mp4")).toEqual({ head: "درس ", tail: "12-Part.mp4" });
+    expect(nameParts("ملف -v2.zip")).toEqual({ head: "ملف -", tail: "v2.zip" });
+    expect(nameParts("حلقة (720p).mkv")).toEqual({ head: "حلقة ", tail: "(720p).mkv" });
+  });
+  it("orders Arabic-Indic digits as numbers, and knows Greek and Cyrillic", () => {
+    expect(nameParts("محاضرة Part ٢.mp4")).toEqual({ head: "محاضرة ", tail: "Part ٢.mp4" });
+    expect(nameParts("تقرير (Привет).pdf")).toEqual({ head: "تقرير ", tail: "(Привет).pdf" });
+    expect(nameParts("ملف \uFEFFdoc.txt")).toEqual({ head: "ملف \uFEFF", tail: "doc.txt" });
+  });
+  it("always gives back the whole name", () => {
+    for (const name of ["", ".", ".bashrc", "file.", "a..b", "x.tar.gz", "ملف.", "تقرير 3D", "\u202Eأ b.c", "😀 a.b"]) {
+      const { head, tail } = nameParts(name);
+      expect(head + tail, name).toBe(name);
+    }
+  });
 });

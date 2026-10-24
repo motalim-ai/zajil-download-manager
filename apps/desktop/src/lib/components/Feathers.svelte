@@ -1,10 +1,12 @@
 <script lang="ts">
-  // The progress of a download: one feather for each part (connection), as
-  // in the wings of the icon. The label says it in words.
+  // The progress of a download as feathers, as in the wings of the icon:
+  // the file in at most eight equal pieces, in order, each filled by its
+  // bytes on disk (`parts`, made in src-tauri/src/view.rs). The label says
+  // it in words.
   import type { StatusView } from "../bindings/StatusView";
   let { parts, status, label, width = 150 }: { parts: number[]; status: StatusView; label: string; width?: number } =
     $props();
-  const shown = $derived(parts.length > 8 ? parts.slice(0, 8) : parts.length ? parts : [0]);
+  const shown = $derived(parts.length ? parts : [0]);
 </script>
 
 <span class="feathers {status}" style:inline-size="{width}px" role="img" aria-label={label}>

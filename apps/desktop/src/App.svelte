@@ -13,6 +13,8 @@
   let filter = $state<Filter>({ kind: "all" });
   let selected = $state<number | null>(null);
   let error = $state<string | null>(null);
+  // What the last toolbar command answered, if it failed.
+  let failed = $state<string | null>(null);
 
   const shown = $derived(
     snapshot.downloads.filter((d) => {
@@ -25,11 +27,18 @@
           return d.status === "done";
         case "category":
           return d.category === filter.id;
+        case "uncategorized":
+          return d.category === null;
         case "queue":
           return d.queue === filter.name;
       }
     }),
   );
+  // The toolbar acts only on a download the user sees: one filtered out or
+  // gone is no longer selected (review of #46: Delete removed a hidden one).
+  $effect(() => {
+    if (selected !== null && !shown.some((d) => d.id === selected)) selected = null;
+  });
   const active = $derived(snapshot.downloads.filter((d) => d.status === "active"));
   const waiting = $derived(snapshot.downloads.filter((d) => d.status === "waiting").length);
   const totalSpeed = $derived(active.reduce((sum, d) => sum + d.speed, 0));
@@ -54,9 +63,16 @@
     }
   }
 
+  // A command that fails is said, and the list is asked for again either
+  // way, so it shows what really happened (review of #46).
   async function act(kind: "pause" | "resume" | "remove") {
     if (selected === null) return;
-    await api[kind]([selected]);
+    failed = null;
+    try {
+      await api[kind]([selected]);
+    } catch (e) {
+      failed = String(e);
+    }
     await refresh();
   }
 
@@ -76,11 +92,12 @@
   <Sidebar {snapshot} bind:filter />
   <main class="main">
     <div class="tool">
-      <button class="btn icon" aria-label={locale.t("action-resume")} disabled={selected === null} onclick={() => void act("resume")}><Icon name="play" /></button>
-      <button class="btn icon" aria-label={locale.t("action-pause")} disabled={selected === null} onclick={() => void act("pause")}><Icon name="pause" /></button>
-      <button class="btn icon" aria-label={locale.t("action-delete")} disabled={selected === null} onclick={() => void act("remove")}><Icon name="trash" /></button>
+      {#each [{ kind: "resume", key: "action-resume", icon: "play" }, { kind: "pause", key: "action-pause", icon: "pause" }, { kind: "remove", key: "action-delete", icon: "trash" }] as const as b (b.kind)}
+        <button class="btn icon" aria-label={locale.t(b.key)} title={locale.t(b.key)} disabled={selected === null} onclick={() => void act(b.kind)}><Icon name={b.icon} /></button>
+      {/each}
     </div>
     {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
+    {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
     <DownloadTable downloads={shown} bind:selected />
     <footer class="status">
       <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>

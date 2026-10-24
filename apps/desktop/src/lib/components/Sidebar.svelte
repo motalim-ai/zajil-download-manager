@@ -5,14 +5,16 @@
   import { num } from "../format";
   import type { Snapshot } from "../bindings/Snapshot";
 
-  export type Filter = { kind: "all" | "active" | "done" } | { kind: "category"; id: string } | { kind: "queue"; name: string };
+  export type Filter = { kind: "all" | "active" | "done" | "uncategorized" } | { kind: "category"; id: string } | { kind: "queue"; name: string };
 
   let { snapshot, filter = $bindable() }: { snapshot: Snapshot; filter: Filter } = $props();
 
+  // How many rows the table shows with that filter (review of #46).
   const count = (pick: (d: Snapshot["downloads"][number]) => boolean) =>
     num(locale.lang, locale.digits, snapshot.downloads.filter(pick).length, 0);
   const same = (a: Filter, b: Filter) => JSON.stringify(a) === JSON.stringify(b);
   const categoryName = (c: Snapshot["categories"][number]) => c.name ?? locale.t(`category-${c.id}`);
+  const uncategorized: Filter = { kind: "uncategorized" };
 </script>
 
 <nav class="side" aria-label={locale.t("app-name")}>
@@ -29,6 +31,11 @@
       <Icon name="tag" /><span class="label">{categoryName(c)}</span><span class="count num">{count((d) => d.category === c.id)}</span>
     </button>
   {/each}
+  {#if snapshot.downloads.some((d) => d.category === null)}
+    <button class="nav" aria-current={same(filter, uncategorized) ? "page" : undefined} onclick={() => (filter = uncategorized)}>
+      <Icon name="tag" /><span class="label">{locale.t("category-none")}</span><span class="count num">{count((d) => d.category === null)}</span>
+    </button>
+  {/if}
   <h2>{locale.t("nav-queues")}</h2>
   {#each snapshot.queues as q (q.name)}
     {@const f: Filter = { kind: "queue", name: q.name }}
@@ -38,7 +45,7 @@
         <bdi>{q.name}</bdi>
         {#if q.window}<small><bdi>{locale.t("queue-window", { start: q.window[0], stop: q.window[1] })}</bdi></small>{/if}
       </span>
-      <span class="count num">{num(locale.lang, locale.digits, q.active, 0)}/{num(locale.lang, locale.digits, q.max_active, 0)}</span>
+      <span class="count num">{count((d) => d.queue === q.name)}</span>
     </button>
   {/each}
 </nav>

@@ -61,8 +61,12 @@ pub struct DownloadView {
     pub category: Option<String>,
     /// Where it is saved (the folder).
     pub folder: String,
-    /// How far each part is, from 0 to 1, in file order.
+    /// How far each feather is, from 0 to 1, in file order: the file in at
+    /// most eight equal pieces.
     pub parts: Vec<f64>,
+    /// How many segments the file is in now: one per connection at first,
+    /// then more as they split.
+    pub segments: u32,
     pub error: Option<String>,
 }
 
@@ -118,33 +122,47 @@ fn file_name(path: &Path) -> Option<String> {
     path.file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
-/// How far each part is, from 0 to 1 (a part of unknown size counts as
-/// done when the download is).
+/// Feathers drawn for a download at most: more would be too thin to read.
+const FEATHERS: usize = 8;
+
+/// How far each feather is, from 0 to 1, in file order: the file cut into
+/// as many equal pieces as it has segments, at most [`FEATHERS`], each
+/// filled by its bytes on disk. Segments split as the download runs, so
+/// there are often more than eight, of unequal sizes (review of #46: taking
+/// the first eight drew eight full feathers at 50%).
 fn parts(state: Option<&DownloadState>, status: Status) -> Vec<f64> {
-    match state {
-        Some(state) => state
-            .segments
-            .iter()
-            .map(|s| match s.end {
-                Some(end) => {
-                    let len = end.saturating_sub(s.start).saturating_add(1);
-                    if len == 0 {
-                        1.0
-                    } else {
-                        (s.done as f64 / len as f64).min(1.0)
-                    }
-                }
-                None => {
-                    if status == Status::Done {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            })
-            .collect(),
-        None => vec![if status == Status::Done { 1.0 } else { 0.0 }],
-    }
+    let whole = if status == Status::Done { 1.0 } else { 0.0 };
+    let Some(segments) = state.map(|s| s.segments.as_slice()) else {
+        return vec![whole];
+    };
+    // The file's size; unknown (a single segment with no end): one feather.
+    let size = segments
+        .iter()
+        .map(|s| s.end.map(|e| e.saturating_add(1)))
+        .collect::<Option<Vec<_>>>()
+        .and_then(|ends| ends.into_iter().max());
+    let Some(size) = size.filter(|&size| size > 0) else {
+        return vec![whole];
+    };
+    let pieces = segments.len().clamp(1, FEATHERS) as u128;
+    (0..pieces)
+        .map(|i| {
+            let lo = (u128::from(size) * i / pieces) as u64;
+            let hi = (u128::from(size) * (i + 1) / pieces) as u64;
+            let on_disk = segments.iter().fold(0u64, |sum, s| {
+                let written = s
+                    .start
+                    .saturating_add(s.done)
+                    .min(s.end.map_or(u64::MAX, |e| e.saturating_add(1)));
+                sum.saturating_add(written.min(hi).saturating_sub(s.start.max(lo)))
+            });
+            if hi == lo {
+                whole
+            } else {
+                (on_disk as f64 / (hi - lo) as f64).min(1.0)
+            }
+        })
+        .collect()
 }
 
 pub fn download(
@@ -213,6 +231,9 @@ pub fn download(
         queue: queue.to_owned(),
         folder: folder.display().to_string(),
         parts: parts(state.as_ref(), item.status),
+        segments: state.as_ref().map_or(1, |s| {
+            u32::try_from(s.segments.len().max(1)).unwrap_or(u32::MAX)
+        }),
         error: item.error.clone(),
     }
 }
@@ -302,5 +323,61 @@ mod tests {
         );
         assert_eq!(snapshot.downloads[0].name, "file.iso");
         assert_eq!(snapshot.downloads[1].name, "b.zip");
+    }
+
+    fn segment(start: u64, end: u64, done: u64) -> zajil_core::state::Segment {
+        zajil_core::state::Segment {
+            start,
+            end: Some(end),
+            done,
+        }
+    }
+
+    /// Review of #46: sixteen segments, the first eight whole and the last
+    /// eight empty, are half the file: four full feathers and four empty,
+    /// not the first eight segments drawn full.
+    #[test]
+    fn the_feathers_show_the_file_in_equal_pieces_whatever_its_segments() {
+        let mut state = DownloadState::new(
+            "https://example.net/f.bin".into(),
+            "https://example.net/f.bin".into(),
+            zajil_core::state::Validator {
+                etag: Some("\"v1\"".into()),
+                last_modified: None,
+                date: None,
+            },
+            Some(1600),
+            true,
+        );
+        state.segments = (0..16)
+            .map(|i| segment(i * 100, i * 100 + 99, if i < 8 { 100 } else { 0 }))
+            .collect();
+        assert_eq!(
+            parts(Some(&state), Status::Active),
+            [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        );
+        // Unequal segments after a split: the bytes count, not the segments.
+        state.segments = vec![
+            segment(0, 599, 600),
+            segment(600, 749, 75),
+            segment(750, 899, 0),
+        ];
+        assert_eq!(parts(Some(&state), Status::Active), [1.0, 1.0, 0.25]);
+        // Eight equal segments: one feather each, as at the start.
+        state.segments = (0..8).map(|i| segment(i * 10, i * 10 + 9, i)).collect();
+        let feathers = parts(Some(&state), Status::Active);
+        assert_eq!(feathers.len(), 8);
+        for (i, f) in feathers.iter().enumerate() {
+            assert!((f - i as f64 / 10.0).abs() < 1e-9, "{feathers:?}");
+        }
+        // Of unknown size: one feather, full when done.
+        state.segments = vec![zajil_core::state::Segment {
+            start: 0,
+            end: None,
+            done: 5,
+        }];
+        assert_eq!(parts(Some(&state), Status::Active), [0.0]);
+        assert_eq!(parts(Some(&state), Status::Done), [1.0]);
+        assert_eq!(parts(None, Status::Waiting), [0.0]);
     }
 }

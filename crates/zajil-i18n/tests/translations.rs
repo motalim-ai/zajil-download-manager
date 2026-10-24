@@ -217,12 +217,12 @@ const ARABIC: &[(&str, [&str; 6])] = &[
     (
         "progress-label",
         [
-            "45%، بلا اتصالات",
-            "45% على اتصال واحد",
-            "45% على اتصالين",
-            "45% على 3 اتصالات",
-            "45% على 11 اتصالًا",
-            "45% على 100 اتصال",
+            "45%",
+            "45% في جزء واحد",
+            "45% في جزأين",
+            "45% في 3 أجزاء",
+            "45% في 11 جزءًا",
+            "45% في 100 جزء",
         ],
     ),
     (
@@ -257,10 +257,7 @@ const ENGLISH: &[(&str, [&str; 2])] = &[
     ("seconds-left", ["1 second", "2 seconds"]),
     ("minutes-left", ["1 minute", "2 minutes"]),
     ("hours-left", ["1 hour", "2 hours"]),
-    (
-        "progress-label",
-        ["45% over 1 connection", "45% over 2 connections"],
-    ),
+    ("progress-label", ["45% in 1 part", "45% in 2 parts"]),
     (
         "footer-active",
         ["Downloading: 1 download", "Downloading: 2 downloads"],

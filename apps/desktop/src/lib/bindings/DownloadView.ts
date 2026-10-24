@@ -24,6 +24,12 @@ category: string | null,
  */
 folder: string, 
 /**
- * How far each part is, from 0 to 1, in file order.
+ * How far each feather is, from 0 to 1, in file order: the file in at
+ * most eight equal pieces.
  */
-parts: Array<number>, error: string | null, };
+parts: Array<number>, 
+/**
+ * How many segments the file is in now: one per connection at first,
+ * then more as they split.
+ */
+segments: number, error: string | null, };

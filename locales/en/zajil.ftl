@@ -103,8 +103,8 @@ column-left = Left
 column-status = Status
 progress-label =
     { PLURAL($count) ->
-        [one] { $percent } over { $count } connection
-       *[other] { $percent } over { $count } connections
+        [one] { $percent } in { $count } part
+       *[other] { $percent } in { $count } parts
     }
 
 ## Footer

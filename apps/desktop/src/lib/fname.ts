@@ -14,9 +14,17 @@ export interface NameParts {
   tail: string;
 }
 
-const RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
-const LATIN = /[A-Za-zÀ-ɏ]/;
+// Right-to-left letters, not the Arabic-Indic digits and their separators
+// (U+0660–U+066C, U+06F0–U+06F9), which the bidi algorithm orders as
+// numbers, nor U+FEFF.
+const RTL = /[\u0590-\u065F\u066D-\u06EF\u06FA-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/;
+// Letters written left to right: Latin, Greek and Cyrillic.
+const LATIN = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF]/;
 const OPENING = /[(\[{"'«]/;
+// Digits and joiners stuck to the first Latin letter belong to its word:
+// «1080p», «3D», «12-Part».
+const STUCK = /[0-9_.\-]/;
+const JOINER = /[_.\-]/;
 
 export function nameParts(name: string): NameParts {
   const match = /^(.*?)((?:\.tar)?\.[A-Za-z0-9]{1,8})$/.exec(name);
@@ -41,6 +49,9 @@ export function nameParts(name: string): NameParts {
   }
   if (firstLatin < 0) return { head: name, tail: "" };
   let cut = firstLatin;
+  while (cut > lastRtl + 1 && STUCK.test(stem[cut - 1] ?? "")) cut--;
+  // The word starts at a digit, never at a joiner.
+  while (cut < firstLatin && JOINER.test(stem[cut] ?? "")) cut++;
   while (cut > lastRtl + 1 && OPENING.test(stem[cut - 1] ?? "")) cut--;
   return { head: stem.slice(0, cut), tail: stem.slice(cut) + ext };
 }
