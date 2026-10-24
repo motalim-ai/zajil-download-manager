@@ -1318,9 +1318,18 @@ impl Drop for NewDownload {
     /// Meanwhile a resume may have taken the files over: the state file
     /// exists while the first save runs, and a cancelled download releases
     /// the part file's lock at once. Files whose lock someone holds are
-    /// left alone, and the lock is held while they are removed, so a
+    /// left alone, and the lock is held while their names are freed, so a
     /// resume cannot take them in between (found by the cancellation test
     /// of M3, `retry.rs`).
+    ///
+    /// The names are freed by moving the files aside (emptied), not by removing them
+    /// in place: on Windows a file removed while a handle on it is open
+    /// stays "delete pending" and keeps its name until the last handle
+    /// closes, and a new download of the same name then failed with
+    /// `ERROR_ACCESS_DENIED` (#55). That handle was our own lock, closed
+    /// only after the removal, or another program's (an antivirus). So the
+    /// files are moved aside while locked, our handle is closed, and only
+    /// then are the moved files removed.
     fn drop(&mut self) {
         if !self.abandoned.load(Ordering::SeqCst) {
             return;
@@ -1333,9 +1342,26 @@ impl Drop for NewDownload {
             },
             Err(_) => None,
         };
-        let _ = std::fs::remove_file(state_path(&self.final_path));
-        let _ = std::fs::remove_file(&part);
+        // Emptied first: the part was given its full size before the first
+        // byte, and a moved file left behind (the process dies before
+        // removing it) should not keep that space (review of #56).
+        if let Some(file) = &held {
+            let _ = file.set_len(0);
+        }
+        let state = state_path(&self.final_path);
+        let aside = [state.as_path(), part.as_path()].map(|file| {
+            zajil_platform::fs::move_aside(file).map_err(|err| {
+                // Not movable (missing, or held without sharing its
+                // deletion): removed in place, as before, if it can be.
+                if err.kind() != io::ErrorKind::NotFound {
+                    let _ = std::fs::remove_file(file);
+                }
+            })
+        });
         drop(held);
+        for moved in aside.into_iter().flatten() {
+            let _ = std::fs::remove_file(moved);
+        }
     }
 }
 

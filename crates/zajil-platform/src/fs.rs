@@ -93,6 +93,45 @@ pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     with_retry(|| imp::rename_noreplace(from, to))
 }
 
+/// Moves `path` aside to a new name in the same folder
+/// (`.zajil-removed-<process>-<n>`, a dot-name: hidden on macOS and Linux,
+/// not on Windows), for the caller to remove: its own name
+/// is free at once, even while another program holds the file open.
+///
+/// Removing a file in place does not free its name on Windows while any
+/// handle on it is open (an antivirus, the search indexer, or our own): the
+/// file is only "delete pending" until the last handle closes, and creating
+/// a file of that name meanwhile fails with `ERROR_ACCESS_DENIED` (#55). A
+/// renamed file takes its pending deletion away under the hidden name.
+///
+/// The rename never replaces anything ([`rename_noreplace`]; only on file
+/// systems that refuse a no-replace rename, its documented last resort
+/// leaves an instant in which another process creating exactly this name
+/// could lose it), and does not
+/// retry, so it may be called where sleeping is not allowed (a `Drop` on an
+/// async thread). It fails like the rename: `NotFound` when `path` does not
+/// exist, and an error when a program holds the file without sharing its
+/// deletion (then the file and its name stay as they were).
+pub fn move_aside(path: &Path) -> io::Result<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    loop {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let aside = dir.join(format!(".zajil-removed-{}-{n}", std::process::id()));
+        match imp::rename_noreplace(path, &aside) {
+            // Left by an earlier process that had the same number.
+            Err(err)
+                if err.kind() == io::ErrorKind::AlreadyExists
+                    && aside.symlink_metadata().is_ok() => {}
+            result => return result.map(|()| aside),
+        }
+    }
+}
+
 /// Opens `path` for reading, and for writing when `write` is true, only if
 /// it is a regular file with a single name (or none any more: a file
 /// replaced or removed right after it was opened, which is not a link). A symbolic link, junction or
@@ -997,6 +1036,42 @@ mod tests {
         replace_file(&a, &b).unwrap();
         assert_eq!(fs::read(&b).unwrap(), b"new");
         assert!(!a.exists());
+    }
+
+    /// #55: the name is free at once, even while a handle on the file is
+    /// open (as an antivirus holds it, sharing its deletion), and nothing
+    /// is ever replaced.
+    #[test]
+    fn move_aside_frees_the_name_while_the_file_is_held() {
+        let dir = tempdir();
+        let path = dir.join("f.bin.zajil-part");
+        std::fs::write(&path, b"held").unwrap();
+        let held = File::open(&path).unwrap();
+        let aside = move_aside(&path).unwrap();
+        assert_eq!(aside.parent(), Some(dir.as_path()));
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".zajil-removed-")
+        );
+        // The name is free for a new file at once.
+        let new = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path);
+        assert!(new.is_ok(), "{new:?}");
+        assert_eq!(std::fs::read(&aside).unwrap(), b"held");
+        std::fs::remove_file(&aside).unwrap();
+        drop(held);
+        // A missing file is NotFound; a second move takes another name.
+        assert_eq!(
+            move_aside(&dir.join("none")).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        let other = move_aside(&path).unwrap();
+        assert_ne!(other, aside);
     }
 
     #[test]
