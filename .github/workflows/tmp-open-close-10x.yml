@@ -1,0 +1,78 @@
+# TEMPORARY (owner's request on #45): the open-and-close check 10 times on
+# each system, and the close-during-a-download tests 3 times, on #45's
+# code. Removed with its branch once the results are on #45.
+name: TEMP open-close 10x
+
+on:
+  push:
+    branches: [tmp/open-close-10x]
+
+permissions:
+  contents: read
+
+jobs:
+  repeat:
+    name: Open and close 10x (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned toolchain
+        working-directory: .
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install the GUI libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool
+      - run: npm ci
+      - name: Build the app
+        shell: bash
+        run: npx tauri build --debug --no-bundle
+      - name: Open and close, 10 times
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) app=src-tauri/target/debug/zajil-desktop.exe ;;
+            *) app=src-tauri/target/debug/zajil-desktop ;;
+          esac
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/open-close.mjs "$app" --times 10
+          else
+            node scripts/open-close.mjs "$app" --times 10
+          fi
+      - name: Closing during a download, 3 times
+        if: always()
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) built=target/debug/zajil-desktop.exe; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test.exe" ;;
+            *) built=target/debug/zajil-desktop; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test" ;;
+          esac
+          cp "$built" "$ZAJIL_DESKTOP_APP"
+          for i in 1 2 3; do
+            echo "== run $i"
+            if [ "$RUNNER_OS" = Linux ]; then
+              xvfb-run -a -s "-screen 0 1600x1000x24" cargo test --locked --test close_resume -- --ignored --test-threads 1
+            else
+              cargo test --locked --test close_resume -- --ignored --test-threads 1
+            fi
+          done
