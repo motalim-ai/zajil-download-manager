@@ -1,0 +1,30 @@
+{
+  "name": "zajil-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run",
+    "licenses": "node scripts/check-licenses.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@fluent/bundle": "0.19.1",
+    "@fontsource/ibm-plex-sans-arabic": "5.3.0",
+    "@tauri-apps/api": "2.12.4",
+    "svelte": "5.57.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tauri-apps/cli": "2.12.4",
+    "@tsconfig/svelte": "5.0.8",
+    "svelte-check": "4.7.7",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

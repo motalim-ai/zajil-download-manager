@@ -1,0 +1,38 @@
+[package]
+name = "zajil-desktop"
+description = "Zajil Download Manager: the desktop interface (Tauri 2)"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/motalim-ai/zajil-download-manager"
+publish = false
+default-run = "zajil-desktop"
+
+# A workspace of its own: building the engine and the command line never
+# needs the GUI libraries (WebKitGTK on Linux). Every dependency is listed
+# in docs/DEPENDENCIES.md.
+[workspace]
+
+[lib]
+name = "zajil_desktop_lib"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "zajil-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.54.1", features = ["sync", "time", "rt-multi-thread", "macros", "signal"] }
+ts-rs = "12.0.1"
+zajil-core = { path = "../../../crates/zajil-core" }
+zajil-platform = { path = "../../../crates/zajil-platform" }
+
+[dev-dependencies]
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+zajil-testserver = { path = "../../../crates/zajil-testserver" }

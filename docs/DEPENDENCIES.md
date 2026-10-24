@@ -41,6 +41,8 @@
 | `unic-langid` | 0.9.6 | MIT أو Apache-2.0 | `zajil-i18n` | معرّف اللغة الذي يطلبه `fluent-bundle`. ومعه `unic-langid-impl` (MIT أو Apache-2.0) | M4 |
 | `icu_plurals` | 2.4.0 | Unicode-3.0 | `zajil-i18n` | فئات الجمع من CLDR للدالة `PLURAL()` في ملفات الترجمة. من عائلة ICU4X نفسها التي نستعملها (`icu_properties`). ومعها `icu_plurals_data` و`fixed_decimal` و`icu_locale_fallback` و`icu_locale_fallback_data` (Unicode-3.0) | M4 |
 | `icu_locale_core` | 2.4.0 | Unicode-3.0 | `zajil-i18n` | معرّف اللغة لـ `icu_plurals`. موجودة أصلًا في البرنامج عبر `url` ← `idna` | M4 |
+| `tauri` | 2.12.5 | Apache-2.0 أو MIT | `zajil-desktop` | نافذة الواجهة فوق محرّك الويب الموجود في النظام (ADR-0003): WebView2 في ويندوز، وWKWebView في ماك، وWebKitGTK 4.1 في لينكس (LGPL، يُربط ديناميكيًا، والحد الأدنى Ubuntu 22.04 وDebian 12 بقرار المالك). ومعه `tauri-build` 2.7.4 ومكتباتهما (wry وtao وmuda، وgtk-rs 0.18 في لينكس). كلها في مساحة عمل `apps/desktop/src-tauri` المستقلة، ويفحصها `cargo deny` في الـ CI. **استثناء واحد في `deny.toml`**: RUSTSEC-2024-0370، أي `proc-macro-error` «غير مصونة» (وليست ثغرة)، وهي ماكرو يعمل وقت البناء فقط عبر `glib-macros` 0.18 في لينكس، ولا شيء منها في البرنامج | M4 |
+| `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 
 ## مكتبات الواجهة والإضافة (npm)
@@ -71,5 +73,27 @@
 | Swatinem/rust-cache (v2.9.3) | LGPL-3.0 | تخزين مؤقت لبناء Rust في الـ CI |
 | EmbarkStudios/cargo-deny-action (v2.1.1) | Apache-2.0 | تشغيل cargo-deny في الـ CI |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
+
+</div>
+
+<div dir="rtl">
+
+## مكتبات الواجهة (npm)، في `apps/desktop`
+
+الإصدارات مثبتة في `package-lock.json`، و`npm ci` يقرأ منه فقط. والـ CI يفحص التراخيص بقائمة مسموحة (`scripts/check-licenses.mjs`): للمكتبات التي تدخل البرنامج قائمة، ولأدوات البناء والاختبار قائمة أوسع قليلًا. ويشغّل `npm audit` أيضًا.
+
+| المكتبة | الإصدار | الترخيص | تدخل البرنامج؟ | السبب |
+|---|---|---|---|---|
+| `svelte` | 5.57.2 | MIT | نعم (وقت التشغيل) | مكتبة الواجهة (ADR-0008) |
+| `@fluent/bundle` | 0.19.1 | Apache-2.0 | نعم | تنسيق رسائل Fluent في الواجهة، مع الدالة `PLURAL` |
+| `@tauri-apps/api` | 2.12.4 | Apache-2.0 أو MIT | نعم | أوامر المحرّك وأحداثه، وعنوان النافذة |
+| `@fontsource/ibm-plex-sans-arabic` | 5.3.0 | OFL-1.1 (الخط)، MIT (الحزمة) | نعم (ملفات الخط) | خط الواجهة داخل البرنامج، لا يُحمَّل من الإنترنت |
+| `vite` | 8.3.5 | MIT | لا (بناء) | بناء الواجهة |
+| `@sveltejs/vite-plugin-svelte` | 7.3.1 | MIT | لا | ربط Svelte بـ Vite |
+| `typescript` | 6.0.3 | Apache-2.0 | لا | الأنواع (الإصدار 7 لا يدعمه `svelte-check` بعد) |
+| `svelte-check` | 4.7.7 | MIT | لا | فحص الأنواع وتحذيرات الوصول (أخطاء في الـ CI) |
+| `@tsconfig/svelte` | 5.0.8 | MIT | لا | إعدادات TypeScript |
+| `vitest` | 5.0.5 | MIT | لا (اختبار) | اختبارات منطق الواجهة |
+| `@tauri-apps/cli` | 2.12.4 | Apache-2.0 أو MIT | لا (بناء) | بناء التطبيق وتوليد الأيقونات |
 
 </div>
