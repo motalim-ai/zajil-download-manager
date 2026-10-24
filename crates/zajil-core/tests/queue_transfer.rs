@@ -601,7 +601,12 @@ fn invisible_characters_are_refused_but_joiners_and_variation_selectors_are_not(
         let (_tmp, path) = exported(&q);
         let export = read_export(&path).unwrap();
         let mut into = QueuesFile::empty();
-        into.import(&export, &Folders::Keep).map(|_| into)
+        let done = into.import(&export, &Folders::Keep).map(|_| ());
+        if done.is_err() {
+            // Refused: nothing changed.
+            assert_eq!(into, QueuesFile::empty());
+        }
+        done
     };
     for c in [
         '\u{3164}', '\u{FFA0}', '\u{115F}', '\u{034F}', '\u{17B4}', '\u{202E}', '\u{200E}',
@@ -632,8 +637,24 @@ fn invisible_characters_are_refused_but_joiners_and_variation_selectors_are_not(
         assert!(check_name(text).is_ok(), "{text}");
         assert!(import_keeping(&folder).is_ok(), "{text}");
     }
-    // A name of nothing but variation selectors shows nothing.
-    assert!(check_name("\u{FE0F}\u{FE0F}").is_err());
+    // A name of nothing but variation selectors shows nothing, and joiners
+    // or selectors out of their place make lookalikes (round 5).
+    for lookalike in [
+        "\u{FE0F}\u{FE0F}",
+        "Vi\u{200C}deos",
+        "Videos\u{200D}",
+        "\u{200C}صور",
+        "a\u{FE0F}",
+        "\u{FE0F}x",
+        "صور \u{FE0F}",
+    ] {
+        assert!(check_name(lookalike).is_err(), "{lookalike:?}");
+        let folder = std::env::temp_dir().join(lookalike);
+        assert!(check_folder(&folder).is_err(), "{lookalike:?}");
+        assert!(import_keeping(&folder).is_err(), "{lookalike:?}");
+    }
+    // Emoji sequences joined by ZWJ after a selector stay allowed.
+    assert!(check_name("❤️\u{200D}🔥 مفضلة").is_ok());
 }
 
 /// Zajil imports its own exports whatever the URLs hold: an emoji with its
@@ -647,6 +668,10 @@ fn urls_that_can_be_added_can_be_imported_back() {
         "https://example.com/❤️.png",
         "https://fa.wikipedia.org/wiki/فیلم‌ها",
         "https://example.jp/葛󠄀飾.pdf",
+        // Refused by the import rule of round 3, though `add` took it.
+        "https://example.com/a\u{200B}b",
+        // Tabs and line breaks: the URL parser removes them (round 5).
+        "https://example.com/a\tb",
     ] {
         q.add("main", url, &dir("u")).unwrap();
     }
@@ -664,6 +689,7 @@ fn urls_that_can_be_added_can_be_imported_back() {
     assert_eq!(urls(&into), urls(&q));
     for bad in [
         "https://example.com/a\u{202E}gpj.exe",
+        "https://example.com/a\u{85}b",
         "https://example.com/\u{1b}[31m",
         "https://example.com/a\u{2029}b",
     ] {
@@ -671,5 +697,29 @@ fn urls_that_can_be_added_can_be_imported_back() {
             QueuesFile::empty().add("main", bad, &dir("u")).is_err(),
             "{bad:?}"
         );
+    }
+}
+
+/// serde's message quotes a value from the file: escape codes in it are
+/// shown as escapes, never sent to the terminal (review of #41, round 5).
+#[test]
+fn a_refused_file_never_sends_its_escape_codes_to_the_terminal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_t, good) = exported(&sample());
+    for (field, value) in [
+        ("status", "\u{1b}[31mRED\u{1b}]0;T\u{7}\u{202e}"),
+        ("\u{1b}[2Jkey", "x"),
+    ] {
+        let mut file: serde_json::Value =
+            serde_json::from_slice(&fs::read(&good).unwrap()).unwrap();
+        file["queues"][0]["items"][0][field] = value.into();
+        let path = tmp.path().join(format!("escape-{}.json", field.len()));
+        write_signed(&path, file);
+        let err = read_export(&path).unwrap_err().to_string();
+        assert!(
+            !err.contains('\u{1b}') && !err.contains('\u{7}') && !err.contains('\u{202e}'),
+            "{err:?}"
+        );
+        assert!(err.contains("\\u{1b}"), "{err}");
     }
 }

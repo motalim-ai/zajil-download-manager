@@ -29,7 +29,7 @@ use super::store::{
     DEFAULT_MAX_ACTIVE, Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError,
     check_name,
 };
-use crate::category::{is_display_control, is_hidden_char};
+use crate::category::{has_hidden, is_unsafe_in_url, printable};
 use crate::state::{checksum_of, now_rfc3339};
 
 /// Value of the `format` field.
@@ -380,7 +380,8 @@ pub fn read_export(path: &Path) -> Result<ExportFile, TransferError> {
             "its checksum does not match (it was changed or damaged)".into(),
         ));
     }
-    let export: ExportFile = serde_json::from_value(value).map_err(|e| refused(e.to_string()))?;
+    let export: ExportFile =
+        serde_json::from_value(value).map_err(|e| refused(printable(&e.to_string())))?;
     check(&export).map_err(refused)?;
     Ok(export)
 }
@@ -430,7 +431,7 @@ fn check(export: &ExportFile) -> Result<(), String> {
             // The same rule as `QueuesFile::add`, so Zajil always imports
             // its own exports (review of #41, round 4: an emoji with
             // U+FE0F, or a Persian ZWNJ, in a URL was refused).
-            if i.url.chars().any(is_display_control) {
+            if i.url.chars().any(is_unsafe_in_url) {
                 return Err(format!(
                     "{at} has control characters or direction marks in its URL"
                 ));
@@ -474,7 +475,7 @@ fn check_folder_from_file(dir: &Path) -> Result<(), String> {
     // characters, which could drive a terminal or disguise the name
     // (review of #41, round 2).
     match dir.to_str() {
-        Some(text) if !text.chars().any(is_hidden_char) => Ok(()),
+        Some(text) if !has_hidden(text) => Ok(()),
         _ => Err(
             "has a folder with control or invisible characters, or that is not valid text".into(),
         ),

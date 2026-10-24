@@ -234,7 +234,7 @@ impl QueuesFile {
         }
         // Shown by `queue list` and kept in exports: nothing that drives a
         // terminal or reorders text (review of #41, round 4).
-        if url.chars().any(crate::category::is_display_control) {
+        if url.chars().any(crate::category::is_unsafe_in_url) {
             return Err(StoreError::Refused(
                 "the URL has control characters or direction marks".into(),
             ));
@@ -321,7 +321,7 @@ pub fn check_name(name: &str) -> Result<(), StoreError> {
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
         // The Hangul fillers count as letters but show nothing (review of
         // #41, round 4).
-        && !name.chars().any(crate::category::is_hidden_char);
+        && !crate::category::has_hidden(name);
     if ok {
         Ok(())
     } else {
@@ -376,8 +376,8 @@ impl QueueStore {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(corrupt("the file is too large".into()));
         }
-        let value: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|e| corrupt(e.to_string()))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| corrupt(crate::category::printable(&e.to_string())))?;
         if value.get("format").and_then(|v| v.as_str()) != Some(FORMAT) {
             return Err(StoreError::NotAQueuesFile(path));
         }
@@ -392,8 +392,8 @@ impl QueueStore {
         if stored != checksum_of(&value) {
             return Err(corrupt("its checksum does not match".into()));
         }
-        let queues: QueuesFile =
-            serde_json::from_value(value).map_err(|e| corrupt(e.to_string()))?;
+        let queues: QueuesFile = serde_json::from_value(value)
+            .map_err(|e| corrupt(crate::category::printable(&e.to_string())))?;
         queues.check_consistency().map_err(corrupt)?;
         Ok(queues)
     }

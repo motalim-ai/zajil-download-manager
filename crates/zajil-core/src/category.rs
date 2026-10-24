@@ -299,7 +299,7 @@ pub fn check_name(name: &str) -> Result<(), CategoryError> {
     let count = name.chars().count();
     let ok = (1..=MAX_NAME_CHARS).contains(&count)
         && name.trim() == name
-        && !name.chars().any(is_hidden_char)
+        && !has_hidden(name)
         // Not only joiners and variation selectors, which show nothing.
         && name.chars().any(|c| !is_part_of_text(c));
     if ok {
@@ -351,9 +351,7 @@ pub fn check_folder(folder: &Path) -> Result<(), CategoryError> {
         && !folder
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
-        && folder
-            .to_str()
-            .is_some_and(|text| !text.chars().any(is_hidden_char));
+        && folder.to_str().is_some_and(|text| !has_hidden(text));
     if ok {
         Ok(())
     } else {
@@ -393,6 +391,22 @@ pub fn normalize_extension(input: &str) -> Result<String, CategoryError> {
     Ok(ext)
 }
 
+/// `text` with what would drive a terminal or reorder text written as
+/// escapes (`\u{1b}`): for messages that quote a value from a file, such as
+/// serde's (review of #41, round 5: an import file's escape codes reached
+/// the terminal through them).
+pub(crate) fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if is_display_control(c) {
+                c.escape_unicode().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
 /// A character that changes how the text around it is shown: a control
 /// (escape codes drive a terminal), a direction mark that reorders text,
 /// such as U+202E, or a line or paragraph separator. Never in a URL a
@@ -411,6 +425,14 @@ pub(crate) fn is_display_control(c: char) -> bool {
         )
 }
 
+/// What a URL a queue holds may never contain: the display controls,
+/// except tab and line breaks, which the URL parser removes anyway (review
+/// of #41, round 5). The same rule for `QueuesFile::add` and imports, so
+/// Zajil imports what it exports.
+pub(crate) fn is_unsafe_in_url(c: char) -> bool {
+    is_display_control(c) && !matches!(c, '\t' | '\n' | '\r')
+}
+
 /// Joiners and variation selectors: invisible, but part of real text (the
 /// ZWNJ of Persian «فیلم‌ها», the U+FE0F of «❤️», an ideographic variant),
 /// and unable to reorder it (review of #41, round 4).
@@ -420,6 +442,31 @@ fn is_part_of_text(c: char) -> bool {
         '\u{200C}' | '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}'
             | '\u{180B}'..='\u{180D}' | '\u{180F}'
     )
+}
+
+/// Whether `text` holds a hidden character, or a joiner or variation
+/// selector out of the place it has in real text (review of #41, round 5:
+/// `Vi\u{200C}deos` looked like `Videos`). A joiner must stand between two
+/// characters that are not ASCII (Persian «فیلم‌ها», Sinhala, emoji
+/// sequences); a variation selector must follow a character that is not
+/// ASCII, or a keycap base (`0`–`9`, `#`, `*`, as in «1️⃣»).
+pub(crate) fn has_hidden(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let base = |c: Option<&char>| c.is_some_and(|c| !c.is_ascii() && !c.is_whitespace());
+    chars.iter().enumerate().any(|(i, &c)| {
+        let before = i.checked_sub(1).and_then(|j| chars.get(j));
+        let after = chars.get(i + 1);
+        match c {
+            '\u{200C}' | '\u{200D}' => {
+                !(base(before) && !matches!(before, Some('\u{200C}' | '\u{200D}')) && base(after))
+            }
+            c if is_part_of_text(c) => {
+                let keycap = before.is_some_and(|b| b.is_ascii_digit() || matches!(b, '#' | '*'));
+                !(keycap || base(before) && !before.is_some_and(|b| is_part_of_text(*b)))
+            }
+            c => is_hidden_char(c),
+        }
+    })
 }
 
 /// A character that is invisible and could disguise a name or a folder:
@@ -485,7 +532,7 @@ impl CategoryStore {
             return Err(corrupt("the file is too large".into()));
         }
         let value: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|e| corrupt(e.to_string()))?;
+            serde_json::from_slice(&bytes).map_err(|e| corrupt(printable(&e.to_string())))?;
         if value.get("format").and_then(|v| v.as_str()) != Some(FORMAT) {
             return Err(CategoryError::NotACategoriesFile(path));
         }
@@ -501,7 +548,7 @@ impl CategoryStore {
             return Err(corrupt("its checksum does not match".into()));
         }
         let file: CategoriesFile =
-            serde_json::from_value(value).map_err(|e| corrupt(e.to_string()))?;
+            serde_json::from_value(value).map_err(|e| corrupt(printable(&e.to_string())))?;
         file.check_consistency().map_err(corrupt)?;
         Ok(file)
     }
