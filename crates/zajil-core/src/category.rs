@@ -299,7 +299,7 @@ pub fn check_name(name: &str) -> Result<(), CategoryError> {
     let count = name.chars().count();
     let ok = (1..=MAX_NAME_CHARS).contains(&count)
         && name.trim() == name
-        && !name.chars().any(|c| c.is_control() || is_format_char(c));
+        && !name.chars().any(is_hidden_char);
     if ok {
         Ok(())
     } else {
@@ -351,7 +351,7 @@ pub fn check_folder(folder: &Path) -> Result<(), CategoryError> {
             .any(|c| matches!(c, std::path::Component::ParentDir))
         && folder
             .to_str()
-            .is_some_and(|text| !text.chars().any(|c| c.is_control() || is_format_char(c)));
+            .is_some_and(|text| !text.chars().any(is_hidden_char));
     if ok {
         Ok(())
     } else {
@@ -391,15 +391,24 @@ pub fn normalize_extension(input: &str) -> Result<String, CategoryError> {
     Ok(ext)
 }
 
-fn is_format_char(c: char) -> bool {
-    use icu_properties::CodePointMapData;
-    use icu_properties::props::GeneralCategory;
-    matches!(
-        CodePointMapData::<GeneralCategory>::new().get(c),
-        GeneralCategory::Format
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator
-    )
+/// A character that is invisible or has no meaning of its own, so it could
+/// disguise or reorder a name: controls, formatting characters such as
+/// U+202E, line and paragraph separators, private-use and unassigned code
+/// points, and every default-ignorable one, such as U+3164 or U+034F
+/// (review of #41, round 3).
+pub(crate) fn is_hidden_char(c: char) -> bool {
+    use icu_properties::props::{DefaultIgnorableCodePoint, GeneralCategory};
+    use icu_properties::{CodePointMapData, CodePointSetData};
+    c.is_control()
+        || CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(c)
+        || matches!(
+            CodePointMapData::<GeneralCategory>::new().get(c),
+            GeneralCategory::Format
+                | GeneralCategory::LineSeparator
+                | GeneralCategory::ParagraphSeparator
+                | GeneralCategory::PrivateUse
+                | GeneralCategory::Unassigned
+        )
 }
 
 /// The categories file in one folder, and its lock.

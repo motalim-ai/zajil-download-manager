@@ -542,3 +542,84 @@ fn an_export_removes_nothing_and_leaves_no_temporary_file() {
     assert!(zajil_platform::fs::only_owner_can_access(&target).unwrap());
     read_export(&target).unwrap();
 }
+
+/// Many queues import in linear time: each queue was looked for by a
+/// search through all of them, so 360,000 queues (a file under the size
+/// limit) took 88 s while holding the queues lock (review of #41, round 3).
+/// Quadratic, these 200,000 would take minutes even in a release build.
+#[test]
+fn many_queues_import_without_a_search_per_queue() {
+    let mut q = QueuesFile::empty();
+    for n in 0..200_000 {
+        q.queues.push(zajil_core::queue::Queue {
+            name: format!("q{n}"),
+            max_active: 3,
+            schedule: None,
+            items: Vec::new(),
+        });
+    }
+    q.add("q199999", "https://example.com/last.iso", &dir("last"))
+        .unwrap();
+    let export = q.export();
+    let mut into = QueuesFile::empty();
+    let started = std::time::Instant::now();
+    let summary = into.import(&export, &Folders::Keep).unwrap();
+    let took = started.elapsed();
+    assert_eq!(summary.queues_created, 200_000);
+    assert_eq!(into.queue("q199999").unwrap().items.len(), 1);
+    assert!(took < std::time::Duration::from_secs(20), "{took:?}");
+}
+
+/// The longest file name a folder can hold (255 bytes) still takes an
+/// export: the temporary file has a short name of its own (review of #41,
+/// rounds 2 and 3). Unix only: on Windows the whole path, not the name,
+/// would pass the 260-character limit first.
+#[cfg(unix)]
+#[test]
+fn an_export_to_a_255_byte_name_works() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ascii = tmp.path().join(format!("{}.json", "a".repeat(250)));
+    write_export(&ascii, &sample().export()).unwrap();
+    read_export(&ascii).unwrap();
+    // 2 bytes a letter: 125 letters and `.json` are 255 bytes.
+    let arabic = tmp.path().join(format!("{}.json", "ص".repeat(125)));
+    write_export(&arabic, &sample().export()).unwrap();
+    assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 2);
+}
+
+/// Invisible characters that are not formatting characters are refused
+/// too, in kept folders and in category names and folders (review of #41,
+/// round 3): Hangul fillers, the combining grapheme joiner, variation
+/// selectors, private-use and unassigned code points.
+#[test]
+fn default_ignorable_private_and_unassigned_characters_are_refused() {
+    use zajil_core::category::{check_folder, check_name};
+    for c in [
+        '\u{3164}',
+        '\u{FFA0}',
+        '\u{115F}',
+        '\u{034F}',
+        '\u{FE0F}',
+        '\u{E0100}',
+        '\u{17B4}',
+        '\u{E000}',
+        '\u{0378}',
+    ] {
+        let folder = std::env::temp_dir().join(format!("a{c}b"));
+        assert!(check_folder(&folder).is_err(), "{:04X}", c as u32);
+        assert!(check_name(&format!("a{c}b")).is_err(), "{:04X}", c as u32);
+        let mut q = QueuesFile::empty();
+        q.add("main", "https://example.com/a.iso", &folder).unwrap();
+        let (_tmp, path) = exported(&q);
+        let export = read_export(&path).unwrap();
+        let mut into = QueuesFile::empty();
+        assert!(
+            into.import(&export, &Folders::Keep).is_err(),
+            "{:04X}",
+            c as u32
+        );
+        assert_eq!(into, QueuesFile::empty());
+    }
+    // Arabic with its marks and joiners that are letters stays allowed.
+    assert!(check_name("مُستنداتٌ العمل").is_ok());
+}

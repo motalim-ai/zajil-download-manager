@@ -272,16 +272,22 @@ enum Failure {
 
 /// The folder to save into, created if needed.
 fn download_dir(chosen: Option<&Path>) -> Result<PathBuf, String> {
-    let dir = match chosen {
-        Some(dir) => dir.to_path_buf(),
-        None => SystemPaths::new()
-            .map_err(|err| err.to_string())?
-            .download_dir()
-            .to_path_buf(),
-    };
+    let dir = download_dir_path(chosen)?;
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("cannot use the folder {}: {err}", dir.display()))?;
     Ok(dir)
+}
+
+/// The folder given, or the system's downloads folder, without creating it.
+fn download_dir_path(chosen: Option<&Path>) -> Result<PathBuf, String> {
+    match chosen {
+        Some(dir) => std::path::absolute(dir)
+            .map_err(|err| format!("cannot use the folder {}: {err}", dir.display())),
+        None => Ok(SystemPaths::new()
+            .map_err(|err| err.to_string())?
+            .download_dir()
+            .to_path_buf()),
+    }
 }
 
 fn stopped(reason: &str, state_file: &Path) -> ExitCode {

@@ -18,6 +18,7 @@
 //!   ([`Folders::Keep`]): a file from someone else could otherwise send
 //!   downloads into folders such as a startup folder.
 
+use std::collections::HashMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
@@ -28,6 +29,7 @@ use super::store::{
     DEFAULT_MAX_ACTIVE, Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError,
     check_name,
 };
+use crate::category::is_hidden_char;
 use crate::state::{checksum_of, now_rfc3339};
 
 /// Value of the `format` field.
@@ -201,9 +203,20 @@ impl QueuesFile {
             self.settings.speed_limit = export.settings.speed_limit;
             summary.speed_limit_set = true;
         }
+        // Each queue by name, found at once: a search per queue and per
+        // download made a file of many queues take minutes, holding the
+        // queues lock (review of #41, round 3).
+        let mut index: HashMap<String, usize> = self
+            .queues
+            .iter()
+            .enumerate()
+            .map(|(n, q)| (q.name.clone(), n))
+            .collect();
         for eq in &export.queues {
-            match self.queue_mut(&eq.name) {
+            let at = index.get(&eq.name).copied();
+            match at.map(|n| &mut self.queues[n]) {
                 None => {
+                    index.insert(eq.name.clone(), self.queues.len());
                     self.queues.push(Queue {
                         name: eq.name.clone(),
                         max_active: eq.max_active,
@@ -256,10 +269,7 @@ impl QueuesFile {
                     categorize,
                     added_at: ei.added_at.clone(),
                 };
-                self.queue_mut(&eq.name)
-                    .expect("created above")
-                    .items
-                    .push(item);
+                self.queues[index[&eq.name]].items.push(item);
                 summary.items_added += 1;
             }
         }
@@ -466,17 +476,4 @@ fn check_folder_from_file(dir: &Path) -> Result<(), String> {
             "has a folder with control or invisible characters, or that is not valid text".into(),
         ),
     }
-}
-
-/// Control characters, and invisible formatting characters such as U+202E.
-fn is_hidden_char(c: char) -> bool {
-    use icu_properties::CodePointMapData;
-    use icu_properties::props::GeneralCategory;
-    c.is_control()
-        || matches!(
-            CodePointMapData::<GeneralCategory>::new().get(c),
-            GeneralCategory::Format
-                | GeneralCategory::LineSeparator
-                | GeneralCategory::ParagraphSeparator
-        )
 }

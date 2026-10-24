@@ -271,11 +271,17 @@ fn import(
     let folders = if keep_folders {
         zajil_core::queue::Folders::Keep
     } else {
-        zajil_core::queue::Folders::Into(crate::download_dir(dir)?)
+        // Created only once the import is done: a refused import leaves
+        // nothing behind (review of #41, round 3).
+        zajil_core::queue::Folders::Into(crate::download_dir_path(dir)?)
     };
     let summary = store
         .update(|queues| queues.import(&export, &folders))
         .map_err(|err| err.to_string())?;
+    if let zajil_core::queue::Folders::Into(dir) = &folders {
+        std::fs::create_dir_all(dir)
+            .map_err(|err| format!("cannot use the folder {}: {err}", dir.display()))?;
+    }
     println!(
         "Imported {} download(s) ({} new queue(s)) from {}",
         summary.items_added,

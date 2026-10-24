@@ -351,6 +351,24 @@ fn export_then_import_through_the_command_line() {
     let list = ok(elsewhere.path(), &["queue", "list"]);
     assert!(!list.contains("SECRET-TOKEN"), "{list}");
 
+    // Into a data folder where `ليلي` has settings of its own: it keeps
+    // them, and zajil says so (review of #41, round 3).
+    let third = tempfile::tempdir().unwrap();
+    ok(
+        third.path(),
+        &["queue", "set", "--queue", "ليلي", "--max-active", "5"],
+    );
+    let out = ok(
+        third.path(),
+        &["queue", "import", path(&file), "--keep-folders"],
+    );
+    assert!(
+        out.contains("Queue ليلي already had settings of its own: it kept them"),
+        "{out}"
+    );
+    let kept = QueueStore::new(third.path()).load().unwrap();
+    assert_eq!(kept.queue("ليلي").unwrap().max_active, 5);
+
     // A hostile file: the import fails clearly and changes nothing.
     let queues_before = fs::read(QueueStore::new(elsewhere.path()).path()).unwrap();
     let hostile = home.path().join("hostile.json");
@@ -365,5 +383,68 @@ fn export_then_import_through_the_command_line() {
     assert_eq!(
         fs::read(QueueStore::new(elsewhere.path()).path()).unwrap(),
         queues_before
+    );
+    // Refused with a folder to put the downloads in: the folder is not
+    // created (review of #41, round 3).
+    let never = home.path().join("never").join("sub");
+    let out = zajil(
+        elsewhere.path(),
+        &["queue", "import", path(&hostile), "--dir", path(&never)],
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
+    assert!(!home.path().join("never").exists());
+}
+
+/// A folder whose path is not valid text is a clear error, never a crash
+/// (exit code 101), and the files stay as they were (review of #41, rounds
+/// 2 and 3). Unix only: Windows paths are always text. macOS refuses such
+/// a name when the folder is created; Linux takes it, and zajil refuses it.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_is_not_valid_text_is_refused_without_a_crash() {
+    use std::os::unix::ffi::OsStrExt;
+    let data = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    ok(data.path(), &["queue", "add", "http://example.org/a.bin"]);
+    ok(data.path(), &["category", "set", "video", "--name", "أفلام"]);
+    let queues = fs::read(QueueStore::new(data.path()).path()).unwrap();
+    let categories = fs::read(CategoryStore::new(data.path()).path()).unwrap();
+    let bad = home
+        .path()
+        .join(std::ffi::OsStr::from_bytes(b"bad-\xff-name"));
+    let run = |args: &[&std::ffi::OsStr]| {
+        common::zajil_command()
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let os = |s: &'static str| std::ffi::OsStr::new(s);
+    for out in [
+        run(&[
+            os("category"),
+            os("set"),
+            os("video"),
+            os("--folder"),
+            bad.as_os_str(),
+        ]),
+        run(&[
+            os("queue"),
+            os("add"),
+            os("--dir"),
+            bad.as_os_str(),
+            os("http://example.org/b.bin"),
+        ]),
+    ] {
+        assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
+    }
+    assert_eq!(
+        fs::read(QueueStore::new(data.path()).path()).unwrap(),
+        queues
+    );
+    assert_eq!(
+        fs::read(CategoryStore::new(data.path()).path()).unwrap(),
+        categories
     );
 }
