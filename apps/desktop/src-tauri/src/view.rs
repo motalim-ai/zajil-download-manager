@@ -10,6 +10,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use zajil_core::Probe;
 use zajil_core::category::CategoriesFile;
 use zajil_core::queue::{Item, QueuesFile, Status};
 use zajil_core::state::{DownloadState, STATE_SUFFIX};
@@ -98,6 +99,53 @@ pub struct Snapshot {
     pub speed_limit: Option<u64>,
     /// Why the queues cannot run now (a damaged queues file), if so.
     pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProbeView {
+    pub name: String,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    pub resumable: bool,
+    pub category: Option<String>,
+    /// The folder it would go to without a folder of its own.
+    pub folder: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AddRequest {
+    pub url: String,
+    pub queue: Option<String>,
+    /// A folder of its own; `null`: by category.
+    pub folder: Option<String>,
+    /// Start when its queue has room; `false`: added paused.
+    pub start: bool,
+    #[ts(type = "number | null")]
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SegmentView {
+    #[ts(type = "number")]
+    pub start: u64,
+    /// The last byte of the part, or `null` when the size is unknown.
+    #[ts(type = "number | null")]
+    pub end: Option<u64>,
+    #[ts(type = "number")]
+    pub done: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DetailsView {
+    pub download: DownloadView,
+    pub segments: Vec<SegmentView>,
+    pub resumable: bool,
+    #[ts(type = "number | null")]
+    pub limit: Option<u64>,
 }
 
 /// The name the engine would give a download of `url` before the server
@@ -259,6 +307,42 @@ pub fn snapshot(queues: &QueuesFile, categories: &CategoriesFile, live: &Live) -
             .collect(),
         speed_limit: queues.settings.speed_limit,
         problem: live.problem(),
+    }
+}
+
+pub fn probe(found: &Probe, categories: &CategoriesFile, given: &Path) -> ProbeView {
+    let category = categories.classify(&found.name, found.host.as_deref());
+    ProbeView {
+        name: found.name.clone(),
+        size: found.size,
+        resumable: found.resumable,
+        category: category.map(|c| c.id.clone()),
+        folder: categories
+            .folder_for(&found.name, found.host.as_deref(), given)
+            .display()
+            .to_string(),
+    }
+}
+
+pub fn details(item: &Item, state: Option<&DownloadState>, live: &Live) -> DetailsView {
+    let categories = CategoriesFile::built_in();
+    let download = download(item, "", &categories, live);
+    DetailsView {
+        segments: state
+            .map(|s| {
+                s.segments
+                    .iter()
+                    .map(|g| SegmentView {
+                        start: g.start,
+                        end: g.end,
+                        done: g.done,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        resumable: state.is_some_and(|s| s.accept_ranges),
+        limit: item.limit,
+        download,
     }
 }
 

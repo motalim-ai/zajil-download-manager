@@ -4,7 +4,7 @@
 //! names (owner's decision on the M4 plan).
 //!
 //! `zajil-desktop --ui-test <view>-<lang>-<theme> --ui-test-out <folder>`: the page
-//! shows the view (`list`, `names`), then calls
+//! shows the view (`list`, `add`, `details`, `names`), then calls
 //! [`ui_test_report`], which writes `<folder>/<scenario>.json`. The CI
 //! script waits for that file, takes a screenshot of the window with the
 //! system's own tool, and closes the program.
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use tauri::State;
 
-use crate::view::{DownloadView, QueueView, Snapshot, StatusView};
+use crate::view::{DetailsView, DownloadView, QueueView, SegmentView, Snapshot, StatusView};
 
 pub struct UiTest {
     pub scenario: Option<String>,
@@ -225,4 +225,34 @@ pub fn demo_snapshot() -> Snapshot {
         speed_limit: None,
         problem: None,
     }
+}
+
+pub fn demo_details(id: u64) -> Option<DetailsView> {
+    let download = demo_snapshot().downloads.into_iter().find(|d| d.id == id)?;
+    let size = download.size.unwrap_or(0);
+    let n = download.parts.len() as u64;
+    let segments = download
+        .parts
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let start = size / n * i as u64;
+            let end = if i as u64 == n - 1 {
+                size - 1
+            } else {
+                size / n * (i as u64 + 1) - 1
+            };
+            SegmentView {
+                start,
+                end: Some(end),
+                done: ((end - start + 1) as f64 * f) as u64,
+            }
+        })
+        .collect();
+    Some(DetailsView {
+        download,
+        segments,
+        resumable: true,
+        limit: None,
+    })
 }

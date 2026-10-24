@@ -13,19 +13,22 @@ mod live;
 mod ui_test;
 pub mod view;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager, State};
 use zajil_core::category::{CategoriesFile, CategoryStore};
-use zajil_core::queue::{QueueEvent, QueueStore, QueuesFile, Runner, Status, StoreError};
+use zajil_core::queue::{
+    DEFAULT_QUEUE, QueueEvent, QueueStore, QueuesFile, Runner, Status, StoreError,
+};
+use zajil_core::state::DownloadState;
 use zajil_core::{Engine, Options, Stop};
 use zajil_platform::{AppPaths, SystemPaths};
 
 use crate::live::{Live, NOTIFY_EVERY, Notify};
-use crate::view::Snapshot;
+use crate::view::{AddRequest, DetailsView, ProbeView, Snapshot};
 
 /// How long the program waits for the downloads to record their progress
 /// when it is closed.
@@ -36,6 +39,7 @@ pub struct App {
     engine: Engine,
     store: QueueStore,
     categories: CategoryStore,
+    download_dir: PathBuf,
     live: Arc<Live>,
     stop: Stop,
     /// Set once the queues have stopped (their downloads recorded their
@@ -64,10 +68,14 @@ fn data_dir(args: &[String]) -> Result<PathBuf, String> {
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     let data = data_dir(&args).unwrap_or_else(|e| panic!("no data folder: {e}"));
+    let download_dir = SystemPaths::new()
+        .map(|p| p.download_dir().to_path_buf())
+        .unwrap_or_else(|_| data.join("Downloads"));
     let app = App {
         engine: Engine::new(Options::default()).expect("the engine starts"),
         store: QueueStore::new(&data),
         categories: CategoryStore::new(&data),
+        download_dir,
         live: Arc::new(Live::default()),
         stop: Stop::new(),
         stopped: tokio::sync::watch::Sender::new(false),
@@ -138,16 +146,19 @@ pub fn run() {
 
 #[cfg(not(feature = "ui-test"))]
 fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![snapshot, pause, resume, remove]
+    tauri::generate_handler![snapshot, probe, add, pause, resume, remove, details]
 }
 
 #[cfg(feature = "ui-test")]
 fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         snapshot,
+        probe,
+        add,
         pause,
         resume,
         remove,
+        details,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -333,6 +344,55 @@ fn app_ui_test_snapshot(_app: &App) -> Option<Snapshot> {
     Some(ui_test::demo_snapshot())
 }
 
+#[tauri::command]
+async fn probe(app: State<'_, App>, url: String) -> Result<ProbeView, String> {
+    let found = app.engine.probe(&url).await.map_err(|e| e.to_string())?;
+    let categories = app.categories.clone();
+    let given = app.download_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        let categories = categories.load().map_err(blocking_err)?;
+        Ok(view::probe(&found, &categories, &given))
+    })
+    .await
+    .map_err(blocking_err)?
+}
+
+#[tauri::command]
+async fn add(
+    app: State<'_, App>,
+    request: AddRequest,
+    handle: tauri::AppHandle,
+) -> Result<u64, String> {
+    let store = app.store.clone();
+    let given = request
+        .folder
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app.download_dir.clone());
+    let id = tokio::task::spawn_blocking(move || add_blocking(&store, &request, &given))
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    let _ = handle.emit("downloads-changed", ());
+    Ok(id)
+}
+
+fn add_blocking(store: &QueueStore, request: &AddRequest, given: &Path) -> Result<u64, StoreError> {
+    std::fs::create_dir_all(given)?;
+    store.update(|queues| {
+        let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
+        let id = queues.add(queue, &request.url, given)?;
+        let item = queues.item_mut(id).expect("just added");
+        // Without a folder of its own, a download goes by its category.
+        item.categorize = request.folder.is_none();
+        item.limit = request.limit.filter(|l| *l > 0);
+        if !request.start {
+            item.status = Status::Paused;
+        }
+        Ok(id)
+    })
+}
+
 /// Sets the status of items, as `zajil queue pause` and `resume` do: an
 /// unknown id is an error and changes nothing. A running download stops
 /// after recording its progress (the runner sees the change within half a
@@ -453,4 +513,24 @@ mod tests {
         assert!(q.item(2).is_none());
         assert!(q.item(1).is_some());
     }
+}
+
+#[tauri::command]
+async fn details(app: State<'_, App>, id: u64) -> Result<DetailsView, String> {
+    #[cfg(feature = "ui-test")]
+    if app_ui_test_snapshot(&app).is_some() {
+        return ui_test::demo_details(id).ok_or_else(|| format!("no download {id}"));
+    }
+    let (store, live) = (app.store.clone(), app.live.clone());
+    tokio::task::spawn_blocking(move || {
+        let queues = store.load().map_err(blocking_err)?;
+        let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
+        let state = item
+            .state_file
+            .as_deref()
+            .and_then(|p| DownloadState::load(p).ok());
+        Ok(view::details(item, state.as_ref(), &live))
+    })
+    .await
+    .map_err(blocking_err)?
 }
