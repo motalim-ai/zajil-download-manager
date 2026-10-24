@@ -36,6 +36,11 @@
 | `icu_properties` | 2.4.0 | Unicode-3.0 | `zajil-core` | بيانات يونيكود (Joining_Type وCanonical_Combining_Class) لقواعد ContextJ في RFC 5892: متى يبقى ZWNJ وZWJ في اسم الملف. موجودة أصلًا في البرنامج عبر `reqwest` ← `url` ← `idna`، فلا تضيف كودًا جديدًا إلى النسخة النهائية | M1 |
 | `thiserror` | 2.0.21 | MIT أو Apache-2.0 | كل المكتبات | تعريف أنواع الأخطاء | M1 |
 | `jiff` | 0.2.38 | Unlicense أو MIT | `zajil-core` و`zajil-cli` (اختبارات) | الوقت المحلي والمنطقة الزمنية للنظام وقواعد التوقيت الصيفي، لجدولة القوائم. بميزاتها الافتراضية: منطقة النظام على الأنظمة الثلاثة، وقاعدة بيانات المناطق مضمّنة في ويندوز فقط (`jiff-tzdb-platform` و`jiff-tzdb`، بترخيص Unlicense أو MIT، والبيانات نفسها من IANA في الملكية العامة). ومعها `jiff-static` و`jiff-core` (Unlicense أو MIT)، و`portable-atomic` و`portable-atomic-util` (Apache-2.0 أو MIT) | M3 |
+| `fluent-bundle` | 0.16.0 | Apache-2.0 أو MIT | `zajil-i18n` | تنسيق رسائل Fluent (ADR-0003) في جهة Rust: قائمة شريط النظام والإشعارات. ومعه `fluent-langneg` و`intl-memoizer` و`type-map` و`rustc-hash` (Apache-2.0 أو MIT)، و`self_cell` (Apache-2.0 أو GPL-2.0-only: نستعمله بـ Apache-2.0)، و`intl_pluralrules` 7.0.2 (Apache-2.0 أو MIT). **وهذه الأخيرة تخطئ في الجمع العربي فوق 100** (103 و111 تعطي «other»)، فلا نختار صيغ الجمع بها: انظر `icu_plurals` | M4 |
+| `fluent-syntax` | 0.12.0 | Apache-2.0 أو MIT | `zajil-i18n` (عبر `fluent-bundle`، واختبارات) | قراءة ملفات `.ftl`. والاختبارات تمر بها على كل مفتاح ومتغير | M4 |
+| `unic-langid` | 0.9.6 | MIT أو Apache-2.0 | `zajil-i18n` | معرّف اللغة الذي يطلبه `fluent-bundle`. ومعه `unic-langid-impl` (MIT أو Apache-2.0) | M4 |
+| `icu_plurals` | 2.4.0 | Unicode-3.0 | `zajil-i18n` | فئات الجمع من CLDR للدالة `PLURAL()` في ملفات الترجمة. من عائلة ICU4X نفسها التي نستعملها (`icu_properties`). ومعها `icu_plurals_data` و`fixed_decimal` و`icu_locale_fallback` و`icu_locale_fallback_data` (Unicode-3.0) | M4 |
+| `icu_locale_core` | 2.4.0 | Unicode-3.0 | `zajil-i18n` | معرّف اللغة لـ `icu_plurals`. موجودة أصلًا في البرنامج عبر `url` ← `idna` | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 
 ## مكتبات الواجهة والإضافة (npm)

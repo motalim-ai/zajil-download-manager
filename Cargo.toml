@@ -40,9 +40,21 @@ tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Power", "Win32_System_Shutdown", "Win32_System_SystemServices", "Win32_System_Threading"] }
 tempfile = "3.27.0"
+# Translations (M4, ADR-0003): Fluent. The plural forms (the six Arabic
+# ones) come from icu_plurals through PLURAL(), not from the rules inside
+# fluent-bundle (see below).
+fluent-bundle = "0.16.0"
+fluent-syntax = "0.12.0"
+unic-langid = "0.9.6"
+# CLDR plural categories for PLURAL() in the translations: the plural rules
+# fluent-bundle uses (intl_pluralrules 7.0.2) put Arabic 103 and 111 in
+# "other" (they test the number, not the number mod 100).
+icu_plurals = "2.4.0"
+icu_locale_core = "2.4.0"
 
 # Workspace crates
 zajil-core = { path = "crates/zajil-core" }
+zajil-i18n = { path = "crates/zajil-i18n" }
 zajil-platform = { path = "crates/zajil-platform" }
 zajil-testserver = { path = "crates/zajil-testserver" }
 
