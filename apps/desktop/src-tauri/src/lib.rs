@@ -9,6 +9,8 @@
 #![forbid(unsafe_code)]
 
 mod live;
+#[cfg(feature = "ui-test")]
+mod ui_test;
 pub mod view;
 
 use std::path::PathBuf;
@@ -74,14 +76,22 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    tauri::Builder::default()
-        .manage(app)
-        .invoke_handler(tauri::generate_handler![snapshot, pause, resume, remove])
+    let builder = tauri::Builder::default().manage(app);
+    #[cfg(feature = "ui-test")]
+    let builder = builder.manage(ui_test::UiTest::from_args(&args));
+    builder
+        .invoke_handler(handlers())
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
             #[cfg(unix)]
             if let Some(signals) = signals {
                 tauri::async_runtime::spawn(exit_on_signal(handle.clone(), signals));
+            }
+            #[cfg(feature = "ui-test")]
+            if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
+                // Fixed demo data: nothing runs, so nothing to wait for.
+                tauri_app.state::<App>().stopped.send_replace(true);
+                return Ok(());
             }
             tauri::async_runtime::spawn(async move {
                 run_queues(handle.clone()).await;
@@ -124,6 +134,23 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(not(feature = "ui-test"))]
+fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![snapshot, pause, resume, remove]
+}
+
+#[cfg(feature = "ui-test")]
+fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        snapshot,
+        pause,
+        resume,
+        remove,
+        ui_test::ui_test_scenario,
+        ui_test::ui_test_report
+    ]
 }
 
 /// Waits for the queues to stop, [`STOP_WAIT`] at most, and says how it
@@ -275,6 +302,10 @@ async fn snapshot(app: State<'_, App>) -> Result<Snapshot, String> {
         // check of CI waits for this line).
         eprintln!("zajil: the window is ready");
     }
+    #[cfg(feature = "ui-test")]
+    if let Some(snapshot) = app_ui_test_snapshot(&app) {
+        return Ok(snapshot);
+    }
     let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
     tokio::task::spawn_blocking(move || {
         let queues = store.load().map_err(blocking_err)?;
@@ -294,6 +325,12 @@ async fn snapshot(app: State<'_, App>) -> Result<Snapshot, String> {
     })
     .await
     .map_err(blocking_err)?
+}
+
+#[cfg(feature = "ui-test")]
+fn app_ui_test_snapshot(_app: &App) -> Option<Snapshot> {
+    // The fixture does not depend on the real queues.
+    Some(ui_test::demo_snapshot())
 }
 
 /// Sets the status of items, as `zajil queue pause` and `resume` do: an
