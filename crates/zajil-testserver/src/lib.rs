@@ -292,6 +292,11 @@ pub struct RequestRecord {
     /// client received, counted when each chunk is handed over. A cut
     /// response counts only what was sent before the cut. Not a speed
     /// measurement.
+    ///
+    /// **Written, not received**: a cut response can count up to about
+    /// 64 KiB that the connection still held and threw away (3,145,728
+    /// counted, 3,080,192 read by a raw client, in the diagnostic of #50).
+    /// Equal to what arrived only for a response that completed.
     pub bytes_sent: u64,
     /// The TLS version of the connection (`"TLSv1_3"`), or `None` for HTTP.
     pub tls_version: Option<String>,
@@ -380,6 +385,12 @@ impl hyper::body::Body for Counted {
 
 struct Shared {
     started: std::time::Instant,
+    /// The start of every path this server serves (`/<random>`): a request
+    /// without it comes from someone else, such as a process left by
+    /// another test that connects to this port number (#50).
+    prefix: String,
+    /// Those requests (`GET /f.bin`): answered 404, never counted.
+    strays: Vec<String>,
     files: HashMap<String, Served>,
     redirects: HashMap<String, (String, u16)>,
     log: Vec<LogEntry>,
@@ -442,6 +453,8 @@ impl TestServer {
     ) -> io::Result<Self> {
         let shared = Arc::new(Mutex::new(Shared {
             started: std::time::Instant::now(),
+            prefix: random_prefix(),
+            strays: Vec::new(),
             files: HashMap::new(),
             redirects: HashMap::new(),
             log: Vec::new(),
@@ -472,9 +485,14 @@ impl TestServer {
             Some(host) => format!("{host}:{}", addr.port()),
             None => addr.to_string(),
         };
+        let prefix = shared
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .prefix
+            .clone();
         Ok(TestServer {
             addr,
-            base: format!("{scheme}://{authority}"),
+            base: format!("{scheme}://{authority}{prefix}"),
             shared,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
@@ -485,9 +503,22 @@ impl TestServer {
         self.addr
     }
 
-    /// Full URL for `path` (which starts with `/`).
+    /// Full URL for `path` (which starts with `/`), under this server's
+    /// own prefix.
     pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base, path)
+    }
+
+    /// The path a raw request must use for `path` (with this server's
+    /// prefix), for tests that write HTTP by hand.
+    pub fn path(&self, path: &str) -> String {
+        format!("{}{path}", self.lock().prefix)
+    }
+
+    /// Requests that did not use this server's prefix, oldest first: they
+    /// were answered 404 and are not in [`TestServer::requests`].
+    pub fn strays(&self) -> Vec<String> {
+        self.lock().strays.clone()
     }
 
     /// Serves `spec` at `path`, replacing any previous file there. A new
@@ -630,7 +661,20 @@ fn handle(
             .and_then(|v: &HeaderValue| v.to_str().ok())
             .map(str::to_owned)
     };
-    let path = req.uri().path().to_owned();
+    // Only requests under this server's prefix are its own; any other is
+    // answered 404 and counted nowhere, so it cannot take the place of a
+    // test's request (in `cut_after`, `fail_first`, the request log…).
+    let Some(path) = req
+        .uri()
+        .path()
+        .strip_prefix(shared.prefix.as_str())
+        .filter(|rest| rest.starts_with('/'))
+        .map(str::to_owned)
+    else {
+        let stray = format!("{} {}", req.method(), req.uri().path());
+        shared.strays.push(stray);
+        return status_only(StatusCode::NOT_FOUND);
+    };
     let is_head = req.method() == Method::HEAD;
     let bytes_sent = Arc::new(AtomicU64::new(0));
     let mut record = RequestRecord {
@@ -648,9 +692,15 @@ fn handle(
     };
 
     let response = if let Some((to, status)) = shared.redirects.get(&path) {
+        // A path on this server stays under its prefix.
+        let to = if to.starts_with('/') {
+            format!("{}{to}", shared.prefix)
+        } else {
+            to.clone()
+        };
         Response::builder()
             .status(*status)
-            .header(header::LOCATION, to.as_str())
+            .header(header::LOCATION, to)
             .body(empty())
             .unwrap()
     } else if let Some(served) = shared.files.get_mut(&path) {
@@ -1070,6 +1120,20 @@ pub fn sha256_hex(data: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// `/` and 16 hex digits, different for every server.
+fn random_prefix() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut hasher = std::hash::RandomState::new().build_hasher();
+    hasher.write_u64(NEXT.fetch_add(1, Ordering::Relaxed));
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    format!("/{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

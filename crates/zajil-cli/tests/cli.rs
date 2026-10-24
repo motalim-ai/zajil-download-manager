@@ -289,7 +289,7 @@ fn a_killed_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let mut child = common::zajil_command()
+    let child = common::zajil_command()
         .args([
             "get",
             &server.url("/big.bin"),
@@ -302,6 +302,8 @@ fn a_killed_download_resumes_from_the_state_file() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+
+    let mut child = common::Running(child);
 
     // Wait until some progress is durable, then kill without warning.
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -358,7 +360,7 @@ fn a_killed_parallel_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let mut child = common::zajil_command()
+    let child = common::zajil_command()
         .args([
             "get",
             &server.url("/big.bin"),
@@ -371,6 +373,8 @@ fn a_killed_parallel_download_resumes_from_the_state_file() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+
+    let mut child = common::Running(child);
 
     // Wait until several segments have durable progress, then kill.
     let deadline = Instant::now() + Duration::from_secs(60);

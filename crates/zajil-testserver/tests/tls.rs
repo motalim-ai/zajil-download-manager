@@ -25,8 +25,14 @@ async fn fetch(server: &TestServer, name: &str) -> Result<String, std::io::Error
     let mut tls = TlsConnector::from(Arc::new(config))
         .connect(ServerName::try_from(name.to_owned()).unwrap(), tcp)
         .await?;
-    tls.write_all(b"GET /f HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-        .await?;
+    tls.write_all(
+        format!(
+            "GET {} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            server.path("/f")
+        )
+        .as_bytes(),
+    )
+    .await?;
     let mut reply = String::new();
     tls.read_to_string(&mut reply).await?;
     Ok(reply)

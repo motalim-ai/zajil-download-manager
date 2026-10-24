@@ -64,7 +64,7 @@ fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
     let out = zajil(data.path(), &add);
     assert!(out.status.success(), "{}", printed(&out));
 
-    let mut child = common::zajil_command()
+    let child = common::zajil_command()
         .arg("--data-dir")
         .arg(data.path())
         .args(["--connections", "2", "queue", "run"])
@@ -72,6 +72,8 @@ fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+
+    let mut child = common::Running(child);
 
     // Wait until both running downloads have durable progress, then kill.
     let store = QueueStore::new(data.path());
@@ -336,7 +338,7 @@ fn the_real_clock_drives_limits_and_schedules() {
     let shown: zajil_core::queue::TimeOfDay = start_text.parse().unwrap();
     assert!(list.contains(&format!("runs from {shown} ")), "{list}");
 
-    let mut child = common::zajil_command()
+    let child = common::zajil_command()
         .arg("--data-dir")
         .arg(state.path())
         .args(["queue", "run"])
@@ -344,6 +346,8 @@ fn the_real_clock_drives_limits_and_schedules() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+
+    let mut child = common::Running(child);
     // Each line of the runner, with the time it arrived.
     let lines: Vec<(jiff::Timestamp, String)> = BufReader::new(child.stderr.take().unwrap())
         .lines()
@@ -443,4 +447,55 @@ fn speed_limits_are_checked_and_can_be_removed() {
     );
     let store = QueueStore::new(data.path());
     assert_eq!(store.load().unwrap().settings.speed_limit, None);
+}
+
+/// #50: `zajil queue run` with a download whose server is gone marks it
+/// failed and ends by itself; it never keeps trying (a run left by a test
+/// could otherwise connect forever to a port number another test reuses).
+#[test]
+fn queue_run_gives_up_a_server_that_is_gone_and_ends() {
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/f.bin",
+        listener.local_addr().unwrap().port()
+    );
+    drop(listener);
+    let added = zajil(
+        data.path(),
+        &[
+            "queue",
+            "add",
+            "--dir",
+            downloads.path().to_str().unwrap(),
+            &url,
+        ],
+    );
+    assert!(added.status.success(), "{}", printed(&added));
+    let child = common::zajil_command()
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["queue", "run"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut child = common::Running(child);
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "zajil queue run still runs after 60 s"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert!(status.code().is_some(), "{status:?}");
+    let queues = QueueStore::new(data.path()).load().unwrap();
+    let item = &queues.queues[0].items[0];
+    assert_eq!(item.status, Status::Failed);
+    assert!(item.error.is_some());
 }

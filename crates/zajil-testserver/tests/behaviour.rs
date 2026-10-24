@@ -29,6 +29,8 @@ fn request(server: &TestServer, method: &str, path: &str, extra: &[(&str, &str)]
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
+    // Under this server's own prefix (#50).
+    let path = server.path(path);
     let mut req = format!("{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n");
     for (k, v) in extra {
         req.push_str(&format!("{k}: {v}\r\n"));
@@ -244,7 +246,11 @@ fn redirects_and_sends_content_disposition() {
     );
     let redirect = get(&server, "/a", &[]);
     assert_eq!(redirect.status, 302);
-    assert_eq!(redirect.header("location"), Some("/b"));
+    // A path on this server, under its own prefix (#50).
+    assert_eq!(
+        redirect.header("location"),
+        Some(server.path("/b").as_str())
+    );
     let reply = get(&server, "/b", &[]);
     assert_eq!(
         reply.header("content-disposition"),
@@ -354,11 +360,13 @@ fn counts_bodies_sent_at_the_same_time_and_connections() {
     let threads: Vec<_> = (0..3)
         .map(|_| {
             let addr = server.addr();
+            let line = format!(
+                "GET {} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+                server.path("/f")
+            );
             std::thread::spawn(move || {
                 let mut stream = TcpStream::connect(addr).unwrap();
-                stream
-                    .write_all(b"GET /f HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
-                    .unwrap();
+                stream.write_all(line.as_bytes()).unwrap();
                 let mut sink = Vec::new();
                 let _ = stream.read_to_end(&mut sink);
             })
@@ -380,10 +388,9 @@ fn counts_bodies_sent_at_the_same_time_and_connections() {
     // Two requests on one kept-alive connection share its number, and a
     // finished body no longer counts.
     let mut stream = TcpStream::connect(server.addr()).unwrap();
+    let head = format!("HEAD {} HTTP/1.1\r\nHost: t\r\n\r\n", server.path("/f"));
     for _ in 0..2 {
-        stream
-            .write_all(b"HEAD /f HTTP/1.1\r\nHost: t\r\n\r\n")
-            .unwrap();
+        stream.write_all(head.as_bytes()).unwrap();
         let mut head = [0u8; 1024];
         let _ = stream.read(&mut head).unwrap();
     }
@@ -432,11 +439,13 @@ fn refuses_requests_beyond_a_number_of_bodies_at_once() {
         server.put("/f", spec.throttle(100_000));
         // One body is being sent (slowly) while a second request arrives.
         let addr = server.addr();
+        let line = format!(
+            "GET {} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+            server.path("/f")
+        );
         let first = std::thread::spawn(move || {
             let mut stream = TcpStream::connect(addr).unwrap();
-            stream
-                .write_all(b"GET /f HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
-                .unwrap();
+            stream.write_all(line.as_bytes()).unwrap();
             let mut sink = Vec::new();
             let _ = stream.read_to_end(&mut sink);
         });
@@ -465,4 +474,34 @@ fn can_fail_only_range_requests_and_records_when_requests_arrived() {
     assert_eq!(get(&server, "/f", &[]).status, 200);
     let gets = server.gets("/f");
     assert!(gets[1].at >= gets[0].at + Duration::from_millis(50));
+}
+
+/// #50: a request that is not this server's own, such as one from a
+/// process left by another test that connects to this port number, is
+/// answered 404 and counted nowhere: it cannot take the cut, or any other
+/// place, of the test's own requests. Without the prefix, the stray request
+/// took the cut and the test's first request came whole.
+#[test]
+fn a_stray_request_is_refused_and_takes_no_place_of_the_tests_own() {
+    let server = TestServer::http();
+    let data = random_bytes(1_000_000, 50);
+    server.put("/f.bin", FileSpec::new(data.clone()).cut_after(300_000, 1));
+
+    // The stray asks for the same path, without this server's prefix.
+    let mut stream = TcpStream::connect(server.addr()).unwrap();
+    stream
+        .write_all(b"GET /f.bin HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut stray = Vec::new();
+    let _ = stream.read_to_end(&mut stray);
+    let status = String::from_utf8_lossy(&stray[..stray.len().min(40)]).into_owned();
+    assert!(status.starts_with("HTTP/1.1 404"), "{status}");
+
+    // The test's own first request is still the one that is cut.
+    let first = get(&server, "/f.bin", &[]);
+    assert!(first.incomplete);
+    let second = get(&server, "/f.bin", &[]);
+    assert_eq!(second.body, data);
+    assert_eq!(server.gets("/f.bin").len(), 2);
+    assert_eq!(server.strays(), ["GET /f.bin"]);
 }

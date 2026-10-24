@@ -383,3 +383,31 @@ async fn cancelling_while_retrying_leaves_a_resumable_download_or_nothing() {
         fs::remove_file(&done.file).unwrap();
     }
 }
+
+/// A port nothing listens on: the address of a server that is gone.
+fn gone() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    format!("http://127.0.0.1:{port}/f.bin")
+}
+
+/// #50: a server that is gone is tried a bounded number of times, with the
+/// default settings a user has, then given up: never forever. The waits
+/// between the 5 tries are at most 0.5 + 1 + 2 + 4 s.
+#[tokio::test]
+async fn a_server_that_is_gone_is_given_up_after_its_tries() {
+    let dir = tempfile::tempdir().unwrap();
+    let started = Instant::now();
+    let result = Engine::new(Options::default())
+        .unwrap()
+        .download(&gone(), dir.path(), &mut |_| {})
+        .await;
+    let took = started.elapsed();
+    assert!(result.is_err(), "{result:?}");
+    assert!(took < Duration::from_secs(20), "gave up after {took:?}");
+    assert!(
+        took >= Duration::from_secs(3),
+        "did not wait between tries: {took:?}"
+    );
+}
