@@ -138,6 +138,17 @@ fn text(lang: Lang, key: &str, count: f64) -> String {
 /// or `$count` shown without `PLURAL`).
 const ARABIC: &[(&str, [&str; 6])] = &[
     (
+        "import-done",
+        [
+            "لم يُضف أي تحميل.",
+            "أُضيف تحميل واحد.",
+            "أُضيف تحميلان.",
+            "أُضيفت 3 تحميلات.",
+            "أُضيف 11 تحميلًا.",
+            "أُضيف 100 تحميل.",
+        ],
+    ),
+    (
         "downloads-count",
         [
             "لا تحميلات",
@@ -251,6 +262,7 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
     ("downloads-count", ["1 download", "2 downloads"]),
+    ("import-done", ["1 download added.", "2 downloads added."]),
     ("connections-count", ["1 connection", "2 connections"]),
     ("queues-count", ["1 queue", "2 queues"]),
     ("files-count", ["1 file", "2 files"]),
@@ -651,6 +663,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("add-category-extension", &["category", "extension"]),
     ("add-category-site", &["category", "site"]),
     ("add-connections-hint", &["max", "min"]),
+    ("categories-remove", &["value"]),
     ("add-probe-ranges", &["size"]),
     ("add-probe-single", &["size"]),
     ("add-probe-unsure", &["size"]),
@@ -660,6 +673,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-file-map", &["size"]),
     ("details-from-to", &["folder", "site"]),
     ("downloads-count", &["count"]),
+    ("import-done", &["count"]),
+    ("import-kept", &["names"]),
     ("files-count", &["count"]),
     ("footer-active", &["count"]),
     ("footer-limit", &["speed"]),
@@ -770,6 +785,19 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "details-file-map",
         ar: (&[("size", "SIZE")], "خريطة الملف: كل مربع SIZE"),
         en: (&[("size", "SIZE")], "File map: each square is SIZE"),
+    },
+    Whole {
+        key: "categories-remove",
+        ar: (&[("value", "VALUE")], "احذف VALUE"),
+        en: (&[("value", "VALUE")], "Remove VALUE"),
+    },
+    Whole {
+        key: "import-kept",
+        ar: (&[("names", "NAMES")], "هذه القوائم أبقت إعداداتها: NAMES."),
+        en: (
+            &[("names", "NAMES")],
+            "These queues kept their own settings: NAMES.",
+        ),
     },
     Whole {
         key: "details-from-to",

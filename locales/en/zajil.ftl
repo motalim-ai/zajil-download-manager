@@ -229,3 +229,23 @@ notify-done-title = Download finished
 notify-done-body = { $name }
 notify-failed-title = Download failed
 notify-failed-body = { $name }: { $reason }
+
+## Settings and categories (keys that were missing: review of #57)
+settings-queues = Queues
+settings-folder-choose = Choose a folder
+settings-folder-default = The system's downloads folder
+settings-import-keep-folders = Use the folders in the imported file
+settings-limit-value = Limit
+settings-limit-unit = Unit
+unit-kib-per-second = KiB/s
+unit-mib-per-second = MiB/s
+export-done = The queues were exported.
+import-done =
+    { PLURAL($count) ->
+        [one] { $count } download added.
+       *[other] { $count } downloads added.
+    }
+import-kept = These queues kept their own settings: { $names }.
+categories-add-site = Add a site
+categories-folder-clear = No folder
+categories-remove = Remove { $value }

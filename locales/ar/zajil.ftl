@@ -271,3 +271,27 @@ notify-done-title = اكتمل التحميل
 notify-done-body = { $name }
 notify-failed-title = فشل التحميل
 notify-failed-body = { $name }: { $reason }
+
+## الإعدادات والفئات (مفاتيح كانت ناقصة: مراجعة #57)
+settings-queues = القوائم
+settings-folder-choose = اختر مجلدًا
+settings-folder-default = مجلد التحميلات في النظام
+settings-import-keep-folders = استخدم المجلدات التي في الملف المستورد
+settings-limit-value = الحد
+settings-limit-unit = الوحدة
+unit-kib-per-second = كيلوبايت/ث
+unit-mib-per-second = ميجابايت/ث
+export-done = صُدّرت القوائم.
+import-done =
+    { PLURAL($count) ->
+        [zero] لم يُضف أي تحميل.
+        [one] أُضيف تحميل واحد.
+        [two] أُضيف تحميلان.
+        [few] أُضيفت { $count } تحميلات.
+        [many] أُضيف { $count } تحميلًا.
+       *[other] أُضيف { $count } تحميل.
+    }
+import-kept = هذه القوائم أبقت إعداداتها: { $names }.
+categories-add-site = أضف موقعًا
+categories-folder-clear = بلا مجلد
+categories-remove = احذف { $value }

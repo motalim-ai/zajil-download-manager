@@ -12,8 +12,9 @@
   --sunken: #f5f8fb;
   --side: #e4ecf4;
   --ink: #10263d;
-  --muted: #566b82;
-  --faint: #6f8298;
+  /* At least 4.5:1 on every light background (axe, review of #57). */
+  --muted: #4a5d72;
+  --faint: #55687e;
   --line: #d8e2ec;
   --accent: #1c6cd0;
   --accent-ink: #ffffff;

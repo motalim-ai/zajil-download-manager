@@ -33,6 +33,11 @@
   let view = $state<View>("list");
   let settings = $state<SettingsView | null>(null);
   let settingsMessage = $state<{ text: string; problem: boolean } | null>(null);
+  // Why the settings could not be read (a damaged settings.json or
+  // queues.json): said on the settings screen, never overwritten by a
+  // refresh (review of #57: it went into `error`, which the next snapshot
+  // cleared).
+  let settingsProblem = $state<string | null>(null);
   let keepFolders = $state(false);
   // Said to screen readers when a download ends: not each progress event.
   let announcement = $state("");
@@ -310,7 +315,7 @@
       try {
         applySettings(await api.settings());
       } catch (e) {
-        error = String(e);
+        settingsProblem = String(e);
       }
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
@@ -326,7 +331,9 @@
   <div class="window">
     <Sidebar {snapshot} bind:filter bind:view />
     <main class="main">
-      {#if view === "settings" && settings}
+      {#if view === "settings" && !settings}
+        <p class="problem" role="alert"><Icon name="alert" />{settingsProblem ?? "…"}</p>
+      {:else if view === "settings" && settings}
         <Settings
           {settings}
           bind:keepFolders

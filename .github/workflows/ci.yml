@@ -247,7 +247,7 @@ jobs:
             echo "$extra"
             exit 1
           fi
-          if grep -rl -i 'data-zajil-ui-test\|ui_test_\|uitest\|windowRect\|naiveDiffers' dist; then
+          if grep -rl -i 'data-zajil-ui-test\|ui_test_\|uitest\|windowRect\|naiveDiffers\|axe-core\|axe\.run' dist; then
             echo "::error::the release build of the page contains UI test code"
             exit 1
           fi
