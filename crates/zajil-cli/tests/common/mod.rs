@@ -16,6 +16,14 @@ pub fn zajil_command() -> Command {
 /// the test ends, also when it fails before its own `kill` (#50: a process
 /// left running can keep connecting to a port number that a later test's
 /// server reuses). Use it as the `Child` it holds.
+/// Starts `command` in the background, held by [`Running`]: the only way
+/// tests start a process they do not wait for at once (`process_guard.rs`
+/// checks that no test file calls `spawn` itself).
+#[allow(dead_code)] // Not every test file starts `zajil` in the background.
+pub fn spawn(command: &mut Command) -> Running {
+    Running(command.spawn().expect("zajil starts"))
+}
+
 #[allow(dead_code)] // Not every test file starts `zajil` in the background.
 pub struct Running(pub std::process::Child);
 

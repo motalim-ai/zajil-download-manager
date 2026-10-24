@@ -384,30 +384,33 @@ async fn cancelling_while_retrying_leaves_a_resumable_download_or_nothing() {
     }
 }
 
-/// A port nothing listens on: the address of a server that is gone.
-fn gone() -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    format!("http://127.0.0.1:{port}/f.bin")
-}
+/// A server that is gone: port 1 on the loopback, where nothing listens
+/// and no test server can be (they take free high ports; a port freed for
+/// this could be handed to one: review of #51).
+const GONE: &str = "http://127.0.0.1:1/f.bin";
 
 /// #50: a server that is gone is tried a bounded number of times, with the
-/// default settings a user has, then given up: never forever. The waits
-/// between the 5 tries are at most 0.5 + 1 + 2 + 4 s.
+/// default settings a user has, then given up: never forever. Counted by
+/// the retries the engine reports, not by time (review of #51: a refused
+/// connection itself can take seconds on Windows).
 #[tokio::test]
 async fn a_server_that_is_gone_is_given_up_after_its_tries() {
     let dir = tempfile::tempdir().unwrap();
     let started = Instant::now();
+    let mut retries = 0;
     let result = Engine::new(Options::default())
         .unwrap()
-        .download(&gone(), dir.path(), &mut |_| {})
+        .download(GONE, dir.path(), &mut |event| {
+            if matches!(event, Event::Retrying { .. }) {
+                retries += 1;
+            }
+        })
         .await;
-    let took = started.elapsed();
     assert!(result.is_err(), "{result:?}");
-    assert!(took < Duration::from_secs(20), "gave up after {took:?}");
+    assert_eq!(retries, zajil_core::DEFAULT_TRIES - 1, "{result:?}");
     assert!(
-        took >= Duration::from_secs(3),
-        "did not wait between tries: {took:?}"
+        started.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
     );
 }

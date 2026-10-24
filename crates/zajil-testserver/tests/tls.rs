@@ -55,6 +55,7 @@ async fn an_expired_certificate_is_refused_by_a_client_that_trusts_the_ca() {
     let err = fetch(&server, "localhost").await.unwrap_err();
     assert!(err.to_string().to_lowercase().contains("expired"), "{err}");
     assert!(server.requests().is_empty());
+    assert!(server.strays().is_empty(), "{:?}", server.strays());
 }
 
 #[tokio::test]

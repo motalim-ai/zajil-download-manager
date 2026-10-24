@@ -47,6 +47,7 @@ async fn assert_refused(engine: Engine, server: &TestServer, expected: &str) {
     // The TLS handshake failed, so no HTTP request reached the server and
     // nothing was written.
     assert!(server.requests().is_empty());
+    assert!(server.strays().is_empty(), "{:?}", server.strays());
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
@@ -114,6 +115,7 @@ async fn refuses_a_redirect_from_https_to_http() {
     assert!(err.to_string().contains("https to http"), "{err}");
     assert_eq!(secure.requests().len(), 1);
     assert!(plain.requests().is_empty(), "the http URL was requested");
+    assert!(plain.strays().is_empty(), "{:?}", plain.strays());
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 

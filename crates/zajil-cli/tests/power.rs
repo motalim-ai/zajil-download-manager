@@ -49,23 +49,21 @@ fn a_finished_queue_starts_a_countdown_that_says_how_to_cancel_it() {
     let downloads = tempfile::tempdir().unwrap();
     add(data.path(), downloads.path(), &server.url("/f.bin"));
 
-    let child = zajil_command()
-        .arg("--data-dir")
-        .arg(data.path())
-        .args([
-            "queue",
-            "run",
-            "--shutdown-after",
-            "main",
-            "--countdown",
-            "3600",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        zajil_command()
+            .arg("--data-dir")
+            .arg(data.path())
+            .args([
+                "queue",
+                "run",
+                "--shutdown-after",
+                "main",
+                "--countdown",
+                "3600",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    );
     // Lines arrive through a channel, so a missing line fails the test
     // after a minute instead of hanging it.
     let (send, lines) = std::sync::mpsc::channel();

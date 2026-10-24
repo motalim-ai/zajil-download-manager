@@ -117,15 +117,14 @@ fn a_zip_goes_to_archives_and_a_users_rule_survives_a_killed_run() {
     // nothing is left to download") before any progress was saved, and
     // the test failed with "zajil exited early" about one run in 20 here
     // and on Linux and macOS CI (review of #41).
-    let child = common::zajil_command()
-        .arg("--data-dir")
-        .arg(data.path())
-        .args(["--connections", "1", "queue", "run"])
-        .stdout(fs::File::create(&out_file).unwrap())
-        .stderr(fs::File::create(&err_file).unwrap())
-        .spawn()
-        .unwrap();
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        common::zajil_command()
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(["--connections", "1", "queue", "run"])
+            .stdout(fs::File::create(&out_file).unwrap())
+            .stderr(fs::File::create(&err_file).unwrap()),
+    );
     let shown = || {
         format!(
             "stdout:\n{}\nstderr:\n{}",

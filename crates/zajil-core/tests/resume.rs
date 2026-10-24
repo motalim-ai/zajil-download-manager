@@ -195,6 +195,7 @@ async fn a_damaged_state_file_is_refused_and_nothing_is_touched() {
     );
     assert!(err.to_string().contains("damaged"));
     assert_eq!(server.requests().len(), requests_before);
+    assert!(server.strays().is_empty(), "{:?}", server.strays());
     assert_eq!(fs::read(&part).unwrap(), part_before);
 }
 
@@ -347,6 +348,7 @@ async fn refuses_a_part_file_that_is_a_symbolic_link_out_of_the_folder() {
     );
     assert_eq!(fs::read(&victim).unwrap(), b"precious");
     assert_eq!(server.requests().len(), requests_before);
+    assert!(server.strays().is_empty(), "{:?}", server.strays());
     assert!(!dir.join("f.bin").exists());
 }
 

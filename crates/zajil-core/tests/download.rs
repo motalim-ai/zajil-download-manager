@@ -119,6 +119,7 @@ async fn stops_after_too_many_redirects() {
         .unwrap_err();
     assert!(err.to_string().contains("redirects"), "{err}");
     assert_eq!(server.requests().len(), 6);
+    assert!(server.strays().is_empty(), "{:?}", server.strays());
     assert!(names_in(dir.path()).is_empty());
 }
 

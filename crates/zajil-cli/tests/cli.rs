@@ -289,21 +289,19 @@ fn a_killed_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let child = common::zajil_command()
-        .args([
-            "get",
-            &server.url("/big.bin"),
-            "--connections",
-            "1",
-            "--dir",
-        ])
-        .arg(dir.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        common::zajil_command()
+            .args([
+                "get",
+                &server.url("/big.bin"),
+                "--connections",
+                "1",
+                "--dir",
+            ])
+            .arg(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
 
     // Wait until some progress is durable, then kill without warning.
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -360,21 +358,19 @@ fn a_killed_parallel_download_resumes_from_the_state_file() {
     let dir = tempfile::tempdir().unwrap();
     let state_file = dir.path().join("big.bin.zajil-state");
 
-    let child = common::zajil_command()
-        .args([
-            "get",
-            &server.url("/big.bin"),
-            "--connections",
-            "8",
-            "--dir",
-        ])
-        .arg(dir.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        common::zajil_command()
+            .args([
+                "get",
+                &server.url("/big.bin"),
+                "--connections",
+                "8",
+                "--dir",
+            ])
+            .arg(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
 
     // Wait until several segments have durable progress, then kill.
     let deadline = Instant::now() + Duration::from_secs(60);

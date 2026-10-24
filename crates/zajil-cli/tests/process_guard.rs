@@ -36,15 +36,14 @@ fn a_failed_test_does_not_leave_zajil_running() {
     let url = server.url("/f.bin");
     let mut pid = 0;
     let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let child = common::zajil_command()
-            .args(["get", "--dir"])
-            .arg(dir.path())
-            .arg(&url)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let child = common::Running(child);
+        let child = common::spawn(
+            common::zajil_command()
+                .args(["get", "--dir"])
+                .arg(dir.path())
+                .arg(&url)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        );
         pid = child.id();
         std::thread::sleep(Duration::from_millis(500));
         assert!(alive(pid), "zajil should still be downloading");
@@ -62,27 +61,32 @@ fn a_failed_test_does_not_leave_zajil_running() {
     }
 }
 
-/// Every `zajil` a test starts in the background is held by the guard:
-/// as many `.spawn()` as `common::Running(` in each test file.
+/// Every process a test starts in the background goes through
+/// `common::spawn`, which holds it in the guard: no test file outside
+/// `common/` calls `spawn` itself (review of #51: counting calls against
+/// guards could be fooled by a comment). The word is built from pieces,
+/// so this file does not match itself.
 #[test]
-fn every_background_zajil_is_held_by_the_guard() {
+fn every_background_process_is_started_through_the_guard() {
+    let needle = [".spa", "wn("].concat();
     let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut checked = 0;
+    let mut files = 0;
     for entry in std::fs::read_dir(&folder).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_none_or(|e| e != "rs") {
             continue;
         }
+        files += 1;
         let text = std::fs::read_to_string(&path).unwrap();
-        let spawned = text.matches(".spawn()").count();
-        let held = text.matches("common::Running(").count();
-        assert_eq!(
-            spawned,
-            held,
-            "{}: {spawned} started, {held} held",
-            path.display()
-        );
-        checked += spawned;
+        for (n, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            assert!(
+                !code.contains(&needle),
+                "{}:{}: start background processes with common::spawn",
+                path.display(),
+                n + 1
+            );
+        }
     }
-    assert!(checked >= 7, "found only {checked} background processes");
+    assert!(files > 5, "found only {files} test files");
 }

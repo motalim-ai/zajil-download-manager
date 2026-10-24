@@ -293,10 +293,11 @@ pub struct RequestRecord {
     /// response counts only what was sent before the cut. Not a speed
     /// measurement.
     ///
-    /// **Written, not received**: a cut response can count up to about
-    /// 64 KiB that the connection still held and threw away (3,145,728
-    /// counted, 3,080,192 read by a raw client, in the diagnostic of #50).
-    /// Equal to what arrived only for a response that completed.
+    /// **Written, not received**: a cut response can count what the
+    /// connection still held and threw away, hundreds of KiB when the
+    /// reader is slow (64 KiB in the diagnostic of #50: 3,145,728 counted,
+    /// 3,080,192 read by a raw client). Equal to what arrived only for a
+    /// response that completed.
     pub bytes_sent: u64,
     /// The TLS version of the connection (`"TLSv1_3"`), or `None` for HTTP.
     pub tls_version: Option<String>,

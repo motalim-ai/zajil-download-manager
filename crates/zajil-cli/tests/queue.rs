@@ -64,16 +64,14 @@ fn a_killed_queue_run_keeps_its_queues_progress_and_settings() {
     let out = zajil(data.path(), &add);
     assert!(out.status.success(), "{}", printed(&out));
 
-    let child = common::zajil_command()
-        .arg("--data-dir")
-        .arg(data.path())
-        .args(["--connections", "2", "queue", "run"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        common::zajil_command()
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(["--connections", "2", "queue", "run"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
 
     // Wait until both running downloads have durable progress, then kill.
     let store = QueueStore::new(data.path());
@@ -338,21 +336,39 @@ fn the_real_clock_drives_limits_and_schedules() {
     let shown: zajil_core::queue::TimeOfDay = start_text.parse().unwrap();
     assert!(list.contains(&format!("runs from {shown} ")), "{list}");
 
-    let child = common::zajil_command()
-        .arg("--data-dir")
-        .arg(state.path())
-        .args(["queue", "run"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-
-    let mut child = common::Running(child);
-    // Each line of the runner, with the time it arrived.
-    let lines: Vec<(jiff::Timestamp, String)> = BufReader::new(child.stderr.take().unwrap())
-        .lines()
-        .map(|line| (jiff::Timestamp::now(), line.unwrap()))
-        .collect();
+    let mut child = common::spawn(
+        common::zajil_command()
+            .arg("--data-dir")
+            .arg(state.path())
+            .args(["queue", "run"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    );
+    // Each line of the runner, with the time it arrived. Read on a thread
+    // and taken with a deadline, so a runner that never ends fails the test
+    // (and the guard stops it) instead of hanging it (review of #51).
+    let (sender, received) = std::sync::mpsc::channel();
+    let stderr = child.stderr.take().unwrap();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            if sender.send((jiff::Timestamp::now(), line)).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut lines: Vec<(jiff::Timestamp, String)> = Vec::new();
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match received.recv_timeout(left) {
+            Ok(line) => lines.push(line),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("zajil queue run still runs after 120 s: {lines:?}")
+            }
+        }
+    }
     let ended = jiff::Timestamp::now();
     assert!(child.wait().unwrap().success(), "{lines:?}");
 
@@ -456,12 +472,9 @@ fn speed_limits_are_checked_and_can_be_removed() {
 fn queue_run_gives_up_a_server_that_is_gone_and_ends() {
     let data = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!(
-        "http://127.0.0.1:{}/f.bin",
-        listener.local_addr().unwrap().port()
-    );
-    drop(listener);
+    // Port 1 on the loopback: nothing listens there, and no test server
+    // can (review of #51).
+    let url = "http://127.0.0.1:1/f.bin".to_owned();
     let added = zajil(
         data.path(),
         &[
@@ -473,15 +486,14 @@ fn queue_run_gives_up_a_server_that_is_gone_and_ends() {
         ],
     );
     assert!(added.status.success(), "{}", printed(&added));
-    let child = common::zajil_command()
-        .arg("--data-dir")
-        .arg(data.path())
-        .args(["queue", "run"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut child = common::Running(child);
+    let mut child = common::spawn(
+        common::zajil_command()
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(["queue", "run"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
