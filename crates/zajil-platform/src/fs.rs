@@ -605,6 +605,9 @@ mod imp {
 }
 
 #[cfg(windows)]
+pub(crate) use imp::owner_only;
+
+#[cfg(windows)]
 #[allow(unsafe_code)]
 mod imp {
     use std::fs::{File, OpenOptions};
@@ -687,12 +690,13 @@ mod imp {
         std::os::windows::fs::symlink_file(target, link)
     }
 
-    pub fn create_private(path: &Path) -> io::Result<File> {
-        // "D:P(A;;FA;;;<sid>)": a protected DACL (P: nothing inherited from
-        // the folder) with one entry allowing (A) all file access (FA) to
-        // the current user. Given to CreateFileW, so the file never exists
-        // with other permissions, not even for an instant.
-        let sddl = format!("D:P(A;;FA;;;{})", UserSid::current()?.to_text()?);
+    /// Security attributes that allow `access` (SDDL rights, such as `FA`
+    /// for all file access or `GA` for all generic access) to the current
+    /// user only: "D:P(A;;<access>;;;<sid>)", a protected DACL (P: nothing
+    /// inherited) with one entry allowing (A) it. Kept alive by the
+    /// returned guard, which must outlive every use of the attributes.
+    pub(crate) fn owner_only(access: &str) -> io::Result<(SECURITY_ATTRIBUTES, LocalMemory)> {
+        let sddl = format!("D:P(A;;{access};;;{})", UserSid::current()?.to_text()?);
         let sddl: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
         let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         // SAFETY: `sddl` is a NUL-terminated UTF-16 string alive for the
@@ -708,12 +712,20 @@ mod imp {
         if ok == 0 {
             return Err(io::Error::last_os_error());
         }
-        let _descriptor = LocalMemory(descriptor);
+        let guard = LocalMemory(descriptor);
         let attributes = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: descriptor,
             bInheritHandle: 0,
         };
+        Ok((attributes, guard))
+    }
+
+    pub fn create_private(path: &Path) -> io::Result<File> {
+        // All file access (FA) for the current user only, given to
+        // CreateFileW, so the file never exists with other permissions,
+        // not even for an instant.
+        let (attributes, _descriptor) = owner_only("FA")?;
         // `absolute` also removes `.` and `..`, which the `\\?\` form of
         // long paths requires.
         let path_w = wide(&std::path::absolute(path)?);
@@ -812,7 +824,7 @@ mod imp {
     }
 
     /// Memory that a Windows call allocated with `LocalAlloc`.
-    struct LocalMemory(*mut core::ffi::c_void);
+    pub(crate) struct LocalMemory(*mut core::ffi::c_void);
 
     impl Drop for LocalMemory {
         fn drop(&mut self) {

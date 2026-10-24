@@ -131,6 +131,7 @@ pub fn run() {
                 eprintln!("zajil: cannot watch for the end of the Windows session: {err}");
             }
             tray::build(tauri_app)?;
+            serve_extension(tauri_app.handle().clone(), data.clone());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -539,6 +540,79 @@ fn chosen_folder(folder: Option<&str>, download_dir: &Path) -> Result<PathBuf, S
     }
 }
 
+/// The browser extension's requests, handed over by `zajil-host` on the
+/// user's private channel (ADR-0005, M5). One thread waits for
+/// connections; each carries one request and its answer. A second app on
+/// the same data folder cannot open the channel: it says so and goes on
+/// without it.
+fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf) {
+    let listener = match zajil_platform::ipc::Listener::bind(&data) {
+        Ok(listener) => listener,
+        Err(err) => {
+            eprintln!("zajil: the browser extension cannot reach this window: {err}");
+            return;
+        }
+    };
+    std::thread::spawn(move || {
+        while let Ok(mut stream) = listener.accept() {
+            let handle = handle.clone();
+            std::thread::spawn(move || {
+                let Ok(Some(message)) =
+                    zajil_host::read_frame(&mut stream, zajil_host::MAX_REQUEST)
+                else {
+                    return;
+                };
+                let answer = match zajil_host::parse(&message) {
+                    Err(why) => zajil_host::Response::refused(why),
+                    Ok(request) if in_scene(&handle) => {
+                        let _ = request;
+                        zajil_host::Response::refused("a ui-test scene adds nothing")
+                    }
+                    Ok(request) => {
+                        let app = handle.state::<App>();
+                        let given = download_dir(&app.settings, &app.system_download_dir);
+                        let answer = from_extension(&app.store, &request, &given);
+                        if answer.ok {
+                            let _ = handle.emit("downloads-changed", ());
+                            tray::show_window(&handle);
+                        }
+                        answer
+                    }
+                };
+                let _ = zajil_host::write_json(&mut stream, &answer);
+            });
+        }
+    });
+}
+
+/// What a request from the extension does: a download goes into the
+/// default queue, by category, as the add dialog adds one. The referrer,
+/// the suggested name and the cookies are checked by `zajil_host::parse`
+/// and carried, but not used yet: the engine sends no such headers until
+/// a later part of M5.
+fn from_extension(
+    store: &QueueStore,
+    request: &zajil_host::Request,
+    given: &Path,
+) -> zajil_host::Response {
+    match request {
+        zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
+        zajil_host::Request::Download { url, .. } => {
+            let add = AddRequest {
+                url: url.clone(),
+                queue: None,
+                folder: None,
+                start: true,
+                limit: None,
+            };
+            match add_blocking(store, &add, given) {
+                Ok(_) => zajil_host::Response::ok(),
+                Err(err) => zajil_host::Response::refused(err.to_string()),
+            }
+        }
+    }
+}
+
 /// Nothing is created here: the download makes its folder when it starts,
 /// so a refused add leaves nothing behind (review of #48).
 fn add_blocking(store: &QueueStore, request: &AddRequest, given: &Path) -> Result<u64, StoreError> {
@@ -689,6 +763,34 @@ mod tests {
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+    }
+
+    /// M5: a download from the extension lands in the default queue, by
+    /// category, started; a ping changes nothing.
+    #[test]
+    fn a_download_from_the_extension_is_added_to_the_queue() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/a.zip","cookies":"sid=1"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            from_extension(&store, &request, data.path()),
+            zajil_host::Response::ok()
+        );
+        let queues = store.load().unwrap();
+        let item = queues.queues[0].items.first().expect("added");
+        assert_eq!(queues.queues[0].name, DEFAULT_QUEUE);
+        assert_eq!(item.url, "https://example.com/a.zip");
+        assert!(item.categorize);
+        assert_eq!(item.status, Status::Waiting);
+        let ping = zajil_host::parse(br#"{"type":"ping","protocol_version":1}"#).unwrap();
+        assert_eq!(
+            from_extension(&store, &ping, data.path()),
+            zajil_host::Response::ok()
+        );
+        assert_eq!(store.load().unwrap().queues[0].items.len(), 1);
     }
 
     /// A folder that comes from the page is checked before anything is

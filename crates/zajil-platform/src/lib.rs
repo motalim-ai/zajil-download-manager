@@ -19,6 +19,7 @@
 pub mod console;
 pub mod fs;
 pub mod ids;
+pub mod ipc;
 pub mod native_host;
 mod paths;
 pub mod power;

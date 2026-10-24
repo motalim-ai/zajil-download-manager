@@ -5594,8 +5594,20 @@ dependencies = [
  "tokio",
  "ts-rs",
  "zajil-core",
+ "zajil-host",
  "zajil-platform",
  "zajil-testserver",
+]
+
+[[package]]
+name = "zajil-host"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "zajil-core",
+ "zajil-platform",
 ]
 
 [[package]]
@@ -5603,6 +5615,7 @@ name = "zajil-platform"
 version = "0.0.0"
 dependencies = [
  "dirs 7.0.0",
+ "getrandom 0.4.3",
  "libc",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",

@@ -2083,6 +2083,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zajil-host"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "zajil-core",
+ "zajil-platform",
+]
+
+[[package]]
 name = "zajil-i18n"
 version = "0.0.0"
 dependencies = [
@@ -2098,6 +2110,7 @@ name = "zajil-platform"
 version = "0.0.0"
 dependencies = [
  "dirs",
+ "getrandom 0.4.3",
  "libc",
  "thiserror",
  "windows-sys 0.61.2",
