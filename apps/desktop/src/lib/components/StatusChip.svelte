@@ -25,7 +25,9 @@
     white-space: nowrap;
   }
   .active {
-    color: var(--accent);
+    /* Toward the ink: 4.5:1 or more on a selected row too (axe, review
+       of #57); in the dark themes the ink is light, so it stays light. */
+    color: color-mix(in oklab, var(--accent) 72%, var(--ink));
     background: color-mix(in oklab, var(--feather) 14%, transparent);
   }
   .done {
