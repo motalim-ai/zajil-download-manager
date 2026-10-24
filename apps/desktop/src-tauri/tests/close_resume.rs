@@ -154,14 +154,14 @@ fn ask_to_close(child: &Child, how: Close) {
                        [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); \
                        [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); \
                        [DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r); \
-                       public static int End(uint pid) {{ \
+                       public static void Send(uint pid) {{ \
                          var all = new List<IntPtr>(); \
                          EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
                          IntPtr r; \
                          foreach (var h in all) SendMessageTimeoutW(h, 0x11, IntPtr.Zero, IntPtr.Zero, 2, 5000, out r); \
                          foreach (var h in all) SendMessageTimeoutW(h, 0x16, (IntPtr)1, IntPtr.Zero, 2, 10000, out r); \
-                         return all.Count; }} }}'; \
-                     $n = [ZajilSession]::End({pid}); Write-Output \"session end sent to $n top-level windows\"; if ($n -eq 0) {{ exit 1 }}"
+                         Console.WriteLine(\"session end sent to \" + all.Count + \" top-level windows\"); if (all.Count == 0) Environment.Exit(1); }} }}'; \
+                     [ZajilSession]::Send({pid})"
                 ),
             ])
             .status(),
