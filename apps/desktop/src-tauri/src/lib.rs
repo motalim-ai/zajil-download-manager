@@ -9,6 +9,8 @@
 #![forbid(unsafe_code)]
 
 mod live;
+#[cfg(feature = "ui-test")]
+mod ui_test;
 pub mod view;
 
 use std::path::PathBuf;
@@ -74,14 +76,25 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    tauri::Builder::default()
-        .manage(app)
-        .invoke_handler(tauri::generate_handler![snapshot, pause, resume, remove])
+    let builder = tauri::Builder::default().manage(app);
+    #[cfg(feature = "ui-test")]
+    let builder = builder.manage(ui_test::UiTest::from_args(&args));
+    builder
+        .invoke_handler(handlers())
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
             #[cfg(unix)]
             if let Some(signals) = signals {
                 tauri::async_runtime::spawn(exit_on_signal(handle.clone(), signals));
+            }
+            #[cfg(feature = "ui-test")]
+            if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
+                // Fixed demo data: nothing runs, so nothing to wait for.
+                tauri_app.state::<App>().stopped.send_replace(true);
+                if let Some(window) = tauri_app.get_webview_window("main") {
+                    ui_test::fit_to_screen(&window)?;
+                }
+                return Ok(());
             }
             tauri::async_runtime::spawn(async move {
                 run_queues(handle.clone()).await;
@@ -126,6 +139,24 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+// Generic over the runtime, so a test can run them on Tauri's mock runtime.
+#[cfg(not(feature = "ui-test"))]
+fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![snapshot, pause, resume, remove]
+}
+
+#[cfg(feature = "ui-test")]
+fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        snapshot,
+        pause,
+        resume,
+        remove,
+        ui_test::ui_test_scenario,
+        ui_test::ui_test_report
+    ]
 }
 
 /// Waits for the queues to stop, [`STOP_WAIT`] at most, and says how it
@@ -284,12 +315,21 @@ fn blocking_err(err: impl std::fmt::Display) -> String {
 }
 
 #[tauri::command]
-async fn snapshot(app: State<'_, App>) -> Result<Snapshot, String> {
+async fn snapshot<R: tauri::Runtime>(
+    app: State<'_, App>,
+    handle: tauri::AppHandle<R>,
+) -> Result<Snapshot, String> {
     if !app.page_ready.swap(true, Ordering::SeqCst) {
         // The page is up and talking to the program (the open-and-close
         // check of CI waits for this line).
         eprintln!("zajil: the window is ready");
     }
+    #[cfg(feature = "ui-test")]
+    if let Some(snapshot) = handle.state::<ui_test::UiTest>().demo() {
+        return Ok(snapshot);
+    }
+    #[cfg(not(feature = "ui-test"))]
+    let _ = handle;
     let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
     tokio::task::spawn_blocking(move || read_snapshot(&store, &categories, &live))
         .await
@@ -355,11 +395,17 @@ fn remove_items(queues: &mut QueuesFile, ids: &[u64]) -> Result<(), StoreError> 
     Ok(())
 }
 
-async fn change(
+async fn change<R: tauri::Runtime>(
     app: &App,
-    handle: &tauri::AppHandle,
+    handle: &tauri::AppHandle<R>,
     change: impl FnOnce(&mut QueuesFile) -> Result<(), StoreError> + Send + 'static,
 ) -> Result<(), String> {
+    // A `ui-test` scene shows demo data: its toolbar changes nothing, so the
+    // real queues are never touched (review of #47).
+    #[cfg(feature = "ui-test")]
+    if handle.state::<ui_test::UiTest>().scenario.is_some() {
+        return Ok(());
+    }
     let store = app.store.clone();
     tokio::task::spawn_blocking(move || store.update(change))
         .await
@@ -370,24 +416,28 @@ async fn change(
 }
 
 #[tauri::command]
-async fn pause(app: State<'_, App>, ids: Vec<u64>, handle: tauri::AppHandle) -> Result<(), String> {
+async fn pause<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
     change(&app, &handle, move |q| set_status(q, &ids, Status::Paused)).await
 }
 
 #[tauri::command]
-async fn resume(
+async fn resume<R: tauri::Runtime>(
     app: State<'_, App>,
     ids: Vec<u64>,
-    handle: tauri::AppHandle,
+    handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     change(&app, &handle, move |q| set_status(q, &ids, Status::Waiting)).await
 }
 
 #[tauri::command]
-async fn remove(
+async fn remove<R: tauri::Runtime>(
     app: State<'_, App>,
     ids: Vec<u64>,
-    handle: tauri::AppHandle,
+    handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     change(&app, &handle, move |q| remove_items(q, &ids)).await
 }
@@ -419,6 +469,51 @@ mod tests {
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+    }
+
+    /// The owner's condition on #47: in a release build the commands of
+    /// the UI tests do not exist, and calling them is an error; in a
+    /// `ui-test` build the same calls answer (CI runs both).
+    #[test]
+    fn the_ui_test_commands_exist_only_in_a_ui_test_build() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(handlers())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        #[cfg(feature = "ui-test")]
+        app.manage(ui_test::UiTest::from_args(&[]));
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        for cmd in ["ui_test_scenario", "ui_test_report"] {
+            let body = serde_json::json!({ "report": {} });
+            let answer = tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    // The page's own origin: anything else is refused before
+                    // the command is even looked for.
+                    url: if cfg!(windows) {
+                        "http://tauri.localhost"
+                    } else {
+                        "tauri://localhost"
+                    }
+                    .parse()
+                    .unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            );
+            if cfg!(feature = "ui-test") {
+                assert!(answer.is_ok(), "{cmd}: {answer:?}");
+            } else {
+                let error = answer.expect_err(cmd).to_string();
+                assert!(error.contains("not found"), "{cmd}: {error}");
+            }
+        }
     }
 
     #[test]

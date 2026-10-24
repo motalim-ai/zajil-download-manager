@@ -211,8 +211,8 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       # Tauri 2 on Linux needs WebKitGTK 4.1 (the minimum the owner chose:
-      # Ubuntu 22.04 and Debian 12). Xvfb and xdotool are for opening the
-      # real window.
+      # Ubuntu 22.04 and Debian 12). Xvfb, xdotool and ImageMagick are for
+      # opening the real window and taking its screenshots.
       - name: Install the GUI libraries (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 10
@@ -222,7 +222,7 @@ jobs:
           set -euo pipefail
           sudo apt-get $APT_OPTIONS update -q
           sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick
       - name: Install npm packages (from the lock file only)
         run: npm ci
       - name: Licenses and advisories of npm packages
@@ -233,17 +233,47 @@ jobs:
         run: npm run check
       - name: Unit tests of the interface
         run: npm test
+      # A release build of the page has no test page and no test command.
+      - name: Release build has no UI test code
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          # Nothing of src/uitest: no chunk of its own (Names, its calls),
+          # and none of its names in the page (owner's condition on #47).
+          extra=$(find dist -name '*.js' ! -name 'index-*.js')
+          if [ -n "$extra" ]; then
+            echo "::error::the release build of the page has more than its own script:"
+            echo "$extra"
+            exit 1
+          fi
+          if grep -rl -i 'data-zajil-ui-test\|ui_test_\|uitest\|windowRect\|naiveDiffers' dist; then
+            echo "::error::the release build of the page contains UI test code"
+            exit 1
+          fi
+          if grep -n '^default *=' src-tauri/Cargo.toml | grep ui-test; then
+            echo "::error::ui-test is a default feature"
+            exit 1
+          fi
+          # The window may be asked where it is only in a ui-test build.
+          if ! grep -q '"capabilities": \["default"\]' src-tauri/tauri.conf.json; then
+            echo "::error::the release build must enable only the default capability"
+            exit 1
+          fi
+          echo "no UI test code in the release build"
       - name: Clippy (desktop)
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
           cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --all-targets --features ui-test -- -D warnings
       - name: Tests (desktop) and generated types up to date
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
           set -euo pipefail
           cargo test --locked
+          cargo test --locked --features ui-test --lib
           # Changed files by content (line endings aside, on Windows), and
           # new files too (review of #45: `git diff` alone missed them).
           git diff --exit-code -- ../src/lib/bindings
@@ -256,6 +286,23 @@ jobs:
       - name: Build the app
         shell: bash
         run: npx tauri build --debug --no-bundle
+      # The program built without `ui-test` has no UI test command: not even
+      # their names (owner's condition on #47). Calling them is an error, as
+      # the unit test `the_ui_test_commands_exist_only_in_a_ui_test_build`
+      # shows through Tauri's IPC in both builds.
+      - name: The release program has no UI test commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) app=src-tauri/target/debug/zajil-desktop.exe ;;
+            *) app=src-tauri/target/debug/zajil-desktop ;;
+          esac
+          if grep -c -a 'ui_test_scenario\|ui_test_report' "$app"; then
+            echo "::error::the release program contains the UI test commands"
+            exit 1
+          fi
+          echo "no UI test command in $app"
       # The built app opens its window and closes cleanly (exit code 0).
       - name: The app opens and closes
         shell: bash
@@ -291,6 +338,37 @@ jobs:
           else
             "${test[@]}"
           fi
+      - name: Build the app with its UI test pages
+        shell: bash
+        run: |
+          npx tauri build --debug --no-bundle --features ui-test \
+            --config '{"build":{"beforeBuildCommand":"npm run build:ui-test"},"app":{"security":{"capabilities":["default","ui-test"]}}}'
+      # Screenshots of the real window, captured with each system's own
+      # tool, and the image test of mixed names (owner's decision on the
+      # M4 plan).
+      - name: Screenshots and the image test of mixed names
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) app=src-tauri/target/debug/zajil-desktop.exe ;;
+            *) app=src-tauri/target/debug/zajil-desktop ;;
+          esac
+          shots="$RUNNER_TEMP/ui-shots"
+          scenarios="names list-ar-light list-ar-dark list-en-light list-en-dark"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/ui-shots.mjs "$app" "$shots" $scenarios
+          else
+            node scripts/ui-shots.mjs "$app" "$shots" $scenarios
+          fi
+          node scripts/compare-names.mjs "$shots"
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-screenshots-${{ matrix.os }}
+          path: ${{ runner.temp }}/ui-shots
+          if-no-files-found: warn
 
   desktop-licenses:
     name: Desktop licenses & advisories (cargo-deny)

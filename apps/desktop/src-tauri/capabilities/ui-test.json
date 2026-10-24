@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ui-test",
+  "description": "ui-test builds only (CI adds it with --config; tauri.conf.json lists only `default`): read where the window and the screen's work area are, for the screenshots of the UI tests.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:window:allow-inner-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor",
+    "core:window:allow-current-monitor"
+  ]
+}

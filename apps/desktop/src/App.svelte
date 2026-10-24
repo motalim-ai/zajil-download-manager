@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Sidebar, { type Filter } from "./lib/components/Sidebar.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
-  import { locale } from "./lib/i18n.svelte";
+  import { locale, type Lang } from "./lib/i18n.svelte";
   import { size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
 
@@ -15,6 +15,8 @@
   let error = $state<string | null>(null);
   // What the last toolbar command answered, if it failed.
   let failed = $state<string | null>(null);
+  // The names test page, loaded only in a ui-test build.
+  let NamesPage = $state<typeof import("./uitest/Names.svelte").default | null>(null);
 
   const shown = $derived(
     snapshot.downloads.filter((d) => {
@@ -76,10 +78,36 @@
     await refresh();
   }
 
+  function setTheme(theme: string) {
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }
+
+  /// `ui-test` builds only: show a fixed scenario (`<view>-<lang>-<theme>`)
+  /// and tell the Rust side when it is on screen.
+  async function runUiTest(): Promise<boolean> {
+    if (!__UI_TEST__) return false;
+    const test = await import("./uitest/api");
+    const scenario = await test.uiTestScenario();
+    if (!scenario) return false;
+    const [view = "list", lang = "ar", theme = "light"] = scenario.split("-");
+    locale.set(lang as Lang);
+    setTheme(theme);
+    snapshot = await api.snapshot();
+    selected = 1;
+    if (view === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
+    await tick();
+    await document.fonts.ready;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    if (view !== "names") await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect() });
+    return true;
+  }
+
   onMount(() => {
     locale.set("ar");
     let unlisten: (() => void) | undefined;
     void (async () => {
+      if (await runUiTest()) return;
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
       await refresh();
@@ -88,25 +116,29 @@
   });
 </script>
 
-<div class="window">
-  <Sidebar {snapshot} bind:filter />
-  <main class="main">
-    <div class="tool">
-      {#each [{ kind: "resume", key: "action-resume", icon: "play" }, { kind: "pause", key: "action-pause", icon: "pause" }, { kind: "remove", key: "action-delete", icon: "trash" }] as const as b (b.kind)}
-        <button class="btn icon" aria-label={locale.t(b.key)} title={locale.t(b.key)} disabled={selected === null} onclick={() => void act(b.kind)}><Icon name={b.icon} /></button>
-      {/each}
-    </div>
-    {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
-    {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
-    <DownloadTable downloads={shown} bind:selected />
-    <footer class="status">
-      <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
-      <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
-      <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
-      <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
-    </footer>
-  </main>
-</div>
+{#if NamesPage}
+  <NamesPage />
+{:else}
+  <div class="window">
+    <Sidebar {snapshot} bind:filter />
+    <main class="main">
+      <div class="tool">
+        {#each [{ kind: "resume", key: "action-resume", icon: "play" }, { kind: "pause", key: "action-pause", icon: "pause" }, { kind: "remove", key: "action-delete", icon: "trash" }] as const as b (b.kind)}
+          <button class="btn icon" aria-label={locale.t(b.key)} title={locale.t(b.key)} disabled={selected === null} onclick={() => void act(b.kind)}><Icon name={b.icon} /></button>
+        {/each}
+      </div>
+      {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
+      {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
+      <DownloadTable downloads={shown} bind:selected />
+      <footer class="status">
+        <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
+        <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
+        <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
+        <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
+      </footer>
+    </main>
+  </div>
+{/if}
 
 <style>
   .window {

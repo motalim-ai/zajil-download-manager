@@ -1,5 +1,6 @@
 // The commands of the Rust side (src-tauri/src/lib.rs). The types are
-// generated from Rust (ts-rs), so both sides agree.
+// generated from Rust (ts-rs), so both sides agree. The calls of the UI
+// tests are in ../uitest/api.ts, never in a release build.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Snapshot } from "./bindings/Snapshot";
