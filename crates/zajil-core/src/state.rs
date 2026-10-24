@@ -147,6 +147,16 @@ impl DownloadState {
         }
     }
 
+    /// Whether the download can be split over several connections and
+    /// resumed later: the server announced `Accept-Ranges: bytes`, the size
+    /// and a strong validator (the rule of `Engine::probe`, and of the
+    /// details in the interface).
+    pub fn resumable(&self) -> bool {
+        self.accept_ranges
+            && self.content_length.is_some()
+            && crate::engine::if_range_value(&self.validator).is_some()
+    }
+
     /// Bytes on disk, summed over all segments. Saturates instead of
     /// overflowing on a state that was never checked.
     pub fn bytes_done(&self) -> u64 {

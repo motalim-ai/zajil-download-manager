@@ -81,6 +81,15 @@ pub struct Category {
     pub folder: Option<PathBuf>,
 }
 
+/// What made [`CategoriesFile::classify_why`] choose a category.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Matched {
+    /// One of its sites (as written in the category).
+    Site(String),
+    /// The file's extension (lowercase, without the dot).
+    Extension(String),
+}
+
 /// Why the categories file could not be used or changed.
 #[derive(Debug, thiserror::Error)]
 pub enum CategoryError {
@@ -185,23 +194,38 @@ impl CategoriesFile {
     /// The category of a download named `file_name` from `host` (the host
     /// of the final URL, after redirects), if any. See the module docs.
     pub fn classify(&self, file_name: &str, host: Option<&str>) -> Option<&Category> {
+        self.classify_why(file_name, host)
+            .map(|(category, _)| category)
+    }
+
+    /// [`classify`](Self::classify), and what matched: a site of the
+    /// category, or the file's extension (the add dialog says which).
+    pub fn classify_why(
+        &self,
+        file_name: &str,
+        host: Option<&str>,
+    ) -> Option<(&Category, Matched)> {
         if let Some(host) = host {
             let host = host.trim_end_matches('.').to_ascii_lowercase();
-            let by_site = self.categories.iter().find(|c| {
-                c.sites.iter().any(|site| {
-                    host == *site
+            for category in &self.categories {
+                let site = category.sites.iter().find(|site| {
+                    host == **site
                         || host
                             .strip_suffix(site.as_str())
                             .is_some_and(|rest| rest.ends_with('.'))
-                })
-            });
-            if by_site.is_some() {
-                return by_site;
+                });
+                if let Some(site) = site {
+                    return Some((category, Matched::Site(site.clone())));
+                }
             }
         }
         let (_, ext) = file_name.rsplit_once('.')?;
         let ext = ext.to_lowercase();
-        self.categories.iter().find(|c| c.extensions.contains(&ext))
+        let category = self
+            .categories
+            .iter()
+            .find(|c| c.extensions.contains(&ext))?;
+        Some((category, Matched::Extension(ext)))
     }
 
     /// Where a download named `file_name` from `host` goes: its category's
@@ -607,6 +631,28 @@ impl CategoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review of #48: the add dialog says what matched, a site or the
+    /// extension, and a site wins as in `classify`.
+    #[test]
+    fn classify_why_says_what_matched() {
+        let mut c = CategoriesFile::built_in();
+        c.categories[0].sites.push("example.com".into());
+        let first = c.categories[0].id.clone();
+        let (category, matched) = c
+            .classify_why("photos.ZIP", Some("dl.example.com"))
+            .unwrap();
+        assert_eq!(
+            (category.id.as_str(), matched),
+            (first.as_str(), Matched::Site("example.com".into()))
+        );
+        let (category, matched) = c.classify_why("photos.ZIP", Some("other.net")).unwrap();
+        assert_eq!(
+            (category.id.as_str(), matched),
+            ("archives", Matched::Extension("zip".into()))
+        );
+        assert!(c.classify_why("README", Some("other.net")).is_none());
+    }
 
     #[test]
     fn a_zip_file_is_an_archive_and_extensions_ignore_case() {

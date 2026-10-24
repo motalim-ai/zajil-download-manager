@@ -13,19 +13,22 @@ mod live;
 mod ui_test;
 pub mod view;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager, State};
 use zajil_core::category::{CategoriesFile, CategoryStore};
-use zajil_core::queue::{QueueEvent, QueueStore, QueuesFile, Runner, Status, StoreError};
+use zajil_core::queue::{
+    DEFAULT_QUEUE, QueueEvent, QueueStore, QueuesFile, Runner, Status, StoreError,
+};
+use zajil_core::state::DownloadState;
 use zajil_core::{Engine, Options, Stop};
 use zajil_platform::{AppPaths, SystemPaths};
 
 use crate::live::{Live, NOTIFY_EVERY, Notify};
-use crate::view::Snapshot;
+use crate::view::{AddRequest, DetailsView, ProbeView, Snapshot};
 
 /// How long the program waits for the downloads to record their progress
 /// when it is closed.
@@ -36,6 +39,7 @@ pub struct App {
     engine: Engine,
     store: QueueStore,
     categories: CategoryStore,
+    download_dir: PathBuf,
     live: Arc<Live>,
     stop: Stop,
     /// Set once the queues have stopped (their downloads recorded their
@@ -45,6 +49,9 @@ pub struct App {
     exiting: AtomicBool,
     /// The page has asked for its first snapshot.
     page_ready: AtomicBool,
+    /// The add dialog's probe in progress, given up when the dialog closes
+    /// (review of #48).
+    probing: std::sync::Mutex<Option<Stop>>,
 }
 
 /// Where the queues and categories live: `--data-dir <folder>` (as for
@@ -64,15 +71,20 @@ fn data_dir(args: &[String]) -> Result<PathBuf, String> {
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     let data = data_dir(&args).unwrap_or_else(|e| panic!("no data folder: {e}"));
+    let download_dir = SystemPaths::new()
+        .map(|p| p.download_dir().to_path_buf())
+        .unwrap_or_else(|_| data.join("Downloads"));
     let app = App {
         engine: Engine::new(Options::default()).expect("the engine starts"),
         store: QueueStore::new(&data),
         categories: CategoryStore::new(&data),
+        download_dir,
         live: Arc::new(Live::default()),
         stop: Stop::new(),
         stopped: tokio::sync::watch::Sender::new(false),
         exiting: AtomicBool::new(false),
         page_ready: AtomicBool::new(false),
+        probing: std::sync::Mutex::new(None),
     };
     #[cfg(unix)]
     let signals = stop_signals();
@@ -144,16 +156,29 @@ pub fn run() {
 // Generic over the runtime, so a test can run them on Tauri's mock runtime.
 #[cfg(not(feature = "ui-test"))]
 fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![snapshot, pause, resume, remove]
+    tauri::generate_handler![
+        snapshot,
+        probe,
+        cancel_probe,
+        add,
+        pause,
+        resume,
+        remove,
+        details
+    ]
 }
 
 #[cfg(feature = "ui-test")]
 fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         snapshot,
+        probe,
+        cancel_probe,
+        add,
         pause,
         resume,
         remove,
+        details,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -336,6 +361,102 @@ async fn snapshot<R: tauri::Runtime>(
         .map_err(blocking_err)?
 }
 
+#[tauri::command]
+async fn probe(app: State<'_, App>, url: String) -> Result<ProbeView, String> {
+    // What adding would refuse is refused before the server is asked
+    // (review of #48: a URL with a password passed, then `add` refused it).
+    zajil_core::queue::check_url(&url).map_err(|e| e.to_string())?;
+    // A new probe takes the place of one still running.
+    let stop = Stop::new();
+    if let Some(old) = app.probing.lock().unwrap().replace(stop.clone()) {
+        old.request();
+    }
+    let found = app
+        .engine
+        .probe_until(&url, &stop)
+        .await
+        .map_err(|e| e.to_string())?;
+    let categories = app.categories.clone();
+    let given = app.download_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        // A damaged categories file: none, as in the list, so a download
+        // can still be added (review of #48).
+        let categories = categories.load().unwrap_or_else(|_| no_categories());
+        view::probe(&found, &categories, &given)
+    })
+    .await
+    .map_err(blocking_err)
+}
+
+/// Gives up the add dialog's probe (the dialog was closed).
+#[tauri::command]
+fn cancel_probe(app: State<'_, App>) {
+    if let Some(stop) = app.probing.lock().unwrap().take() {
+        stop.request();
+    }
+}
+
+/// What a damaged categories file is read as: no categories at all (the
+/// list says the problem itself).
+fn no_categories() -> CategoriesFile {
+    let mut none = CategoriesFile::built_in();
+    none.categories.clear();
+    none
+}
+
+#[tauri::command]
+async fn add<R: tauri::Runtime>(
+    app: State<'_, App>,
+    request: AddRequest,
+    handle: tauri::AppHandle<R>,
+) -> Result<u64, String> {
+    // A `ui-test` scene shows demo data and never touches the real queues
+    // (as `change`, review of #47).
+    #[cfg(feature = "ui-test")]
+    if handle.state::<ui_test::UiTest>().scenario.is_some() {
+        return Err("a ui-test scene adds nothing".into());
+    }
+    let store = app.store.clone();
+    let given = chosen_folder(request.folder.as_deref(), &app.download_dir)?;
+    let id = tokio::task::spawn_blocking(move || add_blocking(&store, &request, &given))
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    let _ = handle.emit("downloads-changed", ());
+    Ok(id)
+}
+
+/// The folder a new download goes to: its own, checked as a category's
+/// folder is (absolute, no `..`, valid text without hidden characters),
+/// since it comes from the page; or the given download folder.
+fn chosen_folder(folder: Option<&str>, download_dir: &Path) -> Result<PathBuf, String> {
+    match folder {
+        Some(folder) => {
+            let folder = PathBuf::from(folder);
+            zajil_core::category::check_folder(&folder).map_err(|e| e.to_string())?;
+            Ok(folder)
+        }
+        None => Ok(download_dir.to_path_buf()),
+    }
+}
+
+/// Nothing is created here: the download makes its folder when it starts,
+/// so a refused add leaves nothing behind (review of #48).
+fn add_blocking(store: &QueueStore, request: &AddRequest, given: &Path) -> Result<u64, StoreError> {
+    store.update(|queues| {
+        let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
+        let id = queues.add(queue, &request.url, given)?;
+        let item = queues.item_mut(id).expect("just added");
+        // Without a folder of its own, a download goes by its category.
+        item.categorize = request.folder.is_none();
+        item.limit = request.limit.filter(|l| *l > 0);
+        if !request.start {
+            item.status = Status::Paused;
+        }
+        Ok(id)
+    })
+}
+
 /// What the page shows, read from the files. Blocking. A damaged categories
 /// file is said, not fatal: the downloads still show (review of #45: the
 /// whole list went blank while they ran).
@@ -471,6 +592,23 @@ mod tests {
         assert!(q.item(2).unwrap().error.is_none());
     }
 
+    /// A folder that comes from the page is checked before anything is
+    /// made there; without one, the download folder is used.
+    #[test]
+    fn a_folder_from_the_page_is_checked() {
+        let base = std::env::temp_dir();
+        assert_eq!(chosen_folder(None, &base).unwrap(), base);
+        let own = base.join("zajil-own");
+        assert_eq!(chosen_folder(own.to_str(), &base).unwrap(), own);
+        for bad in ["relative/dir", "../up"] {
+            assert!(chosen_folder(Some(bad), &base).is_err(), "{bad}");
+        }
+        let dotdot = base.join("..").join("x");
+        assert!(chosen_folder(dotdot.to_str(), &base).is_err());
+        let hidden = format!("{}\u{202e}x", base.display());
+        assert!(chosen_folder(Some(&hidden), &base).is_err());
+    }
+
     /// The owner's condition on #47: in a release build the commands of
     /// the UI tests do not exist, and calling them is an error; in a
     /// `ui-test` build the same calls answer (CI runs both).
@@ -549,4 +687,49 @@ mod tests {
         assert!(q.item(2).is_none());
         assert!(q.item(1).is_some());
     }
+}
+
+#[tauri::command]
+async fn details<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    handle: tauri::AppHandle<R>,
+) -> Result<DetailsView, String> {
+    // The demo download's details only in a scene (review of #47).
+    #[cfg(feature = "ui-test")]
+    if handle.state::<ui_test::UiTest>().scenario.is_some() {
+        return ui_test::demo_details(id).ok_or_else(|| format!("no download {id}"));
+    }
+    #[cfg(not(feature = "ui-test"))]
+    let _ = handle;
+    let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
+    tokio::task::spawn_blocking(move || {
+        let queues = store.load().map_err(blocking_err)?;
+        let (queue, item) = queues
+            .queues
+            .iter()
+            .find_map(|q| {
+                q.items
+                    .iter()
+                    .find(|i| i.id == id)
+                    .map(|i| (q.name.as_str(), i))
+            })
+            .ok_or_else(|| format!("no download {id}"))?;
+        // A damaged categories file: none, as in the list (which says the
+        // problem itself).
+        let categories = categories.load().unwrap_or_else(|_| no_categories());
+        let state = item
+            .state_file
+            .as_deref()
+            .and_then(|p| DownloadState::load(p).ok());
+        Ok(view::details(
+            item,
+            queue,
+            &categories,
+            state.as_ref(),
+            &live,
+        ))
+    })
+    .await
+    .map_err(blocking_err)?
 }

@@ -179,6 +179,24 @@ pub enum StoreError {
     Refused(String),
 }
 
+/// The rules a URL must meet to be added to a queue ([`QueuesFile::add`]):
+/// http or https, no user name or password (they would have to be saved),
+/// and nothing that drives a terminal or reorders text, since `queue list`
+/// shows it and exports keep it (review of #41, round 4). The add dialog
+/// checks them before asking the server (review of #48).
+pub fn check_url(url: &str) -> Result<(), StoreError> {
+    let parsed = crate::engine::parse_url(url)?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(StoreError::Credentials);
+    }
+    if url.chars().any(crate::category::is_unsafe_in_url) {
+        return Err(StoreError::Refused(
+            "the URL has control characters or direction marks".into(),
+        ));
+    }
+    Ok(())
+}
+
 impl QueuesFile {
     /// No queues yet but the default one, empty.
     pub fn empty() -> Self {
@@ -228,17 +246,7 @@ impl QueuesFile {
     /// saved in `dir`. Only http and https URLs, and never one with a user
     /// name or password (they would have to be saved). Returns its id.
     pub fn add(&mut self, queue: &str, url: &str, dir: &Path) -> Result<u64, StoreError> {
-        let parsed = crate::engine::parse_url(url)?;
-        if !parsed.username().is_empty() || parsed.password().is_some() {
-            return Err(StoreError::Credentials);
-        }
-        // Shown by `queue list` and kept in exports: nothing that drives a
-        // terminal or reorders text (review of #41, round 4).
-        if url.chars().any(crate::category::is_unsafe_in_url) {
-            return Err(StoreError::Refused(
-                "the URL has control characters or direction marks".into(),
-            ));
-        }
+        check_url(url)?;
         let id = self.next_id;
         let item = Item {
             id,

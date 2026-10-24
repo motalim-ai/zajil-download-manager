@@ -280,6 +280,22 @@ pub struct Finished {
     pub bytes: u64,
 }
 
+/// What [`Engine::probe`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probe {
+    /// The file's name, as a download would give it (sanitized).
+    pub name: String,
+    /// Its size, if the server said.
+    pub size: Option<u64>,
+    /// It can be split over several connections and resumed later.
+    pub resumable: bool,
+    /// The server announced `Accept-Ranges: bytes` (resumable also needs a
+    /// size and a strong validator; the add dialog says which is missing).
+    pub ranges: bool,
+    /// The host of the final URL (after redirects), for categories.
+    pub host: Option<String>,
+}
+
 /// Why a download did not finish.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -513,6 +529,45 @@ impl Engine {
             on_event,
         )
         .await
+    }
+
+    /// What `url` holds, without downloading it: the name the file would
+    /// get, its size, and whether it can be split and resumed (the server
+    /// announces `Accept-Ranges: bytes`, a size and a strong validator).
+    /// For the add dialog of the interface (M4). The first response is
+    /// read for its headers only; the connection is then dropped.
+    pub async fn probe(&self, url: &str) -> Result<Probe, Error> {
+        self.probe_until(url, &Stop::new()).await
+    }
+
+    /// [`probe`](Self::probe), given up when `stop` is requested (the add
+    /// dialog is closed while the server is tried again: review of #48).
+    pub async fn probe_until(&self, url: &str, stop: &Stop) -> Result<Probe, Error> {
+        let url = parse_url(url)?;
+        let mut attempt = Attempt::new(Some(&url), stop, &self.limits());
+        let response = self
+            .retrying(&mut attempt, &mut |_| {}, || self.get(url.clone(), None))
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(Error::Status(response.status()));
+        }
+        let name = suggested_name(
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .map(|v| v.as_bytes()),
+            response.url(),
+        );
+        let state = state_from_response(String::new(), false, &response);
+        let size = response.content_length();
+        let resumable = state.resumable();
+        Ok(Probe {
+            name,
+            size,
+            resumable,
+            ranges: state.accept_ranges,
+            host: response.url().host_str().map(str::to_owned),
+        })
     }
 
     /// Continues the download described by `state_file`
@@ -1801,7 +1856,7 @@ fn state_from_response(url: String, had_credentials: bool, response: &Response) 
 ///   it is strong (§8.8.2.2): at least one second before the `Date` of the
 ///   same response. A file changed twice within that second would otherwise
 ///   look unchanged.
-fn if_range_value(validator: &Validator) -> Option<String> {
+pub(crate) fn if_range_value(validator: &Validator) -> Option<String> {
     match &validator.etag {
         Some(etag) if !etag.trim_start().starts_with("W/") => Some(etag.clone()),
         Some(_weak) => None,

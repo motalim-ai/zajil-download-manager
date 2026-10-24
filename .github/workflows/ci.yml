@@ -355,7 +355,7 @@ jobs:
             *) app=src-tauri/target/debug/zajil-desktop ;;
           esac
           shots="$RUNNER_TEMP/ui-shots"
-          scenarios="names list-ar-light list-ar-dark list-en-light list-en-dark"
+          scenarios="names list-ar-light list-ar-dark list-en-light list-en-dark add-ar-light details-ar-light details-en-dark"
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/ui-shots.mjs "$app" "$shots" $scenarios
           else

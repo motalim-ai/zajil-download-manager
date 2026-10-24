@@ -2,16 +2,25 @@
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Sidebar, { type Filter } from "./lib/components/Sidebar.svelte";
+  import PasteBar from "./lib/components/PasteBar.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
+  import AddDialog from "./lib/components/AddDialog.svelte";
+  import Details from "./lib/components/Details.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
   import { locale, type Lang } from "./lib/i18n.svelte";
   import { size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
+  import type { DetailsView } from "./lib/bindings/DetailsView";
+  import type { ProbeView } from "./lib/bindings/ProbeView";
+  import type { AddRequest } from "./lib/bindings/AddRequest";
 
   let snapshot = $state<Snapshot>({ downloads: [], queues: [], categories: [], speed_limit: null, problem: null });
   let filter = $state<Filter>({ kind: "all" });
   let selected = $state<number | null>(null);
+  let details = $state<DetailsView | null>(null);
+  let pasted = $state("");
+  let adding = $state<{ url: string; probe: ProbeView | null; error: string | null; busy: boolean } | null>(null);
   let error = $state<string | null>(null);
   // What the last toolbar command answered, if it failed.
   let failed = $state<string | null>(null);
@@ -60,18 +69,74 @@
       if (mine !== asked) return;
       snapshot = next;
       error = snapshot.problem;
+      // The details follow the list: closed when their download is gone
+      // (review of #48: they stayed, stale, and every refresh failed), and
+      // an answer that comes after Back, or after a newer refresh, is
+      // dropped (it reopened them).
+      const id = details?.download.id;
+      if (id !== undefined) {
+        if (!next.downloads.some((d) => d.id === id)) details = null;
+        else {
+          const fresh = await api.details(id);
+          if (mine === asked && details?.download.id === id) details = fresh;
+        }
+      }
     } catch (e) {
       if (mine === asked) error = String(e);
     }
   }
 
-  // A command that fails is said, and the list is asked for again either
-  // way, so it shows what really happened (review of #46).
-  async function act(kind: "pause" | "resume" | "remove") {
-    if (selected === null) return;
+  async function startAdding(url: string) {
+    if (adding) return; // one dialog at a time
+    adding = { url, probe: null, error: null, busy: false };
+    try {
+      const probe = await api.probe(url);
+      if (adding?.url === url) adding = { ...adding, probe, error: null };
+    } catch (e) {
+      if (adding?.url === url) adding = { ...adding, probe: null, error: String(e) };
+    }
+  }
+
+  // Closed: a probe still running is given up, and the focus goes back to
+  // the paste bar (review of #48).
+  function closeAdding() {
+    adding = null;
+    void api.cancelProbe().catch(() => {});
+    void tick().then(() => document.getElementById("paste-url")?.focus());
+  }
+
+  async function add(request: AddRequest) {
+    if (!adding || adding.busy) return;
+    adding = { ...adding, busy: true };
+    try {
+      await api.add(request);
+      pasted = "";
+      closeAdding();
+      await refresh();
+    } catch (e) {
+      if (adding) adding = { ...adding, busy: false, error: String(e) };
+    }
+  }
+
+  async function open(id: number) {
+    selected = id;
     failed = null;
     try {
-      await api[kind]([selected]);
+      details = await api.details(id);
+    } catch (e) {
+      failed = String(e);
+    }
+  }
+
+  // A command that fails is said, and the list is asked for again either
+  // way, so it shows what really happened (review of #46).
+  // `id`: the details' own download, whatever the list selects (review of
+  // #48: a sidebar click cleared the selection, and Resume did nothing).
+  async function act(kind: "pause" | "resume" | "remove", id: number | null = selected) {
+    if (id === null) return;
+    failed = null;
+    try {
+      await api[kind]([id]);
     } catch (e) {
       failed = String(e);
     }
@@ -95,6 +160,23 @@
     setTheme(theme);
     snapshot = await api.snapshot();
     selected = 1;
+    if (view === "details") details = await api.details(1);
+    if (view === "add")
+      adding = {
+        url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
+        probe: {
+          name: "ubuntu-24.04.3-desktop-amd64.iso",
+          size: 6.1 * 1024 ** 3,
+          resumable: true,
+          ranges: true,
+          category: "programs",
+          category_site: null,
+          category_extension: "iso",
+          folder: "~/Downloads",
+        },
+        error: null,
+        busy: false,
+      };
     if (view === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     await tick();
     await document.fonts.ready;
@@ -122,20 +204,44 @@
   <div class="window">
     <Sidebar {snapshot} bind:filter />
     <main class="main">
-      <div class="tool">
-        {#each [{ kind: "resume", key: "action-resume", icon: "play" }, { kind: "pause", key: "action-pause", icon: "pause" }, { kind: "remove", key: "action-delete", icon: "trash" }] as const as b (b.kind)}
-          <button class="btn icon" aria-label={locale.t(b.key)} title={locale.t(b.key)} disabled={selected === null} onclick={() => void act(b.kind)}><Icon name={b.icon} /></button>
-        {/each}
-      </div>
-      {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
-      {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
-      <DownloadTable downloads={shown} bind:selected />
-      <footer class="status">
-        <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
-        <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
-        <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
-        <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
-      </footer>
+      {#if details}
+        {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
+        <Details
+          {details}
+          onback={() => (details = null)}
+          onpause={() => void act("pause", details?.download.id ?? null)}
+          onresume={() => void act("resume", details?.download.id ?? null)}
+        />
+      {:else}
+        <PasteBar bind:value={pasted} onsubmit={(url) => void startAdding(url)} />
+        <div class="tool">
+          {#each [{ kind: "resume", key: "action-resume", icon: "play" }, { kind: "pause", key: "action-pause", icon: "pause" }, { kind: "remove", key: "action-delete", icon: "trash" }] as const as b (b.kind)}
+            <button class="btn icon" aria-label={locale.t(b.key)} title={locale.t(b.key)} disabled={selected === null} onclick={() => void act(b.kind)}><Icon name={b.icon} /></button>
+          {/each}
+          <button class="btn quiet" disabled={selected === null} onclick={() => selected !== null && void open(selected)}><Icon name="open" />{locale.t("action-details")}</button>
+        </div>
+        {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
+        {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
+        <DownloadTable downloads={shown} bind:selected onopen={(id) => void open(id)} />
+        <footer class="status">
+          <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
+          <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
+          <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
+          <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
+        </footer>
+      {/if}
+      {#if adding}
+        <AddDialog
+          url={adding.url}
+          probe={adding.probe}
+          error={adding.error}
+          busy={adding.busy}
+          queues={snapshot.queues}
+          categories={snapshot.categories}
+          onadd={(r) => void add(r)}
+          oncancel={closeAdding}
+        />
+      {/if}
     </main>
   </div>
 {/if}

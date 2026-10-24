@@ -10,7 +10,7 @@
     downloads,
     selected = $bindable(),
     onopen,
-  }: { downloads: DownloadView[]; selected: number | null; onopen?: (id: number) => void } = $props();
+  }: { downloads: DownloadView[]; selected: number | null; onopen: (id: number) => void } = $props();
 
   const extension = (name: string) => (/\.([A-Za-z0-9]{1,4})[A-Za-z0-9]*$/.exec(name)?.[1] ?? "").toUpperCase();
   const fraction = (d: DownloadView) => (d.size ? d.done / d.size : d.status === "done" ? 1 : 0);
@@ -19,8 +19,8 @@
   const current = $derived(Math.max(downloads.findIndex((d) => d.id === selected), 0));
 
   // Keyboard first: the arrows, Home and End move the selection; Space
-  // selects the focused row; Enter opens its details (part 4 of the app:
-  // until then the table has no `onopen`). An arrow on a row that is not
+  // selects the focused row; Enter (or a double click) opens its details.
+  // An arrow on a row that is not
   // selected selects that row first (review of #46: it skipped it).
   function onkeydown(event: KeyboardEvent, index: number) {
     const here = downloads[index]?.id !== selected;
@@ -38,7 +38,7 @@
       (document.getElementById(`row-${id}`) as HTMLElement | null)?.focus();
     } else if (event.key === "Enter") {
       const id = downloads[index]?.id;
-      if (id !== undefined) onopen?.(id);
+      if (id !== undefined) onopen(id);
     }
   }
 </script>
@@ -63,7 +63,7 @@
           tabindex={i === current ? 0 : -1}
           aria-selected={selected === d.id}
           onclick={() => (selected = d.id)}
-          ondblclick={() => onopen?.(d.id)}
+          ondblclick={() => onopen(d.id)}
           onkeydown={(e) => onkeydown(e, i)}
         >
           <td><div class="name"><span class="type" aria-hidden="true">{extension(d.name)}</span><FileName name={d.name} /></div></td>

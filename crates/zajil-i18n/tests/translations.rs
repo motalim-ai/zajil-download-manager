@@ -648,12 +648,14 @@ fn plural_follows_cldr_for_every_number_up_to_1200() {
 /// with a noun. A new message with variables, or a new variable in a
 /// message, fails here until someone has looked at it.
 const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
-    ("add-category-auto", &["category", "extension"]),
+    ("add-category-extension", &["category", "extension"]),
+    ("add-category-site", &["category", "site"]),
     ("add-connections-hint", &["max", "min"]),
     ("add-probe-ranges", &["size"]),
     ("add-probe-single", &["size"]),
+    ("add-probe-unsure", &["size"]),
     ("connections-count", &["count"]),
-    ("details-connection", &["number"]),
+    ("details-part", &["number"]),
     ("details-connections-value", &["active", "total"]),
     ("details-file-map", &["size"]),
     ("details-from-to", &["folder", "site"]),
@@ -695,7 +697,7 @@ struct Whole {
 
 const WHOLE_TEXTS: &[Whole] = &[
     Whole {
-        key: "add-category-auto",
+        key: "add-category-extension",
         ar: (
             &[("category", "CAT"), ("extension", "EXT")],
             "CAT (من الامتداد EXT)",
@@ -703,6 +705,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         en: (
             &[("category", "CAT"), ("extension", "EXT")],
             "CAT (from the extension EXT)",
+        ),
+    },
+    Whole {
+        key: "add-category-site",
+        ar: (
+            &[("category", "CAT"), ("site", "SITE")],
+            "CAT (من الموقع SITE)",
+        ),
+        en: (
+            &[("category", "CAT"), ("site", "SITE")],
+            "CAT (from the site SITE)",
         ),
     },
     Whole {
@@ -733,9 +746,20 @@ const WHOLE_TEXTS: &[Whole] = &[
         ),
     },
     Whole {
-        key: "details-connection",
-        ar: (&[("number", "11")], "الاتصال 11"),
-        en: (&[("number", "1")], "Connection 1"),
+        key: "add-probe-unsure",
+        ar: (
+            &[("size", "SIZE")],
+            "SIZE. السيرفر يدعم التقسيم، لكنه لا يعطي الحجم أو ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.",
+        ),
+        en: (
+            &[("size", "SIZE")],
+            "SIZE. The server allows ranges but gives no size, or no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.",
+        ),
+    },
+    Whole {
+        key: "details-part",
+        ar: (&[("number", "11")], "الجزء 11"),
+        en: (&[("number", "1")], "Part 1"),
     },
     Whole {
         key: "details-connections-value",

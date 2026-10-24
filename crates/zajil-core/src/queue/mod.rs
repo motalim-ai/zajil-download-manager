@@ -12,7 +12,8 @@ pub use runner::{QueueEvent, Runner, Summary};
 pub use schedule::{Day, Schedule, ScheduleError, TimeOfDay};
 pub use store::{
     DEFAULT_MAX_ACTIVE, DEFAULT_QUEUE, FORMAT, Item, MAX_ACTIVE, MAX_NAME_CHARS, Queue, QueueStore,
-    QueuesFile, RunnerLock, SCHEMA_VERSION, Settings, Status, StoreError, check_name, shown_url,
+    QueuesFile, RunnerLock, SCHEMA_VERSION, Settings, Status, StoreError, check_name, check_url,
+    shown_url,
 };
 pub use transfer::{
     EXPORT_FORMAT, EXPORT_SCHEMA_VERSION, ExportFile, ExportItem, ExportQueue, ExportStatus,

@@ -10,7 +10,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use zajil_core::category::CategoriesFile;
+use zajil_core::Probe;
+use zajil_core::category::{CategoriesFile, Matched};
 use zajil_core::queue::{Item, QueuesFile, Status};
 use zajil_core::state::{DownloadState, STATE_SUFFIX};
 
@@ -102,6 +103,60 @@ pub struct Snapshot {
     pub speed_limit: Option<u64>,
     /// Why the queues cannot run now (a damaged queues file), if so.
     pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProbeView {
+    pub name: String,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    pub resumable: bool,
+    /// The server announced ranges (without a size or a strong validator,
+    /// it still cannot be resumed: the dialog says which).
+    pub ranges: bool,
+    pub category: Option<String>,
+    /// What matched the category: one of its sites, or else the extension.
+    pub category_site: Option<String>,
+    pub category_extension: Option<String>,
+    /// The folder it would go to without a folder of its own.
+    pub folder: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AddRequest {
+    pub url: String,
+    pub queue: Option<String>,
+    /// A folder of its own; `null`: by category.
+    pub folder: Option<String>,
+    /// Start when its queue has room; `false`: added paused.
+    pub start: bool,
+    #[ts(type = "number | null")]
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SegmentView {
+    #[ts(type = "number")]
+    pub start: u64,
+    /// The last byte of the part, or `null` when the size is unknown.
+    #[ts(type = "number | null")]
+    pub end: Option<u64>,
+    #[ts(type = "number")]
+    pub done: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DetailsView {
+    pub download: DownloadView,
+    pub segments: Vec<SegmentView>,
+    /// `null` when unknown: no state file (finished, or not started yet).
+    pub resumable: Option<bool>,
+    #[ts(type = "number | null")]
+    pub limit: Option<u64>,
 }
 
 /// The name the engine would give a download of `url` before the server
@@ -283,6 +338,59 @@ pub fn snapshot(queues: &QueuesFile, categories: &CategoriesFile, live: &Live) -
     }
 }
 
+pub fn probe(found: &Probe, categories: &CategoriesFile, given: &Path) -> ProbeView {
+    let matched = categories.classify_why(&found.name, found.host.as_deref());
+    let (category_site, category_extension) = match matched.as_ref().map(|(_, m)| m) {
+        Some(Matched::Site(site)) => (Some(site.clone()), None),
+        Some(Matched::Extension(ext)) => (None, Some(ext.clone())),
+        None => (None, None),
+    };
+    ProbeView {
+        name: found.name.clone(),
+        size: found.size,
+        resumable: found.resumable,
+        ranges: found.ranges,
+        category: matched.map(|(c, _)| c.id.clone()),
+        category_site,
+        category_extension,
+        folder: categories
+            .folder_for(&found.name, found.host.as_deref(), given)
+            .display()
+            .to_string(),
+    }
+}
+
+/// The details of one download, with the same categories and queue name
+/// as in the list (review of #48: the built-in categories only, and no
+/// queue name).
+pub fn details(
+    item: &Item,
+    queue: &str,
+    categories: &CategoriesFile,
+    state: Option<&DownloadState>,
+    live: &Live,
+) -> DetailsView {
+    let download = download(item, queue, categories, live);
+    DetailsView {
+        segments: state
+            .map(|s| {
+                s.segments
+                    .iter()
+                    .map(|g| SegmentView {
+                        start: g.start,
+                        end: g.end,
+                        done: g.done,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // The same rule as the add dialog (`Engine::probe`).
+        resumable: state.map(DownloadState::resumable),
+        limit: item.limit,
+        download,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,5 +487,61 @@ mod tests {
         assert_eq!(parts(Some(&state), Status::Active), [0.0]);
         assert_eq!(parts(Some(&state), Status::Done), [1.0]);
         assert_eq!(parts(None, Status::Waiting), [0.0]);
+    }
+
+    fn state_with(etag: Option<&str>, size: Option<u64>, ranges: bool) -> DownloadState {
+        DownloadState::new(
+            "https://example.net/f.iso".into(),
+            "https://example.net/f.iso".into(),
+            zajil_core::state::Validator {
+                etag: etag.map(str::to_owned),
+                last_modified: None,
+                date: None,
+            },
+            size,
+            ranges,
+        )
+    }
+
+    /// Review of #48: the details show the download as the list does (the
+    /// user's categories, its queue), and call it resumable by the add
+    /// dialog's rule, not on `Accept-Ranges` alone.
+    #[test]
+    fn the_details_agree_with_the_list_and_the_add_dialog() {
+        let mut queues = QueuesFile::empty();
+        let dir = std::env::temp_dir();
+        queues
+            .add("night", "https://isos.example.net/f.iso", &dir)
+            .unwrap();
+        let mut categories = CategoriesFile::built_in();
+        categories.categories.insert(
+            0,
+            zajil_core::category::Category {
+                id: "isos".into(),
+                name: Some("ISOs".into()),
+                extensions: vec!["iso".into()],
+                sites: vec![],
+                folder: None,
+            },
+        );
+        let item = queues.item(1).unwrap();
+        let strong = state_with(Some("\"v1\""), Some(100), true);
+        let shown = details(item, "night", &categories, Some(&strong), &Live::default());
+        assert_eq!(shown.download.queue, "night");
+        assert_eq!(shown.download.category.as_deref(), Some("isos"));
+        assert_eq!(shown.resumable, Some(true));
+        for (state, why) in [
+            (state_with(Some("W/\"v1\""), Some(100), true), "a weak ETag"),
+            (state_with(Some("\"v1\""), None, true), "no size"),
+            (state_with(Some("\"v1\""), Some(100), false), "no ranges"),
+        ] {
+            let shown = details(item, "night", &categories, Some(&state), &Live::default());
+            assert_eq!(shown.resumable, Some(false), "{why}");
+        }
+        // Without a state file it is not known (review of #48: it said No).
+        assert_eq!(
+            details(item, "night", &categories, None, &Live::default()).resumable,
+            None
+        );
     }
 }
