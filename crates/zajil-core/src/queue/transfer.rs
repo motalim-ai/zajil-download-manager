@@ -24,8 +24,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::schedule::Schedule;
-use super::store::{Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError, check_name};
-use crate::state::{checksum_of, now_rfc3339, write_safely};
+use super::store::{
+    DEFAULT_MAX_ACTIVE, Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError,
+    check_name,
+};
+use crate::state::{checksum_of, now_rfc3339};
 
 /// Value of the `format` field.
 pub const EXPORT_FORMAT: &str = "zajil-queues-export";
@@ -35,6 +38,9 @@ pub const EXPORT_SCHEMA_VERSION: u32 = 1;
 pub const MAX_EXPORT_BYTES: u64 = 16 * 1024 * 1024;
 /// More queues than anyone keeps; more is refused.
 const MAX_QUEUES: usize = 1000;
+/// More downloads than the queues file can hold (16 MiB); more is refused
+/// before anything changes (review of #41).
+const MAX_ITEMS: usize = 50_000;
 
 /// The whole export file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,20 +182,52 @@ impl QueuesFile {
         export: &ExportFile,
         folders: &Folders,
     ) -> Result<ImportSummary, StoreError> {
+        // The file's folders, only when the user asked for them, and
+        // checked before anything changes (review of #41: they were always
+        // checked, so an export from another system was refused even when
+        // its folders were not used).
+        if matches!(folders, Folders::Keep) {
+            for q in &export.queues {
+                for (n, i) in q.items.iter().enumerate() {
+                    check_folder_from_file(&i.dir).map_err(|why| {
+                        StoreError::Refused(format!(
+                            "download {} of queue {:?} {why}",
+                            n + 1,
+                            q.name
+                        ))
+                    })?;
+                }
+            }
+        }
         let mut summary = ImportSummary::default();
         if self.settings.speed_limit.is_none() && export.settings.speed_limit.is_some() {
             self.settings.speed_limit = export.settings.speed_limit;
             summary.speed_limit_set = true;
         }
         for eq in &export.queues {
-            if self.queue(&eq.name).is_none() {
-                self.queues.push(Queue {
-                    name: eq.name.clone(),
-                    max_active: eq.max_active,
-                    schedule: eq.schedule.clone(),
-                    items: Vec::new(),
-                });
-                summary.queues_created += 1;
+            match self.queue_mut(&eq.name) {
+                None => {
+                    self.queues.push(Queue {
+                        name: eq.name.clone(),
+                        max_active: eq.max_active,
+                        schedule: eq.schedule.clone(),
+                        items: Vec::new(),
+                    });
+                    summary.queues_created += 1;
+                }
+                // A queue nobody has touched (empty, with the defaults, like
+                // the `main` of a new data folder) takes the file's settings
+                // (review of #41: `main` lost them, so the round trip into a
+                // new data folder was not exact).
+                Some(q)
+                    if q.items.is_empty()
+                        && q.max_active == DEFAULT_MAX_ACTIVE
+                        && q.schedule.is_none() =>
+                {
+                    q.max_active = eq.max_active;
+                    q.schedule = eq.schedule.clone();
+                }
+                Some(_) => {}
             }
             for ei in &eq.items {
                 let id = self.next_id;
@@ -230,7 +268,14 @@ impl QueuesFile {
 
 /// Writes `export` to `path`, which must not exist yet, readable by the
 /// user only (a URL may hold a token). Blocking.
+///
+/// The data goes to a new temporary file of its own name next to `path`
+/// (created only if nothing is there), is synced, then takes `path` with a
+/// rename that never replaces: nothing that exists is removed or written
+/// over, not a `<file>.tmp` of the user's, and not a file that appears at
+/// `path` meanwhile (review of #41).
 pub fn write_export(path: &Path, export: &ExportFile) -> Result<(), TransferError> {
+    use std::io::Write as _;
     if std::fs::symlink_metadata(path).is_ok() {
         return Err(TransferError::Exists(path.to_owned()));
     }
@@ -239,7 +284,43 @@ pub fn write_export(path: &Path, export: &ExportFile) -> Result<(), TransferErro
     export.checksum = checksum_of(&serde_json::to_value(&export).expect("serializes"));
     let mut json = serde_json::to_vec_pretty(&export).map_err(io::Error::other)?;
     json.push(b'\n');
-    write_safely(path, &json)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let folder = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let (tmp, mut file) = (0u32..)
+        .take(100)
+        .find_map(|n| {
+            let mut tmp_name = std::ffi::OsString::from(".");
+            tmp_name.push(name);
+            tmp_name.push(format!(".{}-{n}.zajil-tmp", std::process::id()));
+            let tmp = folder.join(tmp_name);
+            match zajil_platform::fs::create_private(&tmp) {
+                Ok(file) => Some(Ok((tmp, file))),
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(err) => Some(Err(err)),
+            }
+        })
+        .unwrap_or_else(|| Err(io::Error::other("no free temporary name")))?;
+    let written = file
+        .write_all(&json)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| {
+            drop(file);
+            zajil_platform::fs::rename_noreplace(&tmp, path)
+        });
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(if err.kind() == io::ErrorKind::AlreadyExists {
+            TransferError::Exists(path.to_owned())
+        } else {
+            err.into()
+        });
+    }
+    zajil_platform::fs::sync_dir(&folder)?;
     Ok(())
 }
 
@@ -303,11 +384,30 @@ fn check(export: &ExportFile) -> Result<(), String> {
     if export.queues.len() > MAX_QUEUES {
         return Err(format!("more than {MAX_QUEUES} queues"));
     }
+    let items: usize = export.queues.iter().map(|q| q.items.len()).sum();
+    if items > MAX_ITEMS {
+        return Err(format!(
+            "{items} downloads, more than the {MAX_ITEMS} Zajil keeps"
+        ));
+    }
+    if export.exported_at.len() > 64 || export.exported_at.parse::<jiff::Timestamp>().is_err() {
+        return Err("its exported_at is not an RFC 3339 time".into());
+    }
     let mut names = std::collections::HashSet::new();
     for q in &export.queues {
         check_name(&q.name).map_err(|e| e.to_string())?;
         if !names.insert(&q.name) {
             return Err(format!("the queue {:?} appears twice", q.name));
+        }
+        // A schedule as `Schedule::new` makes it: not empty, each day once
+        // and in order (review of #41: a million "mon" made the queues file
+        // too large to read back).
+        if let Some(schedule) = &q.schedule {
+            let valid = Schedule::new(schedule.start, schedule.stop, schedule.days.clone())
+                .is_ok_and(|made| made == *schedule);
+            if !valid {
+                return Err(format!("queue {:?} has an impossible schedule", q.name));
+            }
         }
         if !(1..=MAX_ACTIVE).contains(&q.max_active) {
             return Err(format!(
@@ -326,18 +426,13 @@ fn check(export: &ExportFile) -> Result<(), String> {
             if i.limit == Some(0) {
                 return Err(format!("{at} has a speed limit of 0"));
             }
-            let dir_ok = i.dir.is_absolute()
-                && !i
-                    .dir
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir));
-            if !dir_ok {
+            if i.url.chars().any(is_hidden_char) {
                 return Err(format!(
-                    "{at} has a folder that is not absolute or contains `..`"
+                    "{at} has control or invisible characters in its URL"
                 ));
             }
-            if i.added_at.len() > 64 {
-                return Err(format!("{at} has an impossible added_at"));
+            if i.added_at.len() > 64 || i.added_at.parse::<jiff::Timestamp>().is_err() {
+                return Err(format!("{at} has an added_at that is not an RFC 3339 time"));
             }
         }
     }
@@ -355,4 +450,35 @@ fn without_credentials(url: &str) -> String {
         }
         _ => url.to_owned(),
     }
+}
+
+/// A folder written in an export, used with `--keep-folders`: absolute,
+/// without `..`, and on Windows a plain drive path. A network path
+/// (`\\server\share`) or a device path (`\\?\`, `\\.\`) would make
+/// Windows contact that server or device (review of #41).
+fn check_folder_from_file(dir: &Path) -> Result<(), String> {
+    use std::path::{Component, Prefix};
+    let plain = dir.components().all(|c| match c {
+        Component::Prefix(p) => matches!(p.kind(), Prefix::Disk(_)),
+        Component::ParentDir => false,
+        _ => true,
+    });
+    if dir.is_absolute() && plain {
+        Ok(())
+    } else {
+        Err("has a folder that is not a plain absolute path (relative, `..`, or a network or device path)".into())
+    }
+}
+
+/// Control characters, and invisible formatting characters such as U+202E.
+fn is_hidden_char(c: char) -> bool {
+    use icu_properties::CodePointMapData;
+    use icu_properties::props::GeneralCategory;
+    c.is_control()
+        || matches!(
+            CodePointMapData::<GeneralCategory>::new().get(c),
+            GeneralCategory::Format
+                | GeneralCategory::LineSeparator
+                | GeneralCategory::ParagraphSeparator
+        )
 }

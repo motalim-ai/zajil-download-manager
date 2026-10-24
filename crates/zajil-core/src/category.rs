@@ -110,6 +110,11 @@ pub enum CategoryError {
     Exists(String),
     #[error("{0}")]
     Invalid(String),
+    #[error(
+        "this change would make the categories file {bytes} bytes long, more than the \
+         {MAX_FILE_BYTES} bytes Zajil reads back; nothing was changed"
+    )]
+    TooLarge { bytes: usize },
 }
 
 impl Default for CategoriesFile {
@@ -474,6 +479,10 @@ impl CategoryStore {
         file.checksum = checksum_of(&serde_json::to_value(&file).expect("serializes"));
         let mut json = serde_json::to_vec_pretty(&file).map_err(io::Error::other)?;
         json.push(b'\n');
+        // Never write a file that `load` would refuse (review of #41).
+        if json.len() as u64 > MAX_FILE_BYTES {
+            return Err(CategoryError::TooLarge { bytes: json.len() });
+        }
         write_safely(&self.path(), &json)?;
         Ok(result)
     }

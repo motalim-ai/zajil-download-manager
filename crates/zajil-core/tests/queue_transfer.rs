@@ -48,6 +48,11 @@ fn sample() -> QueuesFile {
     q.item_mut(d).unwrap().error = Some("the server answered 404".into());
     q.item_mut(e).unwrap().status = Status::Active;
     q.item_mut(e).unwrap().state_file = Some(dir("e").join("e.bin.zajil-state"));
+    // `main` with settings of its own too: a new data folder has a default
+    // `main`, which must take them (review of #41).
+    let main = q.queue_mut("main").unwrap();
+    main.max_active = 1;
+    main.schedule = Some(Schedule::new(Some("01:30".parse().unwrap()), None, vec![]).unwrap());
     let night = q.queue_mut("ليلي").unwrap();
     night.max_active = 2;
     night.schedule = Some(
@@ -185,6 +190,8 @@ fn a_queue_that_exists_keeps_its_settings_and_gets_the_downloads_at_its_end() {
     let mut q = QueuesFile::empty();
     q.settings.speed_limit = Some(1);
     q.add("ليلي", "http://mine.example/x", &dir("x")).unwrap();
+    // `main` was touched here (it has a download), so it keeps its own.
+    q.add("main", "http://mine.example/y", &dir("y")).unwrap();
     q.queue_mut("ليلي").unwrap().max_active = 7;
     let summary = q.import(&export, &Folders::Keep).unwrap();
     let night = q.queue("ليلي").unwrap();
@@ -194,6 +201,8 @@ fn a_queue_that_exists_keeps_its_settings_and_gets_the_downloads_at_its_end() {
     assert_eq!(q.settings.speed_limit, Some(1));
     assert!(!summary.speed_limit_set);
     assert_eq!(summary.items_added, 5);
+    assert_eq!(q.queue("main").unwrap().max_active, 3);
+    assert!(q.queue("main").unwrap().schedule.is_none());
 }
 
 /// Writes `value` with a checksum that matches, so only the checks after
@@ -255,19 +264,6 @@ fn damaged_or_hostile_files_are_refused_clearly_and_change_nothing() {
             "only http and https",
             Box::new(|v| {
                 v["queues"][0]["items"][0]["url"] = "file:///etc/passwd".into();
-            }),
-        ),
-        (
-            "not absolute or contains `..`",
-            Box::new(|v| {
-                v["queues"][0]["items"][0]["dir"] = "relative/folder".into();
-            }),
-        ),
-        (
-            "not absolute or contains `..`",
-            Box::new(|v| {
-                let up = std::env::temp_dir().join("..").join("..").join("startup");
-                v["queues"][0]["items"][0]["dir"] = up.to_string_lossy().into_owned().into();
             }),
         ),
         (
@@ -353,4 +349,175 @@ fn no_header_ever_goes_into_an_export() {
             );
         }
     }
+}
+
+/// Review of #41: an import, or any change, that would make the queues
+/// file larger than Zajil reads back is refused, and the queues stay
+/// readable, the user's own included.
+#[test]
+fn nothing_ever_writes_a_queues_file_too_large_to_read_back() {
+    let (tmp, path) = exported(&sample());
+    let good: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    store
+        .update(|q| {
+            q.add("main", "http://mine.example/mine.iso", &dir("m"))
+                .map(|_| ())
+        })
+        .unwrap();
+    let before = fs::read(store.path()).unwrap();
+
+    // 50,001 downloads: refused when the file is read.
+    let mut v = good.clone();
+    let item = v["queues"][0]["items"][0].clone();
+    v["queues"][0]["items"] = serde_json::Value::Array(vec![item; 50_001]);
+    let big = tmp.path().join("big.json");
+    write_signed(&big, v);
+    let err = read_export(&big).unwrap_err().to_string();
+    assert!(err.contains("more than the 50000 Zajil keeps"), "{err}");
+
+    // Under that number, but long URLs: refused when the queues file would
+    // be written, and nothing changes.
+    let err = store
+        .update(|q| {
+            let long = format!("http://example.com/{}", "a".repeat(8 * 1024));
+            for _ in 0..2200 {
+                q.add("main", &long, &dir("l"))?;
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        matches!(err, zajil_core::queue::StoreError::TooLarge { .. }),
+        "{err}"
+    );
+    assert_eq!(fs::read(store.path()).unwrap(), before);
+    assert_eq!(store.load().unwrap().queue("main").unwrap().items.len(), 1);
+}
+
+/// Review of #41: schedules, times and URLs in an export are what Zajil
+/// itself would write, or the file is refused.
+#[test]
+fn impossible_schedules_times_and_urls_are_refused() {
+    let (tmp, path) = exported(&sample());
+    let good: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let bad = tmp.path().join("bad.json");
+    type Change = Box<dyn Fn(&mut serde_json::Value)>;
+    let cases: Vec<(&str, Change)> = vec![
+        (
+            "impossible schedule",
+            Box::new(|v| {
+                v["queues"][1]["schedule"]["days"] =
+                    serde_json::Value::Array(vec!["mon".into(); 1_000_000]);
+            }),
+        ),
+        (
+            "impossible schedule",
+            Box::new(|v| {
+                v["queues"][1]["schedule"] =
+                    serde_json::json!({"start": null, "stop": null, "days": []});
+            }),
+        ),
+        (
+            "impossible schedule",
+            Box::new(|v| {
+                v["queues"][1]["schedule"]["days"] = serde_json::json!(["sat", "fri"]);
+            }),
+        ),
+        (
+            "not an RFC 3339 time",
+            Box::new(|v| v["queues"][0]["items"][0]["added_at"] = "yesterday\u{202e}".into()),
+        ),
+        (
+            "not an RFC 3339 time",
+            Box::new(|v| v["exported_at"] = "\u{1b}[2J".into()),
+        ),
+        (
+            "control or invisible characters",
+            Box::new(|v| {
+                v["queues"][0]["items"][0]["url"] = "\u{1b}http://example.com/a".into();
+            }),
+        ),
+    ];
+    for (expect, change) in cases {
+        let mut v = good.clone();
+        change(&mut v);
+        write_signed(&bad, v);
+        let err = read_export(&bad).unwrap_err().to_string();
+        assert!(err.contains(expect), "expected {expect:?} in: {err}");
+    }
+}
+
+/// Review of #41: the folders of an export matter only with
+/// `--keep-folders`. An export from another system (with folders this one
+/// cannot use) imports into a folder of the user's; kept, such folders are
+/// refused before anything changes, and so are network and device paths.
+#[test]
+fn folders_from_the_file_are_checked_only_when_kept() {
+    let (tmp, path) = exported(&sample());
+    let mut v: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    // A folder that is not absolute on this system, whichever it is.
+    let foreign = if cfg!(windows) {
+        "/home/me/Downloads"
+    } else {
+        "C:\\Users\\me\\Downloads"
+    };
+    v["queues"][0]["items"][0]["dir"] = foreign.into();
+    let other = tmp.path().join("other-system.json");
+    write_signed(&other, v);
+    let export = read_export(&other).unwrap();
+
+    let mut q = QueuesFile::empty();
+    let mine = std::env::temp_dir().join("zajil-transfer-mine");
+    q.import(&export, &Folders::Into(mine.clone())).unwrap();
+    assert!(
+        q.queues
+            .iter()
+            .flat_map(|q| &q.items)
+            .all(|i| i.dir == mine)
+    );
+
+    let mut q = QueuesFile::empty();
+    let before = q.clone();
+    let err = q.import(&export, &Folders::Keep).unwrap_err().to_string();
+    assert!(err.contains("not a plain absolute path"), "{err}");
+    assert_eq!(q, before, "a refused import changed something");
+
+    for path in [
+        "\\\\server\\share\\x",
+        "\\\\?\\C:\\x",
+        "relative/x",
+        "/tmp/../etc",
+    ] {
+        let mut v: serde_json::Value = serde_json::from_slice(&fs::read(&other).unwrap()).unwrap();
+        v["queues"][0]["items"][0]["dir"] = path.into();
+        write_signed(&other, v);
+        let export = read_export(&other).unwrap();
+        let err = QueuesFile::empty()
+            .import(&export, &Folders::Keep)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not a plain absolute path"), "{path}: {err}");
+    }
+}
+
+/// Review of #41: an export never removes or writes over anything: not a
+/// `<file>.tmp` of the user's, and leaves no temporary file behind.
+#[test]
+fn an_export_removes_nothing_and_leaves_no_temporary_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("out.json");
+    let users = tmp.path().join("out.json.tmp");
+    fs::write(&users, b"my notes").unwrap();
+    write_export(&target, &sample().export()).unwrap();
+    assert_eq!(fs::read(&users).unwrap(), b"my notes");
+    let mut names: Vec<String> = fs::read_dir(tmp.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["out.json", "out.json.tmp"]);
+    assert!(zajil_platform::fs::only_owner_can_access(&target).unwrap());
+    read_export(&target).unwrap();
 }

@@ -377,3 +377,44 @@ fn the_first_download_of_a_new_category_folder_waits_for_a_busy_pool_and_finishe
         );
     });
 }
+
+/// Review of #41: a change that would make `categories.json` larger than
+/// Zajil reads back is refused, and the file stays as it was.
+#[test]
+fn a_change_too_large_to_read_back_is_refused() {
+    let data = tempfile::tempdir().unwrap();
+    let store = store_with_archives_in(data.path(), &data.path().join("a"));
+    let before = fs::read(store.path()).unwrap();
+    let err = store
+        .update(|file| {
+            for c in 0..50 {
+                let id = format!("c{c}");
+                file.add(&id, "x")?;
+                let cat = file.get_mut(&id)?;
+                for n in 0..200 {
+                    cat.sites
+                        .push(format!("{}.example{n}.com", "a".repeat(200)));
+                }
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(matches!(err, CategoryError::TooLarge { .. }), "{err}");
+    assert_eq!(fs::read(store.path()).unwrap(), before);
+    store.load().unwrap();
+}
+
+#[test]
+fn a_hard_link_in_place_of_the_lock_is_refused() {
+    let data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim.txt");
+    fs::write(&victim, b"keep me").unwrap();
+    fs::hard_link(&victim, data.path().join("categories.lock")).unwrap();
+    let store = CategoryStore::new(data.path());
+    assert!(matches!(
+        store.update(|file| file.add("x", "X")),
+        Err(CategoryError::NotRegularFile(_))
+    ));
+    assert_eq!(fs::read(&victim).unwrap(), b"keep me");
+}

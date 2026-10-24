@@ -420,7 +420,9 @@ impl Engine {
         }
     }
 
-    /// Downloads `url` into the existing folder `dir`.
+    /// Downloads `url` into the folder `dir` (created if it does not exist,
+    /// since M4: queue items whose folder was removed, and folders kept from
+    /// an imported file).
     pub async fn download(
         &self,
         url: &str,

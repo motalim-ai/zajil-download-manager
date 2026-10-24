@@ -170,6 +170,13 @@ pub enum StoreError {
     Url(#[from] crate::Error),
     #[error("another `zajil queue run` is already running")]
     RunnerBusy,
+    #[error(
+        "this change would make the queues file {bytes} bytes long, more than the \
+         {MAX_FILE_BYTES} bytes Zajil reads back; nothing was changed"
+    )]
+    TooLarge { bytes: usize },
+    #[error("refusing this change: {0}; nothing was changed")]
+    Refused(String),
 }
 
 impl QueuesFile {
@@ -392,6 +399,9 @@ impl QueueStore {
         let _lock = self.lock(LOCK_NAME, true)?;
         let mut queues = self.load()?;
         let result = change(&mut queues)?;
+        // Never write a file that `load` would refuse (review of #41: a
+        // large import made the queues unreadable, the user's own too).
+        queues.check_consistency().map_err(StoreError::Refused)?;
         queues.format = FORMAT.to_owned();
         queues.schema_version = SCHEMA_VERSION;
         queues.updated_at = now_rfc3339();
@@ -399,6 +409,9 @@ impl QueueStore {
         queues.checksum = checksum_of(&serde_json::to_value(&queues).expect("serializes"));
         let mut json = serde_json::to_vec_pretty(&queues).map_err(io::Error::other)?;
         json.push(b'\n');
+        if json.len() as u64 > MAX_FILE_BYTES {
+            return Err(StoreError::TooLarge { bytes: json.len() });
+        }
         write_safely(&self.path(), &json)?;
         Ok(result)
     }

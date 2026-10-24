@@ -295,6 +295,13 @@ fn export_then_import_through_the_command_line() {
         data.path(),
         &["queue", "set", "--queue", "ليلي", "--max-active", "2"],
     );
+    // `main` with settings of its own: the new data folder's default `main`
+    // must take them (review of #41).
+    ok(data.path(), &["queue", "set", "--max-active", "1"]);
+    ok(
+        data.path(),
+        &["queue", "schedule", "--start", "02:00", "--stop", "06:00"],
+    );
     let out = ok(data.path(), &["queue", "export", path(&file)]);
     assert!(!out.contains("SECRET-TOKEN"), "{out}");
     assert!(
@@ -333,6 +340,14 @@ fn export_then_import_through_the_command_line() {
             .collect::<Vec<_>>()
     };
     assert_eq!(names(&after), names(&before));
+    let schedules = |q: &zajil_core::queue::QueuesFile| {
+        q.queues
+            .iter()
+            .map(|q| q.schedule.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(schedules(&after), schedules(&before));
+    assert_eq!(after.queue("main").unwrap().max_active, 1);
     let list = ok(elsewhere.path(), &["queue", "list"]);
     assert!(!list.contains("SECRET-TOKEN"), "{list}");
 
