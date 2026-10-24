@@ -201,6 +201,7 @@ fn a_queue_that_exists_keeps_its_settings_and_gets_the_downloads_at_its_end() {
     assert_eq!(q.settings.speed_limit, Some(1));
     assert!(!summary.speed_limit_set);
     assert_eq!(summary.items_added, 5);
+    assert_eq!(summary.kept_settings, ["main", "ليلي"]);
     assert_eq!(q.queue("main").unwrap().max_active, 3);
     assert!(q.queue("main").unwrap().schedule.is_none());
 }
@@ -368,14 +369,25 @@ fn nothing_ever_writes_a_queues_file_too_large_to_read_back() {
         .unwrap();
     let before = fs::read(store.path()).unwrap();
 
-    // 50,001 downloads: refused when the file is read.
+    // 60,000 downloads: the export reads (it is small), but the queues
+    // file they would make is too large, so the import is refused whole and
+    // nothing changes. No separate count limit: Zajil itself can hold more
+    // than such a limit, and it must import its own exports (review of
+    // #41, round 2).
     let mut v = good.clone();
     let item = v["queues"][0]["items"][0].clone();
-    v["queues"][0]["items"] = serde_json::Value::Array(vec![item; 50_001]);
+    v["queues"][0]["items"] = serde_json::Value::Array(vec![item; 60_000]);
     let big = tmp.path().join("big.json");
     write_signed(&big, v);
-    let err = read_export(&big).unwrap_err().to_string();
-    assert!(err.contains("more than the 50000 Zajil keeps"), "{err}");
+    let export = read_export(&big).unwrap();
+    let err = store
+        .update(|q| q.import(&export, &Folders::Into(dir("big"))))
+        .unwrap_err();
+    assert!(
+        matches!(err, zajil_core::queue::StoreError::TooLarge { .. }),
+        "{err}"
+    );
+    assert_eq!(fs::read(store.path()).unwrap(), before);
 
     // Under that number, but long URLs: refused when the queues file would
     // be written, and nothing changes.
@@ -484,11 +496,17 @@ fn folders_from_the_file_are_checked_only_when_kept() {
     assert!(err.contains("not a plain absolute path"), "{err}");
     assert_eq!(q, before, "a refused import changed something");
 
+    // Control and invisible characters (review of #41, round 2: escape
+    // codes reached the terminal through `zajil queue run`).
+    let escape = std::env::temp_dir().join("x\u{1b}]0;PWNED\u{7}\u{1b}[31m");
+    let spoof = std::env::temp_dir().join("photos\u{202e}gpj.exe");
     for path in [
         "\\\\server\\share\\x",
         "\\\\?\\C:\\x",
         "relative/x",
         "/tmp/../etc",
+        escape.to_str().unwrap(),
+        spoof.to_str().unwrap(),
     ] {
         let mut v: serde_json::Value = serde_json::from_slice(&fs::read(&other).unwrap()).unwrap();
         v["queues"][0]["items"][0]["dir"] = path.into();
@@ -498,7 +516,10 @@ fn folders_from_the_file_are_checked_only_when_kept() {
             .import(&export, &Folders::Keep)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("not a plain absolute path"), "{path}: {err}");
+        assert!(
+            err.contains("not a plain absolute path") || err.contains("control or invisible"),
+            "{path:?}: {err}"
+        );
     }
 }
 

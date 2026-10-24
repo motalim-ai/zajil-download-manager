@@ -36,12 +36,6 @@ pub const EXPORT_FORMAT: &str = "zajil-queues-export";
 pub const EXPORT_SCHEMA_VERSION: u32 = 1;
 /// Larger files are refused before they are parsed.
 pub const MAX_EXPORT_BYTES: u64 = 16 * 1024 * 1024;
-/// More queues than anyone keeps; more is refused.
-const MAX_QUEUES: usize = 1000;
-/// More downloads than the queues file can hold (16 MiB); more is refused
-/// before anything changes (review of #41).
-const MAX_ITEMS: usize = 50_000;
-
 /// The whole export file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,6 +97,9 @@ pub enum Folders {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImportSummary {
     pub queues_created: usize,
+    /// Queues that existed with settings or downloads of their own: they
+    /// kept their settings, and the file's were not used.
+    pub kept_settings: Vec<String>,
     pub items_added: usize,
     pub speed_limit_set: bool,
 }
@@ -227,7 +224,11 @@ impl QueuesFile {
                     q.max_active = eq.max_active;
                     q.schedule = eq.schedule.clone();
                 }
-                Some(_) => {}
+                Some(q) => {
+                    if q.max_active != eq.max_active || q.schedule != eq.schedule {
+                        summary.kept_settings.push(q.name.clone());
+                    }
+                }
             }
             for ei in &eq.items {
                 let id = self.next_id;
@@ -281,12 +282,12 @@ pub fn write_export(path: &Path, export: &ExportFile) -> Result<(), TransferErro
     }
     let mut export = export.clone();
     export.checksum = String::new();
-    export.checksum = checksum_of(&serde_json::to_value(&export).expect("serializes"));
+    export.checksum = checksum_of(&serde_json::to_value(&export).map_err(io::Error::other)?);
     let mut json = serde_json::to_vec_pretty(&export).map_err(io::Error::other)?;
     json.push(b'\n');
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    if path.file_name().is_none() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no file name").into());
+    }
     let folder = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
@@ -294,10 +295,9 @@ pub fn write_export(path: &Path, export: &ExportFile) -> Result<(), TransferErro
     let (tmp, mut file) = (0u32..)
         .take(100)
         .find_map(|n| {
-            let mut tmp_name = std::ffi::OsString::from(".");
-            tmp_name.push(name);
-            tmp_name.push(format!(".{}-{n}.zajil-tmp", std::process::id()));
-            let tmp = folder.join(tmp_name);
+            // Short and fixed, so a long export name still fits (review of
+            // #41, round 2).
+            let tmp = folder.join(format!(".zajil-export-{}-{n}.tmp", std::process::id()));
             match zajil_platform::fs::create_private(&tmp) {
                 Ok(file) => Some(Ok((tmp, file))),
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => None,
@@ -381,15 +381,6 @@ fn check(export: &ExportFile) -> Result<(), String> {
     if export.settings.speed_limit == Some(0) {
         return Err("a speed limit of 0".into());
     }
-    if export.queues.len() > MAX_QUEUES {
-        return Err(format!("more than {MAX_QUEUES} queues"));
-    }
-    let items: usize = export.queues.iter().map(|q| q.items.len()).sum();
-    if items > MAX_ITEMS {
-        return Err(format!(
-            "{items} downloads, more than the {MAX_ITEMS} Zajil keeps"
-        ));
-    }
     if export.exported_at.len() > 64 || export.exported_at.parse::<jiff::Timestamp>().is_err() {
         return Err("its exported_at is not an RFC 3339 time".into());
     }
@@ -463,10 +454,17 @@ fn check_folder_from_file(dir: &Path) -> Result<(), String> {
         Component::ParentDir => false,
         _ => true,
     });
-    if dir.is_absolute() && plain {
-        Ok(())
-    } else {
-        Err("has a folder that is not a plain absolute path (relative, `..`, or a network or device path)".into())
+    if !(dir.is_absolute() && plain) {
+        return Err("has a folder that is not a plain absolute path (relative, `..`, or a network or device path)".into());
+    }
+    // Shown in messages and used as a folder name: no control or invisible
+    // characters, which could drive a terminal or disguise the name
+    // (review of #41, round 2).
+    match dir.to_str() {
+        Some(text) if !text.chars().any(is_hidden_char) => Ok(()),
+        _ => Err(
+            "has a folder with control or invisible characters, or that is not valid text".into(),
+        ),
     }
 }
 

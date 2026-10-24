@@ -406,7 +406,9 @@ impl QueueStore {
         queues.schema_version = SCHEMA_VERSION;
         queues.updated_at = now_rfc3339();
         queues.checksum = String::new();
-        queues.checksum = checksum_of(&serde_json::to_value(&queues).expect("serializes"));
+        // A path that is not valid text cannot be written: an error, not
+        // a panic (review of #41, round 2).
+        queues.checksum = checksum_of(&serde_json::to_value(&queues).map_err(io::Error::other)?);
         let mut json = serde_json::to_vec_pretty(&queues).map_err(io::Error::other)?;
         json.push(b'\n');
         if json.len() as u64 > MAX_FILE_BYTES {

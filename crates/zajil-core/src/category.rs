@@ -348,12 +348,16 @@ pub fn check_folder(folder: &Path) -> Result<(), CategoryError> {
     let ok = folder.is_absolute()
         && !folder
             .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir));
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        && folder
+            .to_str()
+            .is_some_and(|text| !text.chars().any(|c| c.is_control() || is_format_char(c)));
     if ok {
         Ok(())
     } else {
         Err(CategoryError::Invalid(format!(
-            "invalid folder {}: use an absolute path without `..`",
+            "invalid folder {}: use an absolute path without `..`, as valid text without control \
+             or invisible characters",
             folder.display()
         )))
     }
@@ -476,7 +480,7 @@ impl CategoryStore {
         file.schema_version = SCHEMA_VERSION;
         file.updated_at = now_rfc3339();
         file.checksum = String::new();
-        file.checksum = checksum_of(&serde_json::to_value(&file).expect("serializes"));
+        file.checksum = checksum_of(&serde_json::to_value(&file).map_err(io::Error::other)?);
         let mut json = serde_json::to_vec_pretty(&file).map_err(io::Error::other)?;
         json.push(b'\n');
         // Never write a file that `load` would refuse (review of #41).
@@ -560,6 +564,10 @@ mod tests {
         assert!(normalize_site("user@example.com").is_err());
         assert!(normalize_site("مثال.مصر").unwrap().starts_with("xn--"));
         assert!(check_folder(Path::new("relative/dir")).is_err());
+        let hidden = std::env::temp_dir().join("a\u{1b}[31mb");
+        assert!(check_folder(&hidden).is_err());
+        let spoof = std::env::temp_dir().join("x\u{202e}y");
+        assert!(check_folder(&spoof).is_err());
         let dotdot = std::env::temp_dir().join("..").join("x");
         assert!(check_folder(&dotdot).is_err());
     }

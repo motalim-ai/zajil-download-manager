@@ -282,6 +282,9 @@ fn import(
         summary.queues_created,
         file.display()
     );
+    for name in &summary.kept_settings {
+        println!("Queue {name} already had settings of its own: it kept them");
+    }
     if summary.speed_limit_set {
         println!(
             "{}",
