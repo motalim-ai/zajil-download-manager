@@ -32,9 +32,15 @@ pub enum QueueCommand {
         /// The queue (created if needed).
         #[arg(short, long, value_name = "NAME", default_value = DEFAULT_QUEUE)]
         queue: String,
-        /// Folder to save into. Defaults to the system Downloads folder.
+        /// Folder to save into. Without it, each file goes to its
+        /// category's folder (see `zajil category`), or to the system
+        /// Downloads folder.
         #[arg(short, long, value_name = "FOLDER")]
         dir: Option<PathBuf>,
+        /// With --dir: each file still goes to its category's folder, and
+        /// to --dir only when its category has no folder.
+        #[arg(long, requires = "dir")]
+        by_category: bool,
         /// A speed limit for each of these downloads, like `zajil get
         /// --limit`. The limit for the whole program applies too.
         #[arg(long, value_name = "RATE", value_parser = crate::rate)]
@@ -102,6 +108,28 @@ pub enum QueueCommand {
         #[arg(long, conflicts_with_all = ["start", "stop", "days"])]
         none: bool,
     },
+    /// Save the queues, their settings and their downloads in a file, to
+    /// import them elsewhere. Progress is not saved. The file is readable
+    /// by you only (a URL may hold a token), and never written over.
+    Export {
+        /// The file to create.
+        file: PathBuf,
+    },
+    /// Add the queues and downloads of an exported file. Queues that
+    /// exist keep their settings and get the downloads at their end.
+    Import {
+        /// The exported file.
+        file: PathBuf,
+        /// Save into the folders written in the file. Without it, the
+        /// downloads go to --dir (or the system Downloads folder) and their
+        /// categories' folders: a file from someone else could otherwise
+        /// send downloads anywhere.
+        #[arg(long, conflicts_with = "dir")]
+        keep_folders: bool,
+        /// The folder for the imported downloads.
+        #[arg(short, long, value_name = "FOLDER")]
+        dir: Option<PathBuf>,
+    },
     /// Run every queue until nothing is left to download. Ctrl+C stops the
     /// downloads after recording their progress; run it again to go on.
     Run {
@@ -129,6 +157,12 @@ pub enum QueueCommand {
 /// The commands that only change or read the queues file.
 pub fn manage(store: &QueueStore, command: QueueCommand) -> ExitCode {
     let result: Result<(), String> = match command {
+        QueueCommand::Export { file } => export(store, &file),
+        QueueCommand::Import {
+            file,
+            keep_folders,
+            dir,
+        } => import(store, &file, keep_folders, dir.as_deref()),
         QueueCommand::Schedule {
             queue,
             start,
@@ -150,15 +184,19 @@ fn manage_queues(store: &QueueStore, command: QueueCommand) -> Result<(), StoreE
             urls,
             queue,
             dir,
+            by_category,
             limit,
-        } => add(store, &urls, &queue, dir.as_deref(), limit),
+        } => add(store, &urls, &queue, dir.as_deref(), by_category, limit),
         QueueCommand::SpeedLimit { rate } => speed_limit(store, rate.0),
         QueueCommand::List => list(store),
         QueueCommand::Pause { ids } => set_status(store, &ids, Status::Paused, "paused"),
         QueueCommand::Resume { ids } => set_status(store, &ids, Status::Waiting, "waiting"),
         QueueCommand::Remove { ids } => remove(store, &ids),
         QueueCommand::Set { queue, max_active } => set(store, &queue, max_active),
-        QueueCommand::Run { .. } | QueueCommand::Schedule { .. } => {
+        QueueCommand::Run { .. }
+        | QueueCommand::Schedule { .. }
+        | QueueCommand::Export { .. }
+        | QueueCommand::Import { .. } => {
             unreachable!("handled before")
         }
     }
@@ -181,20 +219,75 @@ fn add(
     urls: &[String],
     queue: &str,
     dir: Option<&Path>,
+    by_category: bool,
     limit: Option<u64>,
 ) -> Result<(), StoreError> {
+    // Without a folder, each download goes by its category (M4).
+    let categorize = dir.is_none() || by_category;
     let dir = crate::download_dir(dir).map_err(|message| StoreError::Io(io_error(message)))?;
     let ids = store.update(|queues| {
         urls.iter()
             .map(|url| {
                 let id = queues.add(queue, url, &dir)?;
-                queues.item_mut(id).expect("just added").limit = limit;
+                let item = queues.item_mut(id).expect("just added");
+                item.limit = limit;
+                item.categorize = categorize;
                 Ok(id)
             })
             .collect::<Result<Vec<_>, _>>()
     })?;
     for (id, url) in ids.iter().zip(urls) {
         println!("Added {id}: {}", shown_url(url));
+    }
+    Ok(())
+}
+
+fn export(store: &QueueStore, file: &Path) -> Result<(), String> {
+    let queues = store.load().map_err(|err| err.to_string())?;
+    let export = queues.export();
+    zajil_core::queue::write_export(file, &export).map_err(|err| err.to_string())?;
+    let items: usize = export.queues.iter().map(|q| q.items.len()).sum();
+    println!(
+        "Exported {} queue(s) and {items} download(s) to {}",
+        export.queues.len(),
+        file.display()
+    );
+    Ok(())
+}
+
+fn import(
+    store: &QueueStore,
+    file: &Path,
+    keep_folders: bool,
+    dir: Option<&Path>,
+) -> Result<(), String> {
+    // Everything is checked before the queues file is touched.
+    let export = zajil_core::queue::read_export(file).map_err(|err| err.to_string())?;
+    let folders = if keep_folders {
+        zajil_core::queue::Folders::Keep
+    } else {
+        zajil_core::queue::Folders::Into(crate::download_dir(dir)?)
+    };
+    let summary = store
+        .update(|queues| queues.import(&export, &folders))
+        .map_err(|err| err.to_string())?;
+    println!(
+        "Imported {} download(s) ({} new queue(s)) from {}",
+        summary.items_added,
+        summary.queues_created,
+        file.display()
+    );
+    if summary.speed_limit_set {
+        println!(
+            "{}",
+            describe_limit(
+                store
+                    .load()
+                    .map_err(|e| e.to_string())?
+                    .settings
+                    .speed_limit
+            )
+        );
     }
     Ok(())
 }
@@ -376,7 +469,12 @@ impl PowerRequest {
 }
 
 /// `zajil queue run`.
-pub async fn run(store: QueueStore, engine: Engine, power: Option<PowerRequest>) -> ExitCode {
+pub async fn run(
+    store: QueueStore,
+    categories: zajil_core::category::CategoryStore,
+    engine: Engine,
+    power: Option<PowerRequest>,
+) -> ExitCode {
     let stop = Stop::new();
     let on_ctrl_c = stop.clone();
     tokio::spawn(async move {
@@ -396,7 +494,7 @@ pub async fn run(store: QueueStore, engine: Engine, power: Option<PowerRequest>)
         return fail(&err.to_string());
     }
     let clock = engine.clock();
-    let mut runner = Runner::new(engine, store.clone());
+    let mut runner = Runner::new(engine, store.clone()).categories(categories);
     if let Some(request) = &power {
         eprintln!(
             "zajil: the computer will {} when queue {} has finished (after a countdown)",

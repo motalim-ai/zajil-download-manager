@@ -329,7 +329,12 @@ fn the_real_clock_drives_limits_and_schedules() {
         list.contains("Speed limit for all downloads: 1.0 MiB/s"),
         "{list}"
     );
-    assert!(list.contains(&format!("runs from {start_text}")), "{list}");
+    // The list prints a time the way the schedule shows it: without
+    // ":00" when the seconds are zero. The test used to expect the seconds
+    // always, so it failed whenever the start fell on a whole minute (about
+    // one run in 60; found on CI while M4 began).
+    let shown: zajil_core::queue::TimeOfDay = start_text.parse().unwrap();
+    assert!(list.contains(&format!("runs from {shown} ")), "{list}");
 
     let mut child = common::zajil_command()
         .arg("--data-dir")

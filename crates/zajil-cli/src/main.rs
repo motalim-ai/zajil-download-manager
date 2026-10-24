@@ -4,11 +4,12 @@
 //! events and maps the result to an exit code. There is deliberately no
 //! option that weakens TLS certificate checks.
 //!
-//! Messages are in English until the translation system arrives with the
-//! GUI (M4, ADR-0003).
+//! Messages are in English: the owner kept the command line in English in
+//! M4 (scripts read what it prints); the translations are for the GUI.
 
 #![forbid(unsafe_code)]
 
+mod category;
 mod queue;
 
 use std::io::{IsTerminal, Write};
@@ -72,9 +73,14 @@ enum Command {
     Get {
         /// The http:// or https:// URL to download.
         url: String,
-        /// Folder to save into. Defaults to the system Downloads folder.
+        /// Folder to save into. Without it, the file goes to its category's
+        /// folder (see `zajil category`), or to the system Downloads folder.
         #[arg(short, long, value_name = "FOLDER")]
         dir: Option<PathBuf>,
+        /// With --dir: the file still goes to its category's folder, and
+        /// to --dir only when its category has no folder.
+        #[arg(long, requires = "dir")]
+        by_category: bool,
         /// Speed limit, in bytes per second, or with K, M or G (KiB/s,
         /// MiB/s, GiB/s), such as 500K or 1.5M.
         #[arg(long, value_name = "RATE", value_parser = rate)]
@@ -93,15 +99,25 @@ enum Command {
         #[command(subcommand)]
         command: queue::QueueCommand,
     },
+    /// Manage the categories that choose where downloads go.
+    Category {
+        #[command(subcommand)]
+        command: category::CategoryCommand,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let data_dir = match data_dir(cli.data_dir.as_deref()) {
+        Ok(dir) => dir,
+        Err(message) => return fail(&message),
+    };
+    let categories = zajil_core::category::CategoryStore::new(&data_dir);
+    if let Command::Category { command } = cli.command {
+        return category::manage(&categories, command);
+    }
     if let Command::Queue { command } = cli.command {
-        let store = match queue_store(cli.data_dir.as_deref()) {
-            Ok(store) => store,
-            Err(message) => return fail(&message),
-        };
+        let store = zajil_core::queue::QueueStore::new(&data_dir);
         let queue::QueueCommand::Run {
             shutdown_after,
             sleep_after,
@@ -122,7 +138,7 @@ fn main() -> ExitCode {
             Ok(engine) => engine,
             Err(err) => return fail(&err.to_string()),
         };
-        return runtime.block_on(queue::run(store, engine, power));
+        return runtime.block_on(queue::run(store, categories, engine, power));
     }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -131,7 +147,12 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
-    runtime.block_on(run(cli.command, cli.connections.into(), cli.tries))
+    runtime.block_on(run(
+        cli.command,
+        &categories,
+        cli.connections.into(),
+        cli.tries,
+    ))
 }
 
 /// A speed limit given on the command line (`zajil_core::limit::parse_rate`).
@@ -151,19 +172,24 @@ fn options(connections: usize, tries: u32) -> Options {
     }
 }
 
-/// The queues file, in `--data-dir` or the system data folder.
-fn queue_store(chosen: Option<&Path>) -> Result<zajil_core::queue::QueueStore, String> {
-    let dir = match chosen {
+/// Where the queues and categories files are: `--data-dir` or the system
+/// data folder.
+fn data_dir(chosen: Option<&Path>) -> Result<PathBuf, String> {
+    Ok(match chosen {
         Some(dir) => dir.to_path_buf(),
         None => SystemPaths::new()
             .map_err(|err| err.to_string())?
             .data_dir()
             .to_path_buf(),
-    };
-    Ok(zajil_core::queue::QueueStore::new(dir))
+    })
 }
 
-async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
+async fn run(
+    command: Command,
+    categories: &zajil_core::category::CategoryStore,
+    connections: usize,
+    tries: u32,
+) -> ExitCode {
     let engine = match Engine::new(options(connections, tries)) {
         Ok(engine) => engine,
         Err(err) => return fail(&err.to_string()),
@@ -172,14 +198,36 @@ async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
 
     let work = async {
         match &command {
-            Command::Get { url, dir, limit } => {
-                let dir = match download_dir(dir.as_deref()) {
+            Command::Get {
+                url,
+                dir,
+                by_category,
+                limit,
+            } => {
+                let given = match download_dir(dir.as_deref()) {
                     Ok(dir) => dir,
                     Err(message) => return Err(Failure::Message(message)),
                 };
+                let engine = engine.with_download_limit(*limit);
+                if dir.is_some() && !by_category {
+                    // A folder given on the command line wins.
+                    return engine
+                        .download(url, &given, &mut |e| progress.show(e))
+                        .await
+                        .map_err(Failure::Engine);
+                }
+                let store = categories.clone();
+                let categories = tokio::task::spawn_blocking(move || store.load())
+                    .await
+                    .map_err(|err| Failure::Message(err.to_string()))?
+                    .map_err(|err| Failure::Message(err.to_string()))?;
+                let choose = move |name: &str, url: &zajil_core::Url| {
+                    categories.folder_for(name, url.host_str(), &given)
+                };
                 engine
-                    .with_download_limit(*limit)
-                    .download(url, &dir, &mut |e| progress.show(e))
+                    .download_choosing_until(url, &choose, &zajil_core::Stop::new(), &mut |e| {
+                        progress.show(e)
+                    })
                     .await
                     .map_err(Failure::Engine)
             }
@@ -188,7 +236,7 @@ async fn run(command: Command, connections: usize, tries: u32) -> ExitCode {
                 .resume(state_file, &mut |e| progress.show(e))
                 .await
                 .map_err(Failure::Engine),
-            Command::Queue { .. } => unreachable!("handled in main"),
+            Command::Queue { .. } | Command::Category { .. } => unreachable!("handled in main"),
         }
     };
 

@@ -106,6 +106,11 @@ pub struct Item {
     /// own (the program's limit still applies).
     #[serde(default)]
     pub limit: Option<u64>,
+    /// Added without a folder of its own: the finished file goes to its
+    /// category's folder (M4), and to `dir` when it has none. `false` when
+    /// absent.
+    #[serde(default)]
+    pub categorize: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
 }
@@ -230,6 +235,7 @@ impl QueuesFile {
             file: None,
             error: None,
             limit: None,
+            categorize: false,
             added_at: now_rfc3339(),
         };
         self.queue_or_new(queue)?.items.push(item);

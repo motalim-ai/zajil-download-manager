@@ -266,6 +266,20 @@ mod tests {
     }
 
     #[test]
+    fn a_whole_minute_is_shown_without_seconds() {
+        // What `zajil queue list` prints, and what its real-clock test
+        // compares with (the test failed when a start fell on :00).
+        assert_eq!(
+            "22:51:00".parse::<TimeOfDay>().unwrap().to_string(),
+            "22:51"
+        );
+        assert_eq!(
+            "22:51:07".parse::<TimeOfDay>().unwrap().to_string(),
+            "22:51:07"
+        );
+    }
+
+    #[test]
     fn a_window_within_a_day() {
         let tz = riyadh();
         let s = Schedule::new(time("09:00"), time("17:30"), vec![]).unwrap();

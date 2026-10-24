@@ -4,7 +4,7 @@
 
 | البند | القيمة |
 |---|---|
-| الحالة | مُطبَّق في M3 |
+| الحالة | مُطبَّق في M3، ومعه في M4 الحقل `categorize` وملف التصدير |
 | القرار | [ADR-0007](adr/0007-queues-and-settings-storage.md) |
 | الكود | `crates/zajil-core/src/queue/store.rs` |
 
@@ -38,6 +38,7 @@
 | `items[].file` | نص أو `null` | الملف المكتمل |
 | `items[].error` | نص أو `null` | سبب الفشل أو التوقف |
 | `items[].limit` | عدد أو `null` | حد السرعة لهذا التحميل وحده، بالبايت في الثانية (أكبر من 0). وحد البرنامج يبقى. `null` أو غيابه: بلا حد خاص |
+| `items[].categorize` | منطقي، اختياري | (M4) أُضيف دون مجلد خاص به (`zajil queue add` دون `--dir`، أو مع `--by-category`): الملف المكتمل يذهب إلى مجلد فئته ([CATEGORIES-FILE](CATEGORIES-FILE.md))، وإلى `dir` إذا لم يكن لفئته مجلد. غيابه يعني `false`. أُضيف إلى المخطط v1 قبل نشره، كما أُضيف `had_credentials` إلى ملف الحالة |
 | `items[].added_at` | نص | وقت الإضافة بصيغة RFC 3339 بتوقيت UTC |
 | `updated_at` | نص | وقت آخر تعديل |
 | `checksum` | نص | `sha256:` ثم البصمة، بنفس الصيغة القانونية التي يستعملها ملف الحالة ([STATE-FILE](STATE-FILE.md#البصمة-والصيغة-القانونية)) |
@@ -59,6 +60,35 @@
 - **الكتابة** بنفس قواعد ملف الحالة: ملف مؤقت (`queues.json.tmp`) لا يقرؤه إلا صاحبه، يُنشأ دون أن يتبع أي رابط، ثم `fsync`، ثم إعادة تسمية فوق القديم، ثم `fsync` للمجلد. وفي ماك نفس النافذة الصغيرة المعروفة قبل حذف قائمة الصلاحيات الموروثة ([STATE-FILE](STATE-FILE.md#قواعد-الكتابة)، القاعدة 0).
 - **القراءة دون قفل**: القارئ يرى الملف القديم أو الجديد. وإذا فتح القديم في اللحظة التي استُبدل فيها، فعدد روابطه يصبح 0. هذا مقبول، لأنه ليس رابطًا صلبًا (وجدته اختبارات الـ CLI: كانت القراءة تُرفض).
 
+## ملف التصدير (M4)
+
+`zajil queue export <ملف>` يكتب القوائم في ملف بصيغة مستقلة، و`zajil queue import <ملف>` يضيفها. بقرار المالك على #36 (النقل إلى M4)، وشرط نجاحه على خطة M4 (#6).
+
+| الحقل | المعنى |
+|---|---|
+| `format` | دائمًا `"zajil-queues-export"` |
+| `schema_version` | دائمًا `1` |
+| `settings.speed_limit` | حد البرنامج، كما في `queues.json` |
+| `queues[]` | `name` و`max_active` و`schedule`، كما في `queues.json` |
+| `queues[].items[]` | `url` و`dir` و`limit` و`categorize` و`added_at`، و`status`: `waiting` أو `paused` أو `done`. التحميل الجاري أو الفاشل يُصدَّر `waiting`، فيعمل من جديد في الطرف الآخر |
+| `exported_at` | وقت التصدير |
+| `checksum` | بنفس الصيغة القانونية |
+
+**ما لا يُصدَّر**: الأرقام، والتقدم (`state_file`)، والملف المكتمل، والخطأ. هذه كلها تخص هذا الجهاز.
+
+**الأمان**:
+- **لا اسم مستخدم ولا كلمة مرور أبدًا**: القوائم لا تحملهما أصلًا، والتصدير يحذفهما لو ظهرا، والاستيراد يرفض ملفًا فيه أحدهما.
+- **التوكن الذي هو جزء من الرابط** (`?sig=…`) يبقى، بشرطي AGENTS.md §10.3: الملف لا يقرؤه إلا صاحبه، والتوكن لا يُطبع أبدًا. مختبر.
+- **لا يُكتب فوق ملف موجود**، ولا عبر رابط رمزي.
+- **الملف عند الاستيراد مُدخل غير موثوق**:
+  - حد للحجم (16 ميجابايت).
+  - قراءة صارمة: الحقل غير المعروف يُرفض، والبصمة يجب أن تطابق.
+  - كل قيمة تُفحص قبل أي تعديل: الأسماء، و`max_active`، والروابط (http وhttps فقط، وبلا بيانات دخول)، والمجلدات (مطلقة، وبلا `..`)، وحدود السرعة.
+  - الملف المرفوض لا يغيّر شيئًا، والرسالة تقول السبب.
+- **المجلدات في الملف لا تُستعمل إلا بطلب**: بدون `--keep-folders`، تذهب التحميلات إلى `--dir` (أو مجلد التنزيلات في النظام) ومجلدات فئاتها. السبب: ملف من شخص آخر قد يوجّه التحميلات إلى أي مجلد، مثل مجلد التشغيل مع بدء النظام.
+
+**الدمج**: القائمة الجديدة تُنشأ بإعدادات الملف. والقائمة الموجودة تبقى إعداداتها، وتُضاف التحميلات إلى آخرها. وحد البرنامج في الملف لا يُستعمل إلا إذا لم يكن هناك حد.
+
 ## المشغّل (`zajil queue run`)
 
 - **حالة `active` يتركها مشغّل قُتل** تعود إلى `waiting` عند التشغيل التالي، ويُستكمل التحميل من `state_file`.
@@ -72,4 +102,4 @@
 
 ## English summary
 
-`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, schedule {start, stop, days}, items [{id, url, dir, status, state_file, file, error, limit, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file.
+`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, schedule {start, stop, days}, items [{id, url, dir, status, state_file, file, error, limit, categorize, added_at}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file. M4: `categorize` (optional) sends an item to its category's folder; `zajil queue export`/`import` use a separate `zajil-queues-export` file (no ids, progress or credentials, owner-only, never written over; imports are strictly checked and use the file's folders only with `--keep-folders`).

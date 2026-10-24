@@ -269,8 +269,6 @@ impl DownloadState {
     }
 }
 
-/// `sha256:` and the hex SHA-256 of the canonical form of `value` with its
-/// `checksum` member set to the empty string.
 /// Replaces `path` with `bytes` in one step, by the safe-write rules of
 /// ADR-0004 (also used for the queues file, ADR-0007): a temporary file
 /// `<path>.tmp` only the user may read (a token may be in a URL), synced,
@@ -308,7 +306,11 @@ pub(crate) fn write_safely(path: &Path, bytes: &[u8]) -> io::Result<()> {
     zajil_platform::fs::sync_dir(folder)
 }
 
-pub(crate) fn checksum_of(value: &serde_json::Value) -> String {
+/// `sha256:` and the hex SHA-256 of the canonical form of `value` with its
+/// `checksum` member empty: the checksum of the state, queues, categories
+/// and export files (`docs/STATE-FILE.md`). Public so that tools and tests
+/// can make files that pass it.
+pub fn checksum_of(value: &serde_json::Value) -> String {
     let mut unsigned = value.clone();
     if let Some(object) = unsigned.as_object_mut() {
         object.insert("checksum".into(), serde_json::Value::String(String::new()));

@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use super::store::{QueueStore, QueuesFile, Status, StoreError};
+use crate::category::CategoryStore;
 use crate::limit::SpeedLimit;
 use crate::{Engine, Error, Event, Finished, Stop};
 
@@ -92,6 +93,9 @@ pub struct Runner {
     time_zone: TimeZone,
     /// End the run when this queue has nothing left to run.
     until: Option<String>,
+    /// Where items added without a folder of their own find their
+    /// category's folder (M4).
+    categories: Option<CategoryStore>,
 }
 
 /// How the download of an item ended.
@@ -114,7 +118,15 @@ impl Runner {
             poll: Duration::from_millis(500),
             time_zone: TimeZone::system(),
             until: None,
+            categories: None,
         }
+    }
+
+    /// Items marked `categorize` go to their category's folder, read from
+    /// `store` when each of them starts.
+    pub fn categories(mut self, store: CategoryStore) -> Self {
+        self.categories = Some(store);
+        self
     }
 
     /// Ends the run as soon as `queue` has nothing left to run, stopping
@@ -391,6 +403,7 @@ impl Runner {
                 });
                 let stop = Stop::new();
                 let engine = engine.with_download_limit(item.limit);
+                let categories = self.categories.clone().filter(|_| item.categorize);
                 let events = events.clone();
                 let task_stop = stop.clone();
                 let task = tasks.spawn(async move {
@@ -411,11 +424,37 @@ impl Runner {
                         Some(state_file) => {
                             engine.resume_until(&state_file, &stop, &mut report).await
                         }
-                        None => {
-                            engine
-                                .download_until(&item.url, &item.dir, &stop, &mut report)
-                                .await
-                        }
+                        None => match categories {
+                            None => {
+                                engine
+                                    .download_until(&item.url, &item.dir, &stop, &mut report)
+                                    .await
+                            }
+                            Some(store) => {
+                                match tokio::task::spawn_blocking(move || store.load()).await {
+                                    Ok(Ok(categories)) => {
+                                        let given = item.dir.clone();
+                                        let choose = move |name: &str, url: &reqwest::Url| {
+                                            categories.folder_for(name, url.host_str(), &given)
+                                        };
+                                        engine
+                                            .download_choosing_until(
+                                                &item.url,
+                                                &choose,
+                                                &stop,
+                                                &mut report,
+                                            )
+                                            .await
+                                    }
+                                    Ok(Err(err)) => {
+                                        Err(Error::Io(std::io::Error::other(err.to_string())))
+                                    }
+                                    Err(err) => {
+                                        Err(Error::Io(std::io::Error::other(err.to_string())))
+                                    }
+                                }
+                            }
+                        },
                     };
                     (id, result)
                 });

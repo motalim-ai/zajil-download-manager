@@ -446,6 +446,21 @@ impl Engine {
         stop: &Stop,
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
+        self.download_choosing_until(url, &|_, _| dir.to_owned(), stop, on_event)
+            .await
+    }
+
+    /// Like [`Engine::download_until`], but the folder is chosen by
+    /// `choose` once the file's name and the final URL (after redirects)
+    /// are known, before any file is created: categories (M4) need both.
+    /// The chosen folder is created if it does not exist.
+    pub async fn download_choosing_until(
+        &self,
+        url: &str,
+        choose: &(dyn Fn(&str, &reqwest::Url) -> PathBuf + Send + Sync),
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(Event) + Send),
+    ) -> Result<Finished, Error> {
         let url = parse_url(url)?;
         let mut attempt = Attempt::new(Some(&url), stop, &self.limits());
         let response = self
@@ -454,12 +469,6 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        // The size comes from the server: before creating anything, make
-        // sure it fits (a huge or false size fails here, clearly).
-        if let Some(len) = response.content_length() {
-            check_space(dir, len, 0).await?;
-        }
-
         let name = suggested_name(
             response
                 .headers()
@@ -467,6 +476,21 @@ impl Engine {
                 .map(|v| v.as_bytes()),
             response.url(),
         );
+        let dir = choose(&name, response.url());
+        // Only a folder that does not exist yet (a category's) is created:
+        // creating one waits for a blocking thread, and a download into an
+        // existing folder must reserve its name as soon as before (the
+        // cancellation test with a busy blocking pool in `download.rs`
+        // found this). The check itself is one quick `stat`.
+        if !dir.is_dir() {
+            tokio::fs::create_dir_all(&dir).await?;
+        }
+        let dir = dir.as_path();
+        // The size comes from the server: before creating anything, make
+        // sure it fits (a huge or false size fails here, clearly).
+        if let Some(len) = response.content_length() {
+            check_space(dir, len, 0).await?;
+        }
         let (final_path, part) = reserve_target(dir, &name)?;
         // From here until the first byte is written, any failure or
         // cancellation removes the new files again.
