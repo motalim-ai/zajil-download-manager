@@ -12,3 +12,17 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+  # The desktop app (M4): its npm packages, and its Tauri crates, which
+  # are a Cargo workspace of their own.
+  - package-ecosystem: npm
+    directory: /apps/desktop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build

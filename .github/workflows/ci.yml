@@ -51,6 +51,7 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install && rustup show active-toolchain
       - run: cargo fmt --all -- --check
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
 
   build-test:
     name: Build & test (${{ matrix.os }})
@@ -184,6 +185,123 @@ jobs:
             exit 1
           fi
           echo "zajil-core/test-support is off in release builds"
+
+  desktop:
+    name: Desktop app (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned toolchain
+        working-directory: .
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      # Tauri 2 on Linux needs WebKitGTK 4.1 (the minimum the owner chose:
+      # Ubuntu 22.04 and Debian 12). Xvfb and xdotool are for opening the
+      # real window.
+      - name: Install the GUI libraries (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+        run: |
+          set -euo pipefail
+          sudo apt-get $APT_OPTIONS update -q
+          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool
+      - name: Install npm packages (from the lock file only)
+        run: npm ci
+      - name: Licenses and advisories of npm packages
+        run: |
+          npm run licenses
+          npm audit --audit-level=high
+      - name: Svelte check (accessibility warnings are errors)
+        run: npm run check
+      - name: Unit tests of the interface
+        run: npm test
+      - name: Clippy (desktop)
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Tests (desktop) and generated types up to date
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked
+          # Changed files by content (line endings aside, on Windows), and
+          # new files too (review of #45: `git diff` alone missed them).
+          git diff --exit-code -- ../src/lib/bindings
+          new=$(git ls-files --others --exclude-standard -- ../src/lib/bindings)
+          if [ -n "$new" ]; then
+            echo "::error::new generated TypeScript types are not in the repository:"
+            echo "$new"
+            exit 1
+          fi
+      - name: Build the app
+        shell: bash
+        run: npx tauri build --debug --no-bundle
+      # The built app opens its window and closes cleanly (exit code 0).
+      - name: The app opens and closes
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Windows) app=src-tauri/target/debug/zajil-desktop.exe ;;
+            *) app=src-tauri/target/debug/zajil-desktop ;;
+          esac
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" node scripts/open-close.mjs "$app"
+          else
+            node scripts/open-close.mjs "$app"
+          fi
+      # Closed, or killed, in the middle of a download, then opened again:
+      # the download goes on from its recorded progress and the file is
+      # whole (src-tauri/tests/close_resume.rs, owner's request on #45).
+      - name: Closing during a download, then opening again
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A copy of the app `tauri build` made: `cargo test` rebuilds the
+          # binary in place without its page (review of #45).
+          case "$RUNNER_OS" in
+            Windows) built=target/debug/zajil-desktop.exe; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test.exe" ;;
+            *) built=target/debug/zajil-desktop; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test" ;;
+          esac
+          cp "$built" "$ZAJIL_DESKTOP_APP"
+          test=(cargo test --locked --test close_resume -- --ignored --test-threads 1)
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" "${test[@]}"
+          else
+            "${test[@]}"
+          fi
+
+  desktop-licenses:
+    name: Desktop licenses & advisories (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: apps/desktop/src-tauri/Cargo.toml
+          command: check
+          arguments: --all-features
 
   licenses:
     name: Licenses & advisories (cargo-deny)
