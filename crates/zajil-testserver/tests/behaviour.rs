@@ -505,3 +505,58 @@ fn a_stray_request_is_refused_and_takes_no_place_of_the_tests_own() {
     assert_eq!(server.gets("/f.bin").len(), 2);
     assert_eq!(server.strays(), ["GET /f.bin"]);
 }
+
+/// #50: what a failed test is shown: every request in order with its range,
+/// status and bytes; every connection, who opened it and how it ended (a
+/// cut says so, with its cause); and the stray requests.
+#[test]
+fn the_report_of_a_failed_test_holds_requests_connections_and_strays() {
+    let server = TestServer::http();
+    server.put(
+        "/f.bin",
+        FileSpec::new(random_bytes(500_000, 51)).cut_after(100_000, 1),
+    );
+    let cut = get(&server, "/f.bin", &[]);
+    assert!(cut.incomplete);
+    let whole = get(&server, "/f.bin", &[("Range", "bytes=1000-")]);
+    assert_eq!(whole.status, 206);
+    let mut stream = TcpStream::connect(server.addr()).unwrap();
+    stream
+        .write_all(b"GET /other HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let _ = stream.read_to_end(&mut Vec::new());
+    // Let the server record how the last connection ended.
+    std::thread::sleep(Duration::from_millis(200));
+
+    let report = server.report();
+    assert!(
+        report.contains("request 0: GET /f.bin range=None"),
+        "{report}"
+    );
+    assert!(report.contains("bytes_written=100000 conn=1"), "{report}");
+    assert!(
+        report.contains("request 1: GET /f.bin range=Some(\"bytes=1000-\")"),
+        "{report}"
+    );
+    assert!(report.contains("status=206"), "{report}");
+    assert!(report.contains("connection 1 from 127.0.0.1:"), "{report}");
+    assert!(report.contains("cut by test server"), "{report}");
+    assert!(report.contains("connection 2 from 127.0.0.1:"), "{report}");
+    assert!(
+        report.contains("stray request (404, not counted): GET /other"),
+        "{report}"
+    );
+}
+
+/// The report is printed while the test is already panicking: that must
+/// not panic again (which would abort the whole test binary).
+#[test]
+fn a_test_that_fails_with_a_server_alive_still_ends_cleanly() {
+    let failed = std::panic::catch_unwind(|| {
+        let server = TestServer::http();
+        server.put("/f", FileSpec::new(vec![1u8; 10]));
+        let _ = get(&server, "/f", &[]);
+        panic!("a test fails while its server is alive");
+    });
+    assert!(failed.is_err());
+}
