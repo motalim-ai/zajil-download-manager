@@ -280,6 +280,19 @@ pub struct Finished {
     pub bytes: u64,
 }
 
+/// What [`Engine::probe`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probe {
+    /// The file's name, as a download would give it (sanitized).
+    pub name: String,
+    /// Its size, if the server said.
+    pub size: Option<u64>,
+    /// It can be split over several connections and resumed later.
+    pub resumable: bool,
+    /// The host of the final URL (after redirects), for categories.
+    pub host: Option<String>,
+}
+
 /// Why a download did not finish.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -513,6 +526,40 @@ impl Engine {
             on_event,
         )
         .await
+    }
+
+    /// What `url` holds, without downloading it: the name the file would
+    /// get, its size, and whether it can be split and resumed (the server
+    /// announces `Accept-Ranges: bytes`, a size and a strong validator).
+    /// For the add dialog of the interface (M4). The first response is
+    /// read for its headers only; the connection is then dropped.
+    pub async fn probe(&self, url: &str) -> Result<Probe, Error> {
+        let url = parse_url(url)?;
+        let stop = Stop::new();
+        let mut attempt = Attempt::new(Some(&url), &stop, &self.limits());
+        let response = self
+            .retrying(&mut attempt, &mut |_| {}, || self.get(url.clone(), None))
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(Error::Status(response.status()));
+        }
+        let name = suggested_name(
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .map(|v| v.as_bytes()),
+            response.url(),
+        );
+        let state = state_from_response(String::new(), false, &response);
+        let size = response.content_length();
+        let resumable =
+            state.accept_ranges && size.is_some() && if_range_value(&state.validator).is_some();
+        Ok(Probe {
+            name,
+            size,
+            resumable,
+            host: response.url().host_str().map(str::to_owned),
+        })
     }
 
     /// Continues the download described by `state_file`

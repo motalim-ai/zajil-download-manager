@@ -16,7 +16,7 @@ pub mod sanitize;
 mod segmented;
 pub mod state;
 
-pub use engine::{Engine, Error, Event, Finished, Options, RestartReason, Stop};
+pub use engine::{Engine, Error, Event, Finished, Options, Probe, RestartReason, Stop};
 /// URLs as the engine parses them (for [`Engine::download_choosing_until`]).
 pub use reqwest::Url;
 pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};

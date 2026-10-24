@@ -2,16 +2,25 @@
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Sidebar, { type Filter } from "./lib/components/Sidebar.svelte";
+  import PasteBar from "./lib/components/PasteBar.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
+  import AddDialog from "./lib/components/AddDialog.svelte";
+  import Details from "./lib/components/Details.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import { api, windowRect } from "./lib/api";
   import { locale, type Lang } from "./lib/i18n.svelte";
   import { size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
+  import type { DetailsView } from "./lib/bindings/DetailsView";
+  import type { ProbeView } from "./lib/bindings/ProbeView";
+  import type { AddRequest } from "./lib/bindings/AddRequest";
 
   let snapshot = $state<Snapshot>({ downloads: [], queues: [], categories: [], speed_limit: null, problem: null });
   let filter = $state<Filter>({ kind: "all" });
   let selected = $state<number | null>(null);
+  let details = $state<DetailsView | null>(null);
+  let pasted = $state("");
+  let adding = $state<{ url: string; probe: ProbeView | null; error: string | null } | null>(null);
   let error = $state<string | null>(null);
   // The names test page, loaded only in a ui-test build.
   let NamesPage = $state<typeof import("./uitest/Names.svelte").default | null>(null);
@@ -50,10 +59,37 @@
       const next = await api.snapshot();
       if (mine !== asked) return;
       snapshot = next;
+      if (details) details = await api.details(details.download.id);
       error = snapshot.problem;
     } catch (e) {
       if (mine === asked) error = String(e);
     }
+  }
+
+  async function startAdding(url: string) {
+    adding = { url, probe: null, error: null };
+    try {
+      const probe = await api.probe(url);
+      if (adding?.url === url) adding = { url, probe, error: null };
+    } catch (e) {
+      if (adding?.url === url) adding = { url, probe: null, error: String(e) };
+    }
+  }
+
+  async function add(request: AddRequest) {
+    try {
+      await api.add(request);
+      adding = null;
+      pasted = "";
+      await refresh();
+    } catch (e) {
+      if (adding) adding = { ...adding, error: String(e) };
+    }
+  }
+
+  async function open(id: number) {
+    selected = id;
+    details = await api.details(id);
   }
 
   async function act(kind: "pause" | "resume" | "remove") {
@@ -78,6 +114,19 @@
     setTheme(theme);
     snapshot = await api.snapshot();
     selected = 1;
+    if (view === "details") details = await api.details(1);
+    if (view === "add")
+      adding = {
+        url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
+        probe: {
+          name: "ubuntu-24.04.3-desktop-amd64.iso",
+          size: 6.1 * 1024 ** 3,
+          resumable: true,
+          category: "programs",
+          folder: "~/Downloads",
+        },
+        error: null,
+      };
     if (view === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     await tick();
     await document.fonts.ready;
@@ -105,19 +154,40 @@
   <div class="window">
     <Sidebar {snapshot} bind:filter />
     <main class="main">
-      <div class="tool">
-        <button class="btn icon" aria-label={locale.t("action-resume")} disabled={selected === null} onclick={() => void act("resume")}><Icon name="play" /></button>
-        <button class="btn icon" aria-label={locale.t("action-pause")} disabled={selected === null} onclick={() => void act("pause")}><Icon name="pause" /></button>
-        <button class="btn icon" aria-label={locale.t("action-delete")} disabled={selected === null} onclick={() => void act("remove")}><Icon name="trash" /></button>
-      </div>
-      {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
-      <DownloadTable downloads={shown} bind:selected />
-      <footer class="status">
-        <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
-        <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
-        <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
-        <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
-      </footer>
+      {#if details}
+        <Details
+          {details}
+          onback={() => (details = null)}
+          onpause={() => void act("pause")}
+          onresume={() => void act("resume")}
+        />
+      {:else}
+        <PasteBar bind:value={pasted} onsubmit={(url) => void startAdding(url)} />
+        <div class="tool">
+          <button class="btn icon" aria-label={locale.t("action-resume")} disabled={selected === null} onclick={() => void act("resume")}><Icon name="play" /></button>
+          <button class="btn icon" aria-label={locale.t("action-pause")} disabled={selected === null} onclick={() => void act("pause")}><Icon name="pause" /></button>
+          <button class="btn icon" aria-label={locale.t("action-delete")} disabled={selected === null} onclick={() => void act("remove")}><Icon name="trash" /></button>
+          <button class="btn quiet" disabled={selected === null} onclick={() => selected !== null && void open(selected)}><Icon name="open" />{locale.t("action-details")}</button>
+        </div>
+        {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
+        <DownloadTable downloads={shown} bind:selected onopen={(id) => void open(id)} />
+        <footer class="status">
+          <span><b class="num">{locale.t("footer-active", { count: active.length })}</b></span>
+          <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
+          <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
+          <span class="end">{locale.t("footer-waiting", { count: waiting })}</span>
+        </footer>
+      {/if}
+      {#if adding}
+        <AddDialog
+          url={adding.url}
+          probe={adding.probe}
+          error={adding.error}
+          queues={snapshot.queues}
+          onadd={(r) => void add(r)}
+          oncancel={() => (adding = null)}
+        />
+      {/if}
     </main>
   </div>
 {/if}
