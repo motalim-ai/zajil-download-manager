@@ -107,11 +107,6 @@ pub fn run() {
     #[cfg(unix)]
     let signals = stop_signals();
     let builder = tauri::Builder::default()
-        // First: a second launch only brings this window forward, so two
-        // programs never run the same queues.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_window(app);
-        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -129,8 +124,12 @@ pub fn run() {
             if let Some(signals) = signals {
                 tauri::async_runtime::spawn(exit_on_signal(handle.clone(), signals));
             }
+            // Not fatal: without it, a Windows shutdown still reaches the
+            // stop path through tao's own handling (`RunEvent::Exit`).
             #[cfg(windows)]
-            on_windows_session_end(tauri_app)?;
+            if let Err(err) = on_windows_session_end(tauri_app) {
+                eprintln!("zajil: cannot watch for the end of the Windows session: {err}");
+            }
             tray::build(tauri_app)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {

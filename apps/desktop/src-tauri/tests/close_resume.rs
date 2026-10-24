@@ -96,6 +96,22 @@ fn close_cleanly(app: &mut App, how: Close) {
         "it exited without saying that the downloads stopped"
     );
     assert!(took < Duration::from_millis(4500), "closing took {took:?}");
+    // Which path stopped the downloads at the end of a Windows session:
+    // Zajil's own hook (`zajil_platform::session`), or tao's handling that
+    // ends in `RunEvent::Exit` (both stop them the same way). Shown in the
+    // CI log (the step runs with --nocapture; review of #59).
+    #[cfg(windows)]
+    if matches!(how, Close::SessionEnd) {
+        let hook = app.said("asked to stop (the Windows session is ending)");
+        println!(
+            "the Windows session end was handled by {}",
+            if hook {
+                "zajil_platform::session"
+            } else {
+                "tao (RunEvent::Exit)"
+            }
+        );
+    }
 }
 
 /// How the app is asked to close.
@@ -122,16 +138,30 @@ fn ask_to_close(child: &Child, how: Close) {
         Close::Ask => Command::new("kill").args(["-TERM", &pid]).status(),
         #[cfg(windows)]
         Close::Ask => Command::new("taskkill").args(["/PID", &pid]).status(),
+        // As Windows does at a real shutdown: both messages to every
+        // top-level window of the process (tao's hidden one, the main
+        // window...), not only to the one `MainWindowHandle` picks
+        // (review of #59).
         #[cfg(windows)]
         Close::SessionEnd => Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
                 &format!(
-                    "Add-Type -Namespace Zajil -Name User32 -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);'; \
-                     $h = (Get-Process -Id {pid}).MainWindowHandle; if ($h -eq 0) {{ throw 'the app has no window' }}; $r = [IntPtr]::Zero; \
-                     [void][Zajil.User32]::SendMessageTimeoutW($h, 0x11, [IntPtr]::Zero, [IntPtr]::Zero, 2, 5000, [ref]$r); \
-                     [void][Zajil.User32]::SendMessageTimeoutW($h, 0x16, [IntPtr]1, [IntPtr]::Zero, 2, 10000, [ref]$r)"
+                    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; \
+                     public static class ZajilSession {{ \
+                       public delegate bool EnumProc(IntPtr h, IntPtr l); \
+                       [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); \
+                       [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); \
+                       [DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r); \
+                       public static int End(uint pid) {{ \
+                         var all = new List<IntPtr>(); \
+                         EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
+                         IntPtr r; \
+                         foreach (var h in all) SendMessageTimeoutW(h, 0x11, IntPtr.Zero, IntPtr.Zero, 2, 5000, out r); \
+                         foreach (var h in all) SendMessageTimeoutW(h, 0x16, (IntPtr)1, IntPtr.Zero, 2, 10000, out r); \
+                         return all.Count; }} }}'; \
+                     $n = [ZajilSession]::End({pid}); Write-Output \"session end sent to $n top-level windows\"; if ($n -eq 0) {{ exit 1 }}"
                 ),
             ])
             .status(),

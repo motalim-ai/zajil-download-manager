@@ -332,7 +332,7 @@ jobs:
             *) built=target/debug/zajil-desktop; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test" ;;
           esac
           cp "$built" "$ZAJIL_DESKTOP_APP"
-          test=(cargo test --locked --test close_resume -- --ignored --test-threads 1)
+          test=(cargo test --locked --test close_resume -- --ignored --test-threads 1 --nocapture)
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s "-screen 0 1600x1000x24" "${test[@]}"
           else
