@@ -11,6 +11,7 @@
   import Details from "./lib/components/Details.svelte";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
+  import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
   import { size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
@@ -83,6 +84,8 @@
     locale.set(next.language as Lang);
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
+    // The tray menu speaks the same language.
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
@@ -136,6 +139,22 @@
     }
   }
 
+  /// A system notification for each download that just ended (the
+  /// setting), once the system allows them.
+  async function notify(said: string[]) {
+    try {
+      let allowed = await isPermissionGranted();
+      if (!allowed) allowed = (await requestPermission()) === "granted";
+      if (!allowed) return;
+      for (const text of said) {
+        const [title, ...rest] = text.split(": ");
+        sendNotification({ title: title ?? text, body: rest.join(": ") });
+      }
+    } catch {
+      // A notification that cannot be shown is not a problem of the download.
+    }
+  }
+
   /// Tells screen readers about downloads that just finished or failed.
   function announce(downloads: Snapshot["downloads"]) {
     const said: string[] = [];
@@ -146,7 +165,10 @@
       }
       lastStatus.set(d.id, d.status);
     }
-    if (said.length) announcement = said.join(". ");
+    if (said.length) {
+      announcement = said.join(". ");
+      if (settings?.notifications) void notify(said);
+    }
   }
 
   // Snapshots can come back out of order: only the latest asked counts

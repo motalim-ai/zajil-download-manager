@@ -21,6 +21,7 @@ pub mod fs;
 pub mod ids;
 mod paths;
 pub mod power;
+pub mod session;
 pub mod shell;
 
 pub use paths::{AppPaths, PathsError, SystemPaths, linux, macos, windows};

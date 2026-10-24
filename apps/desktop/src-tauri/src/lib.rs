@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod live;
+mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
 pub mod view;
@@ -106,7 +107,17 @@ pub fn run() {
     #[cfg(unix)]
     let signals = stop_signals();
     let builder = tauri::Builder::default()
+        // First: a second launch only brings this window forward, so two
+        // programs never run the same queues.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(app);
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
@@ -118,6 +129,9 @@ pub fn run() {
             if let Some(signals) = signals {
                 tauri::async_runtime::spawn(exit_on_signal(handle.clone(), signals));
             }
+            #[cfg(windows)]
+            on_windows_session_end(tauri_app)?;
+            tray::build(tauri_app)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -184,6 +198,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         resume,
         remove,
         details,
+        set_tray_texts,
         settings,
         save_settings,
         categories,
@@ -205,6 +220,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         resume,
         remove,
         details,
+        set_tray_texts,
         settings,
         save_settings,
         categories,
@@ -232,7 +248,8 @@ async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
 
 /// The signals that ask a program to stop (SIGTERM: a shutdown on Linux,
 /// `kill`; SIGINT: Ctrl+C in a terminal; SIGHUP: its terminal closed). On
-/// Windows the system closes the window instead (#49 for a shutdown).
+/// Windows the system closes the window, or ends the session
+/// (`on_windows_session_end`, #49).
 #[cfg(unix)]
 struct StopSignals {
     terminate: tokio::signal::unix::Signal,
@@ -279,6 +296,42 @@ async fn exit_on_signal(handle: tauri::AppHandle, mut signals: StopSignals) {
         eprintln!("zajil: asked to stop ({name})");
         handle.exit(0);
     }
+}
+
+/// Windows has no SIGTERM: at a shutdown, restart or logoff it sends the
+/// window `WM_ENDSESSION`, and may end the process once that is answered
+/// (#49). The downloads stop there, after recording their progress, as
+/// when the window is closed; then the program exits.
+#[cfg(windows)]
+fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
+    let Some(window) = tauri_app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let handle = tauri_app.handle().clone();
+    let hwnd = window.hwnd()?.0 as isize;
+    zajil_platform::session::on_session_end(
+        hwnd,
+        Box::new(move || {
+            eprintln!("zajil: asked to stop (the Windows session is ending)");
+            let app = handle.state::<App>();
+            if !app.exiting.swap(true, Ordering::SeqCst) {
+                app.stop.request();
+            }
+            tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
+            std::process::exit(0);
+        }),
+    )
+    .map_err(tauri::Error::Io)
+}
+
+/// The tray menu's texts in the interface's language.
+#[tauri::command]
+fn set_tray_texts<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    show: String,
+    quit: String,
+) -> Result<(), String> {
+    tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
 }
 
 /// Tells the page that something changed: at once, or once the throttle

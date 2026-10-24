@@ -16,6 +16,7 @@ export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   probe: (url: string) => invoke<ProbeView>("probe", { url }),
   cancelProbe: () => invoke<void>("cancel_probe"),
+  setTrayTexts: (show: string, quit: string) => invoke<void>("set_tray_texts", { show, quit }),
   add: (request: AddRequest) => invoke<number>("add", { request }),
   pause: (ids: number[]) => invoke<void>("pause", { ids }),
   resume: (ids: number[]) => invoke<void>("resume", { ids }),

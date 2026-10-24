@@ -16,6 +16,10 @@ download_dir: string | null,
  */
 system_download_dir: string, connections: number, max_connections: number, 
 /**
+ * A notification when a download finishes or fails.
+ */
+notifications: boolean, 
+/**
  * Bytes per second for all downloads together; `null`: no limit.
  */
 speed_limit: number | null, };

@@ -4,6 +4,8 @@
   import { num } from "../format";
   import type { SettingsView } from "../bindings/SettingsView";
   import type { SettingsChange } from "../bindings/SettingsChange";
+  import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+  import { onMount } from "svelte";
 
   let {
     settings,
@@ -45,6 +47,7 @@
       digits: settings.digits,
       download_dir: settings.download_dir,
       connections: settings.connections,
+      notifications: settings.notifications,
       speed_limit: settings.speed_limit,
       ...patch,
     });
@@ -55,6 +58,23 @@
     const n = Math.round(Number(input.value));
     if (Number.isFinite(n) && n >= 1 && n <= settings.max_connections) change({ connections: n });
     else input.value = String(settings.connections);
+  }
+
+  // Launching at login is the system's own setting (a login item, a
+  // registry value or an autostart file), read from it and changed in it.
+  let autostart = $state<boolean | null>(null);
+  let autostartProblem = $state<string | null>(null);
+  onMount(() => {
+    isEnabled().then((on) => (autostart = on), (e) => (autostartProblem = String(e)));
+  });
+  async function setAutostart(on: boolean) {
+    autostartProblem = null;
+    try {
+      await (on ? enable() : disable());
+      autostart = await isEnabled();
+    } catch (e) {
+      autostartProblem = String(e);
+    }
   }
 
   function setLimit() {
@@ -166,6 +186,23 @@
       </select>
     </div>
     <p class="hint">{locale.t("settings-limit-hint")}</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("settings-notifications")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
+      <span>{locale.t("settings-notifications-label")}</span>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("settings-autostart")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget.checked)} />
+      <span>{locale.t("settings-autostart-label")}</span>
+    </label>
+    {#if autostartProblem}<p class="hint problem" role="alert">{autostartProblem}</p>{/if}
   </fieldset>
 
   <fieldset>

@@ -107,6 +107,12 @@ enum Close {
     /// macOS: the system's quit event (Cmd+Q, the Dock's Quit, a logout).
     #[cfg(target_os = "macos")]
     Quit,
+    /// Windows: the session ends (a shutdown, restart or logoff), as the
+    /// system says it to the window: `WM_QUERYENDSESSION`, then
+    /// `WM_ENDSESSION` (#49). Sent through PowerShell, so the test needs no
+    /// unsafe code; a real shutdown cannot be run by a test.
+    #[cfg(windows)]
+    SessionEnd,
 }
 
 fn ask_to_close(child: &Child, how: Close) {
@@ -116,6 +122,19 @@ fn ask_to_close(child: &Child, how: Close) {
         Close::Ask => Command::new("kill").args(["-TERM", &pid]).status(),
         #[cfg(windows)]
         Close::Ask => Command::new("taskkill").args(["/PID", &pid]).status(),
+        #[cfg(windows)]
+        Close::SessionEnd => Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Add-Type -Namespace Zajil -Name User32 -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);'; \
+                     $h = (Get-Process -Id {pid}).MainWindowHandle; if ($h -eq 0) {{ throw 'the app has no window' }}; $r = [IntPtr]::Zero; \
+                     [void][Zajil.User32]::SendMessageTimeoutW($h, 0x11, [IntPtr]::Zero, [IntPtr]::Zero, 2, 5000, [ref]$r); \
+                     [void][Zajil.User32]::SendMessageTimeoutW($h, 0x16, [IntPtr]1, [IntPtr]::Zero, 2, 10000, [ref]$r)"
+                ),
+            ])
+            .status(),
         #[cfg(target_os = "macos")]
         Close::Quit => Command::new("osascript")
             .args([
@@ -245,6 +264,14 @@ fn closed_during_a_download_it_goes_on_when_opened_again() {
 #[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
 fn quit_during_a_download_it_goes_on_when_opened_again() {
     close_in_the_middle_then_open_again(Some(Close::Quit));
+}
+
+/// Windows: a shutdown, restart or logoff during a download (#49).
+#[cfg(windows)]
+#[test]
+#[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
+fn session_end_during_a_download_it_goes_on_when_opened_again() {
+    close_in_the_middle_then_open_again(Some(Close::SessionEnd));
 }
 
 #[test]

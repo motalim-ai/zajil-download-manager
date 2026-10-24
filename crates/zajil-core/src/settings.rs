@@ -71,6 +71,10 @@ pub struct SettingsFile {
     /// Connections for each new download, from 1 to
     /// [`crate::MAX_CONNECTIONS`].
     pub connections: u32,
+    /// A system notification when a download finishes or fails (M4).
+    /// Absent in files written before it existed, which counts as on.
+    #[serde(default = "on")]
+    pub notifications: bool,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -104,6 +108,10 @@ pub enum SettingsError {
     Invalid(String),
 }
 
+fn on() -> bool {
+    true
+}
+
 impl Default for SettingsFile {
     fn default() -> Self {
         SettingsFile {
@@ -114,6 +122,7 @@ impl Default for SettingsFile {
             digits: Digits::default(),
             download_dir: None,
             connections: crate::DEFAULT_CONNECTIONS as u32,
+            notifications: true,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }
