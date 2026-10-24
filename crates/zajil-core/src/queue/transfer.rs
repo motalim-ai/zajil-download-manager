@@ -29,7 +29,7 @@ use super::store::{
     DEFAULT_MAX_ACTIVE, Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError,
     check_name,
 };
-use crate::category::is_hidden_char;
+use crate::category::{is_display_control, is_hidden_char};
 use crate::state::{checksum_of, now_rfc3339};
 
 /// Value of the `format` field.
@@ -427,9 +427,12 @@ fn check(export: &ExportFile) -> Result<(), String> {
             if i.limit == Some(0) {
                 return Err(format!("{at} has a speed limit of 0"));
             }
-            if i.url.chars().any(is_hidden_char) {
+            // The same rule as `QueuesFile::add`, so Zajil always imports
+            // its own exports (review of #41, round 4: an emoji with
+            // U+FE0F, or a Persian ZWNJ, in a URL was refused).
+            if i.url.chars().any(is_display_control) {
                 return Err(format!(
-                    "{at} has control or invisible characters in its URL"
+                    "{at} has control characters or direction marks in its URL"
                 ));
             }
             if i.added_at.len() > 64 || i.added_at.parse::<jiff::Timestamp>().is_err() {

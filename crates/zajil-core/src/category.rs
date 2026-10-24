@@ -299,7 +299,9 @@ pub fn check_name(name: &str) -> Result<(), CategoryError> {
     let count = name.chars().count();
     let ok = (1..=MAX_NAME_CHARS).contains(&count)
         && name.trim() == name
-        && !name.chars().any(is_hidden_char);
+        && !name.chars().any(is_hidden_char)
+        // Not only joiners and variation selectors, which show nothing.
+        && name.chars().any(|c| !is_part_of_text(c));
     if ok {
         Ok(())
     } else {
@@ -391,23 +393,53 @@ pub fn normalize_extension(input: &str) -> Result<String, CategoryError> {
     Ok(ext)
 }
 
-/// A character that is invisible or has no meaning of its own, so it could
-/// disguise or reorder a name: controls, formatting characters such as
-/// U+202E, line and paragraph separators, private-use and unassigned code
-/// points, and every default-ignorable one, such as U+3164 or U+034F
-/// (review of #41, round 3).
+/// A character that changes how the text around it is shown: a control
+/// (escape codes drive a terminal), a direction mark that reorders text,
+/// such as U+202E, or a line or paragraph separator. Never in a URL a
+/// queue holds (review of #41, round 4).
+pub(crate) fn is_display_control(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{2028}'
+                | '\u{2029}'
+        )
+}
+
+/// Joiners and variation selectors: invisible, but part of real text (the
+/// ZWNJ of Persian «فیلم‌ها», the U+FE0F of «❤️», an ideographic variant),
+/// and unable to reorder it (review of #41, round 4).
+fn is_part_of_text(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200C}' | '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}'
+            | '\u{180B}'..='\u{180D}' | '\u{180F}'
+    )
+}
+
+/// A character that is invisible and could disguise a name or a folder:
+/// the display controls above, formatting characters, and every
+/// default-ignorable code point, such as the Hangul filler U+3164 or the
+/// combining grapheme joiner U+034F (review of #41, round 3), except the
+/// joiners and variation selectors that are part of real text (round 4).
 pub(crate) fn is_hidden_char(c: char) -> bool {
     use icu_properties::props::{DefaultIgnorableCodePoint, GeneralCategory};
     use icu_properties::{CodePointMapData, CodePointSetData};
-    c.is_control()
+    if is_part_of_text(c) {
+        return false;
+    }
+    is_display_control(c)
         || CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(c)
         || matches!(
             CodePointMapData::<GeneralCategory>::new().get(c),
             GeneralCategory::Format
                 | GeneralCategory::LineSeparator
                 | GeneralCategory::ParagraphSeparator
-                | GeneralCategory::PrivateUse
-                | GeneralCategory::Unassigned
         )
 }
 

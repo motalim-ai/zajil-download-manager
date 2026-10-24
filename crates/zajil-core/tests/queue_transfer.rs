@@ -446,7 +446,7 @@ fn impossible_schedules_times_and_urls_are_refused() {
             Box::new(|v| v["exported_at"] = "\u{1b}[2J".into()),
         ),
         (
-            "control or invisible characters",
+            "control characters or direction marks",
             Box::new(|v| {
                 v["queues"][0]["items"][0]["url"] = "\u{1b}http://example.com/a".into();
             }),
@@ -587,39 +587,89 @@ fn an_export_to_a_255_byte_name_works() {
     assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 2);
 }
 
-/// Invisible characters that are not formatting characters are refused
-/// too, in kept folders and in category names and folders (review of #41,
-/// round 3): Hangul fillers, the combining grapheme joiner, variation
-/// selectors, private-use and unassigned code points.
+/// Invisible characters that could disguise a name are refused in kept
+/// folders and in category names and folders (review of #41, round 3):
+/// Hangul fillers, the combining grapheme joiner, direction marks. Joiners
+/// and variation selectors are part of real text and stay allowed (round
+/// 4): emoji, Persian with its ZWNJ, an ideographic variant, Sinhala.
 #[test]
-fn default_ignorable_private_and_unassigned_characters_are_refused() {
+fn invisible_characters_are_refused_but_joiners_and_variation_selectors_are_not() {
     use zajil_core::category::{check_folder, check_name};
+    let import_keeping = |folder: &Path| {
+        let mut q = QueuesFile::empty();
+        q.add("main", "https://example.com/a.iso", folder).unwrap();
+        let (_tmp, path) = exported(&q);
+        let export = read_export(&path).unwrap();
+        let mut into = QueuesFile::empty();
+        into.import(&export, &Folders::Keep).map(|_| into)
+    };
     for c in [
-        '\u{3164}',
-        '\u{FFA0}',
-        '\u{115F}',
-        '\u{034F}',
-        '\u{FE0F}',
-        '\u{E0100}',
-        '\u{17B4}',
-        '\u{E000}',
-        '\u{0378}',
+        '\u{3164}', '\u{FFA0}', '\u{115F}', '\u{034F}', '\u{17B4}', '\u{202E}', '\u{200E}',
+        '\u{2066}',
     ] {
         let folder = std::env::temp_dir().join(format!("a{c}b"));
         assert!(check_folder(&folder).is_err(), "{:04X}", c as u32);
         assert!(check_name(&format!("a{c}b")).is_err(), "{:04X}", c as u32);
-        let mut q = QueuesFile::empty();
-        q.add("main", "https://example.com/a.iso", &folder).unwrap();
-        let (_tmp, path) = exported(&q);
-        let export = read_export(&path).unwrap();
-        let mut into = QueuesFile::empty();
+        assert!(import_keeping(&folder).is_err(), "{:04X}", c as u32);
+        // Queue names too: the Hangul fillers count as letters.
         assert!(
-            into.import(&export, &Folders::Keep).is_err(),
-            "{:04X}",
-            c as u32
+            QueuesFile::empty()
+                .add(&format!("ليلي{c}"), "https://example.com/a", &folder)
+                .is_err()
         );
-        assert_eq!(into, QueuesFile::empty());
     }
-    // Arabic with its marks and joiners that are letters stays allowed.
-    assert!(check_name("مُستنداتٌ العمل").is_ok());
+    for text in [
+        "❤️ صور",
+        "1️⃣",
+        "فیلم‌ها",
+        "葛󠄀飾",
+        "ශ්‍රී",
+        "\u{F8FF} Apple",
+        "مُستنداتٌ العمل",
+    ] {
+        let folder = std::env::temp_dir().join(text);
+        assert!(check_folder(&folder).is_ok(), "{text}");
+        assert!(check_name(text).is_ok(), "{text}");
+        assert!(import_keeping(&folder).is_ok(), "{text}");
+    }
+    // A name of nothing but variation selectors shows nothing.
+    assert!(check_name("\u{FE0F}\u{FE0F}").is_err());
+}
+
+/// Zajil imports its own exports whatever the URLs hold: an emoji with its
+/// variation selector or a Persian ZWNJ was refused (review of #41, round
+/// 4). What would drive a terminal or reorder text is refused when added,
+/// so it never reaches an export.
+#[test]
+fn urls_that_can_be_added_can_be_imported_back() {
+    let mut q = QueuesFile::empty();
+    for url in [
+        "https://example.com/❤️.png",
+        "https://fa.wikipedia.org/wiki/فیلم‌ها",
+        "https://example.jp/葛󠄀飾.pdf",
+    ] {
+        q.add("main", url, &dir("u")).unwrap();
+    }
+    let (_tmp, path) = exported(&q);
+    let export = read_export(&path).unwrap();
+    let mut into = QueuesFile::empty();
+    into.import(&export, &Folders::Into(dir("v"))).unwrap();
+    let urls = |q: &QueuesFile| {
+        q.queues[0]
+            .items
+            .iter()
+            .map(|i| i.url.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(urls(&into), urls(&q));
+    for bad in [
+        "https://example.com/a\u{202E}gpj.exe",
+        "https://example.com/\u{1b}[31m",
+        "https://example.com/a\u{2029}b",
+    ] {
+        assert!(
+            QueuesFile::empty().add("main", bad, &dir("u")).is_err(),
+            "{bad:?}"
+        );
+    }
 }

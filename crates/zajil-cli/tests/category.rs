@@ -384,21 +384,41 @@ fn export_then_import_through_the_command_line() {
         fs::read(QueueStore::new(elsewhere.path()).path()).unwrap(),
         queues_before
     );
-    // Refused with a folder to put the downloads in: the folder is not
-    // created (review of #41, round 3).
+    // A good file refused by the queues file it goes into (damaged): the
+    // folder for its downloads is not created (review of #41, rounds 3
+    // and 4: a file refused while read never reached the folder).
+    let broken = tempfile::tempdir().unwrap();
+    fs::write(QueueStore::new(broken.path()).path(), b"{ not json").unwrap();
     let never = home.path().join("never").join("sub");
     let out = zajil(
-        elsewhere.path(),
-        &["queue", "import", path(&hostile), "--dir", path(&never)],
+        broken.path(),
+        &["queue", "import", path(&file), "--dir", path(&never)],
     );
     assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
     assert!(!home.path().join("never").exists());
+
+    // Saved, but its folder cannot be made (under a file): a warning, and
+    // success, so running it again does not add everything twice (round 4).
+    let fourth = tempfile::tempdir().unwrap();
+    let blocker = home.path().join("a file");
+    fs::write(&blocker, b"x").unwrap();
+    let under = blocker.join("sub");
+    let out = ok(
+        fourth.path(),
+        &["queue", "import", path(&file), "--dir", path(&under)],
+    );
+    assert!(out.contains("Imported 2 download(s)"), "{out}");
+    assert!(out.contains("warning: cannot create the folder"), "{out}");
+    let added = QueueStore::new(fourth.path()).load().unwrap();
+    assert_eq!(added.queues.iter().map(|q| q.items.len()).sum::<usize>(), 2);
 }
 
 /// A folder whose path is not valid text is a clear error, never a crash
 /// (exit code 101), and the files stay as they were (review of #41, rounds
-/// 2 and 3). Unix only: Windows paths are always text. macOS refuses such
-/// a name when the folder is created; Linux takes it, and zajil refuses it.
+/// 2 and 3). Unix only: Windows paths are always text. On macOS the
+/// `queue add --dir` half only shows that APFS refuses the name when the
+/// folder is created; on Linux the folder is made, and it is zajil that
+/// refuses to save the path (round 4).
 #[cfg(unix)]
 #[test]
 fn a_folder_that_is_not_valid_text_is_refused_without_a_crash() {

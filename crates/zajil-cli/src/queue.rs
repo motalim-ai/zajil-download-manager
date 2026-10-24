@@ -278,10 +278,7 @@ fn import(
     let summary = store
         .update(|queues| queues.import(&export, &folders))
         .map_err(|err| err.to_string())?;
-    if let zajil_core::queue::Folders::Into(dir) = &folders {
-        std::fs::create_dir_all(dir)
-            .map_err(|err| format!("cannot use the folder {}: {err}", dir.display()))?;
-    }
+
     println!(
         "Imported {} download(s) ({} new queue(s)) from {}",
         summary.items_added,
@@ -301,6 +298,18 @@ fn import(
                     .settings
                     .speed_limit
             )
+        );
+    }
+    // The import is saved: a folder that cannot be made now is a warning,
+    // not a failure, or running the command again would add everything
+    // twice (review of #41, round 4). The download makes it when it starts.
+    if let zajil_core::queue::Folders::Into(dir) = &folders
+        && let Err(err) = std::fs::create_dir_all(dir)
+    {
+        eprintln!(
+            "zajil: warning: cannot create the folder {} ({err}); the downloads were added, and \
+             will fail until it exists",
+            dir.display()
         );
     }
     Ok(())

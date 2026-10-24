@@ -232,6 +232,13 @@ impl QueuesFile {
         if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err(StoreError::Credentials);
         }
+        // Shown by `queue list` and kept in exports: nothing that drives a
+        // terminal or reorders text (review of #41, round 4).
+        if url.chars().any(crate::category::is_display_control) {
+            return Err(StoreError::Refused(
+                "the URL has control characters or direction marks".into(),
+            ));
+        }
         let id = self.next_id;
         let item = Item {
             id,
@@ -311,7 +318,10 @@ pub fn check_name(name: &str) -> Result<(), StoreError> {
     let ok = (1..=MAX_NAME_CHARS).contains(&count)
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        // The Hangul fillers count as letters but show nothing (review of
+        // #41, round 4).
+        && !name.chars().any(crate::category::is_hidden_char);
     if ok {
         Ok(())
     } else {
