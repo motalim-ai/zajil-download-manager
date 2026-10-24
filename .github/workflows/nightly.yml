@@ -72,19 +72,24 @@ jobs:
             Windows) cores="$NUMBER_OF_PROCESSORS" ;;
           esac
           echo "runner: $RUNNER_OS, cores: $cores" > "$ZAJIL_DIAG_DIR/machine.txt"
-          sample() {
+          # Once a second. On Windows one long-lived typeperf (processor
+          # time and its queue, the nearest to a load average): starting a
+          # PowerShell for each sample took 2 to 5 s and loaded the machine
+          # it measured (review of #42).
+          if [ "$RUNNER_OS" = Windows ]; then
+            typeperf "\Processor(_Total)\% Processor Time" "\System\Processor Queue Length" \
+              -si 1 -sc 900 > "$ZAJIL_DIAG_DIR/load.txt" 2>&1 &
+          else
             while :; do
               case "$RUNNER_OS" in
                 Linux) echo "$(date -u +%T) loadavg $(cut -d' ' -f1-3 /proc/loadavg)" ;;
                 macOS) echo "$(date -u +%T) loadavg $(sysctl -n vm.loadavg)" ;;
-                Windows) echo "$(date -u +%T) cpu% $(powershell -NoProfile -Command \
-                  '(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average')" ;;
               esac
               sleep 1
-            done
-          }
-          sample > "$ZAJIL_DIAG_DIR/load.txt" 2>&1 &
+            done > "$ZAJIL_DIAG_DIR/load.txt" 2>&1 &
+          fi
           sampler=$!
+          sleep 2
           status=0
           cargo test --locked -p zajil-core --test speed_limit_real_clock -- \
             --ignored --exact --nocapture \
@@ -178,12 +183,14 @@ jobs:
             exit 0
           fi
           # This run (its test jobs passed) and the 13 scheduled runs before
-          # it, all finished without a failure.
+          # it, all finished without a failure at their first attempt: a
+          # failed night re-run by hand still counts as failed (review of
+          # #42).
           previous="$(gh run list --workflow nightly.yml --event schedule --limit 30 \
-            --json databaseId,status,conclusion \
+            --json databaseId,status,conclusion,attempt \
             --jq "[.[] | select(.databaseId != $RUN_ID and .status == \"completed\")][:13]")"
           count="$(jq 'length' <<<"$previous")"
-          good="$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$previous")"
+          good="$(jq '[.[] | select(.conclusion == "success" and .attempt == 1)] | length' <<<"$previous")"
           echo "previous scheduled runs: $count, without a failure: $good"
           if [ "$count" -lt 13 ] || [ "$good" -lt 13 ]; then
             exit 0
@@ -191,15 +198,23 @@ jobs:
           ids="$RUN_ID $(jq -r '.[].databaseId' <<<"$previous")"
           measured=""
           for id in $ids; do
-            # "<job>\t<step>\t<time> <line>": keep the job (the system) and
-            # the line.
-            lines="$(gh run view "$id" --log 2>/dev/null | grep '× the limit over' \
-              | awk -F'\t' '{ sub(/^[^ ]* /, "", $3); print $1 ": " $3 }' || true)"
-            measured+="- $SERVER/$GH_REPO/actions/runs/$id"$'\n'"$(sed 's/^/  - /' <<<"$lines")"$'\n'
+            # Each real-clock job's own log: this run is still in progress,
+            # and `gh run view --log` refuses such a run (review of #42).
+            measured+="- $SERVER/$GH_REPO/actions/runs/$id"$'\n'
+            jobs="$(gh api "repos/$GH_REPO/actions/runs/$id/jobs" \
+              --jq '.jobs[] | select(.name | startswith("Real-clock")) | "\(.id)\t\(.name)"')"
+            while IFS=$'\t' read -r job name; do
+              [ -n "$job" ] || continue
+              found="$(gh api "repos/$GH_REPO/actions/jobs/$job/logs" 2>/dev/null \
+                | grep -o '[0-9]* connections: .* × the limit over [0-9.]*s' || true)"
+              while IFS= read -r line; do
+                [ -n "$line" ] && measured+="  - $name: $line"$'\n'
+              done <<<"$found"
+            done <<<"$jobs"
           done
           body="$(printf '%s\n' \
             '<div dir="rtl">' '' \
-            '**ما تكرر** (قرار المالك على #39): 14 تشغيلًا ليليًا متتاليًا دون فشل، على الأنظمة الثلاثة. تُغلق هذه الـ Issue، وتُفتح من جديد تلقائيًا إذا عاد الفشل.' '' \
+            '**لم يتكرر** (قرار المالك على #39): 14 تشغيلًا ليليًا متتاليًا دون فشل، على الأنظمة الثلاثة. تُغلق هذه الـ Issue، وتُفتح من جديد تلقائيًا إذا عاد الفشل.' '' \
             'القياسات (معدّل التحميل من الحد في كل تشغيل):' '' "$measured" '</div>')"
           gh issue close "$issue" --reason "not planned" --comment "$body"
           echo "Closed #$issue"

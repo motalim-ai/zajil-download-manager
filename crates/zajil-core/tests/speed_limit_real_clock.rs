@@ -146,15 +146,29 @@ async fn on_the_real_clock_the_first_second_stays_under_twice_the_limit() {
             }
         };
         let download = engine.download(&url, dir.path(), &mut on_event);
-        let finished = tokio::time::timeout(Duration::from_secs(120), download)
-            .await
-            .unwrap_or_else(|_| panic!("{connections} connections: not done after 120 s"))
-            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(120), download).await;
         let took = started.elapsed();
-        assert_eq!(
-            sha256_hex(&std::fs::read(&finished.file).unwrap()),
-            sha256_hex(&data)
-        );
+        // A hang, an error or a wrong file is a failure like the others,
+        // so its measurements are written too (review of #42: they were
+        // lost when these panicked at once).
+        let mut downloaded = false;
+        match result {
+            Err(_) => failures.push(format!("{connections} connections: not done after 120 s")),
+            Ok(Err(err)) => {
+                failures.push(format!(
+                    "{connections} connections: the download failed: {err}"
+                ));
+            }
+            Ok(Ok(finished)) => {
+                if sha256_hex(&std::fs::read(&finished.file).unwrap()) == sha256_hex(&data) {
+                    downloaded = true;
+                } else {
+                    failures.push(format!(
+                        "{connections} connections: the file is not the original"
+                    ));
+                }
+            }
+        }
         let most = *first_second.lock().unwrap();
         let speed = data.len() as f64 / took.as_secs_f64() / rate as f64;
 
@@ -200,6 +214,9 @@ async fn on_the_real_clock_the_first_second_stays_under_twice_the_limit() {
 
         // The checks, unchanged: collected so that both measurements are
         // written before the test fails.
+        if !downloaded {
+            continue;
+        }
         if most > 2 * rate {
             failures.push(format!(
                 "{connections} connections: {most} bytes on disk within the first second, \
@@ -220,6 +237,8 @@ async fn on_the_real_clock_the_first_second_stays_under_twice_the_limit() {
     }
     print!("{summary}");
     if !failures.is_empty() {
+        // Blocking writes in an async test, on purpose: both downloads are
+        // over, and nothing else runs (AGENTS.md §10.6).
         if let Some(out) = std::env::var_os("ZAJIL_DIAG_DIR") {
             let out = std::path::PathBuf::from(out);
             std::fs::create_dir_all(&out).unwrap();
