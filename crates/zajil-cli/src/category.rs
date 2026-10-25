@@ -72,7 +72,8 @@ pub fn display_name(c: &Category) -> String {
     match c.id.as_str() {
         "programs" => "Programs",
         "video" => "Videos",
-        "music" => "Music",
+        // The app's names since #118 (#121): Videos and Audio.
+        "music" => "Audio",
         "documents" => "Documents",
         "archives" => "Archives",
         other => other,
@@ -190,6 +191,33 @@ fn print_list(file: &CategoriesFile) {
         }
         if !c.extensions.is_empty() {
             println!("  extensions: {}", c.extensions.join(", "));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zajil_core::category::CategoriesFile;
+
+    /// #121: the command line names each built-in category as the app does
+    /// in English (`category-<id>` in `locales/en/zajil.ftl`), so the two
+    /// never drift apart again.
+    #[test]
+    fn built_in_names_are_the_app_s_english_ones() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../locales/en/zajil.ftl");
+        let texts = std::fs::read_to_string(path).unwrap();
+        let app_name = |id: &str| {
+            let key = format!("category-{id} = ");
+            texts
+                .lines()
+                .find_map(|l| l.strip_prefix(&key))
+                .map(str::to_owned)
+        };
+        let built_in = CategoriesFile::built_in().categories;
+        assert!(!built_in.is_empty());
+        for c in &built_in {
+            assert_eq!(Some(display_name(c)), app_name(&c.id), "{}", c.id);
         }
     }
 }
