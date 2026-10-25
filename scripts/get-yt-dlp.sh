@@ -33,7 +33,9 @@ mkdir -p "$dir"
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
   --retry 4 --retry-delay 5 --retry-all-errors \
   -o "$dir/$name.download" "https://github.com/yt-dlp/yt-dlp/releases/download/$version/$file"
-actual="$( (sha256sum "$dir/$name.download" 2>/dev/null || shasum -a 256 "$dir/$name.download") | cut -d' ' -f1)"
+# From stdin: with a file name, Git Bash's sha256sum on Windows puts a
+# backslash before the hash of a path that holds one.
+actual="$( (sha256sum < "$dir/$name.download" 2>/dev/null || shasum -a 256 < "$dir/$name.download") | cut -d' ' -f1)"
 if [ "$actual" != "$sha256" ]; then
   rm -f "$dir/$name.download"
   echo "yt-dlp $version ($file) has SHA-256 $actual, not the pinned $sha256" >&2
