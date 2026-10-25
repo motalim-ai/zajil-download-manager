@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod live;
+mod menu;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
@@ -138,6 +139,9 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Opens a finished download or its folder from Rust only
+        // (`open_download`): the page has no opener permission.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -146,6 +150,12 @@ pub fn run() {
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
+        // The macOS menu bar's commands go to the page (`menu.rs`).
+        .on_menu_event(|handle, event| {
+            if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
+                let _ = handle.emit("menu-command", command.to_owned());
+            }
+        })
         .invoke_handler(handlers())
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
@@ -255,7 +265,13 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         browser_integration,
         refresh_link,
         cancel_refresh,
-        go_without_cookies
+        go_without_cookies,
+        menu::set_menu,
+        quit_app,
+        app_version,
+        open_download,
+        move_to_queue,
+        download_links
     ]
 }
 
@@ -284,6 +300,12 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         refresh_link,
         cancel_refresh,
         go_without_cookies,
+        menu::set_menu,
+        quit_app,
+        app_version,
+        open_download,
+        move_to_queue,
+        download_links,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -1681,6 +1703,95 @@ async fn refresh_item(
     })
 }
 
+/// «Quit» from the menus: the same way as the tray's (the downloads record
+/// their progress and stop first).
+#[tauri::command]
+fn quit_app<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    handle.exit(0);
+}
+
+/// The program's version, for «About Zajil».
+#[tauri::command]
+fn app_version<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> String {
+    handle.package_info().version.to_string()
+}
+
+/// Opens download `id`'s finished file (`folder` false) with the system's
+/// program for it, or shows its folder (`folder` true: the file selected
+/// when it is there). Only a download's own paths: the page names the
+/// download, never a path.
+#[tauri::command]
+async fn open_download<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    folder: bool,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if in_scene(&handle) {
+        return Ok(());
+    }
+    let store = app.store.clone();
+    let queues = tokio::task::spawn_blocking(move || store.load())
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
+    let file = item.file.clone().filter(|f| f.is_file());
+    let opener = handle.opener();
+    match (folder, file) {
+        (false, Some(file)) => opener
+            .open_path(file.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string()),
+        (false, None) => Err(format!("download {id} has no finished file")),
+        (true, Some(file)) => opener.reveal_item_in_dir(&file).map_err(|e| e.to_string()),
+        (true, None) => opener
+            .open_path(item.dir.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string()),
+    }
+}
+
+/// Moves downloads to queue `queue`, in their order, at its end.
+#[tauri::command]
+async fn move_to_queue<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    queue: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| move_items(q, &ids, &queue)).await
+}
+
+/// [`move_to_queue`]: an unknown download or queue changes nothing.
+fn move_items(queues: &mut QueuesFile, ids: &[u64], queue: &str) -> Result<(), StoreError> {
+    queues
+        .queue(queue)
+        .ok_or_else(|| StoreError::NoSuchQueue(queue.to_owned()))?;
+    for id in ids {
+        queues.item(*id).ok_or(StoreError::NoSuchItem(*id))?;
+    }
+    for id in ids {
+        let item = queues.remove(*id)?;
+        queues.queue_mut(queue).expect("checked").items.push(item);
+    }
+    Ok(())
+}
+
+/// The links of downloads, for «Copy link» (the user's own action: a
+/// token in a link is copied with it).
+#[tauri::command]
+async fn download_links(app: State<'_, App>, ids: Vec<u64>) -> Result<Vec<String>, String> {
+    let store = app.store.clone();
+    let queues = tokio::task::spawn_blocking(move || store.load())
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    Ok(ids
+        .iter()
+        .filter_map(|id| queues.item(*id).map(|i| i.url.clone()))
+        .collect())
+}
+
 #[tauri::command]
 async fn remove<R: tauri::Runtime>(
     app: State<'_, App>,
@@ -1705,6 +1816,31 @@ mod tests {
                 .unwrap();
         }
         q
+    }
+
+    /// M5.5 «Move to queue»: the downloads go to the end of that queue, in
+    /// their order; an unknown queue or download changes nothing.
+    #[test]
+    fn downloads_move_to_another_queue_in_their_order() {
+        let mut q = three();
+        q.add("night", "https://example.com/n.iso", &std::env::temp_dir())
+            .unwrap();
+        let before = q.clone();
+        assert!(matches!(
+            move_items(&mut q, &[1], "nowhere"),
+            Err(StoreError::NoSuchQueue(_))
+        ));
+        assert!(matches!(
+            move_items(&mut q, &[1, 99], "night"),
+            Err(StoreError::NoSuchItem(99))
+        ));
+        assert_eq!(q, before);
+        move_items(&mut q, &[3, 1], "night").unwrap();
+        let ids = |name: &str| -> Vec<u64> {
+            q.queue(name).unwrap().items.iter().map(|i| i.id).collect()
+        };
+        assert_eq!(ids("night"), [4, 3, 1]);
+        assert_eq!(ids("main"), [2]);
     }
 
     #[test]
