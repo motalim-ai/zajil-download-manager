@@ -35,7 +35,7 @@
 
 ## الأحجام الفعلية (FFmpeg 8.1.3)
 
-من سجل البناء في الـ CI ([تشغيل 40201069207](https://github.com/motalim-ai/zajil-download-manager/actions/runs/40201069207))، بعد الربط الثابت:
+من سجل البناء في الـ CI ([تشغيل 40213208200](https://github.com/motalim-ai/zajil-download-manager/actions/runs/40213208200)، بلا iconv)، بعد الربط الثابت:
 
 | النظام | `ffmpeg` | `ffprobe` | المجموع |
 |---|---|---|---|
