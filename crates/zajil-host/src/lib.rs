@@ -96,6 +96,26 @@ pub enum Request {
         #[serde(default)]
         private: bool,
     },
+    /// Download the video on this page (M6, ADR-0009): the user chose
+    /// "Download video with Zajil" on a video, or on the page. Zajil asks
+    /// yt-dlp for its formats, and the user chooses.
+    Video {
+        protocol_version: u32,
+        /// The page the video is on: yt-dlp reads it.
+        page: String,
+        /// The video's own address, when it is an http(s) one (not a
+        /// `blob:` the page made): for a page yt-dlp does not know.
+        #[serde(default)]
+        media: Option<String>,
+        /// The `Cookie` header for the page only (ADR-0005), when the user
+        /// allowed cookies; never from a private window.
+        #[serde(default)]
+        cookies: Option<String>,
+        /// From a private window: Zajil keeps nothing of it once it is
+        /// done, as for [`Request::Download`].
+        #[serde(default)]
+        private: bool,
+    },
     /// The last private window closed (review of #91): Zajil takes every
     /// private window's download out of its queues and deletes their part
     /// and state files.
@@ -365,6 +385,9 @@ fn check(request: &Request) -> Result<(), String> {
         }
         | Request::Cookies {
             protocol_version, ..
+        }
+        | Request::Video {
+            protocol_version, ..
         } => *protocol_version,
     };
     check_version(version)?;
@@ -374,6 +397,20 @@ fn check(request: &Request) -> Result<(), String> {
             cookies: Some(cookies),
             ..
         } => check_cookies(cookies)?,
+        Request::Video {
+            page,
+            media,
+            cookies,
+            ..
+        } => {
+            check_url(page, "page")?;
+            if let Some(media) = media {
+                check_url(media, "video URL")?;
+            }
+            if let Some(cookies) = cookies {
+                check_cookies(cookies)?;
+            }
+        }
         _ => {}
     }
     if let Request::Download {
@@ -758,6 +795,64 @@ mod tests {
                     r#"{{"type":"download","protocol_version":1,"url":"https://example.com/a","cookies":"{long_cookies}"}}"#
                 ),
                 "longer than",
+            ),
+        ] {
+            let err = parse(message.as_bytes()).expect_err(message);
+            assert!(err.contains(why), "{message}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_video_is_read_with_its_page_and_checked_like_a_download() {
+        assert_eq!(
+            parse(
+                br#"{"type":"video","protocol_version":1,"page":"https://example.com/watch","media":"https://cdn.example.com/v.mp4","cookies":"a=1","private":true}"#
+            )
+            .unwrap(),
+            Request::Video {
+                protocol_version: 1,
+                page: "https://example.com/watch".into(),
+                media: Some("https://cdn.example.com/v.mp4".into()),
+                cookies: Some("a=1".into()),
+                private: true,
+            }
+        );
+        assert_eq!(
+            parse(br#"{"type":"video","protocol_version":1,"page":"https://example.com/"}"#)
+                .unwrap(),
+            Request::Video {
+                protocol_version: 1,
+                page: "https://example.com/".into(),
+                media: None,
+                cookies: None,
+                private: false,
+            }
+        );
+        for (message, why) in [
+            (r#"{"type":"video","protocol_version":1}"#, "missing field"),
+            (
+                r#"{"type":"video","protocol_version":2,"page":"https://example.com/"}"#,
+                "protocol version 2",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"file:///etc/passwd"}"#,
+                "page is refused",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"https://example.com/","media":"blob:https://example.com/1"}"#,
+                "video URL is refused",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"https://u:p@example.com/"}"#,
+                "page is refused",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"https://example.com/","cookies":"a=1\nX: 1"}"#,
+                "visible ASCII",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"https://example.com/","url":"https://example.com/"}"#,
+                "unknown field",
             ),
         ] {
             let err = parse(message.as_bytes()).expect_err(message);
