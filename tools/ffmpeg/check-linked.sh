@@ -2,7 +2,8 @@
 # Checks what the built ffmpeg and ffprobe themselves load (ADR-0009,
 # checklist items 1, 17 and 18: no external library). configure's own
 # lists are checked by build.sh; this reads the real files: every library
-# they need must be the system's own C library or a Windows system DLL.
+# they need must be part of the system: its C library, Apple's frameworks,
+# Windows' own DLLs.
 # Prints what each file needs, for the record.
 #
 #   tools/ffmpeg/check-linked.sh <dir with ffmpeg and ffprobe>
@@ -31,14 +32,19 @@ case "$(uname -s)" in
     done
     ;;
   Darwin)
-    # libSystem only, for every architecture of a universal file.
+    # libSystem and Apple's own frameworks only (configure probes
+    # CoreFoundation, CoreMedia and CoreVideo whatever the options, and
+    # libavutil links what it finds), for both halves of a universal file.
     for f in "$dir/ffmpeg" "$dir/ffprobe"; do
       deps="$(otool -arch all -L "$f")"
       grep -q '/usr/lib/libSystem.B.dylib' <<< "$deps" || fail "otool could not read the libraries of $f"
       needed="$(grep -E '^[[:space:]]+/' <<< "$deps" | awk '{ print $1 }' | sort -u)"
       echo "$(basename "$f") needs: $(tr '\n' ' ' <<< "$needed")"
       while IFS= read -r lib; do
-        [ "$lib" = /usr/lib/libSystem.B.dylib ] || fail "$f needs $lib, which is not libSystem"
+        case "$lib" in
+          /usr/lib/libSystem.B.dylib|/System/Library/Frameworks/*.framework/*) ;;
+          *) fail "$f needs $lib, which is not part of macOS" ;;
+        esac
       done <<< "$needed"
     done
     ;;
