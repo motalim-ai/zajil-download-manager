@@ -67,6 +67,10 @@ struct Attempt {
     stop: Stop,
     /// The speed limits every byte of this download goes through.
     limits: Limits,
+    /// The counter of the download's site, if the user limited it
+    /// ([`crate::sites`]): further connections of a split download take a
+    /// slot of it each.
+    site: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl Attempt {
@@ -81,7 +85,13 @@ impl Attempt {
                 .cloned(),
             failures: 0,
             furthest: 0,
+            site: None,
         }
+    }
+
+    fn with_site(mut self, site: Option<Arc<tokio::sync::Semaphore>>) -> Self {
+        self.site = site;
+        self
     }
 
     /// Counts a failure of a single connection that had written up to
@@ -469,6 +479,9 @@ pub struct Engine {
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
+    /// The user's per-site connection limits, shared by every download of
+    /// this engine and its clones ([`crate::sites`]).
+    sites: Arc<crate::sites::SiteLimits>,
     /// Hold a new download whose name it says: the name the server gives
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
@@ -505,6 +518,7 @@ impl Engine {
             client,
             options,
             browser: Arc::default(),
+            sites: Arc::default(),
             hold: None,
             own_limit: None,
             name: None,
@@ -525,6 +539,7 @@ impl Engine {
             client,
             options,
             browser: Arc::default(),
+            sites: Arc::default(),
             hold: None,
             own_limit: None,
             name: None,
@@ -560,6 +575,15 @@ impl Engine {
     pub fn with_browser(&self, from: crate::browser::FromBrowser) -> Engine {
         let mut engine = self.clone();
         engine.browser = Arc::new(from);
+        engine
+    }
+
+    /// This engine, counting the connections to each site in `sites` (the
+    /// settings file's `site_connections`) across all its downloads and
+    /// those of its clones made after this.
+    pub fn with_site_limits(&self, sites: crate::sites::SiteLimits) -> Engine {
+        let mut engine = self.clone();
+        engine.sites = Arc::new(sites);
         engine
     }
 
@@ -685,7 +709,10 @@ impl Engine {
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let url = parse_url(url)?;
-        let mut attempt = Attempt::new(Some(&url), stop, &self.limits());
+        // The download's own slot of its site, held until it ends.
+        let site = self.sites.counter_for(&url);
+        let _slot = crate::sites::take_slot(site.as_ref(), stop).await?;
+        let mut attempt = Attempt::new(Some(&url), stop, &self.limits()).with_site(site);
         let response = self
             .retrying(&mut attempt, on_event, || self.get(url.clone(), None))
             .await?;
@@ -838,6 +865,17 @@ impl Engine {
         let final_path = checked_final_path(state_file)?;
         let state_file = state_path(&final_path);
         let state = DownloadState::load(&state_file)?;
+        // The download's own slot of its site, held until it ends. Stopped
+        // while waiting: still resumable from its state file.
+        let site = Url::parse(&state.url)
+            .ok()
+            .and_then(|url| self.sites.counter_for(&url));
+        let _slot = crate::sites::take_slot(site.as_ref(), stop)
+            .await
+            .map_err(|_| Error::Stopped {
+                state_file: Some(state_file.clone()),
+            })?;
+        let new_attempt = || Attempt::new(None, stop, &limits).with_site(site.clone());
         let part_file = part_path(&final_path);
         let part = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {
             Ok(part) => Some(part),
@@ -863,7 +901,7 @@ impl Engine {
                     state,
                     RestartReason::PartFileMissing,
                     None,
-                    Attempt::new(None, stop, &limits),
+                    new_attempt(),
                     on_event,
                 )
                 .await;
@@ -898,7 +936,7 @@ impl Engine {
                     state,
                     reason,
                     None,
-                    Attempt::new(None, stop, &limits),
+                    new_attempt(),
                     on_event,
                 )
                 .await;
@@ -906,18 +944,11 @@ impl Engine {
         let if_range = if_range.expect("checked above");
         if state.segments.len() > 1 {
             return self
-                .resume_segments(
-                    final_path,
-                    part,
-                    state,
-                    if_range,
-                    Attempt::new(None, stop, &limits),
-                    on_event,
-                )
+                .resume_segments(final_path, part, state, if_range, new_attempt(), on_event)
                 .await;
         }
 
-        let mut attempt = Attempt::new(None, stop, &limits);
+        let mut attempt = new_attempt();
         let response = self
             .get_with_fallback(&state, Some((done, None, if_range)), &mut attempt, on_event)
             .await
@@ -1142,6 +1173,7 @@ impl Engine {
                     max_failures: self.options.max_failures,
                     stop: attempt.stop.clone(),
                     limits: attempt.limits.clone(),
+                    site: attempt.site.clone(),
                     url: response.url().clone(),
                     if_range,
                     final_path,
@@ -1320,6 +1352,7 @@ impl Engine {
                 max_failures: self.options.max_failures,
                 stop: attempt.stop.clone(),
                 limits: attempt.limits.clone(),
+                site: attempt.site.clone(),
                 url: attempt.authorize(response.url()),
                 if_range,
                 final_path,

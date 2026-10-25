@@ -138,6 +138,9 @@ pub(crate) struct Job {
     pub stop: Stop,
     /// The speed limits every connection goes through.
     pub limits: Limits,
+    /// The counter of the download's site, if the user limited it
+    /// ([`crate::sites`]): every connection after the first takes a slot.
+    pub site: Option<Arc<tokio::sync::Semaphore>>,
     /// The URL range requests go to.
     pub url: Url,
     /// The `If-Range` value: a strong validator (see `if_range_value`).
@@ -167,6 +170,7 @@ pub(crate) async fn run(
         max_failures,
         stop: user_stop,
         limits,
+        site,
         url,
         if_range,
         final_path,
@@ -192,6 +196,7 @@ pub(crate) async fn run(
     }
     let ctx = Arc::new(Ctx {
         limits,
+        site,
         client,
         browser,
         url,
@@ -222,6 +227,8 @@ pub(crate) async fn run(
                 next: ctx.board().segment_write_position(start),
                 last: total - 1,
                 segment: start,
+                // The first connection is the download's own slot.
+                slot: None,
             }),
             (_, taken) => {
                 first = taken;
@@ -396,6 +403,8 @@ async fn checkpoint(
 /// What workers share.
 struct Ctx {
     limits: Limits,
+    /// See [`Job::site`].
+    site: Option<Arc<tokio::sync::Semaphore>>,
     client: Client,
     browser: Arc<crate::browser::FromBrowser>,
     url: Url,
@@ -787,6 +796,9 @@ struct Stream {
     last: u64,
     /// Start of the segment this stream writes.
     segment: u64,
+    /// This connection's slot of a limited site, if it needed one: given
+    /// back when the stream ends.
+    slot: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 /// One connection: reads its stream into the file, then asks for more work
@@ -826,12 +838,22 @@ enum Work {
 /// (`Board::active`) until its stream ends.
 async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
     let now = Instant::now();
-    let found = {
+    let (found, slot) = {
         let mut board = ctx.board();
         if board.ranges_refused || board.active >= board.limit {
             // Nothing to ask for, or the server allows fewer connections.
             return Work::Done;
         }
+        // On a site the user limited, a connection besides another one of
+        // this download needs a slot of its own; without one it does not
+        // open, as when a server refuses more (`crate::sites`).
+        let slot = match (&ctx.site, board.active >= 1) {
+            (Some(site), true) => match site.clone().try_acquire_owned() {
+                Ok(slot) => Some(slot),
+                Err(_) => return Work::Done,
+            },
+            _ => None,
+        };
         let paused = board.pause_until.filter(|&until| until > now);
         let found = match paused {
             Some(until) => Err(until),
@@ -856,7 +878,7 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
         if found.is_ok() {
             board.active += 1;
         }
-        found
+        (found, slot)
     };
     let (start, from, to) = match found {
         Ok(work) => work,
@@ -869,7 +891,10 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
         }
     };
     match request_range(ctx, id, start, from, to).await {
-        Some(stream) => Work::Stream(stream),
+        Some(mut stream) => {
+            stream.slot = slot;
+            Work::Stream(stream)
+        }
         None => {
             // The segment failed, waits or was given back: another one may
             // still need this connection.
@@ -927,6 +952,7 @@ async fn request_range(
                     next: from,
                     last: to,
                     segment: start,
+                    slot: None,
                 })
             } else {
                 ctx.board().fail(
