@@ -9,6 +9,7 @@ import {
   send,
   shouldCapture,
   takeOver,
+  videoMessage,
 } from "../src/capture.js";
 import { pausesSafely } from "../src/compat.js";
 import { defaults } from "../src/settings.js";
@@ -222,5 +223,33 @@ describe("handing a download over, in Chrome and Edge", () => {
   it("a malformed answer counts as refused", async () => {
     expect((await send(fakeApi({ answer: undefined }), {})).outcome).toBe("refused");
     expect((await send(fakeApi({ answer: { ok: "yes" } }), {})).outcome).toBe("refused");
+  });
+});
+
+describe("videoMessage (M6)", () => {
+  it("sends the frame's page for an embedded player, else the tab's, and an http(s) video address", () => {
+    expect(videoMessage({ pageUrl: "https://blog.example/post", frameUrl: "https://player.example/embed/1", srcUrl: "https://cdn.example/v.mp4" })).toEqual({
+      type: "video",
+      protocol_version: 1,
+      page: "https://player.example/embed/1",
+      media: "https://cdn.example/v.mp4",
+    });
+    expect(videoMessage({ pageUrl: "https://example.com/v", frameUrl: "about:blank" })).toEqual({ type: "video", protocol_version: 1, page: "https://example.com/v" });
+  });
+
+  it("leaves out an address only the page can read, and refuses a page Zajil cannot", () => {
+    for (const srcUrl of ["blob:https://example.com/1", "data:video/mp4;base64,AAAA", "https://u:p@example.com/v.mp4", undefined]) {
+      expect(videoMessage({ pageUrl: "https://example.com/v", srcUrl })?.media, String(srcUrl)).toBeUndefined();
+    }
+    for (const pageUrl of ["file:///v.html", "chrome://newtab", "https://example.com/\u202ev", `https://example.com/${"a".repeat(MAX_URL)}`, undefined]) {
+      expect(videoMessage({ pageUrl }), String(pageUrl)).toBeNull();
+    }
+  });
+
+  it("sends the cookies, but never a private window's", () => {
+    expect(videoMessage({ pageUrl: "https://example.com/v" }, { cookies: "a=1" })).toMatchObject({ cookies: "a=1" });
+    const sent = videoMessage({ pageUrl: "https://example.com/v" }, { cookies: "a=1", private: true });
+    expect(sent).toMatchObject({ private: true });
+    expect(sent?.cookies).toBeUndefined();
   });
 });
