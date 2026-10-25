@@ -969,3 +969,123 @@ async fn a_private_window_s_download_leaves_nothing_once_done() {
         data_bytes
     );
 }
+
+/// Review of #91: a private window's download that fails leaves nothing:
+/// not in the queues, not its part or state file; one taken out of the
+/// queues while it runs (its window closed) is stopped and its files
+/// deleted; one the user paused stays while its window is open.
+#[tokio::test]
+async fn a_private_window_s_download_that_fails_or_is_taken_out_leaves_nothing() {
+    let server = TestServer::http();
+    let data_bytes = random_bytes(2 * MIB, 99);
+    server.put(
+        "/secret-private.bin",
+        FileSpec::new(data_bytes.clone()).cut_after(256 * 1024, 1),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let engine = Engine::new(Options {
+        connections: 1,
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    let id = add(
+        &store,
+        "main",
+        &server.url("/secret-private.bin"),
+        dir.path(),
+    );
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    // Cut in the middle: it fails, with a part and a state file.
+    Runner::new(engine.clone(), store.clone())
+        .poll(Duration::from_millis(20))
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert!(
+        store.load().unwrap().item(id).is_none(),
+        "the failed one stayed"
+    );
+    let left: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert!(!text.contains("secret-private"), "{text}");
+
+    // Running, then its window closes (`take_private`): stopped, nothing left.
+    server.put(
+        "/slow-private.bin",
+        FileSpec::new(data_bytes.clone()).throttle(256 * 1024),
+    );
+    let id = add(&store, "main", &server.url("/slow-private.bin"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    let stop = Stop::new();
+    let run = {
+        let (store, engine, stop) = (store.clone(), engine.clone(), stop.clone());
+        tokio::spawn(async move {
+            Runner::new(engine, store)
+                .poll(Duration::from_millis(20))
+                .run(&stop, &mut |_| {})
+                .await
+        })
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !dir.path().join("slow-private.bin.zajil-part").exists() {
+        assert!(std::time::Instant::now() < deadline, "it did not start");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let files = store.update(|q| Ok(q.take_private())).unwrap();
+    assert!(
+        files.is_empty(),
+        "a running one's files are the runner's: {files:?}"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while fs::read_dir(dir.path()).unwrap().count() > 0 {
+        assert!(std::time::Instant::now() < deadline, "its files stayed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    stop.request();
+    run.await.unwrap().unwrap();
+
+    // Paused by the user while its window is open: it stays, until the
+    // window closes, then its files go too.
+    let id = add(
+        &store,
+        "main",
+        &server.url("/secret-private.bin"),
+        dir.path(),
+    );
+    let state = dir.path().join("kept.bin.zajil-state");
+    fs::write(&state, b"{}").unwrap();
+    fs::write(dir.path().join("kept.bin.zajil-part"), b"x").unwrap();
+    store
+        .update(|q| {
+            let item = q.item_mut(id).unwrap();
+            item.private = true;
+            item.status = Status::Paused;
+            item.state_file = Some(state.clone());
+            Ok(())
+        })
+        .unwrap();
+    assert!(store.load().unwrap().item(id).is_some());
+    let mut files = store.update(|q| Ok(q.take_private())).unwrap();
+    files.sort();
+    assert_eq!(files, [dir.path().join("kept.bin.zajil-part"), state]);
+    assert!(store.load().unwrap().item(id).is_none());
+}

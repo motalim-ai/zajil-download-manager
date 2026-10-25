@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * be fired, and what it does is recorded. `granted`: the cookie
  * permission; `buttons`: whether notifications take buttons (Firefox:
  * not); `answer`: what Zajil answers. */
-function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid", value: "abc" }] }) {
+function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid", value: "abc" }], windows = [] }) {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
@@ -53,6 +53,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
       },
     },
     tabs: { create: async (tab) => done.tabs.push(tab.url) },
+    windows: { onRemoved: on("windowRemoved"), getAll: async () => windows },
     action: { setBadgeText: async () => {}, onClicked: on("action") },
     contextMenus: { create: () => {}, onClicked: on("menu") },
     downloads: {
@@ -226,6 +227,31 @@ describe("the background", () => {
     await flush();
     expect(fake.done.downloads).toEqual([]);
     expect(fake.done.tabs).toEqual([]);
+  });
+
+  it("tells Zajil when the last private window closes, once, and only after a private download (review of #91)", async () => {
+    const windows = [{ incognito: true }, { incognito: false }];
+    const fake = fakeChrome({ granted: false, answer: { ok: true }, windows });
+    await load(fake);
+    // No private download yet: nothing is sent when a window closes.
+    fake.listeners.windowRemoved(1);
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" }, { incognito: true });
+    await flush();
+    expect(fake.session).toEqual({ privateSent: true });
+    // A private window is still open: not yet.
+    fake.listeners.windowRemoved(2);
+    await flush();
+    expect(fake.done.sent).toHaveLength(1);
+    windows.splice(0, 1);
+    fake.listeners.windowRemoved(3);
+    await flush();
+    expect(fake.done.sent.at(-1)).toEqual({ type: "private_closed", protocol_version: 1 });
+    expect(fake.session).toEqual({});
+    fake.listeners.windowRemoved(4);
+    await flush();
+    expect(fake.done.sent).toHaveLength(2);
   });
 
   it("downloads with the browser in the tab's own container (review #84)", async () => {

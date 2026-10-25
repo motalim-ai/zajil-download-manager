@@ -96,6 +96,10 @@ pub enum Request {
         #[serde(default)]
         private: bool,
     },
+    /// The last private window closed (review of #91): Zajil takes every
+    /// private window's download out of its queues and deletes their part
+    /// and state files.
+    PrivateClosed { protocol_version: u32 },
     /// Keep this connection open (`runtime.connectNative`): the link on
     /// which Zajil asks this browser for cookies again (M5). Only the
     /// host's own connection to the app carries it.
@@ -352,6 +356,7 @@ fn check_cookies(cookies: &str) -> Result<(), String> {
 fn check(request: &Request) -> Result<(), String> {
     let version = match request {
         Request::Ping { protocol_version }
+        | Request::PrivateClosed { protocol_version }
         | Request::Download {
             protocol_version, ..
         }

@@ -128,6 +128,9 @@ struct Running {
     stop: Stop,
     /// The runner itself asked it to stop: it goes back to waiting.
     by_runner: bool,
+    /// From a private window: nothing of it stays if it fails or is taken
+    /// out of the queues (review of #91).
+    private: bool,
 }
 
 impl Runner {
@@ -516,6 +519,7 @@ impl Runner {
                     engine = engine.with_browser(from);
                 }
                 let categories = self.categories.clone().filter(|_| item.categorize);
+                let private = item.private;
                 let events = events.clone();
                 let task_stop = stop.clone();
                 let task = tasks.spawn(async move {
@@ -576,6 +580,7 @@ impl Runner {
                         task: task.id(),
                         stop,
                         by_runner: false,
+                        private,
                     },
                 );
             }
@@ -633,7 +638,9 @@ impl Runner {
                 (id, Err(Error::Io(error)))
             }
         };
-        let by_runner = running.remove(&id).is_some_and(|run| run.by_runner);
+        let (by_runner, private) = running
+            .remove(&id)
+            .map_or((false, false), |run| (run.by_runner, run.private));
         let event = match &result {
             Ok(done) => {
                 summary.finished += 1;
@@ -656,6 +663,49 @@ impl Runner {
                 }
             }
         };
+        // A private window's download that failed, or was taken out of the
+        // queues while it ran (its window closed): it leaves the queues, and
+        // its part and state files are deleted (review of #91). Paused by
+        // the user, it stays while its window is open.
+        if private && result.is_err() {
+            let stopped = matches!(result, Err(Error::Stopped { .. }));
+            let mut files: Vec<PathBuf> = match &result {
+                Err(Error::Stopped {
+                    state_file: Some(state),
+                })
+                | Err(Error::Interrupted {
+                    state_file: state, ..
+                }) => crate::queue::store::private_files(state),
+                _ => Vec::new(),
+            };
+            let taken = self
+                .update(move |queues| match queues.item(id) {
+                    Some(_) if stopped => Ok(None),
+                    Some(_) => Ok(Some(queues.remove(id)?.state_file)),
+                    None => Ok(Some(None)),
+                })
+                .await;
+            let taken = match taken {
+                Err(StoreError::NoSuchItem(_)) => Some(None),
+                other => other?,
+            };
+            if let Some(state) = taken {
+                files.extend(
+                    state
+                        .iter()
+                        .flat_map(|s| crate::queue::store::private_files(s)),
+                );
+                blocking(move || {
+                    for file in files {
+                        let _ = std::fs::remove_file(file);
+                    }
+                    Ok::<_, StoreError>(())
+                })
+                .await?;
+                on_event(event);
+                return Ok(());
+            }
+        }
         ignore_removed(
             self.update(move |queues| {
                 let item = queues.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;

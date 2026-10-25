@@ -411,6 +411,19 @@ fn notify(handle: &tauri::AppHandle, live: &Arc<Live>) {
 
 /// Runs the queues for as long as the window is open. The runner ends when
 /// nothing is left to download; it starts again as soon as something is.
+/// Takes every private window's download out of the queues and deletes the
+/// part and state files of those not running (a running one is stopped,
+/// and the runner deletes its files): when the last private window closes,
+/// and when the window starts, for any left from before (review of #91).
+/// Blocking.
+fn discard_private(store: &QueueStore) -> Result<(), StoreError> {
+    let files = store.update(|q| Ok(q.take_private()))?;
+    for file in files {
+        let _ = std::fs::remove_file(file);
+    }
+    Ok(())
+}
+
 async fn run_queues(handle: tauri::AppHandle) {
     let (engine, store, categories, connections, live, stop, from_browser) = {
         let app = handle.state::<App>();
@@ -424,6 +437,12 @@ async fn run_queues(handle: tauri::AppHandle) {
             app.from_browser.clone(),
         )
     };
+    // A private window's download left from before (closed or crashed
+    // meanwhile): nothing of it stays.
+    {
+        let store = store.clone();
+        let _ = tokio::task::spawn_blocking(move || discard_private(&store)).await;
+    }
     let (links, asks) = {
         let app = handle.state::<App>();
         (app.links.clone(), app.asks.clone())
@@ -1277,6 +1296,10 @@ fn from_extension(
         zajil_host::Request::Link { .. } | zajil_host::Request::Cookies { .. } => {
             zajil_host::Response::refused("not here")
         }
+        zajil_host::Request::PrivateClosed { .. } => match discard_private(store) {
+            Ok(()) => zajil_host::Response::ok(),
+            Err(err) => zajil_host::Response::refused(err.to_string()),
+        },
         zajil_host::Request::Download {
             url,
             filename,
@@ -2474,6 +2497,44 @@ mod tests {
             !text.contains("private-page") && !text.contains("inst-1"),
             "{text}"
         );
+    }
+
+    /// Review of #91: when the last private window closes, every private
+    /// window's download leaves the queues and its part and state files are
+    /// deleted; the others stay.
+    #[test]
+    fn the_last_private_window_closing_takes_its_downloads_out() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let state = data.path().join("p.bin.zajil-state");
+        std::fs::write(&state, b"{}").unwrap();
+        std::fs::write(data.path().join("p.bin.zajil-part"), b"x").unwrap();
+        let (private, other) = store
+            .update(|q| {
+                let private = q.add(DEFAULT_QUEUE, "https://example.com/p.bin", data.path())?;
+                let other = q.add(DEFAULT_QUEUE, "https://example.com/o.bin", data.path())?;
+                let item = q.item_mut(private).unwrap();
+                item.private = true;
+                item.status = Status::Paused;
+                item.state_file = Some(state.clone());
+                Ok((private, other))
+            })
+            .unwrap();
+        let request =
+            zajil_host::parse(br#"{"type":"private_closed","protocol_version":1}"#).unwrap();
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &Default::default(),
+            |_, _| unreachable!("nothing is checked"),
+        );
+        assert!(answer.ok, "{answer:?}");
+        let queues = store.load().unwrap();
+        assert!(queues.item(private).is_none());
+        assert!(queues.item(other).is_some());
+        assert!(!state.exists());
+        assert!(!data.path().join("p.bin.zajil-part").exists());
     }
 
     /// M5: a download from the extension keeps where it came from (the

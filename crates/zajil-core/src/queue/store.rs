@@ -174,6 +174,15 @@ impl std::fmt::Debug for BrowserSource {
     }
 }
 
+/// A download's state file and its part file, from its state file.
+pub fn private_files(state_file: &Path) -> Vec<PathBuf> {
+    let mut files = vec![state_file.to_path_buf()];
+    files.extend(
+        crate::state::final_path_for_state(state_file).map(|f| crate::state::part_path(&f)),
+    );
+    files
+}
+
 /// Where an item stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -333,6 +342,27 @@ impl QueuesFile {
     }
 
     /// Removes item `id` from its queue and returns it. Its files stay.
+    /// Takes every private window's download out of the queues (review of
+    /// #91: nothing of them may stay once the window is closed), and gives
+    /// the files of those that are not running (their part and state
+    /// files) for the caller to delete. A running one is stopped by the
+    /// runner, which deletes its files.
+    pub fn take_private(&mut self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for queue in &mut self.queues {
+            queue.items.retain(|item| {
+                if !item.private {
+                    return true;
+                }
+                if item.status != Status::Active {
+                    files.extend(item.state_file.iter().flat_map(|s| private_files(s)));
+                }
+                false
+            });
+        }
+        files
+    }
+
     pub fn remove(&mut self, id: u64) -> Result<Item, StoreError> {
         for queue in &mut self.queues {
             if let Some(index) = queue.items.iter().position(|i| i.id == id) {

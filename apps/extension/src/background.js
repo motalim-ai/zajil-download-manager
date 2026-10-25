@@ -5,7 +5,7 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely } from "./compat.js";
-import { menuMessage, needsSignIn, send, shouldCapture, takeOver } from "./capture.js";
+import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver } from "./capture.js";
 import { cookieHeader, cookiesAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
@@ -174,12 +174,28 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
     if (tab?.incognito) message.private = true;
     const result = await send(api, message);
     if (cookies && result.outcome === "taken") await rememberTicket(api, from.ticket, info.linkUrl, from.store);
+    // Zajil is told when the last private window closes (only a flag).
+    if (tab?.incognito && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
     await report(result, "menu", {
       url: info.linkUrl,
       sentCookies: Boolean(cookies),
       inPrivate: Boolean(tab?.incognito),
       store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
     });
+  })();
+});
+
+// The last private window closed: Zajil takes its downloads out of its
+// queues and deletes what they left (review of #91). Only if one was sent
+// to it, so Zajil is not started for nothing.
+api.windows?.onRemoved.addListener(() => {
+  void (async () => {
+    const { privateSent } = await api.storage.session.get("privateSent").catch(() => ({}));
+    if (!privateSent) return;
+    const open = await api.windows.getAll().catch(() => []);
+    if (open.some((/** @type {any} */ w) => w.incognito)) return;
+    await api.storage.session.remove("privateSent").catch(() => {});
+    await send(api, { type: "private_closed", protocol_version: PROTOCOL_VERSION });
   })();
 });
 
