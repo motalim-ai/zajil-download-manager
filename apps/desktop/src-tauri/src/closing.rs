@@ -57,8 +57,8 @@ const FILE: &str = "window.json";
 
 impl Closing {
     /// `close_quits`: `--close-quits` was given (the tests, which close
-    /// the window to quit it on Windows): closing quits whatever the
-    /// setting says, and nothing is saved.
+    /// the window to quit it on Windows): closing quits at once, with no
+    /// question, whatever the setting says, and nothing is saved.
     pub fn new(data_dir: &Path, close_quits: bool) -> Self {
         let path = data_dir.join(FILE);
         let tray = std::sync::Arc::new(AtomicU8::new(0));
@@ -184,6 +184,14 @@ pub fn watch<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
             .exiting
             .load(std::sync::atomic::Ordering::SeqCst)
         {
+            return;
+        }
+        // `--close-quits` (the tests, and any script that closes the
+        // window to quit Zajil): the window closes as before #109, and the
+        // program ends the way closing always ended it, the downloads
+        // recording their progress first; no question, which nobody would
+        // answer.
+        if app.state::<Closing>().forced {
             return;
         }
         api.prevent_close();

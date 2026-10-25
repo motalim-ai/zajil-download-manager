@@ -2,7 +2,9 @@
 //! download goes on from the progress its state file recorded, and the
 //! file comes out whole (owner's request on #45). Two ways of closing:
 //! asking the app to close (SIGTERM on Linux and macOS, a window close on
-//! Windows), and killing it, as if its 5 s had run out or it had crashed.
+//! Windows, with `--close-quits`), and killing it, as if its 5 s had run
+//! out or it had crashed. And on Windows, closing the window without
+//! `--close-quits`: Zajil goes on in the tray, downloading (#109).
 //!
 //! These need the app built by `tauri build`, so `cargo test` lists them as
 //! ignored; CI copies the built app aside (as `cargo test` rebuilds the
@@ -50,13 +52,22 @@ impl Drop for App {
 /// The app built by `tauri build`, as CI copies it aside: `cargo test`
 /// itself rebuilds the binary without its page (review of #45).
 fn start(data: &Path) -> App {
+    start_with(data, true)
+}
+
+/// `close_quits`: closing the window quits (`--close-quits`, as Zajil's
+/// own setting «Closing the window quits Zajil» but with no question):
+/// the tests ask Zajil to quit by closing its window on Windows. Without
+/// it, closing hides Zajil into the tray and the downloads go on (#109).
+fn start_with(data: &Path, close_quits: bool) -> App {
     let app = std::env::var_os("ZAJIL_DESKTOP_APP")
         .expect("ZAJIL_DESKTOP_APP must name the built zajil-desktop");
-    let mut child = Command::new(app)
-        .arg("--data-dir")
-        .arg(data)
-        // On Windows the window's close asks it to quit (#109).
-        .arg("--close-quits")
+    let mut command = Command::new(app);
+    command.arg("--data-dir").arg(data);
+    if close_quits {
+        command.arg("--close-quits");
+    }
+    let mut child = command
         .stderr(Stdio::piped())
         .spawn()
         .expect("the app starts");
@@ -310,4 +321,43 @@ fn session_end_during_a_download_it_goes_on_when_opened_again() {
 #[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
 fn killed_during_a_download_it_goes_on_when_opened_again() {
     close_in_the_middle_then_open_again(None);
+}
+
+/// Windows: closing the window during a download hides Zajil into the
+/// tray; it keeps running and the download keeps going (owner's decision
+/// after #105, #109).
+#[cfg(windows)]
+#[test]
+#[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
+fn closing_the_window_keeps_the_download_going() {
+    let server = TestServer::http();
+    server.put(
+        "/big.bin",
+        FileSpec::new(random_bytes(SIZE as usize, 47)).throttle(256 * 1024),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    store
+        .update(|q| q.add("main", &server.url("/big.bin"), downloads.path()))
+        .unwrap();
+
+    let mut app = start_with(data.path(), false);
+    wait_until("2 MiB recorded", Duration::from_secs(90), || {
+        recorded(&item(&store)) >= 2 * MIB
+    });
+    ask_to_close(&app.child, Close::Ask);
+    let closed = recorded(&item(&store));
+    // Still running, and still downloading: more is recorded after the
+    // close than before it.
+    wait_until(
+        "more recorded after the close",
+        Duration::from_secs(60),
+        || recorded(&item(&store)) >= closed + 2 * MIB,
+    );
+    assert!(
+        app.child.try_wait().expect("the app's status").is_none(),
+        "closing the window ended Zajil"
+    );
+    assert!(!app.said("zajil: the downloads stopped; exiting"));
 }
