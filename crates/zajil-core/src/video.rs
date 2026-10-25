@@ -812,8 +812,8 @@ impl VideoRunner {
         // the run's folders go.
         let mut tree = tree;
         let killer = tree.killer();
-        let stdout = tree.child().stdout.take().expect("piped");
-        let stderr = tree.child().stderr.take().expect("piped");
+        let stdout = tree.take_stdout().expect("piped");
+        let stderr = tree.take_stderr().expect("piped");
 
         // Progress comes through a channel from the blocking reader.
         let (send, mut receive) = tokio::sync::mpsc::unbounded_channel::<VideoEvent>();
