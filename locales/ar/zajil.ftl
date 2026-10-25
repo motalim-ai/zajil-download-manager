@@ -107,8 +107,8 @@ queue-window = من { $start } إلى { $stop }
 ## الفئات المدمجة (المفتاح category-<id>)
 
 category-programs = برامج
-category-video = أفلام
-category-music = موسيقى
+category-video = فيديوهات
+category-music = صوتيات
 category-documents = مستندات
 category-archives = مضغوطات
 category-none = بلا فئة
@@ -472,3 +472,10 @@ quit-ok = إنهاء زاجِل
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.
+
+## The main window's title bar (the design of #83)
+app-title = زاجِل لإدارة التحميل
+win-minimize = تصغير
+win-maximize = تكبير
+win-restore = استعادة
+win-close = إغلاق

@@ -8,6 +8,7 @@
   import { accelerator, commandFor, keyOf, type Command } from "./lib/commands";
   import { MENU_BAR, commandKey } from "./lib/menus";
   import MenuBar from "./lib/components/MenuBar.svelte";
+  import TitleBar from "./lib/components/TitleBar.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import Categories from "./lib/components/Categories.svelte";
@@ -734,6 +735,7 @@
   />
 {:else}
   <div class="window">
+    <TitleBar />
     <header>
       <h1 class="visually-hidden">{locale.t("app-name")}</h1>
       {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}

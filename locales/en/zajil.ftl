@@ -78,7 +78,7 @@ queue-window = from { $start } to { $stop }
 
 category-programs = Programs
 category-video = Videos
-category-music = Music
+category-music = Audio
 category-documents = Documents
 category-archives = Archives
 category-none = No category
@@ -414,3 +414,10 @@ quit-ok = Quit Zajil
 ## Video (M6)
 
 video-soon = Video downloads are coming soon.
+
+## The main window's title bar (the design of #83)
+app-title = Zajil Download Manager
+win-minimize = Minimize
+win-maximize = Maximize
+win-restore = Restore
+win-close = Close
