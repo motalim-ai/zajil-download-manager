@@ -27,6 +27,16 @@ pub enum Tool {
     Ffprobe,
 }
 
+impl std::fmt::Display for Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Tool::YtDlp => "yt-dlp",
+            Tool::Ffmpeg => "ffmpeg",
+            Tool::Ffprobe => "ffprobe",
+        })
+    }
+}
+
 impl Tool {
     pub const ALL: [Tool; 3] = [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe];
 
@@ -214,15 +224,15 @@ pub fn pinned(tool: Tool, target: Target) -> Option<Pinned> {
 /// Why a tool cannot be used.
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
-    #[error("{0:?} has no released file for this system yet")]
+    #[error("{0} has no released file for this system yet")]
     NotReleased(Tool),
     #[error("this system or processor has no video tools")]
     UnknownTarget,
-    #[error("{0:?} is not downloaded yet")]
+    #[error("{0} is not downloaded yet")]
     Missing(Tool),
     /// The file is not the pinned one: refused, and removed if it was a
     /// new download.
-    #[error("{tool:?} is not the expected file (SHA-256 {actual}, expected {expected})")]
+    #[error("{tool} is not the expected file (SHA-256 {actual}, expected {expected})")]
     Mismatch {
         tool: Tool,
         actual: String,

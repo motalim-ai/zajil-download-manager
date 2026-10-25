@@ -385,6 +385,60 @@ pub struct Video {
     pub formats: Vec<Format>,
 }
 
+impl Video {
+    /// The best choice when the user names none: the highest picture
+    /// with sound in one format, or the highest picture-only format with
+    /// the best sound-only one when that picture is higher; sound alone
+    /// for a page that has no picture. `None` when nothing is usable.
+    pub fn best_choice(&self) -> Option<Choice> {
+        let height = |f: &Format| f.height.unwrap_or(0);
+        let rate = |f: &Format| f.tbr.unwrap_or(0.0);
+        let better = |a: &&Format, b: &&Format| {
+            height(a).cmp(&height(b)).then(
+                rate(a)
+                    .partial_cmp(&rate(b))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        };
+        let both = self
+            .formats
+            .iter()
+            .filter(|f| f.has_video() && f.has_audio())
+            .max_by(better);
+        let picture = self
+            .formats
+            .iter()
+            .filter(|f| f.has_video() && !f.has_audio())
+            .max_by(better);
+        let sound = self
+            .formats
+            .iter()
+            .filter(|f| f.has_audio() && !f.has_video())
+            .max_by(|a, b| {
+                rate(a)
+                    .partial_cmp(&rate(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        match (both, picture, sound) {
+            (Some(both), Some(picture), Some(sound)) if height(picture) > height(both) => {
+                Some(Choice::Merge {
+                    video: picture.id.clone(),
+                    audio: sound.id.clone(),
+                })
+            }
+            (Some(both), _, _) => Some(Choice::Format(both.id.clone())),
+            (None, Some(picture), Some(sound)) => Some(Choice::Merge {
+                video: picture.id.clone(),
+                audio: sound.id.clone(),
+            }),
+            (None, None, Some(_)) => Some(Choice::AudioOnly),
+            // Formats whose codecs the page does not say (a direct file):
+            // the last one, yt-dlp lists the best last.
+            _ => self.formats.last().map(|f| Choice::Format(f.id.clone())),
+        }
+    }
+}
+
 /// One item of a playlist, to be probed and downloaded on its own.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Entry {
@@ -1485,6 +1539,58 @@ mod tests {
         .unwrap();
         assert!(format.is_hls());
         assert!(!format!("{format:?}").contains("SECRET"));
+    }
+
+    #[test]
+    fn the_best_choice_prefers_higher_pictures_and_keeps_sound() {
+        let f = |id: &str, h: Option<u32>, v: &str, a: &str| -> Format {
+            serde_json::from_value(serde_json::json!({
+                "format_id": id, "height": h, "vcodec": v, "acodec": a, "tbr": 100.0,
+            }))
+            .unwrap()
+        };
+        let video = |formats| Video {
+            title: String::new(),
+            duration: None,
+            formats,
+        };
+        // A higher picture alone beats a lower one with sound: merged.
+        assert_eq!(
+            video(vec![
+                f("18", Some(360), "avc1", "mp4a"),
+                f("137", Some(1080), "avc1", "none"),
+                f("140", None, "none", "mp4a")
+            ])
+            .best_choice(),
+            Some(Choice::Merge {
+                video: "137".into(),
+                audio: "140".into()
+            })
+        );
+        // Picture with sound at the top height: that one.
+        assert_eq!(
+            video(vec![
+                f("22", Some(720), "avc1", "mp4a"),
+                f("136", Some(720), "avc1", "none"),
+                f("140", None, "none", "mp4a")
+            ])
+            .best_choice(),
+            Some(Choice::Format("22".into()))
+        );
+        // Sound only.
+        assert_eq!(
+            video(vec![f("140", None, "none", "mp4a")]).best_choice(),
+            Some(Choice::AudioOnly)
+        );
+        // Unknown codecs (a direct file): the last.
+        let mut plain = f("0", None, "x", "x");
+        plain.vcodec = None;
+        plain.acodec = None;
+        assert_eq!(
+            video(vec![plain]).best_choice(),
+            Some(Choice::Format("0".into()))
+        );
+        assert_eq!(video(vec![]).best_choice(), None);
     }
 
     #[test]

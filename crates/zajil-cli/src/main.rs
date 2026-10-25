@@ -11,6 +11,7 @@
 
 mod category;
 mod queue;
+mod video;
 
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -110,6 +111,12 @@ enum Command {
         #[command(subcommand)]
         command: category::CategoryCommand,
     },
+    /// Download videos (with yt-dlp and Zajil's ffmpeg, downloaded only
+    /// after you agree: `zajil video tools install`).
+    Video {
+        #[command(subcommand)]
+        command: video::VideoCommand,
+    },
 }
 
 fn main() -> ExitCode {
@@ -153,6 +160,13 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
+    if let Command::Video { command } = cli.command {
+        let engine = match Engine::new(options(cli.connections.into(), cli.tries)) {
+            Ok(engine) => engine,
+            Err(err) => return fail(&err.to_string()),
+        };
+        return runtime.block_on(video::run(command, &data_dir, engine));
+    }
     runtime.block_on(run(
         cli.command,
         &categories,
@@ -254,7 +268,9 @@ async fn run(
                     .await
                     .map_err(Failure::Engine)
             }
-            Command::Queue { .. } | Command::Category { .. } => unreachable!("handled in main"),
+            Command::Queue { .. } | Command::Category { .. } | Command::Video { .. } => {
+                unreachable!("handled in main")
+            }
         }
     };
 
