@@ -348,3 +348,44 @@ fn leftover_download_folders_are_removed_and_tools_are_kept() {
         vec!["yt-dlp", "yt-dlp/2099.01.01", "yt-dlp/2099.01.01/yt-dlp"]
     );
 }
+
+#[tokio::test]
+async fn an_installed_tool_carries_no_from_the_internet_mark() {
+    // Zajil downloaded the tool and checked its SHA-256: no Gatekeeper or
+    // SmartScreen warning for it (owner's decision on #100). Every other
+    // download gets the mark (#90), so first: this system writes it.
+    let server = https_server();
+    let data = random_bytes(512 * 1024, 62);
+    server.put("/yt-dlp", FileSpec::new(data.clone()));
+    let engine = trusting_engine();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let plain = engine
+        .download_until(
+            &server.url("/yt-dlp"),
+            elsewhere.path(),
+            &Stop::new(),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+    let marks = zajil_platform::origin::read(&plain.file)
+        .ok()
+        .flatten()
+        .is_some();
+    if !marks {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "the CI's disks hold the mark: a plain download must carry it"
+        );
+        eprintln!("NOT RUN: this file system cannot hold the mark");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let tools = toolbox(
+        &root.path().join("tools"),
+        server.url("/yt-dlp"),
+        sha256_hex(&data),
+    );
+    let path = install(&tools, &engine).await.unwrap();
+    assert_eq!(zajil_platform::origin::read(&path).unwrap(), None);
+}
