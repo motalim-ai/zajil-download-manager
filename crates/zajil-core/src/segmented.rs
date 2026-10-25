@@ -233,6 +233,9 @@ pub(crate) async fn run(
     let mut done = from;
     let mut restart = None;
     let mut stopped_by_user = false;
+    // A periodic save has succeeded: the state file counts only synced
+    // bytes, so a stop needs no save of its own (#132).
+    let mut saved = false;
     let mut last_save = Instant::now();
     let mut tick = tokio::time::interval(save_interval);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -277,6 +280,7 @@ pub(crate) async fn run(
                 if last_save.elapsed() >= save_interval {
                     checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
                     last_save = Instant::now();
+                    saved = true;
                 }
             }
         }
@@ -312,7 +316,13 @@ pub(crate) async fn run(
         if cleanup.is_some() {
             return Err(Error::Stopped { state_file: None });
         }
-        checkpoint(&ctx, &state_file, None).await?;
+        // Owner's decision on #132: after a periodic save, a stop does not
+        // save again. On a slow disk (Windows, with an antivirus) a second
+        // sync could take seconds; at most `save_interval` of progress is
+        // downloaded again on resume, and nothing is lost or wrong.
+        if !saved {
+            checkpoint(&ctx, &state_file, None).await?;
+        }
         return Err(Error::Stopped {
             state_file: Some(state_file),
         });

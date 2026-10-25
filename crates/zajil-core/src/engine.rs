@@ -1328,6 +1328,7 @@ impl Engine {
             final_path,
             last_save: Instant::now(),
             save_interval: self.options.save_interval,
+            saved: false,
             cleanup,
         }
     }
@@ -1624,6 +1625,9 @@ struct Transfer {
     final_path: PathBuf,
     last_save: Instant,
     save_interval: Duration,
+    /// A save of this transfer has succeeded: a stop then needs no save of
+    /// its own (#132).
+    saved: bool,
     /// Set for a new download until its first byte is written. Declared
     /// last, so the part file is closed before it is removed.
     cleanup: Option<EmptyDownloadCleanup>,
@@ -1814,7 +1818,12 @@ impl Transfer {
         if self.cleanup.is_some() {
             return Error::Stopped { state_file: None };
         }
-        if let Err(err) = self.checkpoint().await {
+        // Owner's decision on #132: after a save, a stop does not save
+        // again (the state file counts only synced bytes; at most
+        // `save_interval` of progress is downloaded again on resume).
+        if !self.saved
+            && let Err(err) = self.checkpoint().await
+        {
             return err;
         }
         // Waits for anything the file still does, then closes it.
@@ -1837,6 +1846,7 @@ impl Transfer {
         let watch = self.cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
         save_state(&mut self.state, &self.state_file, watch).await?;
         self.last_save = Instant::now();
+        self.saved = true;
         Ok(())
     }
 
