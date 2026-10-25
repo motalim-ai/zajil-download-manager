@@ -1922,6 +1922,42 @@ async fn remove<R: tauri::Runtime>(
 mod tests {
     use super::*;
 
+    /// The main window is the same on every system but for its title bar
+    /// (the design of #83): hidden under the page on macOS, none on Windows
+    /// and Linux, where the page draws it.
+    #[test]
+    fn the_main_window_differs_by_system_only_in_its_title_bar() {
+        let read = |name: &str| -> serde_json::Value {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        for (name, own) in [
+            (
+                "tauri.macos.conf.json",
+                serde_json::json!({"titleBarStyle": "Overlay", "hiddenTitle": true}),
+            ),
+            (
+                "tauri.windows.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+            (
+                "tauri.linux.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+        ] {
+            let mut expected = base.clone();
+            for (k, v) in own.as_object().unwrap() {
+                expected[k] = v.clone();
+            }
+            assert_eq!(
+                read(name)["app"]["windows"],
+                serde_json::json!([expected]),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn a_link_copied_by_the_app_is_not_offered_back() {
         let copied = "https://a.example/x.zip\nhttps://b.example/y.iso";
