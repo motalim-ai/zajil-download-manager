@@ -124,6 +124,16 @@ jobs:
             lipo -create "out-arm64/$tool" "out-x86_64/$tool" -output "out/$tool"
             lipo -info "out/$tool"
           done
+          # Ad-hoc signed (codesign -s -), not signed by Apple: the owner's
+          # decision for 0.1, until M8 (ADR-0009, section 2). Zajil checks
+          # the SHA-256 before every run, and its tools carry no quarantine
+          # mark, so Gatekeeper does not stop them.
+          codesign --force --sign - out/ffmpeg out/ffprobe
+          for tool in ffmpeg ffprobe; do
+            codesign --verify --strict "out/$tool"
+            info="$(codesign --display --verbose=2 "out/$tool" 2>&1)"
+            grep -q '^Signature=adhoc$' <<< "$info" || { echo "::error::out/$tool is not ad-hoc signed"; echo "$info"; exit 1; }
+          done
           # One build file for the universal binaries: both configure lines.
           { cat out-arm64/ffmpeg-build.txt; echo; cat out-x86_64/ffmpeg-build.txt; } > out/ffmpeg-build.txt
           if [ "$TESTGEN_HIT" != true ]; then
@@ -209,13 +219,6 @@ jobs:
             "tools-ffmpeg-$FFMPEG_VERSION-"[0-9]*) ;;
             *) echo "::error::$GITHUB_REF_NAME does not name FFmpeg $FFMPEG_VERSION (tools-ffmpeg-$FFMPEG_VERSION-<n>)"; exit 1 ;;
           esac
-      # ADR-0009, section 2: our macOS build is signed and notarized in the
-      # CI. Not set up yet, so no release yet (it needs an Apple Developer
-      # ID: the owner's decision).
-      - name: macOS signing and notarization
-        run: |
-          echo "::error::the macOS ffmpeg is not signed and notarized yet (ADR-0009, section 2): no release until it is"
-          exit 1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/artifacts
@@ -270,6 +273,8 @@ jobs:
             echo "This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here: $FFMPEG_TARBALL (with its signature $FFMPEG_TARBALL.asc), and ffmpeg-$FFMPEG_VERSION-zajil-source.tar.xz, the same source with the build notes of every platform in its root."
             echo
             echo "Source SHA-256: $FFMPEG_SHA256 ($FFMPEG_TARBALL, signed by FFmpeg's key $FFMPEG_SIGNING_KEY)."
+            echo
+            echo "macOS: ad-hoc signed only, not signed or notarized by Apple (until M8). Zajil checks each file's SHA-256 before every run."
             echo
             echo "No change to the FFmpeg source. Built by .github/workflows/ffmpeg.yml from commit $GITHUB_SHA. FFmpeg belongs to its authors: https://ffmpeg.org"
           } > "$RUNNER_TEMP/notes.md"
