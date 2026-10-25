@@ -26,6 +26,12 @@ pub struct WindowPrefs {
     /// The «still running in the tray» notification was shown once.
     #[serde(default)]
     pub tray_notice_shown: bool,
+    /// The drop box is shown (`dropbox.rs`); off at first.
+    #[serde(default)]
+    pub drop_box: bool,
+    /// Where the user left it.
+    #[serde(default)]
+    pub drop_place: Option<crate::dropbox::Place>,
 }
 
 /// The texts of that notification, in the page's language.

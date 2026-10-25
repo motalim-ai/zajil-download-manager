@@ -17,6 +17,10 @@ thiserror.workspace = true
 arboard.workspace = true
 libc.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Confines the JavaScript runtime that YouTube's pages need (ADR-0009).
+landlock.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit.workspace = true
 
@@ -25,3 +29,9 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# The sandbox test runs itself as the confined program: one thread, no
+# libtest (tests/sandbox.rs).
+[[test]]
+name = "sandbox"
+harness = false

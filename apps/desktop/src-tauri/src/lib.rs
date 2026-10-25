@@ -10,6 +10,7 @@
 
 mod closing;
 mod complete;
+mod dropbox;
 mod live;
 mod menu;
 mod removal;
@@ -235,6 +236,11 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            tauri_app.add_capability(dropbox::CAPABILITY)?;
+            // The drop box, if the user left it shown.
+            if tauri_app.state::<closing::Closing>().prefs().drop_box {
+                let _ = dropbox::show(tauri_app.handle(), true);
+            }
             // The close button hides the window into the tray (`closing.rs`).
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
@@ -338,6 +344,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -398,6 +406,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -548,6 +558,7 @@ fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
     closing: State<'_, closing::Closing>,
     show: String,
+    drop_box: String,
     quit: String,
     notice_title: String,
     notice: String,
@@ -556,7 +567,7 @@ fn set_tray_texts<R: tauri::Runtime>(
         title: notice_title,
         body: notice,
     });
-    tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+    tray::set_texts(&handle, &show, &drop_box, &quit).map_err(|e| e.to_string())
 }
 
 /// Whether closing the main window quits Zajil (the settings), and whether

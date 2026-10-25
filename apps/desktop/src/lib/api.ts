@@ -20,8 +20,11 @@ export const api = {
   cancelProbe: () => invoke<void>("cancel_probe"),
   /** The tray menu's texts, and the notification the first time the
    * window hides into the tray. */
-  setTrayTexts: (show: string, quit: string, noticeTitle: string, notice: string) =>
-    invoke<void>("set_tray_texts", { show, quit, noticeTitle, notice }),
+  setTrayTexts: (show: string, dropBox: string, quit: string, noticeTitle: string, notice: string) =>
+    invoke<void>("set_tray_texts", { show, dropBox, quit, noticeTitle, notice }),
+  /** The drop box (M5.5): shown or not, and showing or hiding it. */
+  dropBoxShown: () => invoke<boolean>("drop_box_shown"),
+  setDropBox: (shown: boolean) => invoke<void>("set_drop_box", { shown }),
   /** Closing the window quits Zajil; and whether there is a tray. */
   closeQuits: () => invoke<[boolean, boolean]>("close_quits"),
   setCloseQuits: (quits: boolean) => invoke<void>("set_close_quits", { quits }),

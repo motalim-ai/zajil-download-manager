@@ -611,6 +611,13 @@ tb-later = أخّر «{ $name }»
 tb-reset = كما كان
 tb-done = تم
 
+## The drop box (M5.5, an IDM touch)
+drop-box = سلة الإسقاط
+drop-hint = اسحب رابطًا هنا لتحميله. كليك يمين يخفيها.
+tray-drop-box = إظهار سلة الإسقاط
+settings-drop-box-label = إظهار سلة الإسقاط فوق كل النوافذ
+settings-drop-box-hint = مربع صغير بشعار زاجِل، تسحب عليه رابطًا من المتصفح فيفتح «معلومات ملف التحميل». تحرّكه بسحبه، وكليك يمين عليه يخفيه.
+
 ## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
 col-queue = الطابور
 cmd-remove-from-queue = إزالة من الطابور
