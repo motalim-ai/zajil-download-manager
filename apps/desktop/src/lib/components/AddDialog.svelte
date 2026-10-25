@@ -191,7 +191,7 @@
         </div>
       {/if}
     </div>
-    <button class="btn quiet end" onclick={oncancel}>{locale.t("add-cancel")}</button>
+    <button class="btn end" onclick={oncancel}>{locale.t("add-cancel")}</button>
   </div>
 </main>
 

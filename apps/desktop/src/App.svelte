@@ -713,8 +713,8 @@
   />
 {:else}
   <div class="window">
-    <h1 class="visually-hidden">{locale.t("app-name")}</h1>
     <header>
+      <h1 class="visually-hidden">{locale.t("app-name")}</h1>
       {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}
       <Toolbar bind:search {can} {hint} onaction={doAction} />
     </header>
