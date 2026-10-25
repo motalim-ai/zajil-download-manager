@@ -32,7 +32,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::http_date;
 use crate::limit::{Clock, Limits, SpeedLimit, SystemClock};
-use crate::naming::{ReserveError, reserve_target, suggested_name};
+use crate::naming::{ReserveError, reserve_target, suggested_name, with_type_extension};
 use crate::sanitize::{ConfineError, MAX_NAME_BYTES, confine, sanitize_file_name};
 use crate::segmented::{self, Job, Outcome};
 use crate::state::{
@@ -297,6 +297,22 @@ pub struct Probe {
     /// Its media type (`Content-Type` without parameters, lower case), if
     /// the server said: a sign-in page a link redirected to is `text/html`.
     pub content_type: Option<String>,
+}
+
+impl Probe {
+    /// The server answered with a web page, not a file: a sign-in page a
+    /// link redirected to, or a file's page on a site. Interfaces warn
+    /// before downloading it.
+    pub fn is_page(&self) -> bool {
+        self.content_type.as_deref().is_some_and(is_page_type)
+    }
+}
+
+/// Whether `media_type` (lower case, without parameters, as
+/// [`Probe::content_type`]) is a web page: `text/html` or
+/// `application/xhtml+xml`.
+pub fn is_page_type(media_type: &str) -> bool {
+    matches!(media_type, "text/html" | "application/xhtml+xml")
 }
 
 /// Why a new link is not shown to be the same file as a download's
@@ -602,13 +618,7 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let name = suggested_name(
-            response
-                .headers()
-                .get(header::CONTENT_DISPOSITION)
-                .map(|v| v.as_bytes()),
-            response.url(),
-        );
+        let name = response_name(&response);
         if self.hold.as_ref().is_some_and(|hold| (hold.0)(&name)) {
             return Err(Error::Held(name));
         }
@@ -669,13 +679,7 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let name = suggested_name(
-            response
-                .headers()
-                .get(header::CONTENT_DISPOSITION)
-                .map(|v| v.as_bytes()),
-            response.url(),
-        );
+        let name = response_name(&response);
         let state = state_from_response(String::new(), false, &response);
         let size = response.content_length();
         let resumable = state.resumable();
@@ -2098,6 +2102,24 @@ fn validator_from(headers: &HeaderMap) -> Validator {
         last_modified: header_str(headers, header::LAST_MODIFIED).map(str::to_owned),
         date: header_str(headers, header::DATE).map(str::to_owned),
     }
+}
+
+/// The name a response's file gets: from its `Content-Disposition` or its
+/// address, cleaned, with the extension of its `Content-Type` when it has
+/// none (`view` sent as `text/html` is `view.html`).
+fn response_name(response: &Response) -> String {
+    let name = suggested_name(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .map(|v| v.as_bytes()),
+        response.url(),
+    );
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    with_type_extension(name, content_type)
 }
 
 /// The first state for a whole-file response. `had_credentials`: the URL
