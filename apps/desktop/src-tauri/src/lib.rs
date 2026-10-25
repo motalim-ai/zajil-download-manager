@@ -173,6 +173,9 @@ pub fn run() {
                             .is_some_and(|w| w.is_focused().unwrap_or(false))
                     })
                     .unwrap_or("main");
+                // Quit is the main window's, which asks first while
+                // downloads run (review of #105: an add window quit at once).
+                let front = if command == "quit" { "main" } else { front };
                 let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
@@ -718,7 +721,10 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 let app = handle.state::<App>();
                 let given = download_dir(&app.settings, &app.system_download_dir);
                 let reach = extension_reach(&app.engine);
-                let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
+                // The user's language, for what the extension is told.
+                let lang = app.settings.load().map(|s| s.language).unwrap_or_default();
+                let answer =
+                    from_extension(&app.store, &request, &given, &app.from_browser, lang, reach);
                 if answer.ok {
                     let _ = handle.emit("downloads-changed", ());
                     tray::show_window(&handle);
@@ -1355,6 +1361,7 @@ fn from_extension(
     request: &zajil_host::Request,
     given: &Path,
     headers: &zajil_core::queue::FromBrowserById,
+    lang: zajil_core::settings::Language,
     reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
 ) -> zajil_host::Response {
     match request {
@@ -1363,6 +1370,9 @@ fn from_extension(
         zajil_host::Request::Link { .. } | zajil_host::Request::Cookies { .. } => {
             zajil_host::Response::refused("not here")
         }
+        // Video downloads (M6) are not in the program yet: the extension
+        // is told so, in the user's language, and nothing else happens.
+        zajil_host::Request::Video { .. } => zajil_host::Response::refused(video_soon(lang)),
         zajil_host::Request::PrivateClosed { .. } => match discard_private(store) {
             Ok(()) => zajil_host::Response::ok(),
             Err(err) => zajil_host::Response::refused(err.to_string()),
@@ -1449,6 +1459,18 @@ fn from_extension(
             }
         }
     }
+}
+
+/// «Video downloads are coming soon», in `lang` (the translations' own
+/// text, `video-soon`).
+fn video_soon(lang: zajil_core::settings::Language) -> String {
+    let lang = match lang {
+        zajil_core::settings::Language::Ar => zajil_i18n::Lang::Ar,
+        zajil_core::settings::Language::En => zajil_i18n::Lang::En,
+    };
+    zajil_i18n::Localizer::new(lang)
+        .text("video-soon", &[])
+        .unwrap_or_else(|_| "Video downloads are coming soon.".to_owned())
 }
 
 /// Nothing is created here: the download makes its folder when it starts,
@@ -2260,9 +2282,14 @@ mod tests {
             zajil_host::serve(
                 listener,
                 move |request| {
-                    from_extension(&served, &request, &given, &Default::default(), |_, _| {
-                        Ok(probe_of("b.iso", None))
-                    })
+                    from_extension(
+                        &served,
+                        &request,
+                        &given,
+                        &Default::default(),
+                        zajil_core::settings::Language::Ar,
+                        |_, _| Ok(probe_of("b.iso", None)),
+                    )
                 },
                 Default::default(),
             );
@@ -2301,6 +2328,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe_of("a.zip", None))
             ),
             zajil_host::Response::ok()
@@ -2318,6 +2346,7 @@ mod tests {
                 &ping,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| panic!("a ping reaches nothing")
             ),
             zajil_host::Response::ok()
@@ -2368,6 +2397,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe),
             );
             assert!(!answer.ok);
@@ -2380,6 +2410,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("L.ZIP", Some("application/zip"))),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2388,9 +2419,14 @@ mod tests {
             br#"{"type":"download","protocol_version":1,"url":"https://example.com/get?id=1"}"#,
         )
         .unwrap();
-        let answer = from_extension(&store, &bare, data.path(), &Default::default(), |_, _| {
-            Ok(probe_of("get", None))
-        });
+        let answer = from_extension(
+            &store,
+            &bare,
+            data.path(),
+            &Default::default(),
+            zajil_core::settings::Language::Ar,
+            |_, _| Ok(probe_of("get", None)),
+        );
         assert!(answer.ok, "{answer:?}");
     }
 
@@ -2407,10 +2443,17 @@ mod tests {
         )
         .unwrap();
         let mut checked_with = None;
-        let answer = from_extension(&store, &request, data.path(), &headers, |_, from| {
-            checked_with = Some(from.has_cookies());
-            Ok(probe_of("a.zip", None))
-        });
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &headers,
+            zajil_core::settings::Language::Ar,
+            |_, from| {
+                checked_with = Some(from.has_cookies());
+                Ok(probe_of("a.zip", None))
+            },
+        );
         assert!(answer.ok, "{answer:?}");
         assert_eq!(checked_with, Some(true));
         let id = store.load().unwrap().queues[0].items[0].id;
@@ -2421,10 +2464,17 @@ mod tests {
             br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.zip"}"#,
         )
         .unwrap();
-        let answer = from_extension(&store, &bare, data.path(), &headers, |_, from| {
-            assert!(!from.has_cookies());
-            Ok(probe_of("b.zip", None))
-        });
+        let answer = from_extension(
+            &store,
+            &bare,
+            data.path(),
+            &headers,
+            zajil_core::settings::Language::Ar,
+            |_, from| {
+                assert!(!from.has_cookies());
+                Ok(probe_of("b.zip", None))
+            },
+        );
         assert!(answer.ok);
         let second = store.load().unwrap().queues[0].items[1].id;
         assert!(!headers.lock().unwrap()[&second].has_cookies());
@@ -2680,6 +2730,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe_of(served, None)),
             );
             assert!(answer.ok, "{answer:?}");
@@ -2732,6 +2783,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("b.iso", None)),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2773,6 +2825,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| unreachable!("nothing is checked"),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2781,6 +2834,42 @@ mod tests {
         assert!(queues.item(other).is_some());
         assert!(!state.exists());
         assert!(!data.path().join("p.bin.zajil-part").exists());
+    }
+
+    /// A video from the extension (M6 is not here yet): answered «coming
+    /// soon» in the user's language, without the check (no request to the
+    /// page) and without anything added to the queues.
+    #[test]
+    fn a_video_from_the_extension_is_answered_coming_soon() {
+        use zajil_core::settings::Language;
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"video","protocol_version":1,"page":"https://video.example.com/watch?v=1"}"#,
+        )
+        .unwrap();
+        for (lang, text) in [
+            (Language::Ar, "تحميل الفيديو قادم قريبًا."),
+            (Language::En, "Video downloads are coming soon."),
+        ] {
+            let answer = from_extension(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                lang,
+                |_, _| unreachable!("a video is not checked here"),
+            );
+            assert_eq!(answer, zajil_host::Response::refused(text));
+        }
+        assert!(
+            store
+                .load()
+                .unwrap()
+                .queues
+                .iter()
+                .all(|q| q.items.is_empty())
+        );
     }
 
     /// M5: a download from the extension keeps where it came from (the
@@ -2799,6 +2888,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("b.iso", None)),
         );
         assert!(answer.ok, "{answer:?}");
@@ -3087,6 +3177,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |url, _| {
                 asked.push(url.to_owned());
                 Err("the server answered 403 Forbidden".into())

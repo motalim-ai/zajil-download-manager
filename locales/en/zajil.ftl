@@ -402,3 +402,15 @@ add-checking = Asking the server about the file…
 add-about-file = About the file
 addlink-info-open = «Download file info» is open for another link. Finish or cancel it first.
 add-remember-failed = The download was added, but the folder wasn't kept for the category: { $error }
+
+## Quit with downloads running (owner's decision on #83)
+quit-question =
+    { PLURAL($count) ->
+        [one] { $count } download is running. Quit Zajil?
+       *[other] { $count } downloads are running. Quit Zajil?
+    }
+quit-ok = Quit Zajil
+
+## Video (M6)
+
+video-soon = Video downloads are coming soon.

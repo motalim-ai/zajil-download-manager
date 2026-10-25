@@ -437,7 +437,7 @@
       case "export":
         return void exportQueues();
       case "quit":
-        return void api.quitApp();
+        return void quit();
       case "find":
         view = "list";
         details = null;
@@ -512,6 +512,27 @@
     }
     await refresh();
   }
+  /** Quits; with downloads running, once the user agrees (owner's
+   * decision on #83). */
+  let quitting = false;
+  async function quit() {
+    // One question at a time (review of #105: a second ⌘Q asked again).
+    if (quitting) return;
+    const running = active.length;
+    if (running > 0) {
+      quitting = true;
+      const yes = await ask(locale.t("quit-question", { count: running }), {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("quit-ok"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
+      quitting = false;
+      if (!yes) return;
+    }
+    await api.quitApp();
+  }
+
   async function about() {
     const version = await api.appVersion().catch(() => "");
     await message(locale.t("about-text", { version }), { title: locale.t("app-name"), kind: "info" }).catch(() => {});

@@ -124,5 +124,17 @@
   },
   "menuSignInNoCookies": {
     "message": "This site needs a sign-in, and no cookies went (the browser gave none for this link). Download it with the browser."
+  },
+  "menuDownloadVideo": {
+    "message": "Download video with Zajil"
+  },
+  "videoRefused": {
+    "message": "Zajil did not take this video."
+  },
+  "videoNotAnswered": {
+    "message": "Zajil did not answer in time, and may have taken the video: look in Zajil."
+  },
+  "videoNotWeb": {
+    "message": "Zajil cannot read this page: it is not an http or https page."
   }
 }
