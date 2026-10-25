@@ -57,6 +57,9 @@ pub struct App {
     /// What «Copy link» put on the clipboard: the monitoring does not offer
     /// it back (M5.5).
     copied: Arc<std::sync::Mutex<String>>,
+    /// The clipboard «Copy link» writes with, kept open: on Linux the text
+    /// lives only while its writer does, with no clipboard manager.
+    copier: Arc<std::sync::Mutex<Option<zajil_platform::clipboard::SystemClipboard>>>,
     /// The data folder (`--data-dir` or the system's).
     data_dir: PathBuf,
     /// The browser's cookies and page of each download the extension sent,
@@ -125,6 +128,7 @@ pub fn run() {
         connections: Arc::new(AtomicUsize::new(connections)),
         clipboard: Arc::new(AtomicBool::new(clipboard)),
         copied: Arc::default(),
+        copier: Arc::default(),
         data_dir: data.clone(),
         from_browser: Arc::default(),
         links: zajil_host::Links::default(),
@@ -1828,8 +1832,15 @@ async fn copy_links<R: tauri::Runtime>(
     if let Ok(mut copied) = app.copied.lock() {
         copied.clone_from(&text);
     }
+    let copier = app.copier.clone();
     tokio::task::spawn_blocking(move || {
-        zajil_platform::clipboard::SystemClipboard::new()?.set_text(&text)
+        let mut copier = copier
+            .lock()
+            .map_err(|_| std::io::Error::other("clipboard"))?;
+        if copier.is_none() {
+            *copier = Some(zajil_platform::clipboard::SystemClipboard::new()?);
+        }
+        copier.as_mut().map_or(Ok(()), |c| c.set_text(&text))
     })
     .await
     .map_err(blocking_err)?
@@ -1851,6 +1862,7 @@ async fn remove<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn a_link_copied_by_the_app_is_not_offered_back() {
@@ -1869,7 +1881,6 @@ mod tests {
         assert!(!asks_before_opening(Path::new("/d/film.mkv")));
         assert!(!asks_before_opening(Path::new("/d/setup.exe.zip")));
     }
-    use super::*;
 
     fn three() -> QueuesFile {
         let mut q = QueuesFile::empty();
