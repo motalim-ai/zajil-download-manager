@@ -29,6 +29,48 @@ pub fn suggested_name(content_disposition: Option<&[u8]>, final_url: &reqwest::U
     sanitize_file_name(&from_header.or_else(from_url).unwrap_or_default())
 }
 
+/// File extensions for common media types, for a name that has none
+/// (an address such as `…/view`). Never a type that can run code (none of
+/// these is in [`crate::category::RUNS_CODE`]): a server must not turn
+/// `view` into `view.exe` by its `Content-Type`.
+#[rustfmt::skip]
+const EXTENSIONS_BY_TYPE: &[(&str, &str)] = &[
+    ("text/html", "html"), ("application/xhtml+xml", "xhtml"), ("text/plain", "txt"),
+    ("text/csv", "csv"), ("application/json", "json"), ("application/xml", "xml"),
+    ("text/xml", "xml"), ("application/pdf", "pdf"), ("application/epub+zip", "epub"),
+    ("application/zip", "zip"), ("application/x-7z-compressed", "7z"),
+    ("application/vnd.rar", "rar"), ("application/x-rar-compressed", "rar"),
+    ("application/gzip", "gz"), ("application/x-gzip", "gz"), ("application/x-tar", "tar"),
+    ("application/x-xz", "xz"), ("image/jpeg", "jpg"), ("image/png", "png"),
+    ("image/gif", "gif"), ("image/webp", "webp"), ("image/avif", "avif"),
+    ("video/mp4", "mp4"), ("video/webm", "webm"), ("video/x-matroska", "mkv"),
+    ("video/quicktime", "mov"), ("audio/mpeg", "mp3"), ("audio/mp4", "m4a"),
+    ("audio/ogg", "ogg"), ("audio/flac", "flac"), ("audio/wav", "wav"), ("audio/x-wav", "wav"),
+];
+
+/// The extension of the media type `content_type` (a `Content-Type` value,
+/// its parameters ignored), if it is one of the common ones above.
+pub fn extension_for_type(content_type: &str) -> Option<&'static str> {
+    let media_type = content_type.split(';').next()?.trim().to_ascii_lowercase();
+    EXTENSIONS_BY_TYPE
+        .iter()
+        .find(|(t, _)| *t == media_type)
+        .map(|(_, ext)| *ext)
+}
+
+/// `name` with the extension of `content_type` when it has none: `view`
+/// sent as `text/html` is `view.html`. Cleaned again, so it stays within
+/// [`MAX_NAME_BYTES`].
+pub fn with_type_extension(name: String, content_type: Option<&str>) -> String {
+    let has_extension = name
+        .rsplit_once('.')
+        .is_some_and(|(stem, ext)| !stem.is_empty() && !ext.is_empty());
+    match content_type.and_then(extension_for_type) {
+        Some(ext) if !has_extension => sanitize_file_name(&format!("{name}.{ext}")),
+        _ => name,
+    }
+}
+
 /// Extracts the file name from a `Content-Disposition` value. `filename*`
 /// wins over `filename` (RFC 6266 §4.3).
 pub fn filename_from_content_disposition(value: &[u8]) -> Option<String> {
@@ -193,6 +235,52 @@ fn numbered(name: &str, n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_without_an_extension_takes_its_type_s() {
+        assert_eq!(
+            with_type_extension("view".into(), Some("text/html; charset=utf-8")),
+            "view.html"
+        );
+        assert_eq!(
+            with_type_extension("download".into(), Some("application/PDF")),
+            "download.pdf"
+        );
+        // An extension already there, or no known type: as it is.
+        assert_eq!(
+            with_type_extension("a.zip".into(), Some("text/html")),
+            "a.zip"
+        );
+        assert_eq!(
+            with_type_extension("view".into(), Some("application/octet-stream")),
+            "view"
+        );
+        assert_eq!(with_type_extension("view".into(), None), "view");
+        // Never a type that runs code.
+        assert_eq!(
+            with_type_extension("view".into(), Some("application/x-msdownload")),
+            "view"
+        );
+        // At the limit, it stays within it, with its extension.
+        let long = "ع".repeat(100);
+        let named = with_type_extension(long, Some("text/html"));
+        assert!(
+            named.len() <= MAX_NAME_BYTES && named.ends_with(".html"),
+            "{named}"
+        );
+        // A reserved name stays safe.
+        assert_eq!(
+            with_type_extension("_CON".into(), Some("text/plain")),
+            "_CON.txt"
+        );
+    }
+
+    #[test]
+    fn no_type_gives_an_extension_that_runs_code() {
+        for (_, ext) in EXTENSIONS_BY_TYPE {
+            assert!(!crate::category::runs_code(&format!("a.{ext}")), "{ext}");
+        }
+    }
 
     fn cd(value: &str) -> Option<String> {
         filename_from_content_disposition(value.as_bytes())

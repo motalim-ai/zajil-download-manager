@@ -586,6 +586,9 @@ impl TestServer {
 
     /// Serves `spec` at `path`, replacing any previous file there. A new
     /// [`FileSpec`] has a new `ETag`, so this simulates a changed file.
+    /// A `path` with a `?query` serves requests with exactly that query
+    /// (their records have it in their `path`); others go to the `path`
+    /// without it. The same for [`TestServer::redirect`].
     pub fn put(&self, path: &str, spec: FileSpec) {
         self.lock().files.insert(
             path.to_owned(),
@@ -757,7 +760,7 @@ fn handle(
     // Only requests under this server's prefix are its own; any other is
     // answered 404 and counted nowhere, so it cannot take the place of a
     // test's request (in `cut_after`, `fail_first`, the request log…).
-    let Some(path) = req
+    let Some(mut path) = req
         .uri()
         .path()
         .strip_prefix(shared.prefix.as_str())
@@ -768,6 +771,14 @@ fn handle(
         shared.strays.push(stray);
         return status_only(StatusCode::NOT_FOUND);
     };
+    // A file put at `path?query` answers that query only (Google Drive's
+    // page and file differ by their query alone).
+    if let Some(query) = req.uri().query() {
+        let with_query = format!("{path}?{query}");
+        if shared.files.contains_key(&with_query) || shared.redirects.contains_key(&with_query) {
+            path = with_query;
+        }
+    }
     let is_head = req.method() == Method::HEAD;
     let bytes_sent = Arc::new(AtomicU64::new(0));
     let mut record = RequestRecord {
