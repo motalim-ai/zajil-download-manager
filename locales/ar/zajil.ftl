@@ -107,8 +107,8 @@ queue-window = من { $start } إلى { $stop }
 ## الفئات المدمجة (المفتاح category-<id>)
 
 category-programs = برامج
-category-video = أفلام
-category-music = موسيقى
+category-video = فيديوهات
+category-music = صوتيات
 category-documents = مستندات
 category-archives = مضغوطات
 category-none = بلا فئة
@@ -469,6 +469,134 @@ quit-question =
     }
 quit-ok = إنهاء زاجِل
 
+## الجدولة
+
+schedule-title = الجدولة
+schedule-queues = الطوابير
+schedule-new = طابور جديد
+schedule-new-name = اسم الطابور الجديد
+schedule-new-hint = حروف وأرقام و - و _ فقط، بلا مسافات.
+schedule-create = إنشاء
+schedule-cancel = إلغاء
+schedule-delete = حذف
+schedule-delete-confirm = يُحذف هذا الطابور، وتنتقل تحميلاته إلى آخر الطابور الرئيسي. هل تحذفه؟
+schedule-main-stays = الطابور الرئيسي لا يُحذف.
+schedule-summary-none = بلا موعد
+schedule-start = البدء
+schedule-start-any = بلا موعد: يعمل متى كان فيه ما ينتظر
+schedule-start-at = ابدأ في
+schedule-days = الأيام
+schedule-days-hint = بلا أيام محددة: كل يوم.
+schedule-day-sat = السبت
+schedule-day-sun = الأحد
+schedule-day-mon = الإثنين
+schedule-day-tue = الثلاثاء
+schedule-day-wed = الأربعاء
+schedule-day-thu = الخميس
+schedule-day-fri = الجمعة
+schedule-stop = الإيقاف
+schedule-stop-at = أوقف في
+schedule-stop-hint = ما لم يكتمل يتوقف، ويُستكمل في الموعد التالي.
+schedule-max-active = عدد التحميلات في الوقت نفسه
+schedule-after = بعد انتهاء الطابور
+schedule-after-nothing = لا شيء
+schedule-after-shutdown = أغلق الجهاز
+schedule-after-sleep = السكون
+schedule-after-hint = لهذا التشغيل فقط، ولا يُحفظ. وقبله يعدّ زاجِل دقيقة يمكنك الإلغاء فيها.
+schedule-countdown-shutdown = انتهى الطابور، ويُغلق الجهاز بعد:
+schedule-countdown-sleep = انتهى الطابور، ويدخل الجهاز في السكون بعد:
+schedule-countdown-cancel = إلغاء
+schedule-after-failed = لم يتم ذلك:
+schedule-files = التحميلات في الطابور (بترتيب البدء)
+schedule-up = لأعلى
+schedule-down = لأسفل
+schedule-move = انقل إلى طابور…
+schedule-empty = لا تحميلات في هذا الطابور.
+schedule-start-now = ابدأ الآن
+schedule-started = بدأ الطابور.
+schedule-closed-now = الطابور خارج موعده الآن: تنتظر تحميلاته موعده التالي.
+schedule-save = حفظ
+schedule-saved = حُفظ.
+schedule-close = إغلاق
+schedule-tries = المحاولات لكل ملف
+schedule-after-open = وافتح بعده ملفًا أو برنامجًا:
+schedule-after-open-pick = اختر ملفًا…
+schedule-soon = قريبًا
+
+## الاكتمال
+
+complete-title = اكتمل التحميل
+complete-name = الاسم
+complete-size = الحجم
+complete-folder = حُفظ في
+complete-url = الرابط
+complete-open = افتح
+complete-open-folder = افتح المجلد
+complete-close = إغلاق
+complete-dont-show = لا تُظهر هذه النافذة مرة أخرى
+complete-setting = أظهر نافذة «اكتمل التحميل» حين ينتهي تحميل
+complete-drag = اسحبه من هنا
+complete-drag-hint = اسحب الملف من هنا إلى أي برنامج أو مجلد
+
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.
+
+## The main window's title bar (the design of #83)
+app-title = زاجِل لإدارة التحميل
+win-minimize = تصغير
+win-maximize = تكبير
+win-restore = استعادة
+win-close = إغلاق
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = زاجِل ما زال يعمل في شريط النظام، والتحميلات تكمل. اختر «إنهاء زاجِل» من أيقونته لإنهائه.
+settings-closing = إغلاق النافذة
+settings-closing-label = إغلاق النافذة يُنهي زاجِل
+settings-closing-hint = دون هذا الخيار تختفي النافذة ويبقى زاجِل في شريط النظام والتحميلات تكمل، كما في IDM.
+settings-closing-no-tray = لا يظهر شريط النظام في سطح المكتب هذا، فإغلاق النافذة يُنهي زاجِل دائمًا (ويسأل أولًا إن كانت هناك تحميلات تعمل).
+
+## M5.5: the progress window (design window 4)
+progress-title = تقدّم التحميل
+progress-tab-status = حالة التحميل
+progress-tab-limit = حد السرعة
+progress-tab-finish = عند الانتهاء
+progress-status = الحالة
+progress-size = حجم الملف
+progress-done = ما نُزّل
+progress-resume = الاستكمال
+progress-resume-yes = ممكن
+progress-resume-no = غير ممكن
+progress-receiving = يستقبل البيانات…
+progress-more = إظهار التفاصيل
+progress-less = إخفاء التفاصيل
+progress-close = إغلاق
+progress-connection = الاتصال
+progress-got = ما نزّله
+progress-working = يعمل { $number }
+progress-left-part = باقٍ
+progress-no-parts = تظهر الأجزاء حين يبدأ التحميل.
+progress-limit-on = حدّد سرعة هذا التحميل
+progress-limit-unit = كيلوبايت/ث
+progress-limit-hint = حد البرنامج كله في الإعدادات يبقى ساريًا كذلك.
+progress-limit-save = حفظ
+progress-limit-saved = حُفظ الحد.
+progress-limit-next = حُفظ الحد، ويسري حين يُستكمل التحميل في المرة القادمة.
+progress-finish-hint = ما تفعله هذه النافذة حين ينتهي التحميل وهي مفتوحة:
+progress-finish-open = افتح الملف
+progress-finish-folder = افتح المجلد
+progress-finish-close = أغلق هذه النافذة
+progress-gone = أُزيل هذا التحميل من القائمة.
+progress-parts-done = اكتمل التحميل، وكل أجزائه وصلت.
+progress-limit-bad = اكتب رقمًا صحيحًا من { $min } إلى { $max }.
+progress-connections = { $connections }، { $working }
+
+## «Download file info»: the owner's test with a Google Drive link
+add-size-unknown = الحجم غير معروف
+add-web-page = هذا الرابط صفحة ويب، لا ملف. لتحميل الملف افتح الصفحة في المتصفح واضغط زر التحميل فيها، أو انسخ رابط الملف نفسه إن كان الموقع يعطيه وأضفه هنا.
+add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، لكنه لا يعطي ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.
+
+## «Download file info»: the user's name, category and description (#103, #95)
+add-description = الوصف
+add-description-hint = اختياري
+last-try-yesterday = أمس { $time }

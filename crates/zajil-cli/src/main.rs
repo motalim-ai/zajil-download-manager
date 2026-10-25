@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod batch;
 mod category;
 mod queue;
 
@@ -110,6 +111,14 @@ enum Command {
         #[command(subcommand)]
         command: category::CategoryCommand,
     },
+    /// Download the files a pattern stands for, one after the other, such
+    /// as `img[001-100].jpg`.
+    #[command(
+        after_help = "Exit codes: 0 every file saved, 1 a file failed (a file that stopped but \
+                      can be resumed counts as failed; the resume command is printed), 2 a \
+                      wrong pattern, 3 stopped with Ctrl+C during a file that can be resumed."
+    )]
+    Batch(batch::BatchArgs),
 }
 
 fn main() -> ExitCode {
@@ -153,6 +162,13 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
+    if let Command::Batch(args) = cli.command {
+        let engine = match Engine::new(options(cli.connections.into(), cli.tries)) {
+            Ok(engine) => engine,
+            Err(err) => return fail(&err.to_string()),
+        };
+        return runtime.block_on(batch::run(engine, args));
+    }
     runtime.block_on(run(
         cli.command,
         &categories,
@@ -254,7 +270,9 @@ async fn run(
                     .await
                     .map_err(Failure::Engine)
             }
-            Command::Queue { .. } | Command::Category { .. } => unreachable!("handled in main"),
+            Command::Queue { .. } | Command::Category { .. } | Command::Batch(_) => {
+                unreachable!("handled in main")
+            }
         }
     };
 

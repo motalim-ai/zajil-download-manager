@@ -90,10 +90,11 @@
 - **FR-7.3**: تحميل موقع كامل (Site Grabber) بعمق محدد، ومرشحات للأنواع، واحترام `robots.txt` افتراضيًا، وحد للسرعة حتى لا نضغط على السيرفر.
 
 ### 5.8 الإصدار (M8)
-- **FR-8.1**: مثبّتات موقّعة:
-  - ويندوز: ‎.exe أو ‎.msi.
-  - ماك: ‎.dmg موقّع وموثَّق (notarized).
-  - لينكس: AppImage و‎.deb.
+- **FR-8.1**: مثبّتات **بلا توقيع من Apple أو Microsoft أبدًا** (قرار المالك، 2026-10-25):
+  - ويندوز: ‎.exe أو ‎.msi بلا توقيع.
+  - ماك: ‎.dmg بتوقيع ad-hoc فقط، بلا توثيق (notarization).
+  - لينكس: AppImage و‎.deb مع توقيع GPG بمفتاح المشروع.
+  - وأصل الملفات تثبته بصمات SHA-256 المنشورة وتوقيع التحديثات بمفتاح المشروع.
 - **FR-8.2**: تحديث تلقائي **موقّع**، يتحقق من التوقيع ومن شهادة TLS **دائمًا**، ويسأل المستخدم قبل التثبيت.
 
 ## 6. ما لا يفعله البرنامج
@@ -150,7 +151,7 @@ This document defines version **1.0** of Zajil.
 - A Manifest V3 extension for Chrome, Edge and Firefox using Native Messaging, plus clipboard monitoring and "refresh download address".
 - Video download that never bypasses DRM.
 - A site grabber, "download all links" and pattern batch downloads.
-- Signed installers and a signed, TLS-verified auto-update.
+- Installers never signed by Apple or Microsoft (macOS ad-hoc only), GPG-signed Linux packages, published SHA-256 sums, and an auto-update signed with the project's own key and always TLS-verified.
 
 **Non-goals:** DRM circumvention, a kernel driver, torrents, a mobile app, telemetry, ads and paid features.
 

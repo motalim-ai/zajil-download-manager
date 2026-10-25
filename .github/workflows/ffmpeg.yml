@@ -124,8 +124,8 @@ jobs:
             lipo -create "out-arm64/$tool" "out-x86_64/$tool" -output "out/$tool"
             lipo -info "out/$tool"
           done
-          # Ad-hoc signed (codesign -s -), not signed by Apple: the owner's
-          # decision for 0.1, until M8 (ADR-0009, section 2). Zajil is to pin
+          # Ad-hoc signed (codesign -s -), never signed by Apple: the owner's
+          # decision (ADR-0009, section 2). Zajil is to pin
           # the SHA-256 and check it before every run, and its tools carry no
           # quarantine mark, so Gatekeeper does not stop them.
           codesign --force --sign - out/ffmpeg out/ffprobe
@@ -276,7 +276,7 @@ jobs:
             echo
             echo "Source SHA-256: $FFMPEG_SHA256 ($FFMPEG_TARBALL, signed by FFmpeg's key $FFMPEG_SIGNING_KEY)."
             echo
-            echo "macOS: ad-hoc signed only, not signed or notarized by Apple (until M8). Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
+            echo "macOS: ad-hoc signed only, never signed or notarized by Apple (owner's decision). Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
             echo
             echo "No change to the FFmpeg source. Built by .github/workflows/ffmpeg.yml from commit $GITHUB_SHA. FFmpeg belongs to its authors: https://ffmpeg.org"
           } > "$RUNNER_TEMP/notes.md"

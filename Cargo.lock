@@ -2433,20 +2433,21 @@ dependencies = [
 
 [[package]]
 name = "zajil-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "jiff",
  "tempfile",
  "tokio",
  "zajil-core",
+ "zajil-grab",
  "zajil-platform",
  "zajil-testserver",
 ]
 
 [[package]]
 name = "zajil-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dunce",
  "icu_properties",
@@ -2466,8 +2467,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zajil-grab"
+version = "0.1.0"
+dependencies = [
+ "zajil-core",
+]
+
+[[package]]
 name = "zajil-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2479,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -2490,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "dirs",
@@ -2503,7 +2511,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-testserver"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "http-body-util",

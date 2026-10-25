@@ -721,6 +721,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("add-probe-ranges", &["size"]),
     ("add-probe-single", &["size"]),
     ("add-probe-unsure", &["size"]),
+    ("add-probe-unsure-no-size", &["size"]),
     ("connections-count", &["count"]),
     ("details-part", &["number"]),
     ("details-connections-value", &["active", "total"]),
@@ -731,6 +732,13 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A time already written for the user's language.
+    ("last-try-yesterday", &["time"]),
+    ("progress-working", &["number"]),
+    // Two texts already made, a count and «N working».
+    ("progress-connections", &["connections", "working"]),
+    // Bounds shown alone (no noun after them).
+    ("progress-limit-bad", &["max", "min"]),
     ("add-remember", &["category"]),
     // The engine's or the system's own words (English).
     ("add-remember-failed", &["error"]),
@@ -847,6 +855,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         ),
     },
     Whole {
+        key: "add-probe-unsure-no-size",
+        ar: (
+            &[("size", "SIZE")],
+            "SIZE. السيرفر يدعم التقسيم، لكنه لا يعطي ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.",
+        ),
+        en: (
+            &[("size", "SIZE")],
+            "SIZE. The server allows ranges but gives no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.",
+        ),
+    },
+    Whole {
         key: "details-part",
         ar: (&[("number", "11")], "الجزء 11"),
         en: (&[("number", "1")], "Part 1"),
@@ -952,6 +971,38 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "add-remember",
         ar: (&[("category", "CAT")], "تذكّر هذا المجلد لفئة «CAT»"),
         en: (&[("category", "CAT")], "Remember this folder for “CAT”"),
+    },
+    Whole {
+        key: "progress-limit-bad",
+        ar: (
+            &[("min", "11"), ("max", "32")],
+            "اكتب رقمًا صحيحًا من 11 إلى 32.",
+        ),
+        en: (
+            &[("min", "1"), ("max", "32")],
+            "Write a whole number from 1 to 32.",
+        ),
+    },
+    Whole {
+        key: "progress-connections",
+        ar: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN، WORK",
+        ),
+        en: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN, WORK",
+        ),
+    },
+    Whole {
+        key: "progress-working",
+        ar: (&[("number", "NUMBER")], "يعمل NUMBER"),
+        en: (&[("number", "NUMBER")], "NUMBER working"),
+    },
+    Whole {
+        key: "last-try-yesterday",
+        ar: (&[("time", "TIME")], "أمس TIME"),
+        en: (&[("time", "TIME")], "Yesterday TIME"),
     },
     Whole {
         key: "footer-selected",

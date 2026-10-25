@@ -8,8 +8,11 @@
 
 #![forbid(unsafe_code)]
 
+mod closing;
+mod complete;
 mod live;
 mod menu;
+mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
@@ -145,7 +148,19 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    let builder = tauri::Builder::default()
+    // One Zajil per user: with its window hidden in the tray, opening Zajil
+    // again shows it instead of starting a second program on the same
+    // queues (review of #109). Not with `--data-dir` (the tests and the
+    // screenshots, each on a folder of its own).
+    let builder = tauri::Builder::default();
+    let builder = if args.iter().any(|a| a == "--data-dir") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
+    };
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Opens a finished download or its folder from Rust only
@@ -156,7 +171,13 @@ pub fn run() {
             None,
         ))
         .manage(app)
-        .manage(windows::Shared::default());
+        .manage(windows::Shared::default())
+        .manage(closing::Closing::new(
+            &data,
+            args.iter().any(|a| a == "--close-quits"),
+        ))
+        .manage(schedule::SharedAfter::default())
+        .manage(complete::Show::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -165,17 +186,18 @@ pub fn run() {
             // To the window in front: in an add window, Select all is its
             // text box's, not the main window's rows (M5.5).
             if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
-                let front = [windows::LINK, windows::INFO]
+                let front = handle
+                    .webview_windows()
                     .into_iter()
-                    .find(|l| {
-                        handle
-                            .get_webview_window(l)
-                            .is_some_and(|w| w.is_focused().unwrap_or(false))
-                    })
-                    .unwrap_or("main");
+                    .find(|(_, w)| w.is_focused().unwrap_or(false))
+                    .map_or_else(|| "main".to_owned(), |(label, _)| label);
                 // Quit is the main window's, which asks first while
                 // downloads run (review of #105: an add window quit at once).
-                let front = if command == "quit" { "main" } else { front };
+                let front = if command == "quit" {
+                    "main"
+                } else {
+                    front.as_str()
+                };
                 let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
@@ -212,7 +234,14 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            // The close button hides the window into the tray (`closing.rs`).
+            closing::watch(tauri_app.handle());
+            tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
+            // The schedule window's and the «download complete» windows'
+            // (`schedule.rs`, `complete.rs`); they close with the main one too.
+            tauri_app.add_capability(schedule::CAPABILITY)?;
+            tauri_app.add_capability(complete::CAPABILITY)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -224,8 +253,21 @@ pub fn run() {
                     let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
                         Some("add") => Some(windows::INFO_SIZE),
                         Some("link") => Some(windows::LINK_SIZE),
+                        Some("progress") => Some(windows::PROGRESS_SIZE),
                         _ => None,
                     };
+                    // macOS: the system's title bar is drawn by the page in
+                    // a scene (the main window's own is hidden, #118).
+                    let size = size.map(|(w, h)| {
+                        (
+                            w,
+                            if cfg!(target_os = "macos") {
+                                h + 28.0
+                            } else {
+                                h
+                            },
+                        )
+                    });
                     ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
@@ -271,6 +313,9 @@ pub fn run() {
                 app.stop.request();
                 tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
             }
+            // macOS: a click on the Dock icon shows the window it hid.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::show_window(handle),
             _ => {}
         });
 }
@@ -288,6 +333,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        tray::set_tray_tooltip,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -307,12 +356,27 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
         open_download,
         move_to_queue,
-        copy_links
+        copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out
     ]
 }
 
@@ -328,6 +392,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        tray::set_tray_tooltip,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -347,12 +415,27 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
         open_download,
         move_to_queue,
         copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -362,11 +445,18 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
 /// ended. After that it gives up: every download's progress is in its state
 /// file, at most a second old (ADR-0004), and the next start resumes there.
 async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
+    // How long the stop took, said every time (#132: on Windows it ran
+    // out a few times; the time shows how near the limit it usually is).
+    let asked = std::time::Instant::now();
     let wait = stopped.wait_for(|stopped| *stopped);
     match tokio::time::timeout(STOP_WAIT, wait).await {
-        Ok(_) => eprintln!("zajil: the downloads stopped; exiting"),
+        Ok(_) => eprintln!(
+            "zajil: the downloads stopped; exiting (after {} ms)",
+            asked.elapsed().as_millis()
+        ),
         Err(_) => eprintln!(
-            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files"
+            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files (after {} ms)",
+            asked.elapsed().as_millis()
         ),
     }
 }
@@ -453,10 +543,37 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
 #[tauri::command]
 fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
+    closing: State<'_, closing::Closing>,
     show: String,
     quit: String,
+    notice_title: String,
+    notice: String,
 ) -> Result<(), String> {
+    closing.set_notice(closing::Notice {
+        title: notice_title,
+        body: notice,
+    });
     tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+}
+
+/// Whether closing the main window quits Zajil (the settings), and whether
+/// this desktop has a system tray to go on in.
+#[tauri::command]
+fn close_quits(closing: State<'_, closing::Closing>) -> (bool, bool) {
+    (closing.prefs().close_quits, closing.tray())
+}
+
+/// The page heard «quit» from closing the window (`closing.rs`).
+#[tauri::command]
+fn quit_heard(closing: State<'_, closing::Closing>) {
+    closing.heard();
+}
+
+#[tauri::command]
+fn set_close_quits(closing: State<'_, closing::Closing>, quits: bool) -> Result<(), String> {
+    closing
+        .change(|p| p.close_quits = quits)
+        .map_err(|e| e.to_string())
 }
 
 /// Tells the page that something changed: at once, or once the throttle
@@ -530,6 +647,8 @@ async fn run_queues(handle: tauri::AppHandle) {
                     }
                 };
                 on_queue_event(&event, &live, &links, &asks, &from_browser, &store, changed);
+                schedule::on_event(&handle, &event);
+                complete::on_event(&handle, &event);
                 notify(&handle, &live);
             })
             .await;
@@ -1326,11 +1445,7 @@ fn reach_file(engine: &Engine, url: &str) -> Result<zajil_core::Probe, String> {
 /// web page (a sign-in page a link redirected to, review of #70), or a file
 /// of another type than the name the browser had.
 fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option<String> {
-    let page = matches!(
-        probe.content_type.as_deref(),
-        Some("text/html" | "application/xhtml+xml")
-    );
-    if page {
+    if view::is_web_page(probe.content_type.as_deref()) {
         return Some("the server sent a web page (a sign-in page?), not the file".into());
     }
     let extension = |name: &str| {
@@ -1422,6 +1537,9 @@ fn from_extension(
             .any(zajil_core::category::runs_code);
             let add = AddRequest {
                 url: url.clone(),
+                name: None,
+                category: None,
+                description: None,
                 queue: None,
                 folder: None,
                 start: !runs_code,
@@ -1487,6 +1605,27 @@ fn add_blocking(
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
         let id = queues.add(queue, &request.url, given)?;
+        // The user's name, category and description (#103, #95), in the
+        // same write: the queue never sees the download without them.
+        let given_name = request
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        if given_name.is_some() {
+            queues.set_name(id, given_name)?;
+        }
+        if let Some(category) = request.category.as_deref() {
+            queues.set_category(id, Some(category))?;
+        }
+        let description = request
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty());
+        if description.is_some() {
+            queues.set_description(id, description)?;
+        }
         let item = queues.item_mut(id).expect("just added");
         // Without a folder of its own, a download goes by its category.
         item.categorize = request.folder.is_none();
@@ -1840,6 +1979,23 @@ fn copied_here(copied: &str, link: &str) -> bool {
     copied.lines().any(|l| l.trim() == link.trim())
 }
 
+/// A download's own speed limit (the progress window, M5.5); `None` or 0:
+/// none. A running download takes it the next time it starts (the runner
+/// reads it then).
+#[tauri::command]
+async fn set_limit<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    limit: Option<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| {
+        q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?.limit = limit.filter(|l| *l > 0);
+        Ok(())
+    })
+    .await
+}
+
 /// Moves downloads to queue `queue`, in their order, at its end.
 #[tauri::command]
 async fn move_to_queue<R: tauri::Runtime>(
@@ -1921,6 +2077,85 @@ async fn remove<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// «Download file info» adds the download with the user's own name,
+    /// category and description (#103, #95); an empty name or description
+    /// leaves the server's name and none.
+    #[test]
+    fn a_download_is_added_with_the_users_name_category_and_description() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = AddRequest {
+            url: "https://example.com/v.mp4".into(),
+            name: Some("  درس أول.mp4 ".into()),
+            category: Some("music".into()),
+            description: Some(" للمراجعة ".into()),
+            queue: None,
+            folder: None,
+            start: false,
+            limit: None,
+        };
+        let id = add_blocking(&store, &request, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(item.name.as_deref(), Some("درس أول.mp4"));
+        assert_eq!(item.category.as_deref(), Some("music"));
+        assert_eq!(item.description.as_deref(), Some("للمراجعة"));
+
+        let plain = AddRequest {
+            name: Some("   ".into()),
+            category: None,
+            description: Some("".into()),
+            ..request
+        };
+        let id = add_blocking(&store, &plain, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(
+            (
+                item.name.as_ref(),
+                item.category.as_ref(),
+                item.description.as_ref()
+            ),
+            (None, None, None)
+        );
+    }
+
+    /// The main window is the same on every system but for its title bar
+    /// (the design of #83): hidden under the page on macOS, none on Windows
+    /// and Linux, where the page draws it.
+    #[test]
+    fn the_main_window_differs_by_system_only_in_its_title_bar() {
+        let read = |name: &str| -> serde_json::Value {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        for (name, own) in [
+            (
+                "tauri.macos.conf.json",
+                serde_json::json!({"titleBarStyle": "Overlay", "hiddenTitle": true}),
+            ),
+            (
+                "tauri.windows.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+            (
+                "tauri.linux.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+        ] {
+            let mut expected = base.clone();
+            for (k, v) in own.as_object().unwrap() {
+                expected[k] = v.clone();
+            }
+            assert_eq!(
+                read(name)["app"]["windows"],
+                serde_json::json!([expected]),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn a_link_copied_by_the_app_is_not_offered_back() {

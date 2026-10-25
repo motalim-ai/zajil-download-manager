@@ -12,7 +12,7 @@
   import FileName from "./FileName.svelte";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
-  import { left, percent, size, speed } from "../format";
+  import { lastTry, left, percent, size, speed } from "../format";
   import { COLUMNS, clampWidth, load, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
   import type { DownloadView } from "../bindings/DownloadView";
 
@@ -221,9 +221,10 @@
     <td class="num muted">{d.status === "active" && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : ""}</td>
   {:else if id === "speed"}
     <td class="num">{d.status === "active" ? speed(locale.lang, locale.digits, d.speed) : ""}</td>
+  {:else if id === "last"}
+    <td class="num muted">{d.last_try ? lastTry(locale.lang, locale.digits, d.last_try, locale.t) : ""}</td>
   {:else}
-    <!-- «Last try» and «Description» come with #95 (zajil-core). -->
-    <td class="faint"></td>
+    <td class="muted"><span class="desc" title={d.description ?? undefined}>{d.description ?? ""}</span></td>
   {/if}
 {/snippet}
 
@@ -322,6 +323,12 @@
 </div>
 
 <style>
+  .desc {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .scroll {
     overflow: auto;
     flex: 1;
@@ -459,9 +466,6 @@
   }
   .muted {
     color: var(--muted);
-  }
-  .faint {
-    color: var(--faint);
   }
   .st {
     display: flex;

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "complete",
+  "description": "Added from Rust when the app starts (complete.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the «Download complete» windows (M5.5) may do: Zajil's own commands and events, and the system's yes-or-no question before a program opens (#84). Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "complete-*"
+  ],
+  "permissions": [
+    "core:event:default",
+    "dialog:allow-message"
+  ]
+}
