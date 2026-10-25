@@ -70,7 +70,9 @@ fn the_real_power_control_is_only_used_by_the_program() {
 
 #[test]
 fn every_test_starts_zajil_with_power_actions_forbidden() {
-    let binary = words(&["CARGO_BIN_EXE", "_zajil"]);
+    // The `zajil` program exactly: `zajil-host` (M5) is another program,
+    // which never shuts a computer down.
+    let binary = words(&["CARGO_BIN_EXE", "_zajil\""]);
     let users: Vec<String> = rust_files()
         .into_iter()
         .filter(|(_, text)| text.contains(&binary))
