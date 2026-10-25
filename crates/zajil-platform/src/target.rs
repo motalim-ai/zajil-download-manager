@@ -40,7 +40,10 @@ pub fn current() -> Option<Target> {
         Os::Windows
     } else if cfg!(target_os = "macos") {
         Os::Macos
-    } else if cfg!(target_os = "linux") {
+    } else if cfg!(target_os = "linux") && cfg!(target_env = "gnu") {
+        // The pinned Linux files are for glibc: a musl build (Alpine) gets
+        // none rather than one that does not run (review of the video
+        // tools).
         Os::Linux
     } else {
         return None;

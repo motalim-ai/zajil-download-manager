@@ -63,19 +63,109 @@ pub struct Pinned {
 }
 
 /// The pinned yt-dlp (`tools/yt-dlp/pins.txt`): its stable version, then
-/// `<os>-<arch> <release file> <sha256>` lines. One file for the program
-/// and the CI, which downloads the same files for its tests. A newer
-/// version comes with a new Zajil release, after its tests pass (ADR-0009,
-/// section 7).
+/// `<os>-<arch> <release file> <sha256>` lines, read strictly
+/// ([`parse_pins`]; a test reads the file of this build). A newer version
+/// comes with a new Zajil release, after its tests pass (ADR-0009, section
+/// 7).
 const YT_DLP_PINS: &str = include_str!("../../../tools/yt-dlp/pins.txt");
+
+/// A pins file: one version, and the file and SHA-256 of each target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinsFile {
+    pub version: String,
+    /// `(<os>-<arch>, release file, sha256)`, each target once.
+    pub files: Vec<(String, String, String)>,
+}
+
+/// Reads a pins file strictly (review of the video tools): comments (`#`)
+/// and empty lines, one `version <version>` line, then exactly three
+/// fields per line: a known target, once; a plain file name; a lower-case
+/// SHA-256. The version and file name are plain names (letters, digits,
+/// `-`, `_`, `.`, never `.` or `..`): the version names a folder.
+pub fn parse_pins(text: &str) -> Result<PinsFile, String> {
+    let mut version = None;
+    let mut files: Vec<(String, String, String)> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let at = || format!("line {}", n + 1);
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            ["version", v] => {
+                if version.is_some() {
+                    return Err(format!("{}: a second version", at()));
+                }
+                if !is_plain_name(v) {
+                    return Err(format!("{}: the version is not a plain name", at()));
+                }
+                version = Some((*v).to_owned());
+            }
+            [target, file, sha256] => {
+                if !KNOWN_TARGETS.contains(target) {
+                    return Err(format!("{}: unknown target {target:?}", at()));
+                }
+                if files.iter().any(|(t, _, _)| t == target) {
+                    return Err(format!("{}: {target} twice", at()));
+                }
+                if !is_plain_name(file) {
+                    return Err(format!("{}: the file is not a plain name", at()));
+                }
+                let hex = sha256.len() == 64
+                    && sha256
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+                if !hex {
+                    return Err(format!("{}: not a lower-case SHA-256", at()));
+                }
+                files.push((
+                    (*target).to_owned(),
+                    (*file).to_owned(),
+                    (*sha256).to_owned(),
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "{}: not `version <v>` nor `<target> <file> <sha256>`",
+                    at()
+                ));
+            }
+        }
+    }
+    let version = version.ok_or("no version line")?;
+    Ok(PinsFile { version, files })
+}
+
+const KNOWN_TARGETS: [&str; 6] = [
+    "windows-x86_64",
+    "windows-aarch64",
+    "macos-x86_64",
+    "macos-aarch64",
+    "linux-x86_64",
+    "linux-aarch64",
+];
+
+/// A file or folder name with nothing that could leave its folder.
+fn is_plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+/// This build's yt-dlp pins (checked by a test, so never wrong here).
+fn yt_dlp_pins() -> &'static PinsFile {
+    static PINS: std::sync::OnceLock<PinsFile> = std::sync::OnceLock::new();
+    PINS.get_or_init(|| parse_pins(YT_DLP_PINS).expect("tools/yt-dlp/pins.txt is valid"))
+}
 
 /// The pinned version of yt-dlp.
 pub fn yt_dlp_version() -> &'static str {
-    YT_DLP_PINS
-        .lines()
-        .find_map(|line| line.strip_prefix("version "))
-        .expect("pins.txt has a version line")
-        .trim()
+    &yt_dlp_pins().version
 }
 
 /// The name of `target` in pins.txt.
@@ -95,17 +185,16 @@ fn target_name(target: Target) -> String {
 /// The pinned yt-dlp file for `target`, if pins.txt has one.
 fn yt_dlp(target: Target) -> Option<Pinned> {
     let wanted = target_name(target);
-    let version = yt_dlp_version();
-    YT_DLP_PINS.lines().find_map(|line| {
-        let mut words = line.split_whitespace();
-        (words.next()? == wanted).then_some(())?;
-        let (file, sha256) = (words.next()?, words.next()?);
-        Some(Pinned {
-            version: version.to_owned(),
+    let pins = yt_dlp_pins();
+    let version = &pins.version;
+    pins.files
+        .iter()
+        .find(|(t, _, _)| *t == wanted)
+        .map(|(_, file, sha256)| Pinned {
+            version: version.clone(),
             url: format!("https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{file}"),
-            sha256: sha256.to_owned(),
+            sha256: sha256.clone(),
         })
-    })
 }
 
 /// What a [`Toolbox`] downloads: a tool and a target to the pinned file,
@@ -141,6 +230,10 @@ pub enum ToolError {
     },
     #[error("{} can be changed by another user, so it is not run", .0.display())]
     NotPrivate(PathBuf),
+    /// A pin that is not a plain version and an HTTPS file (only a test's
+    /// own pins could be).
+    #[error("{0:?} has an invalid pin")]
+    InvalidPin(Tool),
     #[error("downloading the tool failed: {0}")]
     Download(#[from] EngineError),
     #[error(transparent)]
@@ -176,6 +269,9 @@ impl Toolbox {
     fn pin(&self, tool: Tool) -> Result<(Pinned, Target), ToolError> {
         let target = self.target.ok_or(ToolError::UnknownTarget)?;
         let pin = (self.pins)(tool, target).ok_or(ToolError::NotReleased(tool))?;
+        if !is_plain_name(&pin.version) || !pin.url.starts_with("https://") {
+            return Err(ToolError::InvalidPin(tool));
+        }
         Ok((pin, target))
     }
 
@@ -195,19 +291,21 @@ impl Toolbox {
         self.verified_blocking(tool).is_ok()
     }
 
-    /// The path of `tool`, checked right before it runs: the pinned file,
-    /// which no other user can change, in a folder no other user can
-    /// change.
-    pub async fn verified(&self, tool: Tool) -> Result<PathBuf, ToolError> {
+    /// `tool`, checked right before it runs: the pinned file, which no
+    /// other user can change, in folders no other user can change, from
+    /// the tools folder down. Keep the [`VerifiedTool`] until the program
+    /// has started: on Windows the file stays locked while it lives.
+    pub async fn verified(&self, tool: Tool) -> Result<VerifiedTool, ToolError> {
         let (pin, path) = (self.pin(tool)?.0, self.path(tool)?);
-        tokio::task::spawn_blocking(move || check_installed(tool, &pin, &path))
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || check_installed(tool, &pin, &root, &path))
             .await
             .map_err(io::Error::other)?
     }
 
-    fn verified_blocking(&self, tool: Tool) -> Result<PathBuf, ToolError> {
+    fn verified_blocking(&self, tool: Tool) -> Result<VerifiedTool, ToolError> {
         let (pin, path) = (self.pin(tool)?.0, self.path(tool)?);
-        check_installed(tool, &pin, &path)
+        check_installed(tool, &pin, &self.root, &path)
     }
 
     /// Downloads `tool` with `engine` (TLS checked as for every download)
@@ -246,7 +344,7 @@ impl Toolbox {
             }
         };
         tokio::task::spawn_blocking(move || {
-            let result = keep_if_pinned(tool, &pin, &finished.file, &dest);
+            let result = keep_if_pinned(tool, &pin, &finished.file, staging.path(), &dest);
             staging.remove();
             result
         })
@@ -328,21 +426,20 @@ impl Drop for Staging {
 /// Copies the downloaded file to `dest` through a new file only the user
 /// can access, hashing what it copies, and keeps it only if the hash is the
 /// pinned one. A copy, not a rename: the new file carries no mark from the
-/// internet (ADR-0009, section 2) and is not the engine's file.
+/// internet (ADR-0009, section 2) and is not the engine's file. The copy is
+/// made in `staging`, this install's own folder on the same volume, so two
+/// installs at once never share a file (review of the video tools).
 fn keep_if_pinned(
     tool: Tool,
     pin: &Pinned,
     from: &Path,
+    staging: &Path,
     dest: &Path,
 ) -> Result<PathBuf, ToolError> {
     let dir = dest.parent().expect("a tool path has a folder");
     zajil_platform::fs::private_dir(dir)?;
     let mut source = zajil_platform::fs::open_regular_nofollow(from, false)?;
-    let new = dest.with_extension("new");
-    match std::fs::remove_file(&new) {
-        Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err.into()),
-        _ => {}
-    }
+    let new = staging.join("tool.new");
     let mut out = zajil_platform::fs::create_private(&new)?;
     let copied = copy_hashing(&mut source, &mut out).and_then(|actual| {
         out.sync_all()?;
@@ -386,18 +483,56 @@ fn copy_hashing(from: &mut File, to: &mut File) -> io::Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
-fn check_installed(tool: Tool, pin: &Pinned, path: &Path) -> Result<PathBuf, ToolError> {
-    let mut file = match zajil_platform::fs::open_regular_nofollow(path, false) {
-        Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Err(ToolError::Missing(tool)),
-        Err(err) => return Err(err.into()),
-    };
+/// A tool checked right before it runs: its path, and the file it was
+/// checked on, kept open until the program has started (on Windows it
+/// stays locked while open).
+#[derive(Debug)]
+pub struct VerifiedTool {
+    path: PathBuf,
+    _file: File,
+}
+
+impl VerifiedTool {
+    /// The program to run.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn check_installed(
+    tool: Tool,
+    pin: &Pinned,
+    root: &Path,
+    path: &Path,
+) -> Result<VerifiedTool, ToolError> {
+    // Every folder from the tools folder down to the file: no other user
+    // may change, rename or replace any of them (review of the video
+    // tools: only the last folder was checked).
     let dir = path.parent().expect("a tool path has a folder");
-    for checked in [path, dir] {
-        if !zajil_platform::fs::only_user_or_root_can_change(checked)? {
-            return Err(ToolError::NotPrivate(checked.to_owned()));
+    let below = dir.strip_prefix(root).map_err(io::Error::other)?;
+    let mut folder = root.to_path_buf();
+    for level in std::iter::once(None).chain(below.components().map(Some)) {
+        if let Some(part) = level {
+            folder.push(part);
+        }
+        match zajil_platform::fs::is_private_dir(&folder) {
+            Ok(true) => {}
+            Ok(false) => return Err(ToolError::NotPrivate(folder)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(ToolError::Missing(tool));
+            }
+            Err(err) => return Err(err.into()),
         }
     }
+    // The file itself, checked on the opened file.
+    let mut file = match zajil_platform::fs::open_private_tool(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Err(ToolError::Missing(tool)),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            return Err(ToolError::NotPrivate(path.to_owned()));
+        }
+        Err(err) => return Err(err.into()),
+    };
     let mut hasher = Sha256::new();
     io::copy(&mut file, &mut HashWriter(&mut hasher))?;
     let actual = hex(&hasher.finalize());
@@ -408,7 +543,10 @@ fn check_installed(tool: Tool, pin: &Pinned, path: &Path) -> Result<PathBuf, Too
             expected: pin.sha256.clone(),
         });
     }
-    Ok(path.to_owned())
+    Ok(VerifiedTool {
+        path: path.to_owned(),
+        _file: file,
+    })
 }
 
 struct HashWriter<'a>(&'a mut Sha256);
@@ -449,6 +587,35 @@ mod tests {
                 );
                 assert_eq!(pin.version, yt_dlp_version());
             }
+        }
+    }
+
+    #[test]
+    fn this_build_s_pins_file_is_valid() {
+        let pins = parse_pins(YT_DLP_PINS).unwrap();
+        assert_eq!(pins.files.len(), KNOWN_TARGETS.len());
+    }
+
+    #[test]
+    fn a_pins_file_is_read_strictly() {
+        let sha = "a".repeat(64);
+        let good = format!("# yt-dlp\nversion 2026.10.21\n\nlinux-x86_64 yt-dlp_linux {sha}\n");
+        assert_eq!(parse_pins(&good).unwrap().files.len(), 1);
+        for bad in [
+            String::new(),
+            format!("linux-x86_64 yt-dlp_linux {sha}"),
+            format!("version 1\nversion 2\nlinux-x86_64 f {sha}"),
+            format!("version ../x\nlinux-x86_64 f {sha}"),
+            format!("version ..\nlinux-x86_64 f {sha}"),
+            format!("version 1\nlinux-x86_64 f {sha} extra"),
+            format!("version 1\nlinux-x86_64 f {sha}\nlinux-x86_64 g {sha}"),
+            format!("version 1\nbeos-x86 f {sha}"),
+            format!("version 1\nlinux-x86_64 ../f {sha}"),
+            format!("version 1\nlinux-x86_64 f {}", "A".repeat(64)),
+            format!("version 1\nlinux-x86_64 f {}", "a".repeat(63)),
+            "version 1\nsomething".to_owned(),
+        ] {
+            assert!(parse_pins(&bad).is_err(), "{bad:?}");
         }
     }
 
