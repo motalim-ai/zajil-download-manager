@@ -23,14 +23,14 @@
 
 <section class="details" aria-labelledby="details-title">
   <div class="tool">
-    <button class="btn quiet" onclick={onback} aria-label={locale.t("details-back")} title={locale.t("details-back")}><span class="flip"><Icon name="back" /></span></button>
+    <button class="btn quiet" id="details-back" onclick={onback} aria-label={locale.t("details-back")} title={locale.t("details-back")}><span class="flip"><Icon name="back" /></span></button>
     <span class="title-bar">{locale.t("details-title")}</span>
     <span class="end">
       {#if d.status === "active" || d.status === "waiting"}
-        <button class="btn" onclick={onpause}><Icon name="pause" />{locale.t("action-pause")}</button>
+        <button class="btn" id="details-pause" onclick={onpause}><Icon name="pause" />{locale.t("action-pause")}</button>
       {:else if d.status === "paused" || d.status === "failed"}
-        <button class="btn quiet" onclick={onrefresh}><Icon name="link" />{locale.t("refresh-action")}</button>
-        <button class="btn" onclick={onresume}><Icon name="play" />{locale.t("action-resume")}</button>
+        <button class="btn quiet" id="details-refresh" onclick={onrefresh}><Icon name="link" />{locale.t("refresh-action")}</button>
+        <button class="btn" id="details-resume" onclick={onresume}><Icon name="play" />{locale.t("action-resume")}</button>
       {/if}
     </span>
   </div>

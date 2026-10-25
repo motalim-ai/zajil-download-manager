@@ -17,6 +17,12 @@ export function refreshText(
   switch (problem.kind) {
     case "not_stopped":
       return { text: t("refresh-not-stopped"), detail: null };
+    case "stopping":
+      return { text: t("refresh-stopping"), detail: null };
+    case "busy":
+      return { text: t("refresh-busy"), detail: null };
+    case "cancelled":
+      return { text: t("refresh-cancelled"), detail: null };
     case "done":
       return { text: t("refresh-done"), detail: null };
     case "bad_link":
@@ -27,6 +33,8 @@ export function refreshText(
       const shown = (n: number | null) => (n === null ? t("details-unknown") : size(lang, digits, n));
       switch (problem.why) {
         case "size":
+          // An unknown size shows nothing about the file (review of #78).
+          if (problem.theirs === null || problem.ours === null) return { text: t("refresh-size-unknown"), detail: null };
           return { text: t("refresh-size", { theirs: shown(problem.theirs), ours: shown(problem.ours) }), detail: null };
         case "version":
           return { text: t("refresh-version"), detail: null };

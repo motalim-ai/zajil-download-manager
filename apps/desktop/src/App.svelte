@@ -251,8 +251,15 @@
     if (d && !refreshing) refreshing = { id: d.id, name: d.name, problem: null, detail: null, busy: false };
   }
 
+  // Closed: a refresh still asking the server is given up, and the focus
+  // goes back to the details' buttons (review of #78).
   function closeRefreshing() {
+    if (refreshing?.busy) void api.cancelRefresh(refreshing.id).catch(() => {});
     refreshing = null;
+    void tick().then(() => {
+      const back = ["details-refresh", "details-resume", "details-pause", "details-back"].map((id) => document.getElementById(id)).find((b) => b);
+      back?.focus();
+    });
   }
 
   async function refreshLink(url: string) {
@@ -261,7 +268,12 @@
     refreshing = { ...refreshing, busy: true };
     try {
       await api.refreshLink(id, url);
-      refreshing = null;
+      if (refreshing?.id === id) {
+        refreshing = { ...refreshing, busy: false };
+        await refresh();
+        closeRefreshing();
+        return;
+      }
     } catch (e) {
       const said = refreshText(locale.t, locale.lang, locale.digits, asRefreshProblem(e));
       if (refreshing?.id === id) refreshing = { ...refreshing, busy: false, problem: said.text, detail: said.detail };
@@ -379,9 +391,10 @@
       unlisten = await api.onChange(() => void refresh());
       // A copied download link waits in the paste bar, and the window
       // shows; nothing asks the server before the user presses "Download"
-      // (review of #67). Ignored while the add dialog is open.
+      // (review of #67). Ignored while a dialog is open: with the refresh
+      // dialog, the new link is copied for it (review of #78).
       unlistenClipboard = await api.onClipboardLink((url) => {
-        if (adding) return;
+        if (adding || refreshing) return;
         pasted = url;
         void api.showWindow().catch(() => {});
         void tick().then(() => document.getElementById("paste-url")?.focus());

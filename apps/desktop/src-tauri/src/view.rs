@@ -166,9 +166,15 @@ pub struct DetailsView {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum RefreshProblem {
-    /// It is downloading or waiting for its turn (or another refresh of it
-    /// is under way): pause it first.
+    /// It is downloading or waiting for its turn: pause it first.
     NotStopped,
+    /// Paused a moment ago, it is still stopping (it holds its part file):
+    /// try again in a moment (review of #78).
+    Stopping,
+    /// Another refresh of it is under way.
+    Busy,
+    /// Given up: the dialog was closed.
+    Cancelled,
     /// It has finished.
     Done,
     /// Not a link Zajil takes; the reason, in English.
@@ -211,7 +217,8 @@ impl From<zajil_core::Error> for RefreshProblem {
                 };
                 RefreshProblem::NotTheSameFile { why, theirs, ours }
             }
-            Error::Locked(_) => RefreshProblem::NotStopped,
+            Error::Locked(_) => RefreshProblem::Stopping,
+            Error::Stopped { .. } => RefreshProblem::Cancelled,
             err @ (Error::InvalidUrl { .. } | Error::UnsupportedScheme(_)) => {
                 RefreshProblem::BadLink {
                     reason: err.to_string(),

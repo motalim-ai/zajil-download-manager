@@ -10,6 +10,9 @@ const strip = (s: string) => s.replace(/[\u2068\u2069]/g, "");
 describe("refreshing the download link", () => {
   const problems: RefreshProblem[] = [
     { kind: "not_stopped" },
+    { kind: "stopping" },
+    { kind: "busy" },
+    { kind: "cancelled" },
     { kind: "done" },
     { kind: "bad_link", reason: "a URL with a password" },
     { kind: "failed", error: "the server answered 403 Forbidden" },
@@ -27,9 +30,11 @@ describe("refreshing the download link", () => {
       const texts = problems.map((p) => refreshText(t, lang, "latn", p));
       for (const { text } of texts) expect(text).not.toMatch(/^refresh-|^details-/);
       expect(new Set(texts.map((s) => s.text)).size).toBe(texts.length);
-      expect(strip(texts[4]!.text)).toContain("1,000");
-      expect(strip(texts[5]!.text)).toContain(format(lang, "details-unknown"));
-      expect(texts[3]!.detail).toBe("the server answered 403 Forbidden");
+      const at = (kind: string, why?: string, known = true) =>
+        texts[problems.findIndex((p) => p.kind === kind && (!why || ("why" in p && p.why === why && (p.theirs !== null) === known)))]!;
+      expect(strip(at("not_the_same_file", "size").text)).toContain("1,000");
+      expect(at("not_the_same_file", "size", false).text).toBe(format(lang, "refresh-size-unknown"));
+      expect(at("failed").detail).toBe("the server answered 403 Forbidden");
     });
   }
 

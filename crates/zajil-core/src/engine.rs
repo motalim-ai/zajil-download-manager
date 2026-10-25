@@ -839,6 +839,19 @@ impl Engine {
     /// `new_url` must be an http or https URL without a user name or
     /// password.
     pub async fn refresh_link(&self, state_file: &Path, new_url: &str) -> Result<(), Error> {
+        self.refresh_link_until(state_file, new_url, &Stop::new())
+            .await
+    }
+
+    /// [`Engine::refresh_link`], given up when `stop` is requested
+    /// ([`Error::Stopped`], the state file left as it was): the user closed
+    /// the dialog while the new link's server was slow (review of #78).
+    pub async fn refresh_link_until(
+        &self,
+        state_file: &Path,
+        new_url: &str,
+        stop: &Stop,
+    ) -> Result<(), Error> {
         let final_path = checked_final_path(state_file)?;
         let state_file = state_path(&final_path);
         let url = parse_url(new_url)?;
@@ -870,7 +883,7 @@ impl Engine {
             Err(err) => return Err(err.into()),
         };
         lock(&part, &final_path)?;
-        let result = self.refresh_locked(&state_file, &url).await;
+        let result = self.refresh_locked(&state_file, &url, stop).await;
         if result.is_err() && made {
             drop(part);
             let _ = std::fs::remove_file(&part_file);
@@ -879,13 +892,13 @@ impl Engine {
     }
 
     /// [`Engine::refresh_link`], with the part file locked.
-    async fn refresh_locked(&self, state_file: &Path, url: &Url) -> Result<(), Error> {
+    async fn refresh_locked(&self, state_file: &Path, url: &Url, stop: &Stop) -> Result<(), Error> {
         let mut state = DownloadState::load(state_file)?;
         let Some(ours) = if_range_value(&state.validator) else {
             return Err(Error::NotTheSameFile(Mismatch::NoValidator));
         };
         let limits = self.limits();
-        let mut attempt = Attempt::new(None, &Stop::new(), &limits);
+        let mut attempt = Attempt::new(None, stop, &limits);
         let response = self
             .retrying(&mut attempt, &mut |_| {}, || self.get(url.clone(), None))
             .await?;

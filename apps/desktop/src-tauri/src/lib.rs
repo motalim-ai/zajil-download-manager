@@ -245,7 +245,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         show_window,
         fix_browser_integration,
         browser_integration,
-        refresh_link
+        refresh_link,
+        cancel_refresh
     ]
 }
 
@@ -272,6 +273,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         fix_browser_integration,
         browser_integration,
         refresh_link,
+        cancel_refresh,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -1202,9 +1204,16 @@ async fn refresh_link<R: tauri::Runtime>(
     Ok(())
 }
 
-/// The downloads whose link is being refreshed.
+/// Gives up the refresh of download `id` (its dialog was closed): it stops
+/// at once, and the download is left as it was (review of #78).
+#[tauri::command]
+fn cancel_refresh(app: State<'_, App>, id: u64) {
+    app.refreshing.cancel(id);
+}
+
+/// The downloads whose link is being refreshed, each with what stops it.
 #[derive(Default)]
-struct Refreshing(std::sync::Mutex<std::collections::HashSet<u64>>);
+struct Refreshing(std::sync::Mutex<std::collections::HashMap<u64, Stop>>);
 
 impl Refreshing {
     /// Marks `id` as being refreshed until the guard is dropped; `None`
@@ -1213,13 +1222,25 @@ impl Refreshing {
         let mut ids = self.0.lock().unwrap_or_else(|e| e.into_inner());
         // Made only when marked: a guard made and dropped here would lock
         // again, and unmark the refresh under way.
-        ids.insert(id).then(|| RefreshGuard { of: self, id })
+        if ids.contains_key(&id) {
+            return None;
+        }
+        let stop = Stop::new();
+        ids.insert(id, stop.clone());
+        Some(RefreshGuard { of: self, id, stop })
+    }
+
+    /// Stops the refresh of `id`, if one is under way.
+    fn cancel(&self, id: u64) {
+        if let Some(stop) = self.0.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+            stop.request();
+        }
     }
 
     /// `ids` without those being refreshed.
     fn without(&self, mut ids: Vec<u64>) -> Vec<u64> {
         let busy = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        ids.retain(|id| !busy.contains(id));
+        ids.retain(|id| !busy.contains_key(id));
         ids
     }
 }
@@ -1227,6 +1248,7 @@ impl Refreshing {
 struct RefreshGuard<'a> {
     of: &'a Refreshing,
     id: u64,
+    stop: Stop,
 }
 
 impl Drop for RefreshGuard<'_> {
@@ -1259,7 +1281,7 @@ async fn refresh_item(
             reason: e.to_string(),
         })?
         .to_string();
-    let _guard = refreshing.start(id).ok_or(RefreshProblem::NotStopped)?;
+    let guard = refreshing.start(id).ok_or(RefreshProblem::Busy)?;
     let loaded = store.clone();
     let queues = tokio::task::spawn_blocking(move || loaded.load())
         .await
@@ -1296,8 +1318,12 @@ async fn refresh_item(
             Some(from) => engine.with_browser(from),
             None => engine.clone(),
         };
-        engine.refresh_link(&state_file, &url).await?;
+        engine
+            .refresh_link_until(&state_file, &url, &guard.stop)
+            .await?;
     }
+    // From here the state file has the new link: the item takes it too,
+    // even if the dialog was closed meanwhile.
     let store = store.clone();
     tokio::task::spawn_blocking(move || {
         store.update(|q| {
@@ -1862,7 +1888,18 @@ mod tests {
             "/token2/f.bin",
             FileSpec::new(data.clone()).etag(Some("\"v1\"")),
         );
+        // The browser's cookies and page kept for it go with the check and
+        // the rest (the new link is on the same origin).
         let headers = zajil_core::queue::FromBrowserById::default();
+        let page = server.url("/page");
+        headers.lock().unwrap().insert(
+            id,
+            zajil_core::FromBrowser::new(
+                &server.url("/token1/f.bin"),
+                Some("sid=KEPT"),
+                Some(&page),
+            ),
+        );
         let refreshing = Refreshing::default();
         // As a person may type it: kept as the parser writes it.
         let typed = server.url("/token2/f.bin").replace("http://", "HTTP://");
@@ -1873,6 +1910,7 @@ mod tests {
         assert_eq!(item.url, server.url("/token2/f.bin"));
         assert_eq!((item.status, item.error), (Status::Waiting, None));
         Runner::new(engine, store.clone())
+            .from_browser(headers.clone())
             .poll(Duration::from_millis(20))
             .run(&Stop::new(), &mut |_| {})
             .await
@@ -1884,6 +1922,55 @@ mod tests {
         assert_eq!(gets.len(), 2, "the check, then the rest: {gets:?}");
         let range = gets[1].range.as_deref().unwrap();
         assert!(!range.starts_with("bytes=0-"), "started over: {range}");
+        for get in &gets {
+            assert_eq!(get.cookie.as_deref(), Some("sid=KEPT"), "{get:?}");
+        }
+    }
+
+    /// Closing the dialog gives the refresh up at once, even while the new
+    /// link's server does not answer, and the download is left as it was
+    /// (review of #78: it went on for minutes, and Resume did nothing).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_refresh_given_up_stops_at_once_and_changes_nothing() {
+        use zajil_testserver::{TestServer, random_bytes};
+        let server = TestServer::http();
+        let data = random_bytes(1024 * 1024, 97);
+        let base = tempfile::tempdir().unwrap();
+        let (engine, store, id) = expired_download(&server, &data, base.path()).await;
+        let before = store.load().unwrap().item(id).unwrap().clone();
+        let state_before = std::fs::read(before.state_file.as_ref().unwrap()).unwrap();
+        // A server that takes the connection and never answers.
+        let quiet = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let quiet_url = format!("http://{}/f.bin", quiet.local_addr().unwrap());
+        let headers = zajil_core::queue::FromBrowserById::default();
+        let refreshing = Arc::new(Refreshing::default());
+        let task = {
+            let (engine, store, refreshing) = (engine.clone(), store.clone(), refreshing.clone());
+            tokio::spawn(async move {
+                refresh_item(&engine, &store, &headers, &refreshing, id, &quiet_url).await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(refreshing.without(vec![id]).is_empty(), "not under way");
+        let asked = Instant::now();
+        refreshing.cancel(id);
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("still running 5 s after it was given up")
+            .unwrap();
+        assert_eq!(result, Err(RefreshProblem::Cancelled));
+        assert!(
+            asked.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(refreshing.without(vec![id]), vec![id], "still marked");
+        assert_eq!(store.load().unwrap().item(id).unwrap(), &before);
+        assert_eq!(
+            std::fs::read(before.state_file.as_ref().unwrap()).unwrap(),
+            state_before
+        );
+        drop(quiet);
     }
 
     /// A link to another file is refused with the reason, and the download
@@ -1929,7 +2016,7 @@ mod tests {
         let held = refreshing.start(id).unwrap();
         assert_eq!(
             refresh(server.url("/other.bin")).await,
-            Err(RefreshProblem::NotStopped)
+            Err(RefreshProblem::Busy)
         );
         assert_eq!(refreshing.without(vec![id, id + 1]), vec![id + 1]);
         drop(held);

@@ -5,4 +5,4 @@ import type { MismatchView } from "./MismatchView";
  * Why a download did not take a new link (M5, "refresh the download
  * link"), for the page to say in the user's language.
  */
-export type RefreshProblem = { "kind": "not_stopped" } | { "kind": "done" } | { "kind": "bad_link", reason: string, } | { "kind": "not_the_same_file", why: MismatchView, theirs: number | null, ours: number | null, } | { "kind": "failed", error: string, };
+export type RefreshProblem = { "kind": "not_stopped" } | { "kind": "stopping" } | { "kind": "busy" } | { "kind": "cancelled" } | { "kind": "done" } | { "kind": "bad_link", reason: string, } | { "kind": "not_the_same_file", why: MismatchView, theirs: number | null, ours: number | null, } | { "kind": "failed", error: string, };
