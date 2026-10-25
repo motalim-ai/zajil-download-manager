@@ -600,3 +600,13 @@ add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، �
 add-description = الوصف
 add-description-hint = اختياري
 last-try-yesterday = أمس { $time }
+
+## The toolbar as the user leaves it (M5.5, an IDM touch)
+tb-big = أزرار كبيرة
+tb-small = أزرار صغيرة
+tb-customize = تخصيص شريط الأدوات…
+tb-customize-title = تخصيص شريط الأدوات
+tb-earlier = قدّم «{ $name }»
+tb-later = أخّر «{ $name }»
+tb-reset = كما كان
+tb-done = تم

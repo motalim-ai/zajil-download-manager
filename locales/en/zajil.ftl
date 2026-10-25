@@ -542,3 +542,13 @@ add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way 
 add-description = Description
 add-description-hint = Optional
 last-try-yesterday = Yesterday { $time }
+
+## The toolbar as the user leaves it (M5.5, an IDM touch)
+tb-big = Big buttons
+tb-small = Small buttons
+tb-customize = Customize the toolbar…
+tb-customize-title = Customize the toolbar
+tb-earlier = Move “{ $name }” earlier
+tb-later = Move “{ $name }” later
+tb-reset = Reset
+tb-done = Done
