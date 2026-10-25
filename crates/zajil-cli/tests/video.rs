@@ -31,12 +31,9 @@ fn the_tools_status_says_what_is_missing() {
     let out = zajil(data.path(), &["video", "tools"]);
     assert!(out.status.success(), "{}", printed(&out));
     let text = printed(&out);
-    assert!(text.contains("yt-dlp: not downloaded"), "{text}");
-    for tool in ["ffmpeg", "ffprobe"] {
-        assert!(
-            text.lines().any(|l| l.starts_with(&format!("{tool}: "))),
-            "{text}"
-        );
+    // Every tool is pinned for this system: each one can be downloaded.
+    for tool in ["yt-dlp", "ffmpeg", "ffprobe"] {
+        assert!(text.contains(&format!("{tool}: not downloaded")), "{text}");
     }
 }
 

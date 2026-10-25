@@ -314,7 +314,7 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool) -> ExitCode {
         .collect();
     if !unavailable.is_empty() {
         return crate::fail(&format!(
-            "video downloads are not available in this build yet ({}); nothing was downloaded",
+            "video downloads are not available on this system ({}); nothing was downloaded",
             unavailable.join("; ")
         ));
     }

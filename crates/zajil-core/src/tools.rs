@@ -685,9 +685,11 @@ mod tests {
     }
 
     /// Zajil's FFmpeg build: every target, from this repository's
-    /// `tools-ffmpeg-<version>` release of the FFmpeg in source.env; ffmpeg
-    /// and ffprobe of one version (they share a folder); both Macs the
-    /// universal file; each file named as the release names it.
+    /// `tools-ffmpeg-<version>` release; ffmpeg and ffprobe of one version
+    /// (they share a folder); both Macs the universal file; each file named
+    /// as the release names it. The version is FFmpeg's and a build number,
+    /// never newer than source.env: a new source.env comes first, then its
+    /// release (tagged on main), then its pins (review of #164).
     #[test]
     fn every_target_has_our_ffmpeg_and_ffprobe_of_one_version() {
         let source = include_str!("../../../tools/ffmpeg/source.env")
@@ -696,8 +698,14 @@ mod tests {
             .unwrap();
         let version = &ffmpeg_pins().version;
         assert_eq!(&ffprobe_pins().version, version);
-        let build = version.strip_prefix(&format!("{source}-")).unwrap();
+        let numbers = |v: &str| -> Vec<u32> { v.split('.').map(|n| n.parse().unwrap()).collect() };
+        let (ffmpeg, build) = version.rsplit_once('-').expect("<ffmpeg version>-<build>");
         assert!(build.parse::<u32>().is_ok(), "{version}");
+        assert_eq!(numbers(ffmpeg).len(), 3, "{version}");
+        assert!(
+            numbers(ffmpeg) <= numbers(source),
+            "{version} is newer than {source}"
+        );
         for tool in [Tool::Ffmpeg, Tool::Ffprobe] {
             for os in [Os::Windows, Os::Macos, Os::Linux] {
                 for arch in [Arch::X86_64, Arch::Aarch64] {
@@ -718,6 +726,13 @@ mod tests {
                 }
             }
         }
+        // The FFmpeg notice links the source of the build Zajil downloads
+        // (ADR-0009, LGPL checklist, item 9).
+        let release = format!("releases/tag/tools-ffmpeg-{version})");
+        assert!(
+            include_str!("../../../README.md").contains(&release),
+            "README.md: {release}"
+        );
         let mac = |tool, arch| {
             pinned(
                 tool,
