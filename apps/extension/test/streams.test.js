@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_STREAMS, forget, kindOf, note, streamFor, streamsOf } from "../src/streams.js";
+import { MAX_STREAMS, forget, forgetAll, kindOf, note, streamFor, streamsOf } from "../src/streams.js";
 
 /** A fake browser: `storage.session` only (memory), and its tabs. Anything
  * written elsewhere would throw. */
@@ -9,9 +9,9 @@ function browserWith(tabs = {}) {
     session,
     storage: {
       session: {
-        get: async (key) => ({ [key]: session[key] }),
+        get: async (key) => (key === null ? { ...session } : { [key]: session[key] }),
         set: async (value) => Object.assign(session, value),
-        remove: async (key) => delete session[key],
+        remove: async (key) => [key].flat().forEach((k) => delete session[k]),
       },
     },
     tabs: { get: async (id) => tabs[id] ?? { id, incognito: false } },
@@ -72,6 +72,27 @@ describe("the playlists a tab loads", () => {
     await forget(api, 1);
     expect(await streamsOf(api, 1)).toEqual([]);
     expect(api.session).toEqual({});
+  });
+
+  it("a late answer about the old page's tab never brings its playlist back after the new page (review)", async () => {
+    const api = browserWith();
+    let answer;
+    api.tabs.get = () => new Promise((resolve) => (answer = resolve));
+    const old = note(api, hls("https://old.example/a.m3u8"));
+    const next = note(api, { url: "https://example.com/next", tabId: 1, type: "main_frame" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    answer({ id: 1, incognito: false });
+    await Promise.all([old, next]);
+    expect(await streamsOf(api, 1)).toEqual([]);
+  });
+
+  it("all are forgotten at once, and nothing else in the session", async () => {
+    const api = browserWith();
+    await note(api, hls("https://cdn.example/a.m3u8"));
+    await note(api, hls("https://cdn.example/b.m3u8", { tabId: 2 }));
+    api.session.privateSent = true;
+    await forgetAll(api);
+    expect(api.session).toEqual({ privateSent: true });
   });
 
   it("nothing from a private window: Firefox says so on the request, Chrome is asked", async () => {

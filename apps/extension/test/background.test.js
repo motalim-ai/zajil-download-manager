@@ -74,9 +74,9 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
         set: async (value) => Object.assign(local, value),
       },
       session: {
-        get: async (key) => ({ [key]: session[key] }),
+        get: async (key) => (key === null ? { ...session } : { [key]: session[key] }),
         set: async (value) => Object.assign(session, value),
-        remove: async (key) => delete session[key],
+        remove: async (key) => [key].flat().forEach((k) => delete session[k]),
       },
     },
     tabs: {
@@ -368,10 +368,25 @@ describe("the background", () => {
     // Taken back: the script goes, and nothing is watched any more.
     fake.have.delete("webRequest");
     fake.have.delete("scripting");
+    fake.session["streams:3"] = [{ url: "https://a.example/master.m3u8?sig=1", kind: "hls", frame: 0 }];
+    fake.session.privateSent = true;
     fake.listeners.permissionsRemoved({ permissions: ["scripting", "webRequest"] });
     await flush();
     expect(fake.done.scripts).toEqual([]);
     expect(fake.listeners.headers).toBeUndefined();
+    // What was noted under the permission goes with it; nothing else.
+    expect(fake.session).toEqual({ privateSent: true });
+  });
+
+  it("without the video permission, a playlist left from before is never sent (review)", async () => {
+    // Taken back while its tab stayed open, so nothing forgot it.
+    const fake = fakeChrome({ granted: true, video: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    fake.session["streams:5"] = [{ url: "https://a.example/master.m3u8?sig=1", kind: "hls", frame: 0 }];
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://b.example/v", srcUrl: "blob:https://b.example/1", frameId: 0 }, { id: 5 });
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://b.example/v", cookies: "sid=abc" }]);
   });
 
   it("the button sends the tab's page (the browser's word, not the page's) and, for a blob, the playlist the tab loaded", async () => {

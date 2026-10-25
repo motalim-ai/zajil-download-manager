@@ -6,8 +6,15 @@
 // It reads nothing of the page but where its videos are and their address.
 // A press sends the background only that address: the page, its frame and
 // its tab come from the browser (`runtime.MessageSender`), not from here.
-// The button lives in a closed shadow root, so the page can neither see it
-// nor restyle it, and only a real click (`isTrusted`) counts.
+//
+// What the page can and cannot do (review): it cannot reach the button (a
+// closed shadow root) nor forge a press on it (only a real click,
+// `isTrusted`, counts). Its own CSS cannot hide or restyle the button (the
+// root's rules are `!important`, and those of a shadow tree win); a page
+// that hides everything (`opacity: 0` on its root) gets no press at all
+// (`checkVisibility` at the click). But a page can tell the button's host
+// element is there, so that the extension is installed with site access;
+// and like any page element, it can be covered.
 //
 // Its look is a first version: the final one comes with the video window's
 // design (M5.5).
@@ -28,7 +35,10 @@
   const root = host.attachShadow({ mode: "closed" });
   const style = document.createElement("style");
   style.textContent = `
-    :host { all: initial; }
+    :host {
+      all: initial !important; display: block !important; opacity: 1 !important;
+      visibility: visible !important; filter: none !important;
+    }
     button {
       position: fixed; z-index: 2147483647; margin: 0;
       font: 600 13px/1.2 system-ui, sans-serif; color: #fff;
@@ -58,7 +68,8 @@
   const show = (found) => {
     const box = found.getBoundingClientRect();
     if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT) return;
-    if (!host.isConnected) document.documentElement.append(host);
+    // Last in the page each time, above what the page added since.
+    if (host !== document.documentElement.lastElementChild) document.documentElement.append(host);
     video = found;
     button.style.top = `${Math.max(box.top, 0) + 8}px`;
     button.style.left = `${Math.max(box.left, 0) + 8}px`;
@@ -66,8 +77,26 @@
     clearTimeout(hiding);
   };
 
+  /** The last pointer position not yet looked at, once per frame (review:
+   * looking at every move forces a layout on every page). */
+  /** @type {{ x: number, y: number } | null} */
+  let pending = null;
+
   // The pointer's video, even under the player's own controls: the
   // elements under the pointer, not only the top one.
+  const look = () => {
+    const at = pending;
+    pending = null;
+    if (!at) return;
+    const found = document.elementsFromPoint(at.x, at.y).find((e) => e instanceof HTMLVideoElement);
+    if (found) {
+      show(/** @type {HTMLVideoElement} */ (found));
+    } else if (!button.hidden) {
+      clearTimeout(hiding);
+      hiding = setTimeout(hide, LINGER_MS);
+    }
+  };
+
   document.addEventListener(
     "pointermove",
     (event) => {
@@ -75,13 +104,8 @@
         clearTimeout(hiding);
         return;
       }
-      const found = document.elementsFromPoint(event.clientX, event.clientY).find((e) => e instanceof HTMLVideoElement);
-      if (found) {
-        show(/** @type {HTMLVideoElement} */ (found));
-      } else if (!button.hidden) {
-        clearTimeout(hiding);
-        hiding = setTimeout(hide, LINGER_MS);
-      }
+      if (!pending) requestAnimationFrame(look);
+      pending = { x: event.clientX, y: event.clientY };
     },
     { passive: true, capture: true },
   );
@@ -91,8 +115,11 @@
     event.preventDefault();
     event.stopPropagation();
     if (!event.isTrusted || !video) return;
+    // Not pressed for real if the page made it unseen.
+    if (!host.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return;
     const src = video.currentSrc || video.src || "";
     hide();
-    void api.runtime.sendMessage({ type: "video-button", src: src.slice(0, 8192) }).catch(() => {});
+    // A longer address is left out, never cut into another one (review).
+    void api.runtime.sendMessage({ type: "video-button", src: src.length <= 8192 ? src : "" }).catch(() => {});
   });
 })();

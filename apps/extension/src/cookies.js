@@ -46,6 +46,23 @@ export const videoAllowed = (browserApi) => has(browserApi, VIDEO_PERMISSIONS);
  * @param {any} browserApi */
 export const sitesAllowed = (browserApi) => has(browserApi, SITE_PERMISSIONS);
 
+/**
+ * What the welcome page and the settings show: the state's text, and which
+ * buttons. "Partly" when only some of it is given (the cookies alone,
+ * given before the video features came): it says what still goes, and
+ * offers both to complete it and to take it back (review: it must never
+ * say "not allowed" while cookies go).
+ *
+ * @param {any} browserApi
+ * @returns {Promise<{ text: "cookiesAllowed" | "sitesPartly" | "cookiesNotAllowed", allow: boolean, drop: boolean }>}
+ */
+export async function permissionView(browserApi) {
+  const [cookies, video] = [await cookiesAllowed(browserApi), await videoAllowed(browserApi)];
+  if (cookies && video) return { text: "cookiesAllowed", allow: false, drop: true };
+  if (cookies || video) return { text: "sitesPartly", allow: true, drop: true };
+  return { text: "cookiesNotAllowed", allow: true, drop: false };
+}
+
 /** Asks for "Allow Zajil on sites". Must run from a user's click (Chrome).
  * @param {any} browserApi */
 export async function askForSites(browserApi) {

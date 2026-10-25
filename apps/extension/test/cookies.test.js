@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { COOKIE_PERMISSIONS, SITE_PERMISSIONS, VIDEO_PERMISSIONS, askForSites, cookieHeader, cookiesAllowed, dropSites, sitesAllowed, videoAllowed } from "../src/cookies.js";
+import { COOKIE_PERMISSIONS, SITE_PERMISSIONS, VIDEO_PERMISSIONS, askForSites, cookieHeader, cookiesAllowed, dropSites, permissionView, sitesAllowed, videoAllowed } from "../src/cookies.js";
 import { downloadMessage, menuMessage, needsSignIn, takeOver } from "../src/capture.js";
 
 /** A fake browser with the cookie permission `granted` or not (as given
@@ -58,11 +58,16 @@ describe("the cookie permission", () => {
     expect(await videoAllowed(api)).toBe(false);
   });
 
-  it("cookies given before the video features still go; the button asks again for all of it", async () => {
+  it("cookies given before the video features still go, and the pages say so, with both buttons (review)", async () => {
     const api = browserWith({ granted: true });
     expect(await cookiesAllowed(api)).toBe(true);
     expect(await videoAllowed(api)).toBe(false);
     expect(await sitesAllowed(api)).toBe(false);
+    expect(await permissionView(api)).toEqual({ text: "sitesPartly", allow: true, drop: true });
+    await dropSites(api);
+    expect(await permissionView(api)).toEqual({ text: "cookiesNotAllowed", allow: true, drop: false });
+    await askForSites(api);
+    expect(await permissionView(api)).toEqual({ text: "cookiesAllowed", allow: false, drop: true });
   });
 });
 

@@ -21,8 +21,10 @@ afterAll(async () => {
 });
 
 /** A page with `body`, and the button's script with a fake `chrome` that
- * records what is sent. @param {string} body */
-async function pageWith(body) {
+ * records what is sent. `open`: the test opens the button's shadow root, to
+ * reach the button as no page can.
+ * @param {string} body @param {{ open?: boolean }} [how] */
+async function pageWith(body, how = {}) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   // The page itself is served here; anything else it asks for is refused.
   await page.route("**/*", (route) =>
@@ -40,6 +42,14 @@ async function pageWith(body) {
       i18n: { getMessage: (/** @type {string} */ k) => ({ videoButton: "نزّل الفيديو", lang: "ar" })[k] ?? "" },
     };
   });
+  if (how.open) {
+    await page.addInitScript(() => {
+      const attach = Element.prototype.attachShadow;
+      Element.prototype.attachShadow = function () {
+        return attach.call(this, { mode: "open" });
+      };
+    });
+  }
   await page.goto("https://page.invalid/");
   await page.addScriptTag({ content: script });
   return page;
@@ -88,7 +98,7 @@ describe("the Download video button", () => {
     await page.close();
   });
 
-  it("is out of the page's reach: no button in its document, a closed root, and a script's click does nothing", async () => {
+  it("is out of the page's reach: no button in its document, and a closed root", async () => {
     const page = await pageWith(VIDEO);
     await page.mouse.move(400, 200);
     const seen = await page.evaluate(() => {
@@ -103,6 +113,50 @@ describe("the Download video button", () => {
     });
     expect(seen).toEqual({ buttons: 0, open: false, isVideo: false });
     expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("a click a script makes on the button itself sends nothing: only a real click counts", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => document.elementFromPoint(120, 66)?.tagName === "DIV");
+    const reached = await page.evaluate(() => {
+      const button = document.elementFromPoint(120, 66)?.shadowRoot?.querySelector("button");
+      button?.click();
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+      return Boolean(button);
+    });
+    expect(reached).toBe(true);
+    expect(await sent(page)).toEqual([]);
+    // And the same button, clicked for real, sends.
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toHaveLength(1);
+    await page.close();
+  });
+
+  it("the page's own CSS cannot hide or move it", async () => {
+    const style = `<style>div { display: none !important; opacity: 0 !important; visibility: hidden !important; }</style>`;
+    const page = await pageWith(`${style}${VIDEO}`);
+    await page.mouse.move(400, 200);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toHaveLength(1);
+    await page.close();
+  });
+
+  it("a page made unseen as a whole gets no press", async () => {
+    const page = await pageWith(`<style>html { opacity: 0; }</style>${VIDEO}`);
+    await page.mouse.move(400, 200);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("an address longer than Zajil takes is left out, not cut", async () => {
+    const long = `https://media.invalid/${"a".repeat(9000)}.mp4`;
+    const page = await pageWith(`<video src="${long}" style="position:absolute;left:100px;top:50px;width:640px;height:360px"></video>`);
+    await page.mouse.move(400, 200);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toEqual([{ type: "video-button", src: "" }]);
     await page.close();
   });
 

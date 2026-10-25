@@ -68,6 +68,18 @@ export async function forget(browserApi, tab) {
   await inTurn(() => browserApi.storage.session.remove(key(tab)).catch(() => {}));
 }
 
+/** Forgets every tab's playlists: the permission was taken back, so what
+ * was noted under it goes too (review: a tab could otherwise send another
+ * site's playlist with its next page).
+ * @param {any} browserApi */
+export async function forgetAll(browserApi) {
+  await inTurn(async () => {
+    const all = await browserApi.storage.session.get(null).catch(() => ({}));
+    const keys = Object.keys(all ?? {}).filter((k) => k.startsWith("streams:"));
+    if (keys.length) await browserApi.storage.session.remove(keys).catch(() => {});
+  });
+}
+
 /**
  * Notes a response, if it is a playlist (`webRequest.onHeadersReceived`,
  * without blocking). A tab's new page forgets what its old one loaded. A
@@ -86,12 +98,15 @@ export async function note(browserApi, details) {
   }
   const kind = kindOf(details);
   if (!kind || !isWeb(details.url) || details.incognito) return;
-  if (details.incognito === undefined) {
-    const info = await browserApi.tabs.get(tab).catch(() => null);
-    if (!info || info.incognito) return;
-  }
   const frame = Number.isSafeInteger(details.frameId) ? /** @type {number} */ (details.frameId) : 0;
+  // In turn from here, Chrome's question included: a playlist of the old
+  // page whose answer comes late is never written after the new page's
+  // `main_frame` forgot the old ones.
   await inTurn(async () => {
+    if (details.incognito === undefined) {
+      const info = await browserApi.tabs.get(tab).catch(() => null);
+      if (!info || info.incognito) return;
+    }
     const kept = (await streamsOf(browserApi, tab)).filter((s) => s.url !== details.url);
     kept.push({ url: details.url, kind, frame });
     await browserApi.storage.session.set({ [key(tab)]: kept.slice(-MAX_STREAMS) }).catch(() => {});

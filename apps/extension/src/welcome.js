@@ -5,7 +5,7 @@
 
 import { api } from "./compat.js";
 import { localize } from "./page.js";
-import { askForSites, sitesAllowed } from "./cookies.js";
+import { askForSites, permissionView } from "./cookies.js";
 
 localize(api, document);
 
@@ -13,11 +13,10 @@ localize(api, document);
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
 async function show() {
-  const allowed = await sitesAllowed(api);
-  $("cookies-state").textContent = api.i18n.getMessage(allowed ? "cookiesAllowed" : "cookiesNotAllowed");
-  $("allow").hidden = allowed;
+  const view = await permissionView(api);
+  $("cookies-state").textContent = api.i18n.getMessage(view.text);
+  $("allow").hidden = !view.allow;
 }
-
 $("allow").addEventListener("click", async () => {
   await askForSites(api);
   await show();

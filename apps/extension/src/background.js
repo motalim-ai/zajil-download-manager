@@ -9,7 +9,7 @@ import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOv
 import { cookieHeader, cookiesAllowed, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
-import { forget, note, streamFor } from "./streams.js";
+import { forget, forgetAll, note, streamFor } from "./streams.js";
 
 const MENU = "zajil-download-link";
 const MENU_VIDEO = "zajil-download-video";
@@ -210,7 +210,9 @@ async function sendVideo(info, tab) {
   }
   const cookies = isPrivate ? null : await cookieHeader(api, /** @type {string} */ (page.page), tab?.cookieStoreId);
   // The playlist the tab loaded for it (nothing is noted in a private one).
-  const stream = isPrivate || !Number.isSafeInteger(tab?.id) ? undefined : await streamFor(api, tab.id, info.frameId);
+  // Only while the permission lasts (review: none noted before it went).
+  const noted = !isPrivate && Number.isSafeInteger(tab?.id) && (await videoAllowed(api));
+  const stream = noted ? await streamFor(api, tab.id, info.frameId) : undefined;
   const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
   const result = await send(api, message);
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
@@ -260,6 +262,7 @@ async function syncVideo() {
     }
   }
   if (!allowed && requests?.hasListener(onHeaders)) requests.removeListener(onHeaders);
+  if (!allowed) await forgetAll(api);
   if (!api.scripting) return;
   const registered = await api.scripting.getRegisteredContentScripts({ ids: [BUTTON.id] }).catch(() => []);
   if (allowed && !registered.length) await api.scripting.registerContentScripts([BUTTON]).catch(() => {});

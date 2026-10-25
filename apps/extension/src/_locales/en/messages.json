@@ -142,5 +142,8 @@
   },
   "videoButton": {
     "message": "Download video"
+  },
+  "sitesPartly": {
+    "message": "Partly allowed: a download link's cookies go to Zajil with its download, but the “Download video” button needs the rest of the permission. You can also take it all back."
   }
 }
