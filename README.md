@@ -36,7 +36,7 @@
 |---|---|
 | [docs/PRD.md](docs/PRD.md) | المتطلبات، ومن المستخدم، وما يفعله البرنامج وما لا يفعله |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | بنية البرنامج: المحرّك، وسطر الأوامر، والواجهة، والإضافة |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | المراحل من M1 إلى M8 وشروط نجاح كل مرحلة |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | المراحل من M1 إلى M8 (ومعها M5.5 والإصدار التجريبي 0.1) وشروط نجاح كل مرحلة |
 | [docs/PARITY.md](docs/PARITY.md) | مقارنة ميزات IDM العامة بما سيقدمه زاجِل |
 | [docs/adr/](docs/adr/) | سجل القرارات المعمارية |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | سجل تراخيص المكتبات |
