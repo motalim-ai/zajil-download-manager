@@ -22,6 +22,9 @@ arboard = { version = "3.7.0", default-features = false, features = ["wayland-da
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"] }
 dirs = "7.0.0"
 getrandom = "0.4.3"
+# Reading the links of an HTML page for the site grabber (M7, ADR-0010):
+# the tokenizer only, no tree.
+html5ever = "0.40.1"
 http-body-util = { version = "0.1.5", features = ["channel"] }
 hyper = { version = "1.12.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }

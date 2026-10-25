@@ -411,6 +411,9 @@ struct Shared {
     files: HashMap<String, Served>,
     redirects: HashMap<String, (String, u16)>,
     log: Vec<LogEntry>,
+    /// `/robots.txt` at the root is served as `/robots.txt` under the
+    /// prefix ([`TestServer::robots_txt_at_root`]).
+    robots_at_root: bool,
 }
 
 /// A running test server. Stops when dropped.
@@ -472,6 +475,7 @@ impl TestServer {
             started: std::time::Instant::now(),
             prefix: random_prefix(),
             strays: Vec::new(),
+            robots_at_root: false,
             connections: Vec::new(),
             files: HashMap::new(),
             redirects: HashMap::new(),
@@ -582,6 +586,16 @@ impl TestServer {
     /// were answered 404 and are not in [`TestServer::requests`].
     pub fn strays(&self) -> Vec<String> {
         self.lock().strays.clone()
+    }
+
+    /// From now on, `/robots.txt` at the root of this server (where a
+    /// crawler asks for it, without the prefix) is served as `/robots.txt`
+    /// under the prefix: what [`put`](Self::put) or
+    /// [`redirect`](Self::redirect) gave that path, else 404. It is then a
+    /// request like any other, in [`requests`](Self::requests), and not a
+    /// stray. For the site grabber's tests (M7).
+    pub fn robots_txt_at_root(&self) {
+        self.lock().robots_at_root = true;
     }
 
     /// Serves `spec` at `path`, replacing any previous file there. A new
@@ -757,12 +771,14 @@ fn handle(
     // Only requests under this server's prefix are its own; any other is
     // answered 404 and counted nowhere, so it cannot take the place of a
     // test's request (in `cut_after`, `fail_first`, the request log…).
+    let robots = shared.robots_at_root && req.uri().path() == "/robots.txt";
     let Some(path) = req
         .uri()
         .path()
         .strip_prefix(shared.prefix.as_str())
         .filter(|rest| rest.starts_with('/'))
         .map(str::to_owned)
+        .or_else(|| robots.then(|| "/robots.txt".to_owned()))
     else {
         let stray = format!("{} {}", req.method(), req.uri().path());
         shared.strays.push(stray);
