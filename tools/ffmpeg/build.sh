@@ -55,9 +55,19 @@ while IFS= read -r line; do
   [ -n "$line" ] && opts+=("$line")
 done <<< "${ZAJIL_FFMPEG_EXTRA:-}"
 
+# Only the options a Zajil build needs: turning things off, FFmpeg's own
+# components by name, and how to compile. Anything else is refused, since
+# many external libraries have no `lib` prefix (zlib, iconv, gnutls,
+# openssl, sdl2, vaapi, vulkan...): checklist items 1, 17 and 18.
 for opt in "${opts[@]}"; do
   case "$opt" in
-    --enable-gpl|--enable-version3|--enable-nonfree|--enable-lib*)
+    --disable-*) ;;
+    --enable-bsf=*|--enable-decoder=*|--enable-demuxer=*|--enable-encoder=*) ;;
+    --enable-filter=*|--enable-muxer=*|--enable-parser=*|--enable-protocol=*) ;;
+    --enable-ffmpeg|--enable-ffprobe|--enable-small|--enable-static) ;;
+    --enable-swresample|--enable-swscale|--enable-cross-compile) ;;
+    --arch=*|--target-os=*|--cc=*|--extra-cflags=*|--extra-ldflags=*) ;;
+    *)
       echo "::error::$opt is not allowed in a Zajil FFmpeg build (ADR-0009)" >&2
       exit 1 ;;
   esac
@@ -75,6 +85,14 @@ grep -qx '#define CONFIG_GPL 0' "$src/config.h"
 grep -qx '#define CONFIG_NONFREE 0' "$src/config.h"
 grep -qx '#define CONFIG_VERSION3 0' "$src/config.h"
 grep -q '^License: LGPL version 2.1 or later$' "$work/configure.log"
+# And no external library at all, hardware acceleration included: both
+# lists configure prints are there, and empty (an empty line right after).
+awk '
+  /^External libraries:$/ || /^External libraries providing hardware acceleration:$/ { seen++; inside = 1; next }
+  inside && NF { print "::error::configure enabled an external library: " $0 > "/dev/stderr"; bad = 1 }
+  inside { inside = 0 }
+  END { exit (bad || seen != 2) }
+' "$work/configure.log"
 
 jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
 make -C "$src" -j"$jobs" > "$work/make.log" 2>&1 || { tail -n 60 "$work/make.log" >&2; exit 1; }

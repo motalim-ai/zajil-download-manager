@@ -33,12 +33,21 @@ gpg --batch --with-colons --fingerprint | grep -q "^fpr:::::::::$FFMPEG_SIGNING_
   echo "::error::ffmpeg-devel.asc does not hold the key $FFMPEG_SIGNING_KEY" >&2
   exit 1
 }
-status="$(gpg --batch --status-fd 1 --verify "$dir/$FFMPEG_TARBALL.asc" "$dir/$FFMPEG_TARBALL" 2>/dev/null)"
-# VALIDSIG ends with the primary key's fingerprint, whichever subkey signed.
-printf '%s\n' "$status" | grep -qE "^\[GNUPG:\] VALIDSIG .* $FFMPEG_SIGNING_KEY\$" || {
-  echo "::error::$FFMPEG_TARBALL is not signed by $FFMPEG_SIGNING_KEY" >&2
+status="$(gpg --batch --status-fd 1 --verify "$dir/$FFMPEG_TARBALL.asc" "$dir/$FFMPEG_TARBALL" 2>"$gnupg/verify.err")" || {
+  echo "::error::gpg could not verify $FFMPEG_TARBALL" >&2
+  cat "$gnupg/verify.err" >&2
   exit 1
 }
+# A good signature (GOODSIG), valid (VALIDSIG, which ends with the primary
+# key's fingerprint, whichever subkey signed), and by a key neither expired
+# nor revoked.
+if ! printf '%s\n' "$status" | grep -q '^\[GNUPG:\] GOODSIG ' ||
+   ! printf '%s\n' "$status" | grep -qE "^\[GNUPG:\] VALIDSIG .* $FFMPEG_SIGNING_KEY\$" ||
+   printf '%s\n' "$status" | grep -qE '^\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|EXPSIG) '; then
+  echo "::error::$FFMPEG_TARBALL is not signed by $FFMPEG_SIGNING_KEY" >&2
+  printf '%s\n' "$status" >&2
+  exit 1
+fi
 rm -f "$dir/ffmpeg-devel.asc"
 
 actual="$(sha256sum "$dir/$FFMPEG_TARBALL" | cut -d' ' -f1)"
