@@ -53,6 +53,24 @@ fn nothing_is_downloaded_without_a_yes() {
     assert!(!data.path().join("tools").join("yt-dlp").exists());
 }
 
+/// Review of #128: while FFmpeg has no released file pinned for this
+/// system, a yes downloads nothing at all, not even yt-dlp (which is of no
+/// use alone). When FFmpeg is pinned, this test must change to expect the
+/// download (it then needs the network, so it moves to the real tests).
+#[test]
+fn a_yes_downloads_nothing_while_a_tool_has_no_released_file() {
+    let data = tempfile::tempdir().unwrap();
+    let out = zajil(data.path(), &["video", "tools", "install", "--yes"]);
+    assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
+    let text = printed(&out);
+    assert!(
+        text.contains("video downloads are not available in this build yet"),
+        "{text}"
+    );
+    assert!(text.contains("nothing was downloaded"), "{text}");
+    assert!(!data.path().join("tools").join("yt-dlp").exists());
+}
+
 #[test]
 fn a_video_command_without_the_tools_says_how_to_get_them() {
     let data = tempfile::tempdir().unwrap();

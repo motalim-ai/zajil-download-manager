@@ -64,8 +64,10 @@ jobs:
           bash scripts/check-no-private-keys.sh
 
   # Our LGPL ffmpeg and ffprobe, and the test-only ffmpeg-testgen, for the
-  # video tests (ADR-0009, section 8). Cached there: rebuilt only when the
-  # FFmpeg source, options or build script change.
+  # video tests (ADR-0009, section 8). Only ffmpeg-testgen is cached there;
+  # ffmpeg and ffprobe are built again on every run, on all five platforms
+  # (caching them, and building only the three test platforms from here,
+  # is a follow-up issue).
   video-tools:
     name: Video tools
     uses: ./.github/workflows/ffmpeg.yml
