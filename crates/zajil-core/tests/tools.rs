@@ -86,7 +86,7 @@ async fn installs_the_pinned_file_over_https_and_checks_it_before_use() {
     let path = install(&tools, &trusting_engine()).await.unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), data);
-    assert_eq!(tools.verified(Tool::YtDlp).await.unwrap(), path);
+    assert_eq!(tools.verified(Tool::YtDlp).await.unwrap().path(), path);
     assert!(tools.is_installed(Tool::YtDlp));
     // Only the tool is left: no download folder, part file or copy.
     assert_eq!(
@@ -223,8 +223,9 @@ async fn a_link_in_place_of_the_tool_is_not_run_and_its_target_is_untouched() {
 
 #[tokio::test]
 async fn a_link_in_place_of_the_new_file_is_replaced_not_followed() {
-    // Something left at `<tool>.new` (the copy's name) is never written
-    // through: it is removed, and the copy is a new private file.
+    // Something left at `<tool>.new` beside the tool (the copy's old
+    // name, before the copy moved into the install's own folder) is never
+    // written through: the copy is a new private file of its own.
     let server = https_server();
     let data = random_bytes(128 * 1024, 66);
     server.put("/yt-dlp", FileSpec::new(data.clone()));
@@ -388,4 +389,124 @@ async fn an_installed_tool_carries_no_from_the_internet_mark() {
     );
     let path = install(&tools, &engine).await.unwrap();
     assert_eq!(zajil_platform::origin::read(&path).unwrap(), None);
+}
+
+/// Review of the video tools: two installs at once (two windows, or the
+/// app and `zajil`) each copy into their own folder, so neither renames
+/// the other's half-written copy into place.
+#[tokio::test]
+async fn two_installs_at_once_both_leave_the_whole_tool() {
+    let server = https_server();
+    let data = random_bytes(2 * 1024 * 1024, 69);
+    server.put(
+        "/yt-dlp",
+        FileSpec::new(data.clone()).throttle(4 * 1024 * 1024),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let tools = toolbox(
+        &root.path().join("tools"),
+        server.url("/yt-dlp"),
+        sha256_hex(&data),
+    );
+    let engine = trusting_engine();
+    let (a, b) = tokio::join!(install(&tools, &engine), install(&tools, &engine));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert_eq!(a, b);
+    assert_eq!(fs::read(&a).unwrap(), data);
+    let verified = tools.verified(Tool::YtDlp).await.unwrap();
+    assert_eq!(verified.path(), a);
+    drop(verified);
+    let left: Vec<String> = tree(&root.path().join("tools"))
+        .into_iter()
+        .filter(|p| p.starts_with(".download-"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+/// Review of the video tools: every folder from the tools folder down to
+/// the tool is checked before it runs, not only the last one: a folder
+/// above that another user could change lets them put another tree in
+/// its place. macOS and Linux (modes); the Windows check of the same
+/// function reads access lists, tested in zajil-platform (#89).
+#[cfg(unix)]
+#[tokio::test]
+async fn every_folder_down_to_the_tool_is_checked_before_it_runs() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = https_server();
+    let data = random_bytes(64 * 1024, 70);
+    server.put("/yt-dlp", FileSpec::new(data.clone()));
+    let root = tempfile::tempdir().unwrap();
+    let tools_dir = root.path().join("tools");
+    let tools = toolbox(&tools_dir, server.url("/yt-dlp"), sha256_hex(&data));
+    let path = install(&tools, &trusting_engine()).await.unwrap();
+    // Every level was made private.
+    for level in [
+        &tools_dir,
+        &tools_dir.join("yt-dlp"),
+        &path.parent().unwrap().to_path_buf(),
+    ] {
+        let mode = fs::metadata(level).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "{}", level.display());
+    }
+    for level in [tools_dir.clone(), tools_dir.join("yt-dlp")] {
+        fs::set_permissions(&level, fs::Permissions::from_mode(0o770)).unwrap();
+        let refused = tools.verified(Tool::YtDlp).await;
+        assert!(
+            matches!(&refused, Err(ToolError::NotPrivate(p)) if *p == level),
+            "{}: {refused:?}",
+            level.display()
+        );
+        fs::set_permissions(&level, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    tools.verified(Tool::YtDlp).await.unwrap();
+}
+
+/// AGENTS.md §10.5: an install whose future is dropped in the middle of its
+/// download leaves nothing that the start of the program does not remove,
+/// and the next install is whole.
+#[tokio::test]
+async fn a_dropped_install_leaves_nothing_once_cleaned_and_the_next_is_whole() {
+    let server = https_server();
+    let data = random_bytes(4 * 1024 * 1024, 71);
+    server.put(
+        "/stalls",
+        FileSpec::new(data.clone()).stall_after(512 * 1024),
+    );
+    server.put("/yt-dlp", FileSpec::new(data.clone()));
+    let root = tempfile::tempdir().unwrap();
+    let tools_dir = root.path().join("tools");
+    let stalling = toolbox(&tools_dir, server.url("/stalls"), sha256_hex(&data));
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let seen = started.clone();
+    let engine = trusting_engine();
+    let stop = Stop::new();
+    let mut on_event = |event: Event| {
+        if matches!(event, Event::Progress { .. }) {
+            seen.notify_one();
+        }
+    };
+    {
+        let installing = stalling.install(&engine, Tool::YtDlp, &stop, &mut on_event);
+        tokio::select! {
+            _ = installing => panic!("the stalled install ended"),
+            () = started.notified() => {}
+        }
+    }
+    // The future is gone. What it leaves is removed at the next start.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        stalling.remove_leftovers().unwrap_or(());
+        if tree(&tools_dir).is_empty() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "left behind: {:?}",
+            tree(&tools_dir)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let tools = toolbox(&tools_dir, server.url("/yt-dlp"), sha256_hex(&data));
+    let path = install(&tools, &trusting_engine()).await.unwrap();
+    assert_eq!(fs::read(&path).unwrap(), data);
 }
