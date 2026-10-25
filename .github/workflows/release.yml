@@ -12,7 +12,8 @@
 # tauri.release.json is merged into it here (`tauri build --config`). It
 # sets the version, puts zajil-host (the app looks for it there, lib.rs
 # `host_beside`) and the `zajil` command next to the program as Tauri
-# sidecars, ships the GPL licence, asks for the ad-hoc signature on macOS
+# sidecars, ships the GPL licence as a file in every installer (not as a
+# licence to agree to: the GPL asks for no acceptance), asks for the ad-hoc signature on macOS
 # and a per-user installer on Windows.
 
 name: Release

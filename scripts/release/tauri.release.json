@@ -3,7 +3,6 @@
   "bundle": {
     "externalBin": ["binaries/zajil-host", "binaries/zajil"],
     "license": "GPL-3.0-or-later",
-    "licenseFile": "../../../LICENSE",
     "resources": {
       "../../../LICENSE": "LICENSE"
     },
