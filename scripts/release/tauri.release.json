@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "bundle": {
+    "externalBin": ["binaries/zajil-host"],
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
