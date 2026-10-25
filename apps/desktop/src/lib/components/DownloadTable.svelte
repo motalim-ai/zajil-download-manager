@@ -164,31 +164,30 @@
   }
   table.grid {
     width: 100%;
-    min-width: 640px;
+    min-width: 780px;
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;
   }
-  .c-name {
-    width: 34%;
-  }
+  /* The small columns are as wide as what they show; the name takes the
+     rest. */
   .c-size {
-    width: 11%;
+    width: 104px;
   }
   .c-status {
-    width: 15%;
+    width: 140px;
   }
   .c-left {
-    width: 10%;
+    width: 96px;
   }
   .c-speed {
-    width: 11%;
+    width: 112px;
   }
   .c-last {
-    width: 10%;
+    width: 100px;
   }
   .c-desc {
-    width: 9%;
+    width: 110px;
   }
   th {
     text-align: start;
@@ -255,6 +254,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    max-width: 100%;
   }
   .pct {
     min-width: 34px;
