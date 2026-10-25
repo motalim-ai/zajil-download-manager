@@ -531,6 +531,8 @@ complete-open-folder = افتح المجلد
 complete-close = إغلاق
 complete-dont-show = لا تُظهر هذه النافذة مرة أخرى
 complete-setting = أظهر نافذة «اكتمل التحميل» حين ينتهي تحميل
+complete-drag = اسحبه من هنا
+complete-drag-hint = اسحب الملف من هنا إلى أي برنامج أو مجلد
 
 ## الفيديو (M6)
 

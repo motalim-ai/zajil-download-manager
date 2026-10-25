@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { ask } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
   import FileName from "../lib/components/FileName.svelte";
@@ -53,6 +54,14 @@
     }
   }
 
+  /** The file's icon, held with the left button: the system drags the
+   * file out, into any program or folder (Rust starts it). */
+  function dragOut(e: PointerEvent) {
+    if (e.button !== 0 || !done) return;
+    e.preventDefault();
+    void invoke("drag_out", { id }).catch((err) => (problem = String(err)));
+  }
+
   function onkeydown(e: KeyboardEvent) {
     if (e.key === "Escape") void close();
   }
@@ -64,15 +73,27 @@
   <h1 id="complete-heading"><span class="badge" aria-hidden="true"><Icon name="check" /></span>{locale.t("complete-title")}</h1>
 
   {#if done}
-    <div class="fields">
-      <span class="label">{locale.t("complete-name")}</span>
-      <span class="value"><FileName name={done.name} /></span>
-      <span class="label">{locale.t("complete-size")}</span>
-      <span class="value">{done.size === null ? "?" : size(locale.lang, locale.digits, done.size)}</span>
-      <span class="label">{locale.t("complete-folder")}</span>
-      <span class="value" title={done.folder}><bdi dir="ltr">{done.folder}</bdi></span>
-      <span class="label">{locale.t("complete-url")}</span>
-      <span class="value" title={done.url}><bdi dir="ltr">{done.url}</bdi></span>
+    <div class="body">
+      <div
+        class="tile"
+        role="img"
+        aria-label={locale.t("complete-drag-hint")}
+        title={locale.t("complete-drag-hint")}
+        onpointerdown={dragOut}
+      >
+        <Icon name="file" size={40} stroke={1.4} />
+        <span class="tile-hint">{locale.t("complete-drag")}</span>
+      </div>
+      <div class="fields">
+        <span class="label">{locale.t("complete-name")}</span>
+        <span class="value"><FileName name={done.name} /></span>
+        <span class="label">{locale.t("complete-size")}</span>
+        <span class="value">{done.size === null ? "?" : size(locale.lang, locale.digits, done.size)}</span>
+        <span class="label">{locale.t("complete-folder")}</span>
+        <span class="value" title={done.folder}><bdi dir="ltr">{done.folder}</bdi></span>
+        <span class="label">{locale.t("complete-url")}</span>
+        <span class="value" title={done.url}><bdi dir="ltr">{done.url}</bdi></span>
+      </div>
     </div>
   {/if}
   {#if problem}<p class="problem" role="alert"><Icon name="alert" />{problem}</p>{/if}
@@ -112,6 +133,38 @@
     border-radius: 99px;
     background: var(--green-bg);
     color: var(--green);
+  }
+  .body {
+    flex: 1;
+    display: flex;
+    gap: 18px;
+    min-height: 0;
+  }
+  .tile {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 92px;
+    height: 104px;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    background: var(--sunken);
+    color: var(--accent);
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .tile:active {
+    cursor: grabbing;
+  }
+  .tile-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    text-align: center;
+    padding: 0 4px;
   }
   .fields {
     flex: 1;

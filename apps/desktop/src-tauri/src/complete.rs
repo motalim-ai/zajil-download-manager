@@ -80,6 +80,71 @@ pub async fn complete_info(app: State<'_, App>, id: u64) -> Result<CompleteView,
     .map_err(crate::blocking_err)?
 }
 
+/// The picture under the pointer while the file is dragged: the app's icon.
+const DRAG_IMAGE: &[u8] = include_bytes!("../icons/32x32.png");
+
+/// Drags download `id`'s finished file out of window `window` (the page's
+/// mouse button is down on the file's icon), into any program or folder,
+/// as in IDM: the system's own drag, copying. Only the download's own
+/// file: the page names the download, never a path.
+#[tauri::command]
+pub async fn drag_out<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    window: tauri::WebviewWindow<R>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let store = app.store.clone();
+    let file = tokio::task::spawn_blocking(move || {
+        let queues = store.load().map_err(|e| e.to_string())?;
+        let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
+        dragged(item).ok_or_else(|| format!("download {id} has no finished file"))
+    })
+    .await
+    .map_err(crate::blocking_err)??;
+    // The drag starts on the main thread, as the system wants; its answer
+    // comes back here.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    handle
+        .run_on_main_thread(move || {
+            let _ = tx.send(start(&window, file));
+        })
+        .map_err(|e| e.to_string())?;
+    rx.await.map_err(|e| e.to_string())?
+}
+
+/// The file `item` gives to a drag: its finished file, if it is there.
+fn dragged(item: &Item) -> Option<std::path::PathBuf> {
+    if item.status != Status::Done {
+        return None;
+    }
+    item.file.clone().filter(|f| f.is_absolute() && f.is_file())
+}
+
+fn start<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    file: std::path::PathBuf,
+) -> Result<(), String> {
+    // The drag needs the system's window: GTK's on Linux, the native
+    // handle elsewhere (the one place this file names a system, as
+    // tauri-plugin-drag does).
+    #[cfg(target_os = "linux")]
+    let native = window.gtk_window().map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "linux"))]
+    let native = window.clone();
+    drag::start_drag(
+        &native,
+        drag::DragItem::Files(vec![file]),
+        drag::Image::Raw(DRAG_IMAGE.to_vec()),
+        |_, _| {},
+        drag::Options {
+            skip_animatation_on_cancel_or_failure: false,
+            mode: drag::DragMode::Copy,
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// The window's view of `item`, if it is done with a file.
 fn view(item: &Item, size: Option<u64>) -> Option<CompleteView> {
     if item.status != Status::Done {
@@ -192,6 +257,29 @@ mod tests {
         assert!(!shows_for(&failed) && view(&failed, None).is_none());
         let no_file = Item { file: None, ..item };
         assert!(!shows_for(&no_file));
+    }
+
+    /// Only a finished download's own file can be dragged out.
+    #[test]
+    fn only_a_finished_file_that_is_there_is_dragged() {
+        let dir = std::env::temp_dir().join(format!("zajil-drag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut item = done("https://files.test/a.zip");
+        item.file = Some(dir.join("a.zip"));
+        assert_eq!(dragged(&item), None, "not on disk");
+        std::fs::write(dir.join("a.zip"), b"zip").unwrap();
+        assert_eq!(dragged(&item), Some(dir.join("a.zip")));
+        let failed = Item {
+            status: Status::Failed,
+            ..item.clone()
+        };
+        assert_eq!(dragged(&failed), None);
+        let folder = Item {
+            file: Some(dir.clone()),
+            ..item
+        };
+        assert_eq!(dragged(&folder), None, "a folder is not a file");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

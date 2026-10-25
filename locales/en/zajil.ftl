@@ -473,6 +473,8 @@ complete-open-folder = Open folder
 complete-close = Close
 complete-dont-show = Don't show this window again
 complete-setting = Show the «Download complete» window when a download finishes
+complete-drag = Drag it from here
+complete-drag-hint = Drag the file from here into any program or folder
 
 ## Video (M6)
 
