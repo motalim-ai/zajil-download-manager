@@ -6,10 +6,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zajil_core::Stop;
 use zajil_core::video::{
-    Choice, Download, Probed, Runs, VideoError, VideoEvent, VideoRunner, VideoTools,
+    Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner, VideoTools,
 };
+use zajil_core::{Engine, Options, Stop};
 
 struct Setup {
     _root: tempfile::TempDir,
@@ -34,6 +34,7 @@ fn setup(script: &str) -> Setup {
             ffmpeg_dir: control.clone(),
         },
         Runs::new(&runs),
+        Engine::new(Options::default()).unwrap(),
     );
     Setup {
         _root: root,
@@ -227,6 +228,7 @@ async fn no_run_passes_an_option_outside_the_allow_list() {
                 let request = Download {
                     url: "https://example.com/v",
                     choice,
+                    formats: &[],
                     cookies: Some("sid=1"),
                     dest: &s.dest,
                     name: "x",
@@ -265,6 +267,7 @@ async fn nothing_from_the_page_becomes_an_option() {
         let request = Download {
             url: "https://example.com/v",
             choice: &Choice::Format(id.into()),
+            formats: &[],
             cookies: None,
             dest: &s.dest,
             name: "x",
@@ -360,6 +363,7 @@ async fn a_download_takes_the_page_s_title_safely_and_never_replaces_a_file() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("hls-360".into()),
+        formats: &[],
         cookies: None,
         dest: &s.dest,
         name: "../دورة Rust (Part 2)",
@@ -401,6 +405,7 @@ async fn a_file_printed_outside_the_output_folder_is_refused() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
+        formats: &[],
         cookies: None,
         dest: &s.dest,
         name: "x",
@@ -470,6 +475,7 @@ async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
+        formats: &[],
         cookies: Some("sid=abc"),
         dest: &s.dest,
         name: "x",
@@ -519,6 +525,7 @@ async fn a_download_dropped_mid_way_ends_its_tree_and_leaves_nothing() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
+        formats: &[],
         cookies: Some("sid=abc"),
         dest: &s.dest,
         name: "x",
@@ -586,4 +593,102 @@ async fn leftovers_of_a_crash_are_ended_and_removed_at_the_next_start() {
     // The stand-in was ended by its token: a new start marker never comes
     // and its process is gone (checked by the platform tests); here, the
     // folders it could write to are gone.
+}
+
+#[tokio::test]
+async fn an_hls_playlist_protected_in_a_way_yt_dlp_misses_is_refused_before_it_runs() {
+    // yt-dlp catches FairPlay itself, but hands SAMPLE-AES-CTR with a
+    // Widevine key to ffmpeg, which then fails with an unclear message.
+    // Zajil reads the playlist first.
+    let server = zajil_testserver::TestServer::http();
+    server.put(
+        "/v/widevine.m3u8",
+        zajil_testserver::FileSpec::new(
+            "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"data:x\",\
+             KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"\n#EXTINF:1,\na.m4s\n#EXT-X-ENDLIST\n",
+        ),
+    );
+    server.put(
+        "/v/clear.m3u8",
+        zajil_testserver::FileSpec::new("#EXTM3U\n#EXTINF:1,\na.m4s\n#EXT-X-ENDLIST\n"),
+    );
+    let format = |id: &str, path: &str| -> Format {
+        serde_json::from_value(serde_json::json!({
+            "format_id": id, "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a",
+            "protocol": "m3u8_native", "url": server.url(path),
+        }))
+        .unwrap()
+    };
+    let formats = [
+        format("wv", "/v/widevine.m3u8"),
+        format("clear", "/v/clear.m3u8"),
+    ];
+
+    let s = setup("download mp4");
+    let request = Download {
+        url: "https://example.com/v",
+        choice: &Choice::Format("wv".into()),
+        formats: &formats,
+        cookies: None,
+        dest: &s.dest,
+        name: "x",
+    };
+    let err = s
+        .runner
+        .download(&request, &Stop::new(), &mut |_| {})
+        .await
+        .unwrap_err();
+    assert!(matches!(err, VideoError::Drm), "{err}");
+    assert!(
+        calls(&s.control).is_empty(),
+        "yt-dlp ran for protected content"
+    );
+
+    // The clear playlist of the same page downloads.
+    let request = Download {
+        choice: &Choice::Format("clear".into()),
+        ..request
+    };
+    s.runner
+        .download(&request, &Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(calls(&s.control).len(), 1);
+}
+
+#[tokio::test]
+async fn playlists_for_the_drm_check_come_over_https_only_from_trusted_servers() {
+    use zajil_testserver::{FileSpec, TestServer, Tls, test_ca_der};
+    let server = TestServer::https(Tls::trusted(&["localhost", "127.0.0.1"]), "localhost");
+    server.put("/p.m3u8", FileSpec::new("#EXTM3U\n"));
+    // The same path as the download engine: its trusted test root works…
+    let trusting = Engine::with_test_root(Options::default(), &test_ca_der()).unwrap();
+    let text = trusting
+        .fetch_text(&server.url("/p.m3u8"), 1024, &Stop::new())
+        .await
+        .unwrap();
+    assert_eq!(text, "#EXTM3U\n");
+    // …and the system's roots alone refuse the test certificate.
+    let err = Engine::new(Options::default())
+        .unwrap()
+        .fetch_text(&server.url("/p.m3u8"), 1024, &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("certificate"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_playlist_larger_than_the_limit_is_not_read_past_it() {
+    use zajil_testserver::{FileSpec, TestServer};
+    let server = TestServer::http();
+    server.put("/big.m3u8", FileSpec::new(vec![b'#'; 64 * 1024]));
+    let err = Engine::new(Options::default())
+        .unwrap()
+        .fetch_text(&server.url("/big.m3u8"), 1024, &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("larger than 1024 bytes"), "{err}");
 }

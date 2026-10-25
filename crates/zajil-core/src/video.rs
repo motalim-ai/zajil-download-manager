@@ -23,7 +23,7 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
-use crate::engine::Stop;
+use crate::engine::{Engine, Stop};
 
 /// The tools a run needs, as [`crate::tools::Toolbox::verified`] gave them
 /// (tests give their own).
@@ -265,6 +265,24 @@ pub struct Format {
     pub tbr: Option<f64>,
     #[serde(default)]
     pub has_drm: Option<serde_json::Value>,
+    /// How yt-dlp gets it (`https`, `m3u8_native`, `http_dash_segments`…).
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// Its URL (for an HLS format, its playlist), kept in memory only for
+    /// Zajil's own DRM check: it may carry a token, so it is never shown.
+    #[serde(default)]
+    url: Option<Hidden>,
+}
+
+/// A value that may hold a secret: printed as `(hidden)`.
+#[derive(Clone, PartialEq, Deserialize)]
+#[serde(transparent)]
+struct Hidden(String);
+
+impl std::fmt::Debug for Hidden {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(hidden)")
+    }
 }
 
 impl Format {
@@ -274,6 +292,13 @@ impl Format {
 
     pub fn has_audio(&self) -> bool {
         self.acodec.as_deref().is_some_and(|c| c != "none")
+    }
+
+    /// Whether yt-dlp gets it through an HLS playlist.
+    pub fn is_hls(&self) -> bool {
+        self.protocol
+            .as_deref()
+            .is_some_and(|p| p.starts_with("m3u8"))
     }
 
     /// yt-dlp marks protected formats with `has_drm` true (or `"maybe"`).
@@ -521,6 +546,59 @@ pub fn shown_message(text: &str) -> String {
     out.chars().take(500).collect()
 }
 
+/// Whether an HLS playlist announces content protection that yt-dlp does
+/// not catch by itself (ADR-0009, section 6): any key with a method other
+/// than none or AES-128 (`SAMPLE-AES`, `SAMPLE-AES-CTR`…), any key format
+/// other than plain `identity` (Widevine, PlayReady, FairPlay…), an `skd://`
+/// key, or Adobe's `#EXT-X-FAXS-CM`. AES-128 with a plain key is not DRM:
+/// yt-dlp decrypts it like a browser.
+pub fn hls_is_protected(playlist: &str) -> bool {
+    playlist.lines().any(|line| {
+        let line = line.trim();
+        if line.starts_with("#EXT-X-FAXS-CM") {
+            return true;
+        }
+        let Some(attrs) = line
+            .strip_prefix("#EXT-X-KEY:")
+            .or_else(|| line.strip_prefix("#EXT-X-SESSION-KEY:"))
+        else {
+            return false;
+        };
+        let upper = attrs.to_ascii_uppercase();
+        let method = attribute(&upper, "METHOD").unwrap_or_default();
+        let keyformat = attribute(attrs, "KEYFORMAT");
+        let uri = attribute(attrs, "URI").unwrap_or_default();
+        !matches!(method.as_str(), "NONE" | "AES-128")
+            || keyformat.is_some_and(|k| k != "identity")
+            || uri.to_ascii_lowercase().starts_with("skd://")
+    })
+}
+
+/// The value of `NAME=value` or `NAME="value"` in an attribute list.
+fn attribute(attrs: &str, name: &str) -> Option<String> {
+    let mut rest = attrs;
+    while !rest.is_empty() {
+        let (key, after) = rest.split_once('=')?;
+        let (value, next) = if let Some(quoted) = after.strip_prefix('"') {
+            let (value, after) = quoted.split_once('"')?;
+            (value, after.strip_prefix(',').unwrap_or(after))
+        } else {
+            match after.split_once(',') {
+                Some((value, next)) => (value, next),
+                None => (after, ""),
+            }
+        };
+        if key.trim().eq_ignore_ascii_case(name) {
+            return Some(value.trim().to_owned());
+        }
+        rest = next;
+    }
+    None
+}
+
+/// The longest HLS playlist Zajil reads for its DRM check.
+const MAX_PLAYLIST: usize = 4 * 1024 * 1024;
+
 /// Whether a message of yt-dlp says the content is protected.
 fn says_drm(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
@@ -532,6 +610,9 @@ fn says_drm(message: &str) -> bool {
 pub struct Download<'a> {
     pub url: &'a str,
     pub choice: &'a Choice,
+    /// The formats the probe found: the HLS ones the choice may use are
+    /// checked for DRM before yt-dlp runs.
+    pub formats: &'a [Format],
     /// The link's own `Cookie` header from the browser, if any.
     pub cookies: Option<&'a str>,
     /// The folder the video goes to.
@@ -544,11 +625,51 @@ pub struct Download<'a> {
 pub struct VideoRunner {
     tools: VideoTools,
     runs: Runs,
+    /// For Zajil's own requests (the HLS playlists of the DRM check).
+    engine: Engine,
 }
 
 impl VideoRunner {
-    pub fn new(tools: VideoTools, runs: Runs) -> Self {
-        VideoRunner { tools, runs }
+    pub fn new(tools: VideoTools, runs: Runs, engine: Engine) -> Self {
+        VideoRunner {
+            tools,
+            runs,
+            engine,
+        }
+    }
+
+    /// Refuses `choice` if an HLS format it may use is protected in a way
+    /// yt-dlp would not catch (it would hand the playlist to ffmpeg).
+    async fn check_hls(&self, request: &Download<'_>, stop: &Stop) -> Result<(), VideoError> {
+        let used = |f: &Format| match request.choice {
+            Choice::Format(id) => f.id == *id,
+            Choice::Merge { video, audio } => f.id == *video || f.id == *audio,
+            Choice::AudioOnly => f.has_audio() || f.acodec.is_none(),
+        };
+        let engine = self.engine.with_browser(crate::browser::FromBrowser::new(
+            request.url,
+            request.cookies,
+            None,
+        ));
+        for format in request.formats.iter().filter(|f| f.is_hls() && used(f)) {
+            let Some(Hidden(playlist_url)) = &format.url else {
+                continue;
+            };
+            let playlist = engine
+                .fetch_text(playlist_url, MAX_PLAYLIST, stop)
+                .await
+                .map_err(|e| match e {
+                    crate::engine::Error::Stopped { .. } => VideoError::Stopped,
+                    e => VideoError::Tool(format!(
+                        "the HLS playlist could not be read: {}",
+                        shown_message(&e.to_string())
+                    )),
+                })?;
+            if hls_is_protected(&playlist) {
+                return Err(VideoError::Drm);
+            }
+        }
+        Ok(())
     }
 
     /// What `url` holds: one video and its formats, or a playlist's items.
@@ -605,8 +726,12 @@ impl VideoRunner {
             cookies,
             dest,
             name,
+            ..
         } = *request;
         let url = checked(url)?;
+        // Checked before any check of the HLS playlists asks for them.
+        let choice_args = choice.args()?;
+        self.check_hls(request, stop).await?;
         let mut args = base_args(&self.tools);
         args.extend([
             Arg::NoPlaylist,
@@ -617,7 +742,7 @@ impl VideoRunner {
             Arg::ProgressTemplate,
             Arg::PrintFinalPath,
         ]);
-        args.extend(choice.args()?);
+        args.extend(choice_args);
         let finish = Finish {
             dest: dest.to_owned(),
             name: name.to_owned(),
@@ -1037,6 +1162,39 @@ mod tests {
     }
 
     #[test]
+    fn hls_protection_is_recognised_and_plain_aes_is_not() {
+        let with = |key: &str| format!("#EXTM3U\n#EXT-X-VERSION:7\n{key}\n#EXTINF:1,\na.m4s\n");
+        for protected in [
+            r#"#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://k",KEYFORMAT="com.apple.streamingkeydelivery""#,
+            r#"#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI="data:x",KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed""#,
+            r#"#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,URI="https://k",KEYFORMAT="com.microsoft.playready""#,
+            r#"#EXT-X-KEY:METHOD=AES-128,URI="skd://k""#,
+            "#EXT-X-FAXS-CM:abc",
+            r#"#EXT-X-KEY:METHOD=SAMPLE-AES,URI="https://k/key""#,
+        ] {
+            assert!(hls_is_protected(&with(protected)), "{protected}");
+        }
+        for plain in [
+            r#"#EXT-X-KEY:METHOD=AES-128,URI="https://k/key.bin",IV=0x1234"#,
+            r#"#EXT-X-KEY:METHOD=AES-128,URI="https://k/key",KEYFORMAT="identity""#,
+            "#EXT-X-KEY:METHOD=NONE",
+            "",
+        ] {
+            assert!(!hls_is_protected(&with(plain)), "{plain}");
+        }
+    }
+
+    #[test]
+    fn a_format_s_url_is_never_shown() {
+        let format: Format = serde_json::from_str(
+            r#"{"format_id": "1", "protocol": "m3u8_native", "url": "https://cdn/x.m3u8?sig=SECRET"}"#,
+        )
+        .unwrap();
+        assert!(format.is_hls());
+        assert!(!format!("{format:?}").contains("SECRET"));
+    }
+
+    #[test]
     fn drm_formats_are_recognised() {
         let f = |v: serde_json::Value| Format {
             id: "1".into(),
@@ -1050,6 +1208,8 @@ mod tests {
             filesize_approx: None,
             tbr: None,
             has_drm: Some(v),
+            protocol: None,
+            url: None,
         };
         assert!(f(serde_json::json!(true)).is_protected());
         assert!(f(serde_json::json!("maybe")).is_protected());
