@@ -35,8 +35,19 @@ use std::process::{Child, Command, ExitStatus};
 /// A tool's running process tree. Dropping it ends the whole tree.
 pub struct Tree {
     child: Child,
-    imp: imp::Group,
+    imp: std::sync::Arc<imp::Group>,
     record: Record,
+}
+
+/// Ends a [`Tree`] from another thread or task (a stopped download) while
+/// its owner reads its output. Ending a tree that already ended is fine.
+#[derive(Clone)]
+pub struct Killer(std::sync::Arc<imp::Group>);
+
+impl Killer {
+    pub fn kill(&self) -> io::Result<()> {
+        self.0.kill()
+    }
 }
 
 /// The environment variable that marks every process of a tree.
@@ -83,13 +94,22 @@ pub fn spawn(mut command: Command) -> io::Result<Tree> {
     };
     command.env(TOKEN_VAR, format!("{:016x}", record.token));
     let (child, imp) = imp::spawn(command)?;
-    Ok(Tree { child, imp, record })
+    Ok(Tree {
+        child,
+        imp: std::sync::Arc::new(imp),
+        record,
+    })
 }
 
 impl Tree {
     /// The first process, for its pipes.
     pub fn child(&mut self) -> &mut Child {
         &mut self.child
+    }
+
+    /// Something that ends this tree from elsewhere.
+    pub fn killer(&self) -> Killer {
+        Killer(self.imp.clone())
     }
 
     /// What identifies this tree after a crash (see [`end_leftover`]).
@@ -381,6 +401,11 @@ mod imp {
             unsafe { CloseHandle(self.0) };
         }
     }
+
+    // SAFETY: a job handle is a kernel handle; the job functions may be
+    // called on it from any thread, and it is closed once, on drop.
+    unsafe impl Send for Handle {}
+    unsafe impl Sync for Handle {}
 
     pub struct Group {
         job: Handle,
