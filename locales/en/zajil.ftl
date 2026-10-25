@@ -460,6 +460,10 @@ schedule-closed-now = The queue is outside its time now: its downloads wait for 
 schedule-save = Save
 schedule-saved = Saved.
 schedule-close = Close
+schedule-tries = Tries per file
+schedule-after-open = And open a file or program after it:
+schedule-after-open-pick = Choose a file…
+schedule-soon = Coming soon
 
 ## Video (M6)
 

@@ -518,6 +518,10 @@ schedule-closed-now = الطابور خارج موعده الآن: تنتظر ت
 schedule-save = حفظ
 schedule-saved = حُفظ.
 schedule-close = إغلاق
+schedule-tries = المحاولات لكل ملف
+schedule-after-open = وافتح بعده ملفًا أو برنامجًا:
+schedule-after-open-pick = اختر ملفًا…
+schedule-soon = قريبًا
 
 ## الفيديو (M6)
 

@@ -271,8 +271,14 @@
       </div>
 
       <label class="label" for="max-active">{locale.t("schedule-max-active")}</label>
-      <div class="field">
+      <div class="field inline">
         <input id="max-active" class="number" type="number" min="1" max="32" bind:value={maxActive} />
+        <!-- Ready for the engine (#142): disabled until it keeps the number. -->
+        <label class="check soon-row">
+          {locale.t("schedule-tries")}
+          <input class="number" type="number" min="1" max="100" value="5" disabled />
+          <span class="soon">{locale.t("schedule-soon")}</span>
+        </label>
       </div>
 
       <label class="label" for="after">{locale.t("schedule-after")}</label>
@@ -283,6 +289,13 @@
           <option value="sleep">{locale.t("schedule-after-sleep")}</option>
         </select>
         <p class="hint">{locale.t("schedule-after-hint")}</p>
+        <!-- Ready for the engine (#142): the user picks a file or program in
+             the system's picker and confirms it before it is saved. -->
+        <div class="check soon-row">
+          <span>{locale.t("schedule-after-open")}</span>
+          <button class="btn" disabled><Icon name="file" />{locale.t("schedule-after-open-pick")}</button>
+          <span class="soon">{locale.t("schedule-soon")}</span>
+        </div>
       </div>
     </div>
 
@@ -531,6 +544,17 @@
   }
   #after {
     max-width: 260px;
+  }
+  .soon-row {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .soon {
+    font-size: 11.5px;
+    border: 1px solid var(--line);
+    border-radius: 99px;
+    padding: 0 8px;
+    background: var(--sunken);
   }
   .countdown {
     display: flex;
