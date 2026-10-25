@@ -51,3 +51,8 @@ zajil-platform = { path = "../../../crates/zajil-platform" }
 tauri = { version = "2.12.5", features = ["test"] }
 tempfile = "3.27.0"
 zajil-testserver = { path = "../../../crates/zajil-testserver" }
+
+# Whether the desktop shows tray icons (`closing.rs`): already in the tree
+# through tauri-plugin-notification, so no new crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.19.0"

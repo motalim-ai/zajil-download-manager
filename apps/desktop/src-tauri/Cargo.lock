@@ -6020,6 +6020,7 @@ dependencies = [
  "zajil-i18n",
  "zajil-platform",
  "zajil-testserver",
+ "zbus",
 ]
 
 [[package]]

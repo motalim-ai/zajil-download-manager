@@ -18,7 +18,13 @@ export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   probe: (url: string) => invoke<ProbeView>("probe", { url }),
   cancelProbe: () => invoke<void>("cancel_probe"),
-  setTrayTexts: (show: string, quit: string) => invoke<void>("set_tray_texts", { show, quit }),
+  /** The tray menu's texts, and the notification the first time the
+   * window hides into the tray. */
+  setTrayTexts: (show: string, quit: string, noticeTitle: string, notice: string) =>
+    invoke<void>("set_tray_texts", { show, quit, noticeTitle, notice }),
+  /** Closing the window quits Zajil; and whether there is a tray. */
+  closeQuits: () => invoke<[boolean, boolean]>("close_quits"),
+  setCloseQuits: (quits: boolean) => invoke<void>("set_close_quits", { quits }),
   add: (request: AddRequest) => invoke<number>("add", { request }),
   pause: (ids: number[]) => invoke<void>("pause", { ids }),
   resume: (ids: number[]) => invoke<void>("resume", { ids }),

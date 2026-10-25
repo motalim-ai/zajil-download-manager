@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod closing;
 mod live;
 mod menu;
 mod tray;
@@ -156,7 +157,8 @@ pub fn run() {
             None,
         ))
         .manage(app)
-        .manage(windows::Shared::default());
+        .manage(windows::Shared::default())
+        .manage(closing::Closing::new(&data));
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -212,6 +214,8 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            // The close button hides the window into the tray (`closing.rs`).
+            closing::watch(tauri_app.handle());
             windows::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
@@ -271,6 +275,9 @@ pub fn run() {
                 app.stop.request();
                 tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
             }
+            // macOS: a click on the Dock icon shows the window it hid.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::show_window(handle),
             _ => {}
         });
 }
@@ -288,6 +295,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        close_quits,
+        set_close_quits,
         settings,
         save_settings,
         categories,
@@ -328,6 +337,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        close_quits,
+        set_close_quits,
         settings,
         save_settings,
         categories,
@@ -453,10 +464,31 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
 #[tauri::command]
 fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
+    closing: State<'_, closing::Closing>,
     show: String,
     quit: String,
+    notice_title: String,
+    notice: String,
 ) -> Result<(), String> {
+    closing.set_notice(closing::Notice {
+        title: notice_title,
+        body: notice,
+    });
     tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+}
+
+/// Whether closing the main window quits Zajil (the settings), and whether
+/// this desktop has a system tray to go on in.
+#[tauri::command]
+fn close_quits(closing: State<'_, closing::Closing>) -> (bool, bool) {
+    (closing.prefs().close_quits, closing::has_tray())
+}
+
+#[tauri::command]
+fn set_close_quits(closing: State<'_, closing::Closing>, quits: bool) -> Result<(), String> {
+    closing
+        .change(|p| p.close_quits = quits)
+        .map_err(|e| e.to_string())
 }
 
 /// Tells the page that something changed: at once, or once the throttle

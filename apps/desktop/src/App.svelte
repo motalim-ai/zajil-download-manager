@@ -107,7 +107,7 @@
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
     // The tray menu speaks the same language.
-    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit")).catch(() => {});
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
