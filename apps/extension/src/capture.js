@@ -97,10 +97,12 @@ export function shouldCapture(item, settings, ownId) {
  * browser's file name when the host would accept them (a referrer that is
  * an http(s) URL; a plain name, no path, no control characters, 255 bytes at
  * most), and the link's `Cookie` header when the user allowed it
- * (`cookies.cookieHeader`, already checked as the host checks it).
+ * (`cookies.cookieHeader`, already checked as the host checks it). And
+ * this extension's instance id and the cookie store (a Firefox container),
+ * so Zajil can ask it for the cookies again after a restart (M5).
  *
  * @param {string} url
- * @param {{ referrer?: string, filename?: string, cookies?: string | null }} [extra]
+ * @param {{ referrer?: string, filename?: string, cookies?: string | null, instance?: string, store?: string, ticket?: string }} [extra]
  */
 export function downloadMessage(url, extra = {}) {
   /** @type {Record<string, unknown>} */
@@ -111,6 +113,10 @@ export function downloadMessage(url, extra = {}) {
   const plain = name && !/[\u0000-\u001f\u007f-\u009f]/.test(name) && name !== "." && name !== "..";
   if (plain && new TextEncoder().encode(name).length <= MAX_NAME) message.filename = name;
   if (extra.cookies) message.cookies = extra.cookies;
+  const id = /^[A-Za-z0-9_-]{1,64}$/;
+  if (extra.instance && id.test(extra.instance)) message.instance = extra.instance;
+  if (extra.store && id.test(extra.store) && extra.store !== "firefox-private") message.store = extra.store;
+  if (extra.ticket && id.test(extra.ticket)) message.ticket = extra.ticket;
   return message;
 }
 
@@ -120,10 +126,11 @@ export function downloadMessage(url, extra = {}) {
  *
  * @param {{ linkUrl?: string, pageUrl?: string }} info
  * @param {string | null} [cookies] the link's `Cookie` header, if allowed
+ * @param {{ instance?: string, store?: string, ticket?: string }} [from] where it comes from
  */
-export function menuMessage(info, cookies = null) {
+export function menuMessage(info, cookies = null, from = {}) {
   return isWeb(info.linkUrl)
-    ? downloadMessage(/** @type {string} */ (info.linkUrl), { referrer: info.pageUrl, cookies })
+    ? downloadMessage(/** @type {string} */ (info.linkUrl), { referrer: info.pageUrl, cookies, ...from })
     : null;
 }
 
@@ -177,9 +184,10 @@ export async function send(browserApi, message) {
  *
  * @param {any} browserApi
  * @param {any} item
- * @param {{ pause: boolean, cookies?: string | null }} how `pause`: the
- *   browser keeps a paused download's data (`compat.pausesSafely`);
- *   `cookies`: the link's `Cookie` header, if the user allowed it
+ * @param {{ pause: boolean, cookies?: string | null, instance?: string, ticket?: string }} how
+ *   `pause`: the browser keeps a paused download's data
+ *   (`compat.pausesSafely`); `cookies`: the link's `Cookie` header, if the
+ *   user allowed it; `instance`: this extension's id (`link.instanceId`)
  * @returns {Promise<Result | null>} null when the browser had already
  *   finished (nothing was sent)
  */
@@ -193,7 +201,14 @@ export async function takeOver(browserApi, item, how) {
   }
   const result = await send(
     browserApi,
-    downloadMessage(item.finalUrl || item.url, { referrer: item.referrer, filename: item.filename, cookies: how.cookies }),
+    downloadMessage(item.finalUrl || item.url, {
+      referrer: item.referrer,
+      filename: item.filename,
+      cookies: how.cookies,
+      instance: how.instance,
+      store: item.cookieStoreId,
+      ticket: how.ticket,
+    }),
   );
   if (result.outcome === "taken") {
     // Not paused (Firefox), the browser may have finished it meanwhile:

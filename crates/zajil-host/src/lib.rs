@@ -23,9 +23,10 @@
 //!   [`MAX_COOKIES`] or with anything but visible ASCII and spaces (a line
 //!   break would add a header of its own to the request).
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,13 @@ pub const MAX_URL: usize = 8 * 1024;
 pub const MAX_NAME: usize = 255;
 /// The longest `Cookie` header value, in bytes.
 pub const MAX_COOKIES: usize = 16 * 1024;
+/// The longest extension instance id and cookie store id, in bytes.
+pub const MAX_ID: usize = 64;
+/// The most tickets a `keep` message lists.
+pub const MAX_TICKETS: usize = 10_000;
+/// How long the host waits for the extension to answer a question from
+/// the app on the link; it always answers the app within it.
+pub const LINK_ANSWER: Duration = Duration::from_secs(10);
 
 /// A message from the extension.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +78,156 @@ pub enum Request {
         /// The `Cookie` header for this URL only (ADR-0005).
         #[serde(default)]
         cookies: Option<String>,
+        /// The extension's own random id (one per browser profile), so
+        /// Zajil can ask that browser for the cookies again after a
+        /// restart (M5).
+        #[serde(default)]
+        instance: Option<String>,
+        /// The cookie store the cookies came from (a Firefox container).
+        #[serde(default)]
+        store: Option<String>,
+        /// This download's random ticket: the extension gives its cookies
+        /// again only for an open download's ticket (owner's decision on
+        /// #80).
+        #[serde(default)]
+        ticket: Option<String>,
+        /// From a private window: Zajil keeps nothing of it once it is
+        /// done (security review #84).
+        #[serde(default)]
+        private: bool,
     },
+    /// The last private window closed (review of #91): Zajil takes every
+    /// private window's download out of its queues and deletes their part
+    /// and state files.
+    PrivateClosed { protocol_version: u32 },
+    /// Keep this connection open (`runtime.connectNative`): the link on
+    /// which Zajil asks this browser for cookies again (M5). Only the
+    /// host's own connection to the app carries it.
+    Link {
+        protocol_version: u32,
+        instance: String,
+    },
+    /// The extension's answer on the link to a [`ToExtension`] question:
+    /// for [`ToExtension::CookiesWanted`], the `Cookie` header, or `null`
+    /// (no permission, no open download with that ticket, or none); for
+    /// [`ToExtension::Keep`], always `null`.
+    Cookies {
+        protocol_version: u32,
+        ask: u64,
+        #[serde(default)]
+        cookies: Option<String>,
+    },
+}
+
+/// What the app asks the extension on the link (through the host).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToExtension {
+    /// The cookies for `url` from cookie store `store`, for a download
+    /// that came from this browser with its cookies before a restart.
+    CookiesWanted {
+        protocol_version: u32,
+        ask: u64,
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        store: Option<String>,
+        /// The download's ticket, as the extension gave it.
+        ticket: String,
+    },
+    /// Only these downloads' tickets are still open (not done, not
+    /// removed): the extension forgets every other one at once.
+    Keep {
+        protocol_version: u32,
+        ask: u64,
+        tickets: Vec<String>,
+    },
+}
+
+/// What the host tells the app on the link: the extension's answer, or
+/// that none came within [`LINK_ANSWER`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FromLink {
+    Cookies {
+        protocol_version: u32,
+        ask: u64,
+        #[serde(default)]
+        cookies: Option<String>,
+    },
+    NoAnswer {
+        protocol_version: u32,
+        ask: u64,
+    },
+}
+
+impl ToExtension {
+    /// Reads and checks a question from the app.
+    pub fn parse(message: &[u8]) -> Result<Self, String> {
+        let question: ToExtension =
+            serde_json::from_slice(message).map_err(|e| format!("not a Zajil question: {e}"))?;
+        match &question {
+            ToExtension::CookiesWanted {
+                protocol_version,
+                url,
+                store,
+                ticket,
+                ..
+            } => {
+                check_version(*protocol_version)?;
+                check_url(url, "URL")?;
+                if let Some(store) = store {
+                    check_id(store, "cookie store")?;
+                }
+                check_id(ticket, "ticket")?;
+            }
+            ToExtension::Keep {
+                protocol_version,
+                tickets,
+                ..
+            } => {
+                check_version(*protocol_version)?;
+                if tickets.len() > MAX_TICKETS {
+                    return Err(format!("more than {MAX_TICKETS} tickets"));
+                }
+                for ticket in tickets {
+                    check_id(ticket, "ticket")?;
+                }
+            }
+        }
+        Ok(question)
+    }
+
+    /// The question's number, which its answer carries.
+    pub fn ask(&self) -> u64 {
+        match self {
+            ToExtension::CookiesWanted { ask, .. } | ToExtension::Keep { ask, .. } => *ask,
+        }
+    }
+}
+
+impl FromLink {
+    /// Reads and checks the host's answer.
+    pub fn parse(message: &[u8]) -> Result<Self, String> {
+        let answer: FromLink =
+            serde_json::from_slice(message).map_err(|e| format!("not a Zajil answer: {e}"))?;
+        let version = match &answer {
+            FromLink::Cookies {
+                protocol_version,
+                cookies,
+                ..
+            } => {
+                if let Some(cookies) = cookies {
+                    check_cookies(cookies)?;
+                }
+                *protocol_version
+            }
+            FromLink::NoAnswer {
+                protocol_version, ..
+            } => *protocol_version,
+        };
+        check_version(version)?;
+        Ok(answer)
+    }
 }
 
 /// The answer to a [`Request`].
@@ -162,26 +319,83 @@ pub fn parse(message: &[u8]) -> Result<Request, String> {
     Ok(request)
 }
 
-fn check(request: &Request) -> Result<(), String> {
-    let version = match request {
-        Request::Ping { protocol_version }
-        | Request::Download {
-            protocol_version, ..
-        } => *protocol_version,
-    };
+fn check_version(version: u32) -> Result<(), String> {
     if version != PROTOCOL_VERSION {
         return Err(format!(
             "protocol version {version} is not supported (this Zajil speaks {PROTOCOL_VERSION})"
         ));
+    }
+    Ok(())
+}
+
+/// An instance or cookie store id: ASCII letters, digits, `-` and `_`.
+fn check_id(id: &str, what: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.len() > MAX_ID
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(format!(
+            "the {what} id must be 1 to {MAX_ID} letters, digits, - or _"
+        ));
+    }
+    Ok(())
+}
+
+fn check_cookies(cookies: &str) -> Result<(), String> {
+    if cookies.len() > MAX_COOKIES {
+        return Err(format!("the cookies are longer than {MAX_COOKIES} bytes"));
+    }
+    if !cookies.bytes().all(|b| (b' '..=b'~').contains(&b)) {
+        return Err("the cookies have characters other than visible ASCII and spaces".into());
+    }
+    Ok(())
+}
+
+fn check(request: &Request) -> Result<(), String> {
+    let version = match request {
+        Request::Ping { protocol_version }
+        | Request::PrivateClosed { protocol_version }
+        | Request::Download {
+            protocol_version, ..
+        }
+        | Request::Link {
+            protocol_version, ..
+        }
+        | Request::Cookies {
+            protocol_version, ..
+        } => *protocol_version,
+    };
+    check_version(version)?;
+    match request {
+        Request::Link { instance, .. } => check_id(instance, "instance")?,
+        Request::Cookies {
+            cookies: Some(cookies),
+            ..
+        } => check_cookies(cookies)?,
+        _ => {}
     }
     if let Request::Download {
         url,
         referrer,
         filename,
         cookies,
+        instance,
+        store,
+        ticket,
         ..
     } = request
     {
+        if let Some(instance) = instance {
+            check_id(instance, "instance")?;
+        }
+        if let Some(ticket) = ticket {
+            check_id(ticket, "ticket")?;
+        }
+        if let Some(store) = store {
+            check_id(store, "cookie store")?;
+        }
         check_url(url, "URL")?;
         if let Some(referrer) = referrer {
             check_url(referrer, "referrer")?;
@@ -199,14 +413,7 @@ fn check(request: &Request) -> Result<(), String> {
             }
         }
         if let Some(cookies) = cookies {
-            if cookies.len() > MAX_COOKIES {
-                return Err(format!("the cookies are longer than {MAX_COOKIES} bytes"));
-            }
-            if !cookies.bytes().all(|b| (b' '..=b'~').contains(&b)) {
-                return Err(
-                    "the cookies have characters other than visible ASCII and spaces".into(),
-                );
-            }
+            check_cookies(cookies)?;
         }
     }
     Ok(())
@@ -223,10 +430,13 @@ fn check_url(url: &str, what: &str) -> Result<(), String> {
 /// `handle(request)`, until the process ends. An error on one connection,
 /// or from `accept` (too many open files, a client gone before it was
 /// accepted), never ends the loop; at most [`MAX_CONNECTIONS`] are served
-/// at once, each given [`CHANNEL_TIMEOUT`] where the system allows it.
+/// at once, each given [`CHANNEL_TIMEOUT`] where the system allows it. A
+/// [`Request::Link`] connection is the host's link to an extension: it is
+/// handed to `links` and stays open, outside that count.
 pub fn serve(
     listener: zajil_platform::ipc::Listener,
     handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+    links: Links,
 ) {
     let handle = Arc::new(handle);
     let busy = Arc::new(AtomicUsize::new(0));
@@ -244,11 +454,19 @@ pub fn serve(
             let _ = write_json(&mut stream, &Response::refused("Zajil is busy; try again"));
             continue;
         }
-        let (handle, busy) = (handle.clone(), busy.clone());
+        let (handle, busy, links) = (handle.clone(), busy.clone(), links.clone());
         std::thread::spawn(move || {
             let _ = stream.set_timeout(CHANNEL_TIMEOUT);
             if let Ok(Some(message)) = read_frame(&mut stream, MAX_REQUEST) {
                 let answer = match parse(&message) {
+                    Ok(Request::Link { instance, .. }) => {
+                        busy.fetch_sub(1, Ordering::SeqCst);
+                        links.serve(stream, instance);
+                        return;
+                    }
+                    Ok(Request::Cookies { .. }) => {
+                        Response::refused("cookies are answered on the link only")
+                    }
                     Ok(request) => handle(request),
                     Err(why) => Response::refused(why),
                 };
@@ -256,6 +474,155 @@ pub fn serve(
             }
             busy.fetch_sub(1, Ordering::SeqCst);
         });
+    }
+}
+
+/// A question for one extension, and where its answer goes.
+struct Question {
+    asked: Asked,
+    reply: mpsc::Sender<Option<Option<String>>>,
+}
+
+enum Asked {
+    Cookies {
+        url: String,
+        store: Option<String>,
+        ticket: String,
+    },
+    Keep(Vec<String>),
+}
+
+type Registry = HashMap<String, (u64, mpsc::Sender<Question>)>;
+type OnLink = Arc<Mutex<Option<Box<dyn Fn(&str) + Send>>>>;
+
+/// The app's links to the browsers' extensions (M5), one per extension
+/// instance (a browser profile): Zajil asks the browser a download came
+/// from for its cookies again after a restart. Each link answers one
+/// question at a time (Windows' pipes take one call at a time).
+#[derive(Clone, Default)]
+pub struct Links {
+    links: Arc<Mutex<Registry>>,
+    next: Arc<AtomicU64>,
+    /// Called with the instance when a link opens.
+    on_link: OnLink,
+}
+
+impl Links {
+    /// `f(instance)` runs each time an extension links (the app asks it
+    /// at once for the downloads that wait for it).
+    pub fn on_link(&self, f: impl Fn(&str) + Send + 'static) {
+        *self.on_link.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(f));
+    }
+
+    /// Whether `instance` is linked now.
+    pub fn is_linked(&self, instance: &str) -> bool {
+        self.links
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(instance)
+    }
+
+    /// Serves the link of `instance` on `stream` until it ends: the
+    /// connection breaks, or a newer link of the same instance takes its
+    /// place. Blocking.
+    pub fn serve(&self, mut stream: zajil_platform::ipc::Stream, instance: String) {
+        // The host answers every question within LINK_ANSWER.
+        let _ = stream.set_timeout(LINK_ANSWER + Duration::from_secs(5));
+        let (send, questions) = mpsc::channel::<Question>();
+        let generation = self.next.fetch_add(1, Ordering::SeqCst);
+        self.links
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(instance.clone(), (generation, send));
+        if let Some(f) = &*self.on_link.lock().unwrap_or_else(|e| e.into_inner()) {
+            f(&instance);
+        }
+        // Ends when this link is replaced (its sender dropped).
+        while let Ok(question) = questions.recv() {
+            let ask = self.next.fetch_add(1, Ordering::SeqCst);
+            let wanted = match question.asked {
+                Asked::Cookies { url, store, ticket } => ToExtension::CookiesWanted {
+                    protocol_version: PROTOCOL_VERSION,
+                    ask,
+                    url,
+                    store,
+                    ticket,
+                },
+                Asked::Keep(tickets) => ToExtension::Keep {
+                    protocol_version: PROTOCOL_VERSION,
+                    ask,
+                    tickets,
+                },
+            };
+            let answer = write_json(&mut stream, &wanted)
+                .ok()
+                .and_then(|()| read_frame(&mut stream, MAX_REQUEST).ok().flatten());
+            let Some(answer) = answer else {
+                let _ = question.reply.send(None);
+                break;
+            };
+            let _ = question.reply.send(match FromLink::parse(&answer) {
+                Ok(FromLink::Cookies {
+                    ask: answered,
+                    cookies,
+                    ..
+                }) if answered == ask => Some(cookies),
+                _ => None,
+            });
+        }
+        let mut links = self.links.lock().unwrap_or_else(|e| e.into_inner());
+        if links.get(&instance).is_some_and(|(g, _)| *g == generation) {
+            links.remove(&instance);
+        }
+    }
+
+    /// Asks extension `instance` for the cookies of `url` (from `store`)
+    /// for the download with `ticket`: `Some(cookies)` when it answered
+    /// (`None` cookies: no permission, no open download with that ticket,
+    /// or none for that site), `None` when it is not linked, went away, or
+    /// did not answer within `patience`. Blocking.
+    pub fn ask(
+        &self,
+        instance: &str,
+        url: &str,
+        store: Option<&str>,
+        ticket: &str,
+        patience: Duration,
+    ) -> Option<Option<String>> {
+        let asked = Asked::Cookies {
+            url: url.to_owned(),
+            store: store.map(str::to_owned),
+            ticket: ticket.to_owned(),
+        };
+        self.put(instance, asked, patience)
+    }
+
+    /// Tells extension `instance` which of its downloads' tickets are still
+    /// open: it forgets the others. Whether it answered. Blocking.
+    pub fn keep(&self, instance: &str, tickets: Vec<String>, patience: Duration) -> bool {
+        self.put(instance, Asked::Keep(tickets), patience).is_some()
+    }
+
+    /// The instances linked now.
+    pub fn instances(&self) -> Vec<String> {
+        self.links
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn put(&self, instance: &str, asked: Asked, patience: Duration) -> Option<Option<String>> {
+        let link = self
+            .links
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(instance)
+            .map(|(_, send)| send.clone())?;
+        let (reply, answer) = mpsc::channel();
+        link.send(Question { asked, reply }).ok()?;
+        answer.recv_timeout(patience).ok().flatten()
     }
 }
 
@@ -323,6 +690,10 @@ mod tests {
                 referrer: Some("https://example.com/page".into()),
                 filename: Some("a.zip".into()),
                 cookies: Some("sid=1; theme=dark".into()),
+                instance: None,
+                store: None,
+                ticket: None,
+                private: false,
             }
         );
     }

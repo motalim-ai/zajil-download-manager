@@ -111,8 +111,76 @@ pub struct Item {
     /// absent.
     #[serde(default)]
     pub categorize: bool,
+    /// A file that can run code, from the browser: it waits for the user
+    /// to start it (security review #84). Cleared when it starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_ok: bool,
+    /// It came from a page (the browser extension): held if the server
+    /// names a file that can run code at the download itself, unless the
+    /// user has already started it (review of #90).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_page: bool,
+    /// The user started it while it was held: it is not held again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ok_given: bool,
+    /// From a private window (security review #84): taken out of the
+    /// queues once it is done, so nothing of it stays but the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
+    /// It came from the browser extension (M5): what Zajil needs to ask
+    /// that browser for its cookies again after a restart. Never the
+    /// cookies themselves, which stay in memory (owner's decision on #7).
+    /// Forgotten once the download is done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserSource>,
+}
+
+/// Where a download from the browser extension came from.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserSource {
+    /// The extension's own random id: one per browser profile, so the
+    /// cookies come from the same browser and profile again.
+    pub instance: String,
+    /// Its cookie store (a Firefox container), when not the default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// Cookies went with it: after a restart it waits for that browser
+    /// («افتح المتصفح ليكمل») instead of going without them.
+    pub cookies: bool,
+    /// The page it came from, sent as the browser would (`FromBrowser`),
+    /// without its `#` part (owner's decision on #80); never printed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referrer: Option<String>,
+    /// The download's random ticket from the extension: it gives the
+    /// cookies again only for an open download's ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<String>,
+}
+
+/// Never the page itself (owner's decision on #80: it is not printed in
+/// any log or message); only whether there is one.
+impl std::fmt::Debug for BrowserSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserSource")
+            .field("instance", &self.instance)
+            .field("store", &self.store)
+            .field("cookies", &self.cookies)
+            .field("referrer", &self.referrer.as_ref().map(|_| "…"))
+            .field("ticket", &self.ticket)
+            .finish()
+    }
+}
+
+/// A download's state file and its part file, from its state file.
+pub fn private_files(state_file: &Path) -> Vec<PathBuf> {
+    let mut files = vec![state_file.to_path_buf()];
+    files.extend(
+        crate::state::final_path_for_state(state_file).map(|f| crate::state::part_path(&f)),
+    );
+    files
 }
 
 /// Where an item stands.
@@ -258,7 +326,12 @@ impl QueuesFile {
             error: None,
             limit: None,
             categorize: false,
+            needs_ok: false,
+            from_page: false,
+            ok_given: false,
+            private: false,
             added_at: now_rfc3339(),
+            browser: None,
         };
         self.queue_or_new(queue)?.items.push(item);
         self.next_id = id.checked_add(1).ok_or_else(|| StoreError::Corrupt {
@@ -269,6 +342,27 @@ impl QueuesFile {
     }
 
     /// Removes item `id` from its queue and returns it. Its files stay.
+    /// Takes every private window's download out of the queues (review of
+    /// #91: nothing of them may stay once the window is closed), and gives
+    /// the files of those that are not running (their part and state
+    /// files) for the caller to delete. A running one is stopped by the
+    /// runner, which deletes its files.
+    pub fn take_private(&mut self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for queue in &mut self.queues {
+            queue.items.retain(|item| {
+                if !item.private {
+                    return true;
+                }
+                if item.status != Status::Active {
+                    files.extend(item.state_file.iter().flat_map(|s| private_files(s)));
+                }
+                false
+            });
+        }
+        files
+    }
+
     pub fn remove(&mut self, id: u64) -> Result<Item, StoreError> {
         for queue in &mut self.queues {
             if let Some(index) = queue.items.iter().position(|i| i.id == id) {

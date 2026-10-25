@@ -60,7 +60,9 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             QueueEvent::Finished { .. }
             | QueueEvent::Failed { .. }
             | QueueEvent::Stopped { .. } => now -= 1,
-            QueueEvent::Download { .. } | QueueEvent::Waiting { .. } => {}
+            QueueEvent::Download { .. }
+            | QueueEvent::Waiting { .. }
+            | QueueEvent::NeedsBrowser { .. } => {}
         })
         .await
         .unwrap();
@@ -696,4 +698,396 @@ async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
     store.update(|q| q.remove(failed).map(drop)).unwrap();
     run().run(&Stop::new(), &mut |_| {}).await.unwrap();
     assert_eq!(kept(), [next], "kept after the item was removed");
+}
+
+fn from_browser(cookies: bool, referrer: Option<&str>) -> zajil_core::queue::BrowserSource {
+    zajil_core::queue::BrowserSource {
+        instance: "3f2b8c1e-0000-4000-8000-000000000001".into(),
+        store: Some("firefox-container-1".into()),
+        cookies,
+        referrer: referrer.map(str::to_owned),
+        ticket: Some("ticket-1".into()),
+    }
+}
+
+/// After a restart (M5): a download that came from the browser with its
+/// cookies, and has none in memory, waits for that browser and takes no
+/// room in its queue; once the cookies are given again it goes, with them;
+/// and when it is done, where it came from is forgotten.
+#[tokio::test]
+async fn a_download_waits_for_the_browser_s_cookies_after_a_restart() {
+    let server = TestServer::http();
+    server.put("/signed.bin", FileSpec::new(random_bytes(200_000, 93)));
+    server.put("/plain.bin", FileSpec::new(random_bytes(200_000, 94)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let signed = add(&store, "main", &server.url("/signed.bin"), dir.path());
+    let plain = add(&store, "main", &server.url("/plain.bin"), dir.path());
+    let page = server.url("/page");
+    // One at a time: the waiting one must leave its room to the other.
+    store
+        .update(|q| {
+            q.queue_mut("main").unwrap().max_active = 1;
+            q.item_mut(signed).unwrap().browser = Some(from_browser(true, Some(&page)));
+            Ok(())
+        })
+        .unwrap();
+    // Nothing in memory: as after a restart.
+    let headers = zajil_core::queue::FromBrowserById::default();
+    let stop = Stop::new();
+    let mut asked = Vec::new();
+    {
+        let (store, stop) = (store.clone(), stop.clone());
+        runner(&store)
+            .from_browser(headers.clone())
+            .run(&stop.clone(), &mut |event| {
+                if let QueueEvent::NeedsBrowser { item, url, source } = event {
+                    assert_eq!(url, server.url("/signed.bin"));
+                    asked.push((item, source));
+                    if store.load().unwrap().item(plain).unwrap().status == Status::Done {
+                        stop.request();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+    }
+    let queues = store.load().unwrap();
+    assert_eq!(
+        queues.item(plain).unwrap().status,
+        Status::Done,
+        "it took the room"
+    );
+    assert_eq!(queues.item(signed).unwrap().status, Status::Waiting);
+    assert!(
+        server.gets("/signed.bin").is_empty(),
+        "went without its cookies"
+    );
+    assert_eq!(asked[0], (signed, from_browser(true, Some(&page))));
+
+    // The browser gives them again.
+    headers.lock().unwrap().insert(
+        signed,
+        zajil_core::FromBrowser::new(&server.url("/signed.bin"), Some("sid=AGAIN"), Some(&page)),
+    );
+    runner(&store)
+        .from_browser(headers.clone())
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    let item = store.load().unwrap().item(signed).unwrap().clone();
+    assert_eq!(item.status, Status::Done);
+    assert_eq!(item.browser, None, "kept after it was done");
+    for get in server.gets("/signed.bin") {
+        assert_eq!(get.cookie.as_deref(), Some("sid=AGAIN"), "{get:?}");
+        assert_eq!(get.referer.as_deref(), Some(page.as_str()));
+    }
+}
+
+/// A download from the browser without cookies does not wait: after a
+/// restart it goes at once, with its page from the queues file. And the
+/// file never holds cookies.
+#[tokio::test]
+async fn a_download_from_the_browser_without_cookies_goes_with_its_page() {
+    let server = TestServer::http();
+    server.put("/f.bin", FileSpec::new(random_bytes(200_000, 95)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/f.bin"), dir.path());
+    let page = server.url("/page");
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().browser = Some(from_browser(false, Some(&page)));
+            Ok(())
+        })
+        .unwrap();
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert!(
+        text.contains("\"instance\"") && !text.to_lowercase().contains("cookie\":\""),
+        "{text}"
+    );
+    runner(&store)
+        .from_browser(Default::default())
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(store.load().unwrap().item(id).unwrap().status, Status::Done);
+    for get in server.gets("/f.bin") {
+        assert_eq!(
+            (get.cookie.as_deref(), get.referer.as_deref()),
+            (None, Some(page.as_str()))
+        );
+    }
+}
+
+/// The page a download came from is never printed (owner's decision on
+/// #80), not even in a debug message.
+#[test]
+fn the_browser_s_page_is_never_printed() {
+    let source = from_browser(true, Some("https://example.com/secret-page?token=T"));
+    let shown = format!("{source:?}");
+    assert!(
+        !shown.contains("secret-page") && !shown.contains("token"),
+        "{shown}"
+    );
+}
+
+/// Security review #84: a download held for the user's OK does not start
+/// while paused, and its hold is cleared once the user starts it.
+#[tokio::test]
+async fn a_held_download_starts_only_when_the_user_starts_it() {
+    let server = TestServer::http();
+    server.put("/setup.exe", FileSpec::new(random_bytes(50_000, 96)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/setup.exe"), dir.path());
+    store
+        .update(|q| {
+            let item = q.item_mut(id).unwrap();
+            item.status = Status::Paused;
+            item.needs_ok = true;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert!(server.gets("/setup.exe").is_empty(), "it started by itself");
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!((item.status, item.needs_ok), (Status::Done, false));
+}
+
+/// Review of #90: a server that names another file at the download itself
+/// than at the check (`a.zip`, then `setup.exe`) cannot start a file that
+/// runs code: a download from a page is held by the name the download
+/// gets, before anything is made; once the user starts it, it goes.
+#[tokio::test]
+async fn a_download_from_a_page_is_held_by_the_name_the_download_itself_gets() {
+    let server = TestServer::http();
+    let data = random_bytes(50_000, 98);
+    server.put(
+        "/get",
+        FileSpec::new(data.clone())
+            .content_disposition("attachment; filename=\"a.zip\"")
+            .replaced_after(
+                1,
+                FileSpec::new(data.clone())
+                    .content_disposition("attachment; filename=\"setup.exe\""),
+            ),
+    );
+    // The check, as the app makes it: it is told `a.zip`.
+    let engine = Engine::new(Options::default()).unwrap();
+    assert_eq!(
+        engine.probe(&server.url("/get")).await.unwrap().name,
+        "a.zip"
+    );
+    let data_dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, "main", &server.url("/get"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().from_page = true;
+            Ok(())
+        })
+        .unwrap();
+    let mut failed = false;
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            failed |= matches!(event, QueueEvent::Failed { .. })
+        })
+        .await
+        .unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(
+        (item.status, item.needs_ok),
+        (Status::Paused, true),
+        "{item:?}"
+    );
+    assert!(!failed, "a hold is not a failure");
+    assert_eq!(
+        fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a file was made"
+    );
+    // The user starts it: it goes, and is not held again.
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(item.status, Status::Done, "{item:?}");
+    assert!(item.ok_given);
+    assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+}
+
+/// Security review #84: a private window's download leaves nothing in the
+/// queues once it is done; only its file.
+#[tokio::test]
+async fn a_private_window_s_download_leaves_nothing_once_done() {
+    let server = TestServer::http();
+    let data_bytes = random_bytes(50_000, 97);
+    server.put("/private.bin", FileSpec::new(data_bytes.clone()));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/private.bin"), dir.path());
+    let other = add(&store, "main", &server.url("/private.bin"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    let mut finished = Vec::new();
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            if let QueueEvent::Finished { item, .. } = event {
+                finished.push(item);
+            }
+        })
+        .await
+        .unwrap();
+    finished.sort();
+    assert_eq!(finished, [id, other]);
+    let queues = store.load().unwrap();
+    assert!(queues.item(id).is_none(), "the private one stayed");
+    assert_eq!(queues.item(other).unwrap().status, Status::Done);
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert_eq!(text.matches("private.bin").count(), 1, "{text}");
+    assert_eq!(
+        fs::read(dir.path().join("private.bin")).unwrap(),
+        data_bytes
+    );
+}
+
+/// Review of #91: a private window's download that fails leaves nothing:
+/// not in the queues, not its part or state file; one taken out of the
+/// queues while it runs (its window closed) is stopped and its files
+/// deleted; one the user paused stays while its window is open.
+#[tokio::test]
+async fn a_private_window_s_download_that_fails_or_is_taken_out_leaves_nothing() {
+    let server = TestServer::http();
+    let data_bytes = random_bytes(2 * MIB, 99);
+    server.put(
+        "/secret-private.bin",
+        FileSpec::new(data_bytes.clone()).cut_after(256 * 1024, 1),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let engine = Engine::new(Options {
+        connections: 1,
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    let id = add(
+        &store,
+        "main",
+        &server.url("/secret-private.bin"),
+        dir.path(),
+    );
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    // Cut in the middle: it fails, with a part and a state file.
+    Runner::new(engine.clone(), store.clone())
+        .poll(Duration::from_millis(20))
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert!(
+        store.load().unwrap().item(id).is_none(),
+        "the failed one stayed"
+    );
+    let left: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert!(!text.contains("secret-private"), "{text}");
+
+    // Running, then its window closes (`take_private`): stopped, nothing left.
+    server.put(
+        "/slow-private.bin",
+        FileSpec::new(data_bytes.clone()).throttle(256 * 1024),
+    );
+    let id = add(&store, "main", &server.url("/slow-private.bin"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    let stop = Stop::new();
+    let run = {
+        let (store, engine, stop) = (store.clone(), engine.clone(), stop.clone());
+        tokio::spawn(async move {
+            Runner::new(engine, store)
+                .poll(Duration::from_millis(20))
+                .run(&stop, &mut |_| {})
+                .await
+        })
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !dir.path().join("slow-private.bin.zajil-part").exists() {
+        assert!(std::time::Instant::now() < deadline, "it did not start");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let files = store.update(|q| Ok(q.take_private())).unwrap();
+    assert!(
+        files.is_empty(),
+        "a running one's files are the runner's: {files:?}"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while fs::read_dir(dir.path()).unwrap().count() > 0 {
+        assert!(std::time::Instant::now() < deadline, "its files stayed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    stop.request();
+    run.await.unwrap().unwrap();
+
+    // Paused by the user while its window is open: it stays, until the
+    // window closes, then its files go too.
+    let id = add(
+        &store,
+        "main",
+        &server.url("/secret-private.bin"),
+        dir.path(),
+    );
+    let state = dir.path().join("kept.bin.zajil-state");
+    fs::write(&state, b"{}").unwrap();
+    fs::write(dir.path().join("kept.bin.zajil-part"), b"x").unwrap();
+    store
+        .update(|q| {
+            let item = q.item_mut(id).unwrap();
+            item.private = true;
+            item.status = Status::Paused;
+            item.state_file = Some(state.clone());
+            Ok(())
+        })
+        .unwrap();
+    assert!(store.load().unwrap().item(id).is_some());
+    let mut files = store.update(|q| Ok(q.take_private())).unwrap();
+    files.sort();
+    assert_eq!(files, [dir.path().join("kept.bin.zajil-part"), state]);
+    assert!(store.load().unwrap().item(id).is_none());
 }

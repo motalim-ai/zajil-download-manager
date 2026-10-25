@@ -648,6 +648,11 @@ fn show(event: QueueEvent) {
         QueueEvent::Finished { item, file } => eprintln!("[{item}] saved {}", file.display()),
         QueueEvent::Failed { item, error } => eprintln!("[{item}] failed: {error}"),
         QueueEvent::Stopped { item } => eprintln!("[{item}] stopped"),
+        // Only the app keeps the browser's cookies: this runner has none to
+        // wait for, so it never says this.
+        QueueEvent::NeedsBrowser { item, .. } => {
+            eprintln!("[{item}] waiting for the browser's cookies (open the browser)")
+        }
         QueueEvent::Waiting { queue, until } => eprintln!(
             "queue {queue} waits for its schedule until {} (local time)",
             until.strftime("%Y-%m-%d %H:%M:%S")

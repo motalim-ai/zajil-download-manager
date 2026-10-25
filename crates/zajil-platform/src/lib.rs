@@ -25,6 +25,7 @@ pub mod fs;
 pub mod ids;
 pub mod ipc;
 pub mod native_host;
+pub mod origin;
 mod paths;
 pub mod power;
 pub mod session;

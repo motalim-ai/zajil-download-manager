@@ -41,6 +41,9 @@ struct Inner {
     urgent: bool,
     /// A notification is scheduled for later.
     scheduled: bool,
+    /// Downloads that wait for their browser's cookies, which is not open
+    /// or did not answer (M5): «افتح المتصفح ليكمل».
+    waiting_for_browser: std::collections::HashSet<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -66,6 +69,7 @@ impl Live {
         match event {
             QueueEvent::Started { item, .. } => {
                 inner.items.insert(*item, ItemLive::default());
+                inner.waiting_for_browser.remove(item);
                 inner.urgent = true;
             }
             QueueEvent::Download { item, event } => {
@@ -118,8 +122,24 @@ impl Live {
                 inner.items.remove(item);
                 inner.urgent = true;
             }
-            QueueEvent::Waiting { .. } => {}
+            // The app decides, once it has asked the browser.
+            QueueEvent::Waiting { .. } | QueueEvent::NeedsBrowser { .. } => {}
         }
+    }
+
+    /// Marks download `id` as waiting for its browser, or not; whether
+    /// that changed.
+    pub fn set_waiting_for_browser(&self, id: u64, waiting: bool) -> bool {
+        let mut inner = self.inner();
+        if waiting {
+            inner.waiting_for_browser.insert(id)
+        } else {
+            inner.waiting_for_browser.remove(&id)
+        }
+    }
+
+    pub fn waiting_for_browser(&self, id: u64) -> bool {
+        self.inner().waiting_for_browser.contains(&id)
     }
 
     /// When to tell the page about a change, at `now`: at once, at most

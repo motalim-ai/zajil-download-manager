@@ -300,6 +300,39 @@ impl CategoriesFile {
     }
 }
 
+/// File types that can run code when opened (security review #84):
+/// programs and installers, scripts, Java, macOS images and packages,
+/// shortcuts and system settings files, Office files that can hold macros,
+/// and disk images, which hand files inside them on without the mark of a
+/// file from the internet.
+#[rustfmt::skip]
+pub const RUNS_CODE: &[&str] = &[
+    // Windows programs, installers, scripts and what runs them
+    "exe", "msi", "msix", "msixbundle", "msp", "msu", "appx", "appxbundle", "com", "pif", "scr",
+    "cpl", "bat", "cmd", "ps1", "psm1", "psd1", "ps1xml", "vbs", "vbe", "js", "jse", "wsf",
+    "wsh", "wsc", "sct", "hta", "chm", "msc", "inf", "reg", "lnk", "url", "scf", "cab",
+    "diagcab", "library-ms", "appref-ms", "application", "settingcontent-ms",
+    // Java, macOS and Unix
+    "jar", "dmg", "pkg", "mpkg", "app", "command", "terminal", "tool", "workflow", "scpt",
+    "fileloc", "sh", "run", "desktop", "appimage", "deb", "rpm",
+    // Office and other documents that can hold macros or run code
+    "doc", "dot", "docm", "dotm", "wll", "xls", "xlt", "xla", "xll", "xlsm", "xltm", "xlsb",
+    "xlam", "ppt", "pot", "pps", "ppa", "pptm", "potm", "ppsm", "ppam", "sldm", "one", "rtf",
+    "mdb", "accdb", "accde", "pub", "vsd", "vsdm",
+    // Disk images
+    "iso", "img", "vhd", "vhdx",
+];
+
+/// Whether a file named `name` can run code when opened (its extension is
+/// in [`RUNS_CODE`], whatever its case).
+pub fn runs_code(name: &str) -> bool {
+    // Windows drops trailing dots and spaces: `setup.exe.` is `setup.exe`.
+    name.trim_end_matches(['.', ' '])
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .is_some_and(|ext| RUNS_CODE.contains(&ext.as_str()))
+}
+
 /// `programs`, `my-books`: 1 to [`MAX_ID_CHARS`] lowercase ASCII letters,
 /// digits, `-` or `_`.
 pub fn check_id(id: &str) -> Result<(), CategoryError> {
@@ -631,6 +664,49 @@ impl CategoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Security review #84: what the owner listed, any case, and a name
+    /// that only looks like one (`setup.exe.zip`, a trailing dot or space,
+    /// which Windows drops) seen for what it is.
+    #[test]
+    fn files_that_can_run_code_are_known() {
+        for name in [
+            "setup.exe",
+            "Setup.EXE",
+            "a.msi",
+            "run.bat",
+            "run.cmd",
+            "x.ps1",
+            "s.scr",
+            "a.js",
+            "a.vbs",
+            "app.jar",
+            "Zajil.dmg",
+            "a.pkg",
+            "Zajil.app",
+            "install.sh",
+            "report.docm",
+            "sheet.xlsm",
+            "old.doc",
+            "slides.pptm",
+            "image.iso",
+            "setup.exe.",
+            "setup.exe ",
+        ] {
+            assert!(runs_code(name), "{name}");
+        }
+        for name in [
+            "a.zip",
+            "setup.exe.zip",
+            "film.mp4",
+            "notes.txt",
+            "report.docx",
+            "exe",
+            "",
+        ] {
+            assert!(!runs_code(name), "{name}");
+        }
+    }
 
     /// Review of #48: the add dialog says what matched, a site or the
     /// extension, and a site wins as in `classify`.
