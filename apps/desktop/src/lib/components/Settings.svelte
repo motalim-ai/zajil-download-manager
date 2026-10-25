@@ -9,6 +9,7 @@
   import { api } from "../api";
   import type { IntegrationView } from "../bindings/IntegrationView";
   import CompleteSetting from "./CompleteSetting.svelte";
+  import UpdateSetting from "./UpdateSetting.svelte";
 
   let {
     settings,
@@ -55,6 +56,7 @@
       connections: settings.connections,
       notifications: settings.notifications,
       clipboard: settings.clipboard,
+      update_check: settings.update_check,
       speed_limit: settings.speed_limit,
       ...patch,
     });
@@ -245,6 +247,11 @@
       <span>{locale.t("settings-notifications-label")}</span>
     </label>
     <CompleteSetting />
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("update-setting-title")}</legend>
+    <UpdateSetting checked={settings.update_check} onchange={(on) => change({ update_check: on })} />
   </fieldset>
 
   <fieldset>

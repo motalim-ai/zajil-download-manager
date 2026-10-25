@@ -19,6 +19,7 @@ mod segmented;
 pub mod settings;
 pub mod state;
 pub mod tools;
+pub mod update;
 pub mod video;
 
 pub use browser::FromBrowser;

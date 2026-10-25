@@ -189,3 +189,26 @@ fn clipboard_monitoring_is_off_unless_turned_on() {
         .unwrap();
     assert!(store.load().unwrap().clipboard);
 }
+
+/// #124: the update check is on unless turned off, also in a file written
+/// before it existed.
+#[test]
+fn the_update_check_is_on_unless_turned_off() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(data.path());
+    assert!(store.load().unwrap().update_check);
+    store.update(|_| Ok(())).unwrap();
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    value.as_object_mut().unwrap().remove("update_check");
+    value["checksum"] = checksum_of(&value).into();
+    fs::write(store.path(), value.to_string()).unwrap();
+    assert!(store.load().unwrap().update_check, "absent: on");
+    store
+        .update(|file| {
+            file.update_check = false;
+            Ok(())
+        })
+        .unwrap();
+    assert!(!store.load().unwrap().update_check);
+}

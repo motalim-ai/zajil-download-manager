@@ -16,6 +16,7 @@ mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
+mod update;
 pub mod view;
 mod windows;
 
@@ -177,7 +178,8 @@ pub fn run() {
             args.iter().any(|a| a == "--close-quits"),
         ))
         .manage(schedule::SharedAfter::default())
-        .manage(complete::Show::default());
+        .manage(complete::Show::default())
+        .manage(update::Notice::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -272,6 +274,8 @@ pub fn run() {
                 }
                 return Ok(());
             }
+            // Is a newer Zajil out (#124)? In the background, once.
+            update::check_at_start(&handle);
             tauri::async_runtime::spawn(async move {
                 run_queues(handle.clone()).await;
                 handle.state::<App>().stopped.send_replace(true);
@@ -376,6 +380,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::cancel_after,
         complete::set_show_complete,
         complete::complete_info,
+        update::update_notice,
+        update::open_release_page,
         complete::drag_out
     ]
 }
@@ -435,6 +441,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::cancel_after,
         complete::set_show_complete,
         complete::complete_info,
+        update::update_notice,
+        update::open_release_page,
         complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report

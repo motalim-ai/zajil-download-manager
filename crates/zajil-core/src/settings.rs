@@ -79,6 +79,11 @@ pub struct SettingsFile {
     /// offered in the add dialog. Off by default, and when absent.
     #[serde(default)]
     pub clipboard: bool,
+    /// Look for a newer Zajil on GitHub at start (#124): only asks, never
+    /// downloads. Absent in files written before it existed, which counts
+    /// as on.
+    #[serde(default = "on")]
+    pub update_check: bool,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -128,6 +133,7 @@ impl Default for SettingsFile {
             connections: crate::DEFAULT_CONNECTIONS as u32,
             notifications: true,
             clipboard: false,
+            update_check: true,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }

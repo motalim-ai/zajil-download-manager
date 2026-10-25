@@ -21,6 +21,7 @@
   "connections": 8,
   "notifications": true,
   "clipboard": false,
+  "update_check": true,
   "updated_at": "2026-10-25T12:00:00Z",
   "checksum": "sha256:…"
 }
@@ -35,5 +36,6 @@
 | `connections` | عدد الاتصالات لكل تحميل جديد، من 1 إلى 32 |
 | `notifications` | إشعار حين ينتهي تحميل أو يفشل: `true` (الافتراضي، وكذلك إذا غاب الحقل) أو `false` |
 | `clipboard` | مراقبة الحافظة (M5): رابط تحميل يُنسخ يفتح حوار الإضافة. `false` (الافتراضي، وكذلك إذا غاب الحقل) أو `true` |
+| `update_check` | فحص التحديث عند البدء (#124): يسأل GitHub عن آخر إصدار، ولا يُنزّل شيئًا. `true` (الافتراضي، وكذلك إذا غاب الحقل) أو `false` |
 
 حد السرعة العام **ليس هنا**: يبقى في `queues.json` (`settings.speed_limit`)، حيث يقرؤه منفّذ القوائم و`zajil`.

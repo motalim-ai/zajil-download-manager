@@ -24,6 +24,10 @@ notifications: boolean,
  */
 clipboard: boolean, 
 /**
+ * Look for a newer Zajil at start (#124).
+ */
+update_check: boolean, 
+/**
  * Bytes per second for all downloads together; `null`: no limit.
  */
 speed_limit: number | null, };

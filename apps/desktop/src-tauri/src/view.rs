@@ -301,6 +301,8 @@ pub struct SettingsView {
     pub notifications: bool,
     /// Clipboard monitoring: a copied download link opens the add dialog.
     pub clipboard: bool,
+    /// Look for a newer Zajil at start (#124).
+    pub update_check: bool,
     /// Bytes per second for all downloads together; `null`: no limit.
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
@@ -317,6 +319,7 @@ pub struct SettingsChange {
     pub connections: u32,
     pub notifications: bool,
     pub clipboard: bool,
+    pub update_check: bool,
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
 }
@@ -401,6 +404,7 @@ pub fn settings(file: &SettingsFile, speed_limit: Option<u64>, system_dir: &Path
         max_connections: zajil_core::MAX_CONNECTIONS as u32,
         notifications: file.notifications,
         clipboard: file.clipboard,
+        update_check: file.update_check,
         speed_limit,
     }
 }
@@ -424,6 +428,7 @@ pub fn apply_settings(file: &mut SettingsFile, change: &SettingsChange) {
     file.connections = change.connections;
     file.notifications = change.notifications;
     file.clipboard = change.clipboard;
+    file.update_check = change.update_check;
 }
 
 /// The categories as the page edits them, back into categories. Every
@@ -882,5 +887,27 @@ mod tests {
             details(item, "night", &categories, None, &Live::default()).resumable,
             None
         );
+    }
+
+    /// #124: the settings screen's switch saves the update check.
+    #[test]
+    fn the_update_check_switch_is_saved() {
+        let mut file = SettingsFile::default();
+        let shown = settings(&file, None, Path::new("/d"));
+        assert!(shown.update_check);
+        let change = SettingsChange {
+            language: shown.language,
+            theme: shown.theme,
+            digits: shown.digits,
+            download_dir: None,
+            connections: shown.connections,
+            notifications: shown.notifications,
+            clipboard: shown.clipboard,
+            update_check: false,
+            speed_limit: None,
+        };
+        apply_settings(&mut file, &change);
+        assert!(!file.update_check);
+        assert!(!settings(&file, None, Path::new("/d")).update_check);
     }
 }
