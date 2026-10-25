@@ -2440,6 +2440,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "zajil-core",
+ "zajil-grab",
  "zajil-platform",
  "zajil-testserver",
 ]
@@ -2463,6 +2464,13 @@ dependencies = [
  "zajil-core",
  "zajil-platform",
  "zajil-testserver",
+]
+
+[[package]]
+name = "zajil-grab"
+version = "0.0.0"
+dependencies = [
+ "zajil-core",
 ]
 
 [[package]]
