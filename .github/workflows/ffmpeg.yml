@@ -10,7 +10,9 @@ name: FFmpeg
 # build notes in its root, and every build file: the LGPL checklist of
 # ADR-0009, section 1.
 on:
+  # A filter on tags alone would leave out every branch push.
   push:
+    branches: ["**"]
     paths: [tools/ffmpeg/**, .github/workflows/ffmpeg.yml]
     tags: ["tools-ffmpeg-*"]
   pull_request:
