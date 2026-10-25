@@ -186,7 +186,7 @@ add-connections-hint = من { $min } إلى { $max }
 add-limit = حد السرعة لهذا التحميل
 add-limit-none = بلا حد
 add-cancel = إلغاء
-add-later = أضف إلى الطابور
+add-later = نزّل لاحقًا
 add-start = ابدأ التحميل
 
 ## التفاصيل
@@ -444,3 +444,15 @@ sys-zoom = تكبير
 row-menu = قائمة التحميل
 open-code-question = «{ $name }» برنامج أو ملف يمكنه تشغيل أوامر على جهازك. هل تفتحه؟
 open-code-ok = فتح
+
+## M5.5: the add windows
+info-title = معلومات ملف التحميل
+add-new-category = فئة جديدة
+add-remember = تذكّر هذا المجلد لفئة «{ $category }»
+add-resumable = يمكن استكماله
+add-not-resumable = لا يمكن استكماله
+add-later-queue = نزّل لاحقًا في طابور
+add-checking = جارٍ سؤال السيرفر عن الملف…
+add-about-file = عن الملف
+addlink-info-open = نافذة «معلومات ملف التحميل» مفتوحة لرابط آخر. كمّله أو ألغِه أولًا.
+add-remember-failed = أُضيف التحميل، لكن لم يُحفظ المجلد للفئة: { $error }

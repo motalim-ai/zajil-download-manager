@@ -4,7 +4,6 @@
   import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
-  import AddLink from "./lib/components/AddLink.svelte";
   import { onMac } from "./lib/keys";
   import { accelerator, commandFor, keyOf, type Command } from "./lib/commands";
   import { MENU_BAR, commandKey } from "./lib/menus";
@@ -19,13 +18,13 @@
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
+  import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
   import { num, size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
   import type { DetailsView } from "./lib/bindings/DetailsView";
   import type { ProbeView } from "./lib/bindings/ProbeView";
-  import type { AddRequest } from "./lib/bindings/AddRequest";
   import type { SettingsView } from "./lib/bindings/SettingsView";
   import type { SettingsChange } from "./lib/bindings/SettingsChange";
   import type { CategoryView } from "./lib/bindings/CategoryView";
@@ -41,8 +40,9 @@
   let rowMenu = $state<{ x: number; y: number } | null>(null);
   // The small «add a link» dialog, and whether its link came from the
   // clipboard.
-  let linking = $state<{ url: string; fromClipboard: boolean } | null>(null);
-  let adding = $state<{ url: string; probe: ProbeView | null; error: string | null; busy: boolean } | null>(null);
+  // The «add» UI test scene: «Download file info» drawn in this window
+  // (the add windows are windows of their own, M5.5).
+  let addScene = $state<{ url: string; probe: ProbeView } | null>(null);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -220,42 +220,6 @@
     }
   }
 
-  async function startAdding(url: string) {
-    if (adding) return; // one dialog at a time
-    adding = { url, probe: null, error: null, busy: false };
-    try {
-      const probe = await api.probe(url);
-      if (adding?.url === url) adding = { ...adding, probe, error: null };
-    } catch (e) {
-      if (adding?.url === url) adding = { ...adding, probe: null, error: String(e) };
-    }
-  }
-
-  // Closed: a probe still running is given up, and the focus goes back to
-  // the «add a link» button (review of #48).
-  function closeAdding() {
-    adding = null;
-    void api.cancelProbe().catch(() => {});
-    void tick().then(() => document.getElementById("tb-add")?.focus());
-  }
-
-  function closeLinking() {
-    linking = null;
-    void tick().then(() => document.getElementById("tb-add")?.focus());
-  }
-
-  async function add(request: AddRequest) {
-    if (!adding || adding.busy) return;
-    adding = { ...adding, busy: true };
-    try {
-      await api.add(request);
-      closeAdding();
-      await refresh();
-    } catch (e) {
-      if (adding) adding = { ...adding, busy: false, error: String(e) };
-    }
-  }
-
   async function open(id: number) {
     selected = [id];
     failed = null;
@@ -336,7 +300,7 @@
 
   // A dialog is open: the toolbar waits (review of #96: a second dialog
   // lost the first one's link).
-  const dialogOpen = $derived(Boolean(adding || linking || refreshing));
+  const dialogOpen = $derived(Boolean(refreshing));
   // The table is on screen: what the selection buttons act on is seen
   // (review of #96: Delete removed rows hidden behind the settings).
   const tableShown = $derived(view === "list" && !details);
@@ -371,7 +335,7 @@
   function doAction(action: ToolAction) {
     switch (action) {
       case "add":
-        linking = { url: "", fromClipboard: false };
+        void api.openAddLink(null, false, locale.t("addlink-title")).catch((e) => (failed = String(e)));
         break;
       case "resume":
         void act("resume");
@@ -612,10 +576,7 @@
     void api.setMenu(t("app-name"), menus, system).catch(() => {});
   });
 
-  function setTheme(theme: string) {
-    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-    else delete document.documentElement.dataset.theme;
-  }
+
 
   /// `ui-test` builds only: show a fixed scenario (`<view>-<lang>-<theme>`)
   /// and tell the Rust side when it is on screen.
@@ -645,7 +606,7 @@
       refreshing = { id: 6, name: details.download.name, problem: said.text, detail: null, busy: false };
     }
     if (screen === "add")
-      adding = {
+      addScene = {
         url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
         probe: {
           name: "ubuntu-24.04.3-desktop-amd64.iso",
@@ -657,8 +618,6 @@
           category_extension: "iso",
           folder: "~/Downloads",
         },
-        error: null,
-        busy: false,
       };
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
@@ -698,6 +657,7 @@
     let unlisten: (() => void) | undefined;
     let unlistenClipboard: (() => void) | undefined;
     let unlistenMenu: (() => void) | undefined;
+    let unlistenView: (() => void) | undefined;
     void (async () => {
       if (await runUiTest()) return;
       try {
@@ -712,9 +672,14 @@
       // (review of #67). Ignored while a dialog is open: with the refresh
       // dialog, the new link is copied for it (review of #78).
       unlistenClipboard = await api.onClipboardLink((url) => {
-        if (adding || refreshing || linking) return;
-        linking = { url, fromClipboard: true };
-        void api.showWindow().catch(() => {});
+        if (refreshing) return;
+        void api.openAddLink(url, true, locale.t("addlink-title")).catch(() => {});
+      });
+      // «New category» in «Download file info».
+      unlistenView = await api.onMainView((next) => {
+        if (next !== "categories") return;
+        details = null;
+        view = "categories";
       });
       unlistenMenu = await api.onMenuCommand((command) => fromMenu(command as Command));
       await refresh();
@@ -723,6 +688,7 @@
       unlisten?.();
       unlistenClipboard?.();
       unlistenMenu?.();
+      unlistenView?.();
     };
   });
 </script>
@@ -732,9 +698,23 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if addScene}
+  <AddDialog
+    url={addScene.url}
+    probe={addScene.probe}
+    error={null}
+    busy={false}
+    queues={snapshot.queues}
+    categories={snapshot.categories}
+    onadd={() => {}}
+    oncancel={() => {}}
+    onchoosefolder={async () => null}
+    onnewcategory={() => {}}
+  />
 {:else}
   <div class="window">
     <header>
+      <h1 class="visually-hidden">{locale.t("app-name")}</h1>
       {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}
       <Toolbar bind:search {can} {hint} onaction={doAction} />
     </header>
@@ -799,29 +779,6 @@
             rowMenu = null;
             if (refocus) document.querySelector<HTMLElement>('tr[tabindex="0"]')?.focus();
           }}
-        />
-      {/if}
-      {#if adding}
-        <AddDialog
-          url={adding.url}
-          probe={adding.probe}
-          error={adding.error}
-          busy={adding.busy}
-          queues={snapshot.queues}
-          categories={snapshot.categories}
-          onadd={(r) => void add(r)}
-          oncancel={closeAdding}
-        />
-      {/if}
-      {#if linking}
-        <AddLink
-          url={linking.url}
-          fromClipboard={linking.fromClipboard}
-          onok={(url) => {
-            linking = null;
-            void startAdding(url);
-          }}
-          oncancel={closeLinking}
         />
       {/if}
       {#if refreshing}
