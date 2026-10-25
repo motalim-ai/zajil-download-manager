@@ -301,8 +301,8 @@ pub struct Probe {
 
 impl Probe {
     /// The server answered with a web page, not a file: a sign-in page a
-    /// link redirected to, or a file's page (such as a Google Drive link
-    /// Zajil does not know). Interfaces warn before downloading it.
+    /// link redirected to, or a file's page on a site. Interfaces warn
+    /// before downloading it.
     pub fn is_page(&self) -> bool {
         self.content_type.as_deref().is_some_and(is_page_type)
     }
