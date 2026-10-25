@@ -1,0 +1,506 @@
+<script lang="ts">
+  import { onMount, tick } from "svelte";
+  import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+  import { ask } from "@tauri-apps/plugin-dialog";
+  import Icon from "../lib/components/Icon.svelte";
+  import FileName from "../lib/components/FileName.svelte";
+  import { api } from "../lib/api";
+  import { locale } from "../lib/i18n.svelte";
+  import { counted, left, num, percent, size, speed } from "../lib/format";
+  import { startWindow } from "../lib/windowStart";
+  import type { DetailsView } from "../lib/bindings/DetailsView";
+
+  // A download's progress window (M5.5, the design of #83, window 4), one
+  // per download as in IDM: its state, its own speed limit, and what to do
+  // once it finishes; the details show its parts and their connections.
+  // The window's label says which download (`progress-<id>`).
+  let { id }: { id: number } = $props();
+
+  let details = $state<DetailsView | null>(null);
+  let problem = $state<string | null>(null);
+  let tab = $state<"status" | "limit" | "finish">("status");
+  // Shown or not, as the user left it last (a convenience: per viewer).
+  let more = $state(readMore());
+  // When finished (this window acts, while it is open).
+  let openFile = $state(false);
+  let openFolder = $state(false);
+  let closeWhenDone = $state(false);
+  // The speed limit tab: KB/s, or none.
+  let limited = $state(false);
+  let limitKb = $state(512);
+  let limitSaid = $state<string | null>(null);
+
+  function readMore(): boolean {
+    try {
+      return localStorage.getItem("zajil.progress.more") !== "0";
+    } catch {
+      return true;
+    }
+  }
+
+  const d = $derived(details?.download);
+  const total = $derived(d?.size ?? 0);
+  const fraction = $derived(d ? (total ? d.done / total : d.status === "done" ? 1 : 0) : 0);
+  const running = $derived(d?.status === "active");
+  // A part's connection is at work while the download runs and the part
+  // is not whole.
+  const whole = (s: DetailsView["segments"][number]) => s.end !== null && s.start + s.done > s.end;
+  const working = $derived(running && details ? details.segments.filter((s) => !whole(s)).length : 0);
+
+  let asked = 0;
+  async function load() {
+    const mine = ++asked;
+    try {
+      const next = await api.details(id);
+      if (mine !== asked) return;
+      const was = details?.download.status;
+      details = next;
+      problem = null;
+      if (was && was !== "done" && next.download.status === "done") void finished();
+    } catch (e) {
+      if (mine === asked) problem = String(e);
+    }
+  }
+
+  // The title: the percentage, then the name (as IDM).
+  $effect(() => {
+    if (!d) return;
+    const shown = d.status === "done" ? locale.t("status-done") : percent(locale.lang, locale.digits, fraction);
+    void getCurrentWindow()
+      .setTitle(`${shown} ${d.name}`)
+      .catch(() => {});
+  });
+
+  // With the details, the window is taller.
+  $effect(() => {
+    const height = more ? 640 : 430;
+    void getCurrentWindow()
+      .setSize(new LogicalSize(600, height))
+      .catch(() => {});
+    try {
+      localStorage.setItem("zajil.progress.more", more ? "1" : "0");
+    } catch {
+      // Not kept.
+    }
+  });
+
+  $effect(() => {
+    if (!details) return;
+    limited = details.limit !== null;
+    if (details.limit !== null) limitKb = Math.max(1, Math.round(details.limit / 1024));
+  });
+
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      await startWindow();
+      unlisten = await api.onChange(() => void load());
+      await load();
+      await tick();
+      document.getElementById("progress-pause")?.focus();
+    })();
+    return () => unlisten?.();
+  });
+
+  async function finished() {
+    // A file that can run code opens once the user agrees (#84).
+    if (openFile && !(await api.openDownload(id, false).catch(() => true))) {
+      const yes = await ask(locale.t("open-code-question", { name: d?.name ?? "" }), {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("open-code-ok"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
+      if (yes) await api.openDownload(id, false, true).catch(() => {});
+    }
+    if (openFolder) await api.openDownload(id, true).catch(() => {});
+    if (closeWhenDone) await api.closeWindow();
+  }
+
+  async function act(kind: "pause" | "resume") {
+    problem = null;
+    try {
+      await api[kind]([id]);
+    } catch (e) {
+      problem = String(e);
+    }
+    await load();
+  }
+  // «Cancel»: the download stops (it stays in the list), and the window
+  // closes, as in IDM.
+  async function cancel() {
+    if (d && (d.status === "active" || d.status === "waiting")) await api.pause([id]).catch(() => {});
+    await api.closeWindow();
+  }
+  async function saveLimit() {
+    limitSaid = null;
+    try {
+      await api.setLimit(id, limited ? Math.max(1, Math.round(limitKb)) * 1024 : null);
+      limitSaid = locale.t(running ? "progress-limit-next" : "progress-limit-saved");
+      await load();
+    } catch (e) {
+      limitSaid = String(e);
+    }
+  }
+
+  function statusText(): string {
+    if (!d) return "…";
+    if (d.needs_ok) return locale.t("status-needs-ok");
+    if (d.waits_for_browser) return locale.t("status-open-browser");
+    if (d.status === "active") return locale.t("progress-receiving");
+    if (d.status === "failed" && d.error) return locale.t("details-failed", { error: d.error });
+    return locale.t(`status-${d.status}`);
+  }
+
+  const TABS = [
+    ["status", "progress-tab-status"],
+    ["limit", "progress-tab-limit"],
+    ["finish", "progress-tab-finish"],
+  ] as const;
+  function onTabKey(event: KeyboardEvent) {
+    const order = TABS.map(([t]) => t);
+    const at = order.indexOf(tab);
+    const forward = locale.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
+    const back = locale.dir === "rtl" ? "ArrowRight" : "ArrowLeft";
+    if (event.key !== forward && event.key !== back) return;
+    event.preventDefault();
+    tab = order[(at + (event.key === forward ? 1 : -1) + order.length) % order.length]!;
+    void tick().then(() => document.getElementById(`tab-${tab}`)?.focus());
+  }
+  function onkeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      void api.closeWindow();
+    }
+  }
+</script>
+
+<svelte:window {onkeydown} />
+
+<main class="progress" aria-labelledby="progress-name">
+  <h1 id="progress-name" class="visually-hidden">{d ? d.name : locale.t("progress-title")}</h1>
+  <div class="tabs" role="tablist" aria-label={locale.t("progress-title")}>
+    {#each TABS as [key, text] (key)}
+      <button
+        id="tab-{key}"
+        role="tab"
+        class="tab"
+        aria-selected={tab === key}
+        aria-controls="panel-{key}"
+        tabindex={tab === key ? 0 : -1}
+        onclick={() => (tab = key)}
+        onkeydown={onTabKey}>{locale.t(text)}</button
+      >
+    {/each}
+  </div>
+
+  <div class="top">
+    {#if tab === "status"}
+      <div id="panel-status" role="tabpanel" aria-labelledby="tab-status" class="panel">
+        <dl class="facts">
+          <dt>{locale.t("add-url")}</dt>
+          <dd class="url"><bdi dir="ltr">{details?.url ?? ""}</bdi></dd>
+          <dt>{locale.t("progress-status")}</dt>
+          <dd class:bad={d?.status === "failed"}>{statusText()}</dd>
+          <dt>{locale.t("progress-size")}</dt>
+          <dd class="num">{d?.size === null || !d ? locale.t("details-unknown") : size(locale.lang, locale.digits, d.size)}</dd>
+          <dt>{locale.t("progress-done")}</dt>
+          <dd class="num">{d ? `${size(locale.lang, locale.digits, d.done)} (${percent(locale.lang, locale.digits, fraction)})` : ""}</dd>
+          <dt>{locale.t("details-speed")}</dt>
+          <dd class="num">{running && d ? speed(locale.lang, locale.digits, d.speed) : "—"}</dd>
+          <dt>{locale.t("col-left")}</dt>
+          <dd class="num">{running && d && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : "—"}</dd>
+          <dt>{locale.t("progress-resume")}</dt>
+          <dd>
+            {#if details?.resumable === true}<strong class="yes">{locale.t("progress-resume-yes")}</strong>
+            {:else if details?.resumable === false}<strong class="no">{locale.t("progress-resume-no")}</strong>
+            {:else}{locale.t("details-unknown")}{/if}
+          </dd>
+        </dl>
+        <div class="bar" role="progressbar" aria-label={locale.t("progress-done")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)}>
+          <b style:inline-size="{fraction * 100}%"></b>
+        </div>
+      </div>
+    {:else if tab === "limit"}
+      <div id="panel-limit" role="tabpanel" aria-labelledby="tab-limit" class="panel">
+        <label class="check"><input type="checkbox" bind:checked={limited} />{locale.t("progress-limit-on")}</label>
+        <label class="row" class:off={!limited}>
+          <input type="number" min="1" step="1" bind:value={limitKb} disabled={!limited} dir="ltr" />
+          <span>{locale.t("progress-limit-unit")}</span>
+        </label>
+        <p class="hint">{locale.t("progress-limit-hint")}</p>
+        <div><button class="btn" onclick={() => void saveLimit()}>{locale.t("progress-limit-save")}</button></div>
+        {#if limitSaid}<p class="said" role="status">{limitSaid}</p>{/if}
+      </div>
+    {:else}
+      <div id="panel-finish" role="tabpanel" aria-labelledby="tab-finish" class="panel">
+        <p class="hint">{locale.t("progress-finish-hint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={openFile} />{locale.t("progress-finish-open")}</label>
+        <label class="check"><input type="checkbox" bind:checked={openFolder} />{locale.t("progress-finish-folder")}</label>
+        <label class="check"><input type="checkbox" bind:checked={closeWhenDone} />{locale.t("progress-finish-close")}</label>
+      </div>
+    {/if}
+
+    {#if problem}<p class="problem" role="alert"><Icon name="alert" />{problem}</p>{/if}
+
+    <div class="actions">
+      <button class="btn" aria-expanded={more} aria-controls="progress-more" onclick={() => (more = !more)}>
+        <Icon name={more ? "chevron-up" : "chevron-down"} size={15} />{locale.t(more ? "progress-less" : "progress-more")}
+      </button>
+      <span class="gap"></span>
+      {#if d && (d.status === "active" || d.status === "waiting")}
+        <button class="btn" id="progress-pause" onclick={() => void act("pause")}><Icon name="pause" />{locale.t("action-pause")}</button>
+      {:else if d && d.status !== "done"}
+        <button class="btn" id="progress-pause" onclick={() => void act("resume")}><Icon name="play" />{locale.t("action-resume")}</button>
+      {/if}
+      <button class="btn" onclick={() => void cancel()}>{locale.t(d?.status === "done" ? "progress-close" : "add-cancel")}</button>
+    </div>
+  </div>
+
+  {#if more}
+    <section id="progress-more" class="more" aria-labelledby="parts-title">
+      <div class="head">
+        <h2 id="parts-title">{locale.t("details-parts")}</h2>
+        {#if details && details.segments.length > 0}
+          <span class="muted">{counted(locale.lang, locale.digits, "connections-count", details.segments.length)}، {locale.t("progress-working", { number: num(locale.lang, locale.digits, working, 0) })}</span>
+        {/if}
+      </div>
+      {#if details && total > 0 && details.segments.length > 0}
+        <div class="parts" role="img" aria-label={locale.t("details-parts")}>
+          {#each details.segments as s (s.start)}
+            {@const from = (s.start / total) * 100}
+            {@const width = (Math.min(s.done, (s.end ?? total - 1) - s.start + 1) / total) * 100}
+            <span class="got" style:inset-inline-start="{from}%" style:inline-size="{width}%" class:writing={running && !whole(s)}></span>
+          {/each}
+        </div>
+        <div class="legend">
+          <span><i class="got"></i>{locale.t("details-map-done")}</span>
+          <span><i class="writing"></i>{locale.t("details-map-writing")}</span>
+          <span><i></i>{locale.t("progress-left-part")}</span>
+        </div>
+        <table class="conns">
+          <thead>
+            <tr><th scope="col">{locale.t("progress-connection")}</th><th scope="col">{locale.t("progress-got")}</th><th scope="col">{locale.t("progress-status")}</th></tr>
+          </thead>
+          <tbody>
+            {#each details.segments as s, i (s.start)}
+              <tr>
+                <td class="num">{num(locale.lang, locale.digits, i + 1, 0)}</td>
+                <td class="num">{size(locale.lang, locale.digits, s.done)}</td>
+                <td class:yes={whole(s)}>
+                  {whole(s) ? locale.t("details-part-done") : running ? locale.t("progress-receiving") : locale.t("status-paused")}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {:else}
+        <p class="muted">{locale.t("progress-no-parts")}</p>
+      {/if}
+    </section>
+  {/if}
+</main>
+
+<style>
+  .progress {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--surface);
+    box-sizing: border-box;
+    overflow: auto;
+  }
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 8px 16px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .tab {
+    padding: 6px 12px;
+    border-radius: 8px 8px 0 0;
+    color: var(--muted);
+    border: 1px solid transparent;
+    border-bottom: 0;
+    margin-bottom: -1px;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] {
+    color: var(--ink);
+    font-weight: 600;
+    background: var(--surface);
+    border-color: var(--line);
+  }
+  .top {
+    padding: 16px 20px;
+  }
+  .panel {
+    min-height: 236px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 24px;
+    margin: 0;
+    font-size: 13.5px;
+  }
+  dt {
+    color: var(--muted);
+  }
+  dd {
+    margin: 0;
+    min-width: 0;
+  }
+  .url bdi {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .yes {
+    color: var(--green);
+  }
+  .no,
+  .bad {
+    color: var(--amber);
+  }
+  .bar {
+    height: 10px;
+    border-radius: 6px;
+    background: var(--sunken);
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .bar b {
+    display: block;
+    height: 100%;
+    border-radius: 6px;
+    background: var(--accent);
+  }
+  .check,
+  .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13.5px;
+  }
+  .row.off {
+    color: var(--faint);
+  }
+  .row input {
+    width: 110px;
+    font: inherit;
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--sunken);
+    color: var(--ink);
+  }
+  .hint,
+  .said,
+  .muted {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .problem {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--red);
+    font-size: 13px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding-top: 12px;
+  }
+  .gap {
+    flex: 1;
+  }
+  .more {
+    border-top: 1px solid var(--line);
+    background: var(--sunken);
+    padding: 14px 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  h2 {
+    margin: 0;
+    font-size: 13.5px;
+  }
+  .parts {
+    position: relative;
+    height: 16px;
+    border-radius: 6px;
+    background: var(--line);
+    overflow: hidden;
+  }
+  .parts .got {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--accent);
+  }
+  .parts .got.writing {
+    box-shadow: inset -4px 0 0 color-mix(in oklab, var(--accent) 45%, white);
+  }
+  :global([dir="rtl"]) .parts .got.writing {
+    box-shadow: inset 4px 0 0 color-mix(in oklab, var(--accent) 45%, white);
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend span {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .legend i {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: var(--line);
+  }
+  .legend i.got {
+    background: var(--accent);
+  }
+  .legend i.writing {
+    background: color-mix(in oklab, var(--accent) 45%, white);
+  }
+  .conns {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: var(--surface);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .conns th {
+    text-align: start;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .conns td {
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+</style>

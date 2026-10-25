@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
   import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
@@ -14,6 +14,7 @@
   import Categories from "./lib/components/Categories.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
+  import ProgressWindow from "./windows/ProgressWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
@@ -44,6 +45,8 @@
   // The «add» UI test scene: «Download file info» drawn in this window
   // (the add windows are windows of their own, M5.5).
   let addScene = $state<{ url: string; probe: ProbeView } | null>(null);
+  // The «progress» scene: the first demo download's progress window.
+  let progressScene = $state(false);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -463,6 +466,7 @@
       case "open-folder":
         return void showIn(one!.id, true);
       case "progress":
+        return void showProgress(one!.id);
       case "properties":
         return void open(one!.id);
       case "refresh-link":
@@ -476,8 +480,25 @@
   async function openOne(id: number) {
     const d = snapshot.downloads.find((x) => x.id === id);
     if (d?.status === "done") await showIn(id, false);
-    else await open(id);
+    else await showProgress(id);
   }
+  /** The download's progress window (M5.5). */
+  async function showProgress(id: number) {
+    const d = snapshot.downloads.find((x) => x.id === id);
+    await api.openProgress(id, d?.name ?? locale.t("progress-title")).catch((e) => (failed = String(e)));
+  }
+
+  // The running downloads' progress on the taskbar (Windows) or the Dock
+  // (macOS): how much of what they fetch has come, or nothing.
+  $effect(() => {
+    const sized = active.filter((d) => d.size !== null && d.size > 0);
+    const all = sized.reduce((sum, d) => sum + (d.size ?? 0), 0);
+    const got = sized.reduce((sum, d) => sum + d.done, 0);
+    const shown = all > 0 ? Math.min(100, Math.floor((got / all) * 100)) : null;
+    void getCurrentWindow()
+      .setProgressBar(shown === null ? { status: ProgressBarStatus.None } : { status: ProgressBarStatus.Normal, progress: shown })
+      .catch(() => {});
+  });
   // A file that can run code opens once the user agrees (#84; review of
   // #101: a double-click ran a program).
   async function showIn(id: number, folder: boolean) {
@@ -643,6 +664,7 @@
           folder: "~/Downloads",
         },
       };
+    if (screen === "progress") progressScene = true;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
       await tick();
@@ -722,6 +744,8 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if progressScene}
+  <ProgressWindow id={1} />
 {:else if addScene}
   <AddDialog
     url={addScene.url}

@@ -182,17 +182,18 @@ pub fn run() {
             // To the window in front: in an add window, Select all is its
             // text box's, not the main window's rows (M5.5).
             if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
-                let front = [windows::LINK, windows::INFO]
+                let front = handle
+                    .webview_windows()
                     .into_iter()
-                    .find(|l| {
-                        handle
-                            .get_webview_window(l)
-                            .is_some_and(|w| w.is_focused().unwrap_or(false))
-                    })
-                    .unwrap_or("main");
+                    .find(|(_, w)| w.is_focused().unwrap_or(false))
+                    .map_or_else(|| "main".to_owned(), |(label, _)| label);
                 // Quit is the main window's, which asks first while
                 // downloads run (review of #105: an add window quit at once).
-                let front = if command == "quit" { "main" } else { front };
+                let front = if command == "quit" {
+                    "main"
+                } else {
+                    front.as_str()
+                };
                 let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
@@ -231,6 +232,7 @@ pub fn run() {
             tauri_app.add_capability(windows::CAPABILITY)?;
             // The close button hides the window into the tray (`closing.rs`).
             closing::watch(tauri_app.handle());
+            tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
@@ -243,6 +245,7 @@ pub fn run() {
                     let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
                         Some("add") => Some(windows::INFO_SIZE),
                         Some("link") => Some(windows::LINK_SIZE),
+                        Some("progress") => Some(windows::PROGRESS_SIZE),
                         _ => None,
                     };
                     ui_test::fit_to_screen(&window, size)?;
@@ -332,6 +335,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
@@ -375,6 +380,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
@@ -1893,6 +1900,23 @@ fn asks_before_opening(file: &std::path::Path) -> bool {
 /// Whether `link` is one of the links «Copy link» put on the clipboard.
 fn copied_here(copied: &str, link: &str) -> bool {
     copied.lines().any(|l| l.trim() == link.trim())
+}
+
+/// A download's own speed limit (the progress window, M5.5); `None` or 0:
+/// none. A running download takes it the next time it starts (the runner
+/// reads it then).
+#[tauri::command]
+async fn set_limit<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    limit: Option<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| {
+        q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?.limit = limit.filter(|l| *l > 0);
+        Ok(())
+    })
+    .await
 }
 
 /// Moves downloads to queue `queue`, in their order, at its end.

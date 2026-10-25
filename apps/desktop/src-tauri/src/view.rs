@@ -159,6 +159,9 @@ pub struct SegmentView {
 #[ts(export)]
 pub struct DetailsView {
     pub download: DownloadView,
+    /// The link, whole (the progress window shows it, as the add windows
+    /// do; never printed in a log).
+    pub url: String,
     pub segments: Vec<SegmentView>,
     /// `null` when unknown: no state file (finished, or not started yet).
     pub resumable: Option<bool>,
@@ -653,6 +656,7 @@ pub fn details(
         // The same rule as the add dialog (`Engine::probe`).
         resumable: state.map(DownloadState::resumable),
         limit: item.limit,
+        url: item.url.clone(),
         download,
     }
 }

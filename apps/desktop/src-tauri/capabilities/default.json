@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may do: Zajil's own commands and events, set its title, draw its own title bar (drag the window by it, minimize, maximize and close it), show the system's open and save dialogs (the user picks a folder or an import or export file) and its yes-or-no question before downloads are taken off the list, show a notification when a download ends, and turn launching at login on or off. Nothing else: no file system, no shell, no network from the page.",
+  "description": "What the main window may do: Zajil's own commands and events, set its title and its progress on the taskbar or the Dock, draw its own title bar (drag the window by it, minimize, maximize and close it), show the system's open and save dialogs (the user picks a folder or an import or export file) and its yes-or-no question before downloads are taken off the list, show a notification when a download ends, and turn launching at login on or off. Nothing else: no file system, no shell, no network from the page.",
   "windows": [
     "main"
   ],
@@ -14,6 +14,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:window:allow-close",
+    "core:window:allow-set-progress-bar",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",

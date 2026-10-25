@@ -77,6 +77,11 @@ export const api = {
   /** «Download file info» for `url`; «Add a link» closes. */
   openAddInfo: (url: string, title: string) => invoke<void>("open_add_info", { url, title }),
   pendingInfo: () => invoke<string | null>("pending_info"),
+  /** A download's progress window (M5.5), titled `title` until it names
+   * itself. */
+  openProgress: (id: number, title: string) => invoke<void>("open_progress", { id, title }),
+  /** A download's own speed limit, bytes per second; `null`: none. */
+  setLimit: (id: number, limit: number | null) => invoke<void>("set_limit", { id, limit }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */
