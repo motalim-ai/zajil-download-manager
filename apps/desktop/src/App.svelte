@@ -107,7 +107,7 @@
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
     // The tray menu speaks the same language.
-    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit")).catch(() => {});
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
@@ -517,6 +517,8 @@
    * decision on #83). */
   let quitting = false;
   async function quit() {
+    // A close that quits waits for this page's answer (`closing.rs`).
+    void api.quitHeard().catch(() => {});
     // One question at a time (review of #105: a second ⌘Q asked again).
     if (quitting) return;
     const running = active.length;

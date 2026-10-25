@@ -421,3 +421,10 @@ win-minimize = Minimize
 win-maximize = Maximize
 win-restore = Restore
 win-close = Close
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = Zajil is still running in the system tray, and the downloads go on. Choose “Quit Zajil” from its icon to quit.
+settings-closing = Closing the window
+settings-closing-label = Closing the window quits Zajil
+settings-closing-hint = Without this, the window hides and Zajil stays in the system tray while the downloads go on, as in IDM.
+settings-closing-no-tray = This desktop shows no system tray, so closing the window always quits Zajil (asking first while downloads run).

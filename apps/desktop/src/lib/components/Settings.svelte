@@ -74,6 +74,22 @@
   let integration = $state<IntegrationView | null>(null);
   let integrationProblem = $state<string | null>(null);
   let fixing = $state(false);
+  // Closing the window: hides it into the tray, unless the user chose to
+  // quit (or the desktop has no tray, where it always quits).
+  let closeQuits = $state(false);
+  let hasTray = $state(true);
+  onMount(() => {
+    api.closeQuits().then(
+      ([quits, tray]) => ((closeQuits = quits), (hasTray = tray)),
+      () => {},
+    );
+  });
+  async function setCloseQuits(quits: boolean) {
+    const before = closeQuits;
+    closeQuits = quits;
+    await api.setCloseQuits(quits).catch(() => (closeQuits = before));
+  }
+
   onMount(() => {
     api.browserIntegration().then(
       (last) => (integration ??= last),
@@ -227,6 +243,15 @@
       <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
       <span>{locale.t("settings-notifications-label")}</span>
     </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("settings-closing")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={closeQuits || !hasTray} disabled={!hasTray} onchange={(e) => void setCloseQuits(e.currentTarget.checked)} />
+      <span>{locale.t("settings-closing-label")}</span>
+    </label>
+    <p class="hint">{locale.t(hasTray ? "settings-closing-hint" : "settings-closing-no-tray")}</p>
   </fieldset>
 
   <fieldset>

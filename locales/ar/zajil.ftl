@@ -479,3 +479,10 @@ win-minimize = تصغير
 win-maximize = تكبير
 win-restore = استعادة
 win-close = إغلاق
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = زاجِل ما زال يعمل في شريط النظام، والتحميلات تكمل. اختر «إنهاء زاجِل» من أيقونته لإنهائه.
+settings-closing = إغلاق النافذة
+settings-closing-label = إغلاق النافذة يُنهي زاجِل
+settings-closing-hint = دون هذا الخيار تختفي النافذة ويبقى زاجِل في شريط النظام والتحميلات تكمل، كما في IDM.
+settings-closing-no-tray = لا يظهر شريط النظام في سطح المكتب هذا، فإغلاق النافذة يُنهي زاجِل دائمًا (ويسأل أولًا إن كانت هناك تحميلات تعمل).
