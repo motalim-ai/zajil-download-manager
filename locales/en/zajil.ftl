@@ -552,3 +552,10 @@ tb-earlier = Move “{ $name }” earlier
 tb-later = Move “{ $name }” later
 tb-reset = Reset
 tb-done = Done
+
+## The drop box (M5.5, an IDM touch)
+drop-box = Drop box
+drop-hint = Drag a link here to download it. A right-click hides it.
+tray-drop-box = Show the drop box
+settings-drop-box-label = Show the drop box above all windows
+settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; a right-click hides it.
