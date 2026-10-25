@@ -5,6 +5,9 @@
 # library and no --enable-gpl.
 --disable-everything
 --disable-autodetect
+# libc's iconv is probed even with --disable-autodetect: off, as nothing
+# here converts subtitle character sets.
+--disable-iconv
 --disable-doc
 --disable-network
 --disable-debug
