@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { HOST, MAX_NAME, MAX_URL, NO_ANSWER, PROTOCOL_VERSION } from "../src/capture.js";
+import { MAX_COOKIES } from "../src/cookies.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const chrome = JSON.parse(read("../src/manifest.chrome.json"));
@@ -40,7 +41,10 @@ describe("the manifests", () => {
       expect(m.manifest_version).toBe(3);
       expect([...m.permissions].sort()).toEqual([...wanted].sort());
       expect(m.host_permissions).toBeUndefined();
-      expect(m.optional_permissions).toBeUndefined();
+      // The cookie permission only, asked for with a button, never at
+      // install (owner's decision on #7); nothing else.
+      expect(m.optional_permissions).toEqual(["cookies"]);
+      expect(m.optional_host_permissions).toEqual(["<all_urls>"]);
       expect(m.content_scripts).toBeUndefined();
     }
     const { key: _key, background: cb, minimum_chrome_version: _min, ...chromeRest } = chrome;
@@ -55,12 +59,12 @@ describe("the manifests", () => {
     const en = JSON.parse(read("../src/_locales/en/messages.json"));
     expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort());
     const used = new Set();
-    for (const file of ["background.js", "options.html", "options.js", "manifest.chrome.json"]) {
-      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|t\("(\w+)"\)|getMessage\("(\w+)"\)|: "((?:not|menu)[A-Z]\w+)")/g)) {
+    for (const file of ["background.js", "options.html", "options.js", "page.js", "welcome.html", "welcome.js", "manifest.chrome.json"]) {
+      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|t\("(\w+)"\)|getMessage\("(\w+)"\)|"((?:not|menu|signIn|cookies)[A-Z]\w+)")/g)) {
         used.add(m[1] || m[2] || m[3] || m[4] || m[5]);
       }
     }
-    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang"]) {
+    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang", "signInNeedsCookies", "signInEvenWithCookies", "menuSignInNeedsCookies", "menuSignInEvenWithCookies", "downloadWithBrowser", "cookiesAllow", "cookiesDrop", "cookiesAllowed", "cookiesNotAllowed", "cookiesOnlyHere", "cookiesOnlyThisSite", "cookiesNotKept"]) {
       expect(used.has(key), key).toBe(true);
     }
     expect(ar.lang.message).toBe("ar");
@@ -77,6 +81,10 @@ describe("the protocol, as zajil-host has it", () => {
     expect(MAX_URL).toBe(8 * 1024);
     expect(Number(rustConst(host, "MAX_NAME"))).toBe(MAX_NAME);
     expect(hostMain).toContain(`"${NO_ANSWER[0]} within {} s"`);
+    expect(rustConst(host, "MAX_COOKIES")).toBe("16 * 1024");
+    expect(MAX_COOKIES).toBe(16 * 1024);
+    // How Zajil says the server wanted a sign-in (`needsSignIn`).
+    expect(read("../../../crates/zajil-core/src/engine.rs")).toContain('#[error("the server answered {0}")]');
     expect(hostMain).toContain(`"${NO_ANSWER[0]}: {e}"`);
     expect(hostMain).toContain(`"${NO_ANSWER[1]}: {e}"`);
   });

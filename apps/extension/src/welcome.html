@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n="welcomeTitle">Zajil</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1 data-i18n="welcomeTitle">Zajil</h1>
+      <p data-i18n="welcomeIntro"></p>
+      <section aria-labelledby="cookies-title">
+        <h2 id="cookies-title" data-i18n="cookiesTitle"></h2>
+        <p data-i18n="cookiesWhy"></p>
+        <ul>
+          <li data-i18n="cookiesOnlyHere"></li>
+          <li data-i18n="cookiesOnlyThisSite"></li>
+          <li data-i18n="cookiesNotKept"></li>
+          <li data-i18n="cookiesOptional"></li>
+        </ul>
+        <div class="row">
+          <button type="button" id="allow" data-i18n="cookiesAllow"></button>
+          <output id="cookies-state" role="status" aria-live="polite"></output>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="welcome.js"></script>
+  </body>
+</html>

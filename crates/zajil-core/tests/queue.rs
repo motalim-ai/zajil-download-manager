@@ -610,3 +610,41 @@ async fn a_changed_number_of_connections_applies_to_the_next_download() {
     assert_eq!(server.most_concurrent("/a.bin"), 2);
     assert_eq!(server.most_concurrent("/b.bin"), 5);
 }
+
+/// M5: a download the extension sent with the browser's cookies and page
+/// (`Runner::from_browser`) sends them; another item sends none; and the
+/// item's entry is gone from memory once it has finished.
+#[tokio::test]
+async fn a_queued_download_sends_the_browser_s_headers_kept_for_it() {
+    let server = TestServer::http();
+    server.put("/with.bin", FileSpec::new(random_bytes(200_000, 91)));
+    server.put("/without.bin", FileSpec::new(random_bytes(200_000, 92)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let with = add(&store, "main", &server.url("/with.bin"), dir.path());
+    add(&store, "main", &server.url("/without.bin"), dir.path());
+    let headers = zajil_core::queue::FromBrowserById::default();
+    let page = server.url("/page");
+    headers.lock().unwrap().insert(
+        with,
+        zajil_core::FromBrowser::new(&server.url("/with.bin"), Some("sid=Q"), Some(&page)),
+    );
+    let summary = runner(&store)
+        .from_browser(headers.clone())
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(summary.finished, 2);
+    for get in server.gets("/with.bin") {
+        assert_eq!(get.cookie.as_deref(), Some("sid=Q"), "{get:?}");
+        assert_eq!(get.referer.as_deref(), Some(page.as_str()));
+    }
+    for get in server.gets("/without.bin") {
+        assert_eq!(
+            (get.cookie.as_deref(), get.referer.as_deref()),
+            (None, None)
+        );
+    }
+    assert!(headers.lock().unwrap().is_empty(), "kept after it finished");
+}

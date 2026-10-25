@@ -64,5 +64,56 @@
   },
   "takenAlsoInBrowser": {
     "message": "Zajil took the download, but the browser had finished it too: the file is there twice, so remove one if you like."
+  },
+  "welcomeTitle": {
+    "message": "Welcome to Zajil"
+  },
+  "welcomeIntro": {
+    "message": "Downloads of the file types you choose in the settings now go to the Zajil download manager, to download them faster and resume them when they stop. And in the right-click menu on any link: “Download with Zajil”."
+  },
+  "cookiesTitle": {
+    "message": "Cookies (optional)"
+  },
+  "cookiesWhy": {
+    "message": "Some sites give their files only to signed-in users. For Zajil to download those, the extension needs your permission to read the download link's cookies."
+  },
+  "cookiesOnlyHere": {
+    "message": "The cookies go to the Zajil program on this computer only, and nowhere else."
+  },
+  "cookiesOnlyThisSite": {
+    "message": "Only this download site's cookies, for this download link only, and only when the download goes to Zajil."
+  },
+  "cookiesNotKept": {
+    "message": "Zajil does not keep them: they stay in memory while the download runs."
+  },
+  "cookiesOptional": {
+    "message": "Without the permission the extension works as it is, and files of sites that need a sign-in stay in the browser. You can take the permission back at any time in the settings."
+  },
+  "cookiesAllow": {
+    "message": "Allow"
+  },
+  "cookiesDrop": {
+    "message": "Take the permission back"
+  },
+  "cookiesAllowed": {
+    "message": "Allowed: a download link's cookies go to Zajil with its download."
+  },
+  "cookiesNotAllowed": {
+    "message": "Not allowed: downloads go to Zajil without cookies."
+  },
+  "signInNeedsCookies": {
+    "message": "This site needs a sign-in, so the browser went on with the download. For Zajil to take downloads like this, allow the cookie permission."
+  },
+  "signInEvenWithCookies": {
+    "message": "This site refused Zajil even with the cookies, so the browser went on with the download."
+  },
+  "menuSignInNeedsCookies": {
+    "message": "This site needs a sign-in. Allow the cookie permission for Zajil to download it, or download it with the browser."
+  },
+  "menuSignInEvenWithCookies": {
+    "message": "This site refused Zajil even with the cookies. Download it with the browser."
+  },
+  "downloadWithBrowser": {
+    "message": "Download with the browser"
   }
 }

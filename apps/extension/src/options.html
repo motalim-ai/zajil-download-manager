@@ -26,6 +26,21 @@
           <output id="saved" role="status"></output>
         </div>
       </form>
+      <section aria-labelledby="cookies-title">
+        <h2 id="cookies-title" data-i18n="cookiesTitle"></h2>
+        <p data-i18n="cookiesWhy"></p>
+        <ul>
+          <li data-i18n="cookiesOnlyHere"></li>
+          <li data-i18n="cookiesOnlyThisSite"></li>
+          <li data-i18n="cookiesNotKept"></li>
+          <li data-i18n="cookiesOptional"></li>
+        </ul>
+        <div class="row">
+          <button type="button" id="allow" data-i18n="cookiesAllow"></button>
+          <button type="button" id="drop" data-i18n="cookiesDrop"></button>
+          <output id="cookies-state" role="status" aria-live="polite"></output>
+        </div>
+      </section>
     </main>
     <script type="module" src="options.js"></script>
   </body>

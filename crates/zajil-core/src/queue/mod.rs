@@ -8,7 +8,7 @@ mod store;
 mod transfer;
 
 pub use power::{AfterQueue, after_queue};
-pub use runner::{QueueEvent, Runner, Summary};
+pub use runner::{FromBrowserById, QueueEvent, Runner, Summary};
 pub use schedule::{Day, Schedule, ScheduleError, TimeOfDay};
 pub use store::{
     DEFAULT_MAX_ACTIVE, DEFAULT_QUEUE, FORMAT, Item, MAX_ACTIVE, MAX_NAME_CHARS, Queue, QueueStore,

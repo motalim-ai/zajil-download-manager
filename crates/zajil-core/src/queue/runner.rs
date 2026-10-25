@@ -100,7 +100,14 @@ pub struct Runner {
     categories: Option<CategoryStore>,
     /// Connections for each download, read when it starts (M4).
     connections: Option<Arc<AtomicUsize>>,
+    /// The browser's headers of downloads the extension sent, by item
+    /// (M5): in memory only, gone when the download finishes.
+    from_browser: Option<FromBrowserById>,
 }
+
+/// The browser's headers (cookies, page) of each download the extension
+/// sent, by item id: kept in memory only (owner's decision on #7).
+pub type FromBrowserById = Arc<std::sync::Mutex<HashMap<u64, crate::FromBrowser>>>;
 
 /// How the download of an item ended.
 type Ended = (u64, Result<Finished, Error>);
@@ -124,7 +131,16 @@ impl Runner {
             until: None,
             categories: None,
             connections: None,
+            from_browser: None,
         }
+    }
+
+    /// Each download whose item is in `headers` sends them (the browser's
+    /// cookies for its origin, and its page); the item's entry is removed
+    /// once it has finished.
+    pub fn from_browser(mut self, headers: FromBrowserById) -> Self {
+        self.from_browser = Some(headers);
+        self
     }
 
     /// Items marked `categorize` go to their category's folder, read from
@@ -420,6 +436,14 @@ impl Runner {
                 if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
                 }
+                if let Some(from) = self.from_browser.as_ref().and_then(|map| {
+                    map.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&id)
+                        .cloned()
+                }) {
+                    engine = engine.with_browser(from);
+                }
                 let categories = self.categories.clone().filter(|_| item.categorize);
                 let events = events.clone();
                 let task_stop = stop.clone();
@@ -543,6 +567,9 @@ impl Runner {
             Ok(done) => {
                 summary.finished += 1;
                 finished_now.insert(id);
+                if let Some(map) = &self.from_browser {
+                    map.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                }
                 QueueEvent::Finished {
                     item: id,
                     file: done.file.clone(),

@@ -96,10 +96,11 @@ export function shouldCapture(item, settings, ownId) {
  * The `download` message for `zajil-host`: the URL, and the page and the
  * browser's file name when the host would accept them (a referrer that is
  * an http(s) URL; a plain name, no path, no control characters, 255 bytes at
- * most). Cookies are not sent yet (a later part of M5).
+ * most), and the link's `Cookie` header when the user allowed it
+ * (`cookies.cookieHeader`, already checked as the host checks it).
  *
  * @param {string} url
- * @param {{ referrer?: string, filename?: string }} [extra]
+ * @param {{ referrer?: string, filename?: string, cookies?: string | null }} [extra]
  */
 export function downloadMessage(url, extra = {}) {
   /** @type {Record<string, unknown>} */
@@ -109,6 +110,7 @@ export function downloadMessage(url, extra = {}) {
   // eslint-disable-next-line no-control-regex
   const plain = name && !/[\u0000-\u001f\u007f-\u009f]/.test(name) && name !== "." && name !== "..";
   if (plain && new TextEncoder().encode(name).length <= MAX_NAME) message.filename = name;
+  if (extra.cookies) message.cookies = extra.cookies;
   return message;
 }
 
@@ -117,9 +119,19 @@ export function downloadMessage(url, extra = {}) {
  * not one Zajil can download (`javascript:`, `data:`, a password in it…).
  *
  * @param {{ linkUrl?: string, pageUrl?: string }} info
+ * @param {string | null} [cookies] the link's `Cookie` header, if allowed
  */
-export function menuMessage(info) {
-  return isWeb(info.linkUrl) ? downloadMessage(/** @type {string} */ (info.linkUrl), { referrer: info.pageUrl }) : null;
+export function menuMessage(info, cookies = null) {
+  return isWeb(info.linkUrl)
+    ? downloadMessage(/** @type {string} */ (info.linkUrl), { referrer: info.pageUrl, cookies })
+    : null;
+}
+
+/** Whether Zajil refused because the site wants a sign-in: the server
+ * answered 401 or 403 to Zajil (`zajil_core::Error::Status`).
+ * @param {Result | null} result */
+export function needsSignIn(result) {
+  return result?.outcome === "refused" && /the server answered 40[13]\b/.test(result.error ?? "");
 }
 
 /**
@@ -165,8 +177,9 @@ export async function send(browserApi, message) {
  *
  * @param {any} browserApi
  * @param {any} item
- * @param {{ pause: boolean }} how `pause`: the browser keeps a paused
- *   download's data (`compat.pausesSafely`)
+ * @param {{ pause: boolean, cookies?: string | null }} how `pause`: the
+ *   browser keeps a paused download's data (`compat.pausesSafely`);
+ *   `cookies`: the link's `Cookie` header, if the user allowed it
  * @returns {Promise<Result | null>} null when the browser had already
  *   finished (nothing was sent)
  */
@@ -180,7 +193,7 @@ export async function takeOver(browserApi, item, how) {
   }
   const result = await send(
     browserApi,
-    downloadMessage(item.finalUrl || item.url, { referrer: item.referrer, filename: item.filename }),
+    downloadMessage(item.finalUrl || item.url, { referrer: item.referrer, filename: item.filename, cookies: how.cookies }),
   );
   if (result.outcome === "taken") {
     // Not paused (Firefox), the browser may have finished it meanwhile:

@@ -7,7 +7,19 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const icons = join(root, "..", "desktop", "src-tauri", "icons");
-const files = ["background.js", "capture.js", "compat.js", "settings.js", "options.html", "options.js", "options.css"];
+const files = [
+  "background.js",
+  "capture.js",
+  "compat.js",
+  "cookies.js",
+  "page.js",
+  "settings.js",
+  "options.html",
+  "options.js",
+  "options.css",
+  "welcome.html",
+  "welcome.js",
+];
 
 for (const browser of ["chrome", "firefox"]) {
   const out = join(root, "dist", browser);

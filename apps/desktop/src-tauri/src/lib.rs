@@ -54,6 +54,9 @@ pub struct App {
     clipboard: Arc<AtomicBool>,
     /// The data folder (`--data-dir` or the system's).
     data_dir: PathBuf,
+    /// The browser's cookies and page of each download the extension sent,
+    /// by item: in memory only (owner's decision on #7).
+    from_browser: zajil_core::queue::FromBrowserById,
     /// How the last browser registration went (at the start, or the
     /// settings button), for the settings page.
     integration: Arc<std::sync::Mutex<Option<view::IntegrationView>>>,
@@ -110,6 +113,7 @@ pub fn run() {
         connections: Arc::new(AtomicUsize::new(connections)),
         clipboard: Arc::new(AtomicBool::new(clipboard)),
         data_dir: data.clone(),
+        from_browser: Arc::default(),
         integration: Arc::default(),
         live: Arc::new(Live::default()),
         stop: Stop::new(),
@@ -391,7 +395,7 @@ fn notify(handle: &tauri::AppHandle, live: &Arc<Live>) {
 /// Runs the queues for as long as the window is open. The runner ends when
 /// nothing is left to download; it starts again as soon as something is.
 async fn run_queues(handle: tauri::AppHandle) {
-    let (engine, store, categories, connections, live, stop) = {
+    let (engine, store, categories, connections, live, stop, from_browser) = {
         let app = handle.state::<App>();
         (
             app.engine.clone(),
@@ -400,6 +404,7 @@ async fn run_queues(handle: tauri::AppHandle) {
             app.connections.clone(),
             app.live.clone(),
             app.stop.clone(),
+            app.from_browser.clone(),
         )
     };
     loop {
@@ -408,7 +413,8 @@ async fn run_queues(handle: tauri::AppHandle) {
         }
         let runner = Runner::new(engine.clone(), store.clone())
             .categories(categories.clone())
-            .connections(connections.clone());
+            .connections(connections.clone())
+            .from_browser(from_browser.clone());
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 live.record(&event);
@@ -595,8 +601,10 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
             }
             let app = handle.state::<App>();
             let given = download_dir(&app.settings, &app.system_download_dir);
-            let reach = |url: &str| reach_file(&app.engine, url);
-            let answer = from_extension(&app.store, &request, &given, reach);
+            let reach = |url: &str, from: &zajil_core::FromBrowser| {
+                reach_file(&app.engine.with_browser(from.clone()), url)
+            };
+            let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
             if answer.ok {
                 let _ = handle.emit("downloads-changed", ());
                 tray::show_window(&handle);
@@ -975,22 +983,32 @@ fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option
 /// page, the same extension as the browser's name): otherwise it is
 /// refused, and the extension leaves it to the browser (review of #70: a
 /// file behind a login, a referrer check or a one-time link would vanish
-/// from the browser and then fail in Zajil). The referrer, the suggested name and the
-/// cookies are checked by `zajil_host::parse` and carried, but not used
-/// yet: the engine sends no such headers until a later part of M5.
+/// from the browser and then fail in Zajil). The cookies (sent only when
+/// the user allowed them in the extension) and the page go with the check
+/// and the download, from memory (`App::from_browser`).
 fn from_extension(
     store: &QueueStore,
     request: &zajil_host::Request,
     given: &Path,
-    reach: impl FnOnce(&str) -> Result<zajil_core::Probe, String>,
+    headers: &zajil_core::queue::FromBrowserById,
+    reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
 ) -> zajil_host::Response {
     match request {
         zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
-        zajil_host::Request::Download { url, filename, .. } => {
+        zajil_host::Request::Download {
+            url,
+            filename,
+            referrer,
+            cookies,
+            ..
+        } => {
             if let Err(err) = zajil_core::queue::check_url(url) {
                 return zajil_host::Response::refused(err.to_string());
             }
-            let why = match reach(url) {
+            // The browser's cookies (when the user allowed them) and page,
+            // for the check and then the download: in memory only.
+            let from = zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
+            let why = match reach(url, &from) {
                 Ok(probe) => not_the_file(&probe, filename.as_deref()),
                 Err(why) => Some(why),
             };
@@ -1005,7 +1023,13 @@ fn from_extension(
                 limit: None,
             };
             match add_blocking(store, &add, given) {
-                Ok(_) => zajil_host::Response::ok(),
+                Ok(id) => {
+                    headers
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(id, from);
+                    zajil_host::Response::ok()
+                }
                 Err(err) => zajil_host::Response::refused(err.to_string()),
             }
         }
@@ -1454,7 +1478,9 @@ mod tests {
         let (served, given) = (store.clone(), data.path().to_path_buf());
         std::thread::spawn(move || {
             zajil_host::serve(listener, move |request| {
-                from_extension(&served, &request, &given, |_| Ok(probe_of("b.iso", None)))
+                from_extension(&served, &request, &given, &Default::default(), |_, _| {
+                    Ok(probe_of("b.iso", None))
+                })
             });
         });
         let mut stream =
@@ -1486,9 +1512,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            from_extension(&store, &request, data.path(), |_| Ok(probe_of(
-                "a.zip", None
-            ))),
+            from_extension(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                |_, _| Ok(probe_of("a.zip", None))
+            ),
             zajil_host::Response::ok()
         );
         let queues = store.load().unwrap();
@@ -1499,9 +1529,13 @@ mod tests {
         assert_eq!(item.status, Status::Waiting);
         let ping = zajil_host::parse(br#"{"type":"ping","protocol_version":1}"#).unwrap();
         assert_eq!(
-            from_extension(&store, &ping, data.path(), |_| panic!(
-                "a ping reaches nothing"
-            )),
+            from_extension(
+                &store,
+                &ping,
+                data.path(),
+                &Default::default(),
+                |_, _| panic!("a ping reaches nothing")
+            ),
             zajil_host::Response::ok()
         );
         assert_eq!(store.load().unwrap().queues[0].items.len(), 1);
@@ -1545,23 +1579,71 @@ mod tests {
                 "another file (download), not a .zip",
             ),
         ] {
-            let answer = from_extension(&store, &request, data.path(), |_| Ok(probe));
+            let answer = from_extension(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                |_, _| Ok(probe),
+            );
             assert!(!answer.ok);
             assert!(answer.error.as_deref().unwrap().contains(why), "{answer:?}");
         }
         assert!(store.load().unwrap().queues[0].items.is_empty());
         // The same file, its extension in capitals: taken.
-        let answer = from_extension(&store, &request, data.path(), |_| {
-            Ok(probe_of("L.ZIP", Some("application/zip")))
-        });
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &Default::default(),
+            |_, _| Ok(probe_of("L.ZIP", Some("application/zip"))),
+        );
         assert!(answer.ok, "{answer:?}");
         // No name from the browser: only a web page is refused.
         let bare = zajil_host::parse(
             br#"{"type":"download","protocol_version":1,"url":"https://example.com/get?id=1"}"#,
         )
         .unwrap();
-        let answer = from_extension(&store, &bare, data.path(), |_| Ok(probe_of("get", None)));
+        let answer = from_extension(&store, &bare, data.path(), &Default::default(), |_, _| {
+            Ok(probe_of("get", None))
+        });
         assert!(answer.ok, "{answer:?}");
+    }
+
+    /// M5: the cookies and the page the extension sends go with Zajil's
+    /// check, and are kept in memory for the download, under its item; a
+    /// download sent without them keeps none.
+    #[test]
+    fn the_extension_s_cookies_go_with_the_check_and_the_download() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let headers = zajil_core::queue::FromBrowserById::default();
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/a.zip","referrer":"https://example.com/page","cookies":"sid=1"}"#,
+        )
+        .unwrap();
+        let mut checked_with = None;
+        let answer = from_extension(&store, &request, data.path(), &headers, |_, from| {
+            checked_with = Some(from.has_cookies());
+            Ok(probe_of("a.zip", None))
+        });
+        assert!(answer.ok, "{answer:?}");
+        assert_eq!(checked_with, Some(true));
+        let id = store.load().unwrap().queues[0].items[0].id;
+        let kept = headers.lock().unwrap();
+        assert!(kept.get(&id).is_some_and(|f| f.has_cookies()));
+        drop(kept);
+        let bare = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.zip"}"#,
+        )
+        .unwrap();
+        let answer = from_extension(&store, &bare, data.path(), &headers, |_, from| {
+            assert!(!from.has_cookies());
+            Ok(probe_of("b.zip", None))
+        });
+        assert!(answer.ok);
+        let second = store.load().unwrap().queues[0].items[1].id;
+        assert!(!headers.lock().unwrap()[&second].has_cookies());
     }
 
     /// A file Zajil cannot reach itself (behind a login, a referrer check,
@@ -1576,10 +1658,16 @@ mod tests {
         )
         .unwrap();
         let mut asked = Vec::new();
-        let answer = from_extension(&store, &request, data.path(), |url| {
-            asked.push(url.to_owned());
-            Err("the server answered 403 Forbidden".into())
-        });
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &Default::default(),
+            |url, _| {
+                asked.push(url.to_owned());
+                Err("the server answered 403 Forbidden".into())
+            },
+        );
         assert!(!answer.ok);
         assert_eq!(
             answer.error.as_deref(),

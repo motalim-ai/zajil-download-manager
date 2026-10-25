@@ -2,19 +2,31 @@
 // The settings page: capture on or off, the file types, the excluded sites.
 
 import { api } from "./compat.js";
+import { askForCookies, cookiesAllowed, dropCookies } from "./cookies.js";
+import { localize } from "./page.js";
 import { defaults, load, save } from "./settings.js";
 
 /** @param {string} id */
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
-// The language of the texts the browser chose (Arabic for any language
-// but English, as `default_locale`), not the browser's own language.
-const lang = api.i18n.getMessage("lang") || "ar";
-document.documentElement.lang = lang;
-document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
-for (const node of document.querySelectorAll("[data-i18n]")) {
-  node.textContent = api.i18n.getMessage(/** @type {HTMLElement} */ (node).dataset.i18n ?? "") || node.textContent;
+localize(api, document);
+
+/** The cookie permission: what it is now, and the button that changes it. */
+async function showCookies() {
+  const allowed = await cookiesAllowed(api);
+  $("cookies-state").textContent = api.i18n.getMessage(allowed ? "cookiesAllowed" : "cookiesNotAllowed");
+  $("allow").hidden = allowed;
+  $("drop").hidden = !allowed;
 }
+$("allow").addEventListener("click", async () => {
+  await askForCookies(api);
+  await showCookies();
+});
+$("drop").addEventListener("click", async () => {
+  await dropCookies(api);
+  await showCookies();
+});
+await showCookies();
 
 /** @param {import("./settings.js").Settings} settings */
 function show(settings) {
