@@ -33,7 +33,10 @@ fn the_tools_status_says_what_is_missing() {
     let text = printed(&out);
     assert!(text.contains("yt-dlp: not downloaded"), "{text}");
     for tool in ["ffmpeg", "ffprobe"] {
-        assert!(text.lines().any(|l| l.starts_with(&format!("{tool}: "))), "{text}");
+        assert!(
+            text.lines().any(|l| l.starts_with(&format!("{tool}: "))),
+            "{text}"
+        );
     }
 }
 
@@ -59,7 +62,11 @@ fn a_video_command_without_the_tools_says_how_to_get_them() {
     ] {
         let out = zajil(data.path(), args);
         assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
-        assert!(printed(&out).contains("zajil video tools install"), "{}", printed(&out));
+        assert!(
+            printed(&out).contains("zajil video tools install"),
+            "{}",
+            printed(&out)
+        );
     }
 }
 
@@ -68,8 +75,25 @@ fn choices_that_contradict_each_other_are_refused_before_anything_runs() {
     let data = tempfile::tempdir().unwrap();
     for args in [
         &["video", "get", "--video", "137", "https://example.com/v"][..],
-        &["video", "get", "--format", "18", "--audio-only", "https://example.com/v"][..],
-        &["video", "get", "--format", "18", "--video", "1", "--audio", "2", "https://example.com/v"][..],
+        &[
+            "video",
+            "get",
+            "--format",
+            "18",
+            "--audio-only",
+            "https://example.com/v",
+        ][..],
+        &[
+            "video",
+            "get",
+            "--format",
+            "18",
+            "--video",
+            "1",
+            "--audio",
+            "2",
+            "https://example.com/v",
+        ][..],
     ] {
         let out = zajil(data.path(), args);
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", printed(&out));
