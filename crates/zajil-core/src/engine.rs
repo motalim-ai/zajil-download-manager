@@ -627,8 +627,9 @@ impl Engine {
         self.download_until(url, dir, &Stop::new(), on_event).await
     }
 
-    /// Like [`Engine::download`], until `stop` is requested: then the data
-    /// on disk is synced and recorded, and the call returns
+    /// Like [`Engine::download`], until `stop` is requested: then what is on
+    /// disk is synced and recorded (unless a periodic save already did:
+    /// the state file counts only synced bytes, #132), and the call returns
     /// [`Error::Stopped`] only once nothing of the download runs any more
     /// (no write, no save, the part file closed and unlocked). So the
     /// download can be resumed at once in the same process, and no older
@@ -1810,8 +1811,9 @@ impl Transfer {
         Ok(())
     }
 
-    /// The caller asked to stop: records what is on disk, and returns only
-    /// when nothing of the download runs any more. A new download with no
+    /// The caller asked to stop: returns only when nothing of the download
+    /// runs any more. What is on disk is recorded unless a save already did
+    /// (#132): the state file counts only synced bytes. A new download with no
     /// data yet is removed (when `self` is dropped, here: every save was
     /// awaited, so nothing else holds it).
     async fn stopped(mut self) -> Error {
@@ -1819,7 +1821,7 @@ impl Transfer {
             return Error::Stopped { state_file: None };
         }
         // Owner's decision on #132: after a save, a stop does not save
-        // again (the state file counts only synced bytes; at most
+        // again (the state file counts only synced bytes; about one
         // `save_interval` of progress is downloaded again on resume).
         if !self.saved
             && let Err(err) = self.checkpoint().await
@@ -1840,12 +1842,14 @@ impl Transfer {
     }
 
     /// Syncs the data, then records it in the state file (ADR-0004 rule 1).
+    /// The next save comes `save_interval` after this one starts, so a
+    /// slow save does not stretch the time between them (#132).
     async fn checkpoint(&mut self) -> Result<(), Error> {
+        self.last_save = Instant::now();
         self.file.flush().await?;
         self.file.sync_data().await?;
         let watch = self.cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
         save_state(&mut self.state, &self.state_file, watch).await?;
-        self.last_save = Instant::now();
         self.saved = true;
         Ok(())
     }

@@ -132,8 +132,9 @@ pub(crate) struct Job {
     /// A segment whose connection fails this many times in a row, without
     /// writing in between, is given up.
     pub max_failures: u32,
-    /// The caller's request to stop: every connection ends, what is on
-    /// disk is recorded, and only then does [`run`] return.
+    /// The caller's request to stop: every connection ends, and only then
+    /// does [`run`] return. What is on disk is recorded unless a periodic
+    /// save already did (#132): the state file counts only synced bytes.
     pub stop: Stop,
     /// The speed limits every connection goes through.
     pub limits: Limits,
@@ -236,8 +237,13 @@ pub(crate) async fn run(
     // A periodic save has succeeded: the state file counts only synced
     // bytes, so a stop needs no save of its own (#132).
     let mut saved = false;
-    let mut last_save = Instant::now();
-    let mut tick = tokio::time::interval(save_interval);
+    // A save every `save_interval`: the first one interval after the start
+    // (an `interval` would tick at once), and the next one an interval
+    // after the last (`Delay`). So at most about one interval of progress
+    // is not in the state file (owner's decision on #132), plus how long a
+    // slow disk takes to save.
+    let mut tick =
+        tokio::time::interval_at(tokio::time::Instant::now() + save_interval, save_interval);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
@@ -277,11 +283,8 @@ pub(crate) async fn run(
                 let _ = stop.send(true);
             }
             _ = tick.tick() => {
-                if last_save.elapsed() >= save_interval {
-                    checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
-                    last_save = Instant::now();
-                    saved = true;
-                }
+                checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
+                saved = true;
             }
         }
     }
@@ -318,7 +321,7 @@ pub(crate) async fn run(
         }
         // Owner's decision on #132: after a periodic save, a stop does not
         // save again. On a slow disk (Windows, with an antivirus) a second
-        // sync could take seconds; at most `save_interval` of progress is
+        // sync could take seconds; about one `save_interval` of progress is
         // downloaded again on resume, and nothing is lost or wrong.
         if !saved {
             checkpoint(&ctx, &state_file, None).await?;
