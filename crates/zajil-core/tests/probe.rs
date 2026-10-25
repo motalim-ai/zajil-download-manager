@@ -57,6 +57,25 @@ async fn without_ranges_size_or_a_strong_validator_it_cannot_be_resumed() {
     }
 }
 
+/// The media type, for the extension's check that a link did not lead to a
+/// sign-in page (review of #70): parameters dropped, lower case.
+#[tokio::test]
+async fn the_content_type_is_read_without_its_parameters() {
+    let server = TestServer::http();
+    server.put(
+        "/page",
+        FileSpec::new(b"<html>".to_vec()).content_type("Text/HTML; charset=utf-8"),
+    );
+    server.put("/file.zip", FileSpec::new(random_bytes(100, 75)));
+    let page = engine().probe(&server.url("/page")).await.unwrap();
+    assert_eq!(page.content_type.as_deref(), Some("text/html"));
+    let file = engine().probe(&server.url("/file.zip")).await.unwrap();
+    assert_eq!(
+        file.content_type.as_deref(),
+        Some("application/octet-stream")
+    );
+}
+
 #[tokio::test]
 async fn a_missing_file_is_an_error() {
     let server = TestServer::http();

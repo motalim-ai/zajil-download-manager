@@ -28,6 +28,10 @@ const TEXTS = {
  * @param {keyof typeof TEXTS} where
  */
 async function report(result, where) {
+  if (result?.alsoInBrowser) {
+    await notify(t("takenAlsoInBrowser"));
+    return;
+  }
   if (!result || result.outcome === "taken") {
     await api.action.setBadgeText({ text: "" });
     return;

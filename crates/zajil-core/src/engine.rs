@@ -294,6 +294,9 @@ pub struct Probe {
     pub ranges: bool,
     /// The host of the final URL (after redirects), for categories.
     pub host: Option<String>,
+    /// Its media type (`Content-Type` without parameters, lower case), if
+    /// the server said: a sign-in page a link redirected to is `text/html`.
+    pub content_type: Option<String>,
 }
 
 /// Why a download did not finish.
@@ -576,6 +579,13 @@ impl Engine {
             resumable,
             ranges: state.accept_ranges,
             host: response.url().host_str().map(str::to_owned),
+            content_type: response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.split(';').next())
+                .map(|v| v.trim().to_ascii_lowercase())
+                .filter(|v| !v.is_empty()),
         })
     }
 

@@ -113,7 +113,7 @@ describe("Download with Zajil on a link", () => {
     expect(menuMessage({ linkUrl: "https://example.com/a.zip", pageUrl: "https://example.com/" })).toEqual(
       downloadMessage("https://example.com/a.zip", { referrer: "https://example.com/" }),
     );
-    for (const linkUrl of [undefined, "javascript:alert(document.cookie)", "data:text/plain,x", "ftp://example.com/a.zip", "https://u:p@example.com/a.zip", `https://example.com/${"a".repeat(MAX_URL)}`, "https://example.com/\u202e.zip"]) {
+    for (const linkUrl of [undefined, "javascript:alert(document.cookie)", "data:text/plain,x", "ftp://example.com/a.zip", "https://u:p@example.com/a.zip", `https://example.com/${"a".repeat(MAX_URL)}`, "https://example.com/\u202e.zip", "https://example.com/a\u2028.zip", "https://example.com/a\u2029.zip"]) {
       expect(menuMessage({ linkUrl, pageUrl: "https://example.com/" }), String(linkUrl)).toBeNull();
     }
   });
@@ -159,8 +159,16 @@ describe("handing a download over, in Firefox", () => {
 
   it("taken: cancelled and removed only then", async () => {
     const api = firefoxApi({ protocol_version: 1, ok: true });
+    api.downloads.search = vi.fn(async () => [{ id: 7, state: "in_progress" }]);
     expect((await takeOver(api, item(), { pause: pausesSafely(api) })).outcome).toBe("taken");
     expect(api.calls.map((c) => c[0])).toEqual(["native", "cancel", "erase"]);
+  });
+
+  it("taken after the browser finished it: the browser's file and line stay", async () => {
+    const api = firefoxApi({ protocol_version: 1, ok: true });
+    api.downloads.search = vi.fn(async () => [{ id: 7, state: "complete" }]);
+    expect(await takeOver(api, item(), { pause: false })).toEqual({ outcome: "taken", alsoInBrowser: true });
+    expect(api.calls.map((c) => c[0])).toEqual(["native"]);
   });
 
   it("pausing as in Chrome would lose it: the fake shows why the rule exists", async () => {

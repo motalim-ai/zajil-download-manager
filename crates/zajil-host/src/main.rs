@@ -97,16 +97,19 @@ fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, String> {
     let request = request.clone();
     let (done, wait) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut talk = || -> io::Result<Vec<u8>> {
-            write_json(&mut stream, &request)?;
+        // A request that could not be written never reached the app (it
+        // was busy and closed the connection, review of #70): that is not
+        // "did not answer", which tells the extension the app may have it.
+        let mut talk = || -> Result<Vec<u8>, String> {
+            write_json(&mut stream, &request).map_err(|e| format!("cannot reach Zajil: {e}"))?;
             read_frame(&mut stream, MAX_RESPONSE)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
+                .map_err(|e| format!("Zajil did not answer: {e}"))?
+                .ok_or_else(|| "Zajil did not answer: the connection closed".to_owned())
         };
         let _ = done.send(talk());
     });
     let answer = match wait.recv_timeout(CHANNEL_TIMEOUT) {
-        Ok(answer) => answer.map_err(|e| format!("Zajil did not answer: {e}"))?,
+        Ok(answer) => answer?,
         Err(_) => {
             return Err(format!(
                 "Zajil did not answer within {} s",

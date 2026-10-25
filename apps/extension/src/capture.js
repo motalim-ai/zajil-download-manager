@@ -18,7 +18,7 @@ export const NO_ANSWER = ["Zajil did not answer", "Zajil's answer is not valid"]
 /** Control characters, C0 and C1, and the direction marks `zajil-host`
  * refuses in a URL (`queue::check_url`). */
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/;
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 /** A link the host would accept: http or https, no user name or password,
  * no control or direction characters, 8 KiB at most.
@@ -128,7 +128,10 @@ export function menuMessage(info) {
  * or `unreachable` (no host: Zajil is not installed, or the browser
  * integration needs fixing).
  *
- * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string }} Result
+ * `alsoInBrowser`: taken, but the browser had finished it meanwhile
+ * (Firefox, a small file): it is kept in the browser's list too.
+ *
+ * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string, alsoInBrowser?: boolean }} Result
  */
 
 /**
@@ -180,6 +183,12 @@ export async function takeOver(browserApi, item, how) {
     downloadMessage(item.finalUrl || item.url, { referrer: item.referrer, filename: item.filename }),
   );
   if (result.outcome === "taken") {
+    // Not paused (Firefox), the browser may have finished it meanwhile:
+    // then its file stays, and so does its line in the list (review of #70).
+    if (!how.pause) {
+      const [now] = await browserApi.downloads.search({ id: item.id }).catch(() => []);
+      if (now?.state === "complete") return { ...result, alsoInBrowser: true };
+    }
     await browserApi.downloads.cancel(item.id).catch(() => {});
     await browserApi.downloads.erase({ id: item.id }).catch(() => {});
   } else if (how.pause && result.outcome !== "unknown") {

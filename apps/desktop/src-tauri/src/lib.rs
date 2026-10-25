@@ -709,13 +709,13 @@ impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
 /// still has the answer.
 const EXTENSION_REACH: Duration = Duration::from_secs(7);
 
-/// Whether the engine reaches `url` now, as the add dialog does (the first
+/// What the engine reaches at `url` now, as the add dialog does (the first
 /// response's headers only), within [`EXTENSION_REACH`].
-fn reach_file(engine: &Engine, url: &str) -> Result<(), String> {
+fn reach_file(engine: &Engine, url: &str) -> Result<zajil_core::Probe, String> {
     let stop = Stop::new();
     tauri::async_runtime::block_on(async {
         match tokio::time::timeout(EXTENSION_REACH, engine.probe_until(url, &stop)).await {
-            Ok(Ok(_)) => Ok(()),
+            Ok(Ok(probe)) => Ok(probe),
             Ok(Err(err)) => Err(err.to_string()),
             Err(_) => {
                 stop.request();
@@ -725,27 +725,57 @@ fn reach_file(engine: &Engine, url: &str) -> Result<(), String> {
     })
 }
 
+/// Why what Zajil reached is not the file the browser was downloading: a
+/// web page (a sign-in page a link redirected to, review of #70), or a file
+/// of another type than the name the browser had.
+fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option<String> {
+    let page = matches!(
+        probe.content_type.as_deref(),
+        Some("text/html" | "application/xhtml+xml")
+    );
+    if page {
+        return Some("the server sent a web page (a sign-in page?), not the file".into());
+    }
+    let extension = |name: &str| {
+        name.rsplit_once('.')
+            .map(|(_, ext)| ext.to_lowercase())
+            .filter(|ext| !ext.is_empty())
+    };
+    let wanted = browser_name.and_then(extension)?;
+    (extension(&probe.name).as_deref() != Some(wanted.as_str())).then(|| {
+        format!(
+            "the server sent another file ({}), not a .{wanted}",
+            probe.name
+        )
+    })
+}
+
 /// What a request from the extension does: a download goes into the
 /// default queue, by category, as the add dialog adds one, **once Zajil
-/// has reached the file itself** (`reach`): otherwise it is refused, and
-/// the extension leaves it to the browser (review of #70: a file behind a
-/// login, a referrer check or a one-time link would vanish from the browser
-/// and then fail in Zajil). The referrer, the suggested name and the
+/// has reached the file itself** (`reach`), and it is that file (not a web
+/// page, the same extension as the browser's name): otherwise it is
+/// refused, and the extension leaves it to the browser (review of #70: a
+/// file behind a login, a referrer check or a one-time link would vanish
+/// from the browser and then fail in Zajil). The referrer, the suggested name and the
 /// cookies are checked by `zajil_host::parse` and carried, but not used
 /// yet: the engine sends no such headers until a later part of M5.
 fn from_extension(
     store: &QueueStore,
     request: &zajil_host::Request,
     given: &Path,
-    reach: impl FnOnce(&str) -> Result<(), String>,
+    reach: impl FnOnce(&str) -> Result<zajil_core::Probe, String>,
 ) -> zajil_host::Response {
     match request {
         zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
-        zajil_host::Request::Download { url, .. } => {
+        zajil_host::Request::Download { url, filename, .. } => {
             if let Err(err) = zajil_core::queue::check_url(url) {
                 return zajil_host::Response::refused(err.to_string());
             }
-            if let Err(why) = reach(url) {
+            let why = match reach(url) {
+                Ok(probe) => not_the_file(&probe, filename.as_deref()),
+                Err(why) => Some(why),
+            };
+            if let Some(why) = why {
                 return zajil_host::Response::refused(format!("Zajil cannot download it: {why}"));
             }
             let add = AddRequest {
@@ -1061,7 +1091,7 @@ mod tests {
         let (served, given) = (store.clone(), data.path().to_path_buf());
         std::thread::spawn(move || {
             zajil_host::serve(listener, move |request| {
-                from_extension(&served, &request, &given, |_| Ok(()))
+                from_extension(&served, &request, &given, |_| Ok(probe_of("b.iso", None)))
             });
         });
         let mut stream =
@@ -1093,7 +1123,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            from_extension(&store, &request, data.path(), |_| Ok(())),
+            from_extension(&store, &request, data.path(), |_| Ok(probe_of(
+                "a.zip", None
+            ))),
             zajil_host::Response::ok()
         );
         let queues = store.load().unwrap();
@@ -1110,6 +1142,63 @@ mod tests {
             zajil_host::Response::ok()
         );
         assert_eq!(store.load().unwrap().queues[0].items.len(), 1);
+    }
+
+    /// What the engine's probe would say: a file `name` of `content_type`.
+    fn probe_of(name: &str, content_type: Option<&str>) -> zajil_core::Probe {
+        zajil_core::Probe {
+            name: name.to_owned(),
+            size: Some(10),
+            resumable: true,
+            ranges: true,
+            host: Some("example.com".into()),
+            content_type: content_type.map(str::to_owned),
+        }
+    }
+
+    /// A link that leads to a sign-in page (a redirect answered 200 with a
+    /// web page), or to a file of another type, is refused and nothing is
+    /// added: the browser keeps its download (review of #70).
+    #[test]
+    fn a_sign_in_page_or_another_file_is_refused() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/l.zip","filename":"l.zip"}"#,
+        )
+        .unwrap();
+        for (probe, why) in [
+            (probe_of("signin", Some("text/html")), "a web page"),
+            (
+                probe_of("l.zip", Some("application/xhtml+xml")),
+                "a web page",
+            ),
+            (
+                probe_of("signin.php", Some("application/octet-stream")),
+                "another file (signin.php), not a .zip",
+            ),
+            (
+                probe_of("download", None),
+                "another file (download), not a .zip",
+            ),
+        ] {
+            let answer = from_extension(&store, &request, data.path(), |_| Ok(probe));
+            assert!(!answer.ok);
+            assert!(answer.error.as_deref().unwrap().contains(why), "{answer:?}");
+        }
+        assert!(store.load().unwrap().queues[0].items.is_empty());
+        // The same file, its extension in capitals: taken.
+        let answer = from_extension(&store, &request, data.path(), |_| {
+            Ok(probe_of("L.ZIP", Some("application/zip")))
+        });
+        assert!(answer.ok, "{answer:?}");
+        // No name from the browser: only a web page is refused.
+        let bare = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/get?id=1"}"#,
+        )
+        .unwrap();
+        let answer = from_extension(&store, &bare, data.path(), |_| Ok(probe_of("get", None)));
+        assert!(answer.ok, "{answer:?}");
     }
 
     /// A file Zajil cannot reach itself (behind a login, a referrer check,

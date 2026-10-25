@@ -60,7 +60,7 @@ describe("the manifests", () => {
         used.add(m[1] || m[2] || m[3] || m[4] || m[5]);
       }
     }
-    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "optionsSaved", "lang"]) {
+    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang"]) {
       expect(used.has(key), key).toBe(true);
     }
     expect(ar.lang.message).toBe("ar");

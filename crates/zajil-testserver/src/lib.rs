@@ -70,6 +70,7 @@ pub struct FileSpec {
     ignore_if_range: bool,
     send_length: bool,
     content_disposition: Option<String>,
+    content_type: Option<String>,
     cut_after: Option<(u64, usize)>,
     stall_after: Option<u64>,
     bytes_per_sec: Option<u64>,
@@ -100,6 +101,7 @@ impl FileSpec {
             ignore_if_range: false,
             send_length: true,
             content_disposition: None,
+            content_type: None,
             cut_after: None,
             stall_after: None,
             bytes_per_sec: None,
@@ -188,6 +190,13 @@ impl FileSpec {
     /// Raw value of the `Content-Disposition` header.
     pub fn content_disposition(mut self, value: &str) -> Self {
         self.content_disposition = Some(value.to_owned());
+        self
+    }
+
+    /// Raw value of the `Content-Type` header (`application/octet-stream`
+    /// by default).
+    pub fn content_type(mut self, value: &str) -> Self {
+        self.content_type = Some(value.to_owned());
         self
     }
 
@@ -897,7 +906,11 @@ fn respond(
         None
     };
 
-    let mut builder = Response::builder().header(header::CONTENT_TYPE, "application/octet-stream");
+    let content_type = spec
+        .content_type
+        .as_deref()
+        .unwrap_or("application/octet-stream");
+    let mut builder = Response::builder().header(header::CONTENT_TYPE, content_type);
     if spec.ranges {
         builder = builder.header(header::ACCEPT_RANGES, "bytes");
     }

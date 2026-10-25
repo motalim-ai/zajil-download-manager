@@ -61,5 +61,8 @@
   },
   "menuNotALink": {
     "message": "This is not a link to a file Zajil can download."
+  },
+  "takenAlsoInBrowser": {
+    "message": "Zajil took the download, but the browser had finished it too: the file is there twice, so remove one if you like."
   }
 }
