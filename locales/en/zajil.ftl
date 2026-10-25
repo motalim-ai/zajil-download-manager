@@ -461,6 +461,19 @@ schedule-save = Save
 schedule-saved = Saved.
 schedule-close = Close
 
+## الاكتمال
+
+complete-title = Download complete
+complete-name = Name
+complete-size = Size
+complete-folder = Saved in
+complete-url = Link
+complete-open = Open
+complete-open-folder = Open folder
+complete-close = Close
+complete-dont-show = Don't show this window again
+complete-setting = Show the «Download complete» window when a download finishes
+
 ## Video (M6)
 
 video-soon = Video downloads are coming soon.

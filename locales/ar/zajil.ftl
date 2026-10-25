@@ -519,6 +519,19 @@ schedule-save = حفظ
 schedule-saved = حُفظ.
 schedule-close = إغلاق
 
+## الاكتمال
+
+complete-title = اكتمل التحميل
+complete-name = الاسم
+complete-size = الحجم
+complete-folder = حُفظ في
+complete-url = الرابط
+complete-open = افتح
+complete-open-folder = افتح المجلد
+complete-close = إغلاق
+complete-dont-show = لا تُظهر هذه النافذة مرة أخرى
+complete-setting = أظهر نافذة «اكتمل التحميل» حين ينتهي تحميل
+
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.

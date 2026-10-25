@@ -63,6 +63,18 @@ pub(crate) fn open<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     label: &str,
     title: &str,
+    size: (f64, f64),
+) -> tauri::Result<()> {
+    open_page(handle, label, label, title, size)
+}
+
+/// [`open`], with `page` after `win=` in the page's address (a window of
+/// a download: its kind and id, never a link).
+pub(crate) fn open_page<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    label: &str,
+    page: &str,
+    title: &str,
     (width, height): (f64, f64),
 ) -> tauri::Result<()> {
     if let Some(window) = handle.get_webview_window(label) {
@@ -73,7 +85,7 @@ pub(crate) fn open<R: tauri::Runtime>(
     let window = WebviewWindowBuilder::new(
         handle,
         label,
-        WebviewUrl::App(format!("index.html?win={label}").into()),
+        WebviewUrl::App(format!("index.html?win={page}").into()),
     )
     .title(title)
     .inner_size(width, height)
