@@ -93,7 +93,7 @@ action-delete = Delete
 action-details = Details
 action-open-folder = Open folder
 action-cancel-download = Cancel download
-search-placeholder = Search downloads
+search-placeholder = Search and filter
 
 ## Table
 
@@ -289,3 +289,39 @@ import-kept = These queues kept their own settings: { $names }.
 categories-add-site = Add a site
 categories-folder-clear = No folder
 categories-remove = Remove { $value }
+
+## Main window (M5.5, the design of #83)
+
+tb-add = Add link
+tb-resume = Resume
+tb-pause = Pause
+tb-pause-all = Pause all
+tb-delete = Delete
+tb-delete-done = Clear finished
+tb-settings = Settings
+tb-schedule = Schedule
+tb-run-queue = Run queue
+tb-halt-queue = Halt queue
+tb-toolbar = Download tools
+tree-unfinished = Unfinished
+tree-finished = Finished
+tree-expand = Show what is under it
+queue-main = Main queue
+queue-starts = Starts { $time }
+col-name = File name
+col-size = Size
+col-status = Status
+col-left = Time left
+col-speed = Speed
+col-last-try = Last try
+col-description = Description
+st-in-queue = In queue
+st-paused = Paused
+st-error = Error { $code }
+st-failed = Failed
+footer-selected = Selected: { $number }
+addlink-title = Add a link
+addlink-url = Link
+addlink-from-clipboard = Taken from the clipboard
+addlink-ok = OK
+addlink-cancel = Cancel

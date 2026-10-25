@@ -1,5 +1,8 @@
 <script lang="ts">
-  // Simple line icons drawn for Zajil (not taken from any other program).
+  import { lucide } from "../lucide";
+
+  // Simple line icons drawn for Zajil (not taken from any other program),
+  // and Lucide's (M5.5, `../lucide.ts`, ISC) by their Lucide names.
   const paths: Record<string, string> = {
     plus: '<path d="M12 5v14M5 12h14"/>',
     pause: '<path d="M9 6v12M15 6v12"/>',
@@ -22,7 +25,7 @@
     gauge: '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="M12 16l3.5-4.5"/>',
     open: '<path d="M14 4.5h5.5V10M19.5 4.5L12 12M10 5.5H4.5v14h14V14"/>',
   };
-  let { name, size = 18 }: { name: string; size?: number } = $props();
+  let { name, size = 18, stroke = 1.8 }: { name: string; size?: number; stroke?: number } = $props();
 </script>
 
 <svg
@@ -33,11 +36,11 @@
   aria-hidden="true"
   fill="none"
   stroke="currentColor"
-  stroke-width="1.8"
+  stroke-width={stroke}
   stroke-linecap="round"
   stroke-linejoin="round"
 >
-  {@html paths[name] ?? ""}
+  {@html paths[name] ?? lucide[name] ?? ""}
 </svg>
 
 <style>

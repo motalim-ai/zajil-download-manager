@@ -1,8 +1,17 @@
+<script lang="ts" module>
+  /** The HTTP status a failed download's error names (`the server
+   * answered 403 …`), if any. */
+  export function errorCode(error: string | null): string | null {
+    return /\banswered (\d{3})\b/.exec(error ?? "")?.[1] ?? null;
+  }
+</script>
+
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
-  import Feathers from "./Feathers.svelte";
-  import StatusChip from "./StatusChip.svelte";
+  import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
+  import { isMod } from "../keys";
   import { left, percent, size, speed } from "../format";
   import type { DownloadView } from "../bindings/DownloadView";
 
@@ -10,32 +19,71 @@
     downloads,
     selected = $bindable(),
     onopen,
-  }: { downloads: DownloadView[]; selected: number | null; onopen: (id: number) => void } = $props();
+  }: {
+    downloads: DownloadView[];
+    /** The selected downloads' ids, in table order. */
+    selected: number[];
+    onopen: (id: number) => void;
+  } = $props();
 
-  const extension = (name: string) => (/\.([A-Za-z0-9]{1,4})[A-Za-z0-9]*$/.exec(name)?.[1] ?? "").toUpperCase();
   const fraction = (d: DownloadView) => (d.size ? d.done / d.size : d.status === "done" ? 1 : 0);
+  const pct = (d: DownloadView) => percent(locale.lang, locale.digits, fraction(d));
 
-  // The row Tab reaches: the selected one, else the first.
-  const current = $derived(Math.max(downloads.findIndex((d) => d.id === selected), 0));
+  // The row the keyboard is on, and where a Shift range starts.
+  let focus = $state<number | null>(null);
+  let anchor = $state<number | null>(null);
+  const focusIndex = $derived(Math.max(downloads.findIndex((d) => d.id === (focus ?? selected[0])), 0));
 
-  // Keyboard first: the arrows, Home and End move the selection; Space
-  // selects the focused row; Enter (or a double click) opens its details.
-  // An arrow on a row that is not
-  // selected selects that row first (review of #46: it skipped it).
+  function range(from: number, to: number): number[] {
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    return downloads.slice(a, b + 1).map((d) => d.id);
+  }
+
+  /** A click, as file lists do: alone it selects that row; with Ctrl (⌘ on
+   * macOS) it adds or removes it; with Shift it selects from the anchor. */
+  function pick(event: MouseEvent, index: number) {
+    const id = downloads[index]!.id;
+    if (event.shiftKey && anchor !== null) {
+      const from = downloads.findIndex((d) => d.id === anchor);
+      selected = range(from < 0 ? index : from, index);
+    } else if (event.ctrlKey || event.metaKey) {
+      const set = new Set(selected);
+      if (!set.delete(id)) set.add(id);
+      selected = downloads.filter((d) => set.has(d.id)).map((d) => d.id);
+      anchor = id;
+    } else {
+      selected = [id];
+      anchor = id;
+    }
+    focus = id;
+  }
+
+  // The arrows, Home and End move (Shift extends the selection); Space
+  // selects the row; Enter opens it; Ctrl+A (⌘A) selects every row.
   function onkeydown(event: KeyboardEvent, index: number) {
-    const here = downloads[index]?.id !== selected;
+    if (isMod(event, "a")) {
+      event.preventDefault();
+      selected = downloads.map((d) => d.id);
+      return;
+    }
     const next =
-      event.key === "ArrowDown" ? (here ? index : index + 1)
-      : event.key === "ArrowUp" ? (here ? index : index - 1)
+      event.key === "ArrowDown" ? index + 1
+      : event.key === "ArrowUp" ? index - 1
       : event.key === "Home" ? 0
       : event.key === "End" ? downloads.length - 1
       : event.key === " " ? index
       : -1;
     if (next >= 0 && next < downloads.length) {
       event.preventDefault();
-      const id = downloads[next]?.id ?? null;
-      selected = id;
-      (document.getElementById(`row-${id}`) as HTMLElement | null)?.focus();
+      const id = downloads[next]!.id;
+      if (event.shiftKey && anchor !== null) {
+        selected = range(downloads.findIndex((d) => d.id === anchor), next);
+      } else {
+        selected = [id];
+        anchor = id;
+      }
+      focus = id;
+      document.getElementById(`row-${id}`)?.focus();
     } else if (event.key === "Enter") {
       const id = downloads[index]?.id;
       if (id !== undefined) onopen(id);
@@ -44,46 +92,64 @@
 </script>
 
 <div class="scroll">
-  <!-- A grid, so screen readers say which row is selected. -->
-  <table role="grid" aria-label={locale.t("nav-all")}>
+  <table class="grid" aria-label={locale.t("nav-all")} aria-multiselectable="true" role="grid">
+    <colgroup>
+      <col class="c-name" /><col class="c-size" /><col class="c-status" /><col class="c-left" /><col class="c-speed" /><col class="c-last" /><col class="c-desc" />
+    </colgroup>
     <thead>
       <tr>
-        <th scope="col">{locale.t("column-name")}</th>
-        <th scope="col">{locale.t("column-size")}</th>
-        <th scope="col">{locale.t("column-progress")}</th>
-        <th scope="col">{locale.t("column-speed")}</th>
-        <th scope="col">{locale.t("column-left")}</th>
-        <th scope="col">{locale.t("column-status")}</th>
+        <th scope="col">{locale.t("col-name")}</th>
+        <th scope="col">{locale.t("col-size")}</th>
+        <th scope="col">{locale.t("col-status")}</th>
+        <th scope="col">{locale.t("col-left")}</th>
+        <th scope="col">{locale.t("col-speed")}</th>
+        <th scope="col">{locale.t("col-last-try")}</th>
+        <th scope="col">{locale.t("col-description")}</th>
       </tr>
     </thead>
     <tbody>
       {#each downloads as d, i (d.id)}
         <tr
           id="row-{d.id}"
-          tabindex={i === current ? 0 : -1}
-          aria-selected={selected === d.id}
-          onclick={() => (selected = d.id)}
+          tabindex={i === focusIndex ? 0 : -1}
+          aria-selected={selected.includes(d.id)}
+          onclick={(e) => pick(e, i)}
           ondblclick={() => onopen(d.id)}
           onkeydown={(e) => onkeydown(e, i)}
         >
-          <td><div class="name"><span class="type" aria-hidden="true">{extension(d.name)}</span><FileName name={d.name} /></div></td>
-          <td class="num muted">{d.size === null ? "" : size(locale.lang, locale.digits, d.size)}</td>
           <td>
-            <span class="progress">
-              <Feathers
-                parts={d.parts}
-                status={d.status}
-                label={locale.t("progress-label", {
-                  percent: percent(locale.lang, locale.digits, fraction(d)),
-                  count: d.segments,
-                })}
-              />
-              <span class="pct num" aria-hidden="true">{percent(locale.lang, locale.digits, fraction(d))}</span>
+            <span class="nm">
+              <span class="ft" aria-hidden="true"><Icon name={categoryIcon(d.category)} size={14} /></span>
+              <FileName name={d.name} />
             </span>
           </td>
-          <td class="num">{speed(locale.lang, locale.digits, d.speed)}</td>
-          <td class="num muted">{d.size === null ? "" : left(locale.lang, locale.digits, d.size - d.done, d.speed)}</td>
-          <td><StatusChip status={d.status} browser={d.waits_for_browser} held={d.needs_ok} /></td>
+          <td class="num muted">{d.size === null ? "" : size(locale.lang, locale.digits, d.size)}</td>
+          <td>
+            {#if d.needs_ok}
+              <span class="st paused"><Icon name="circle-alert" size={14} />{locale.t("status-needs-ok")}</span>
+            {:else if d.waits_for_browser}
+              <span class="st paused"><Icon name="link-2" size={14} />{locale.t("status-open-browser")}</span>
+            {:else if d.status === "active"}
+              <span class="st">
+                <span class="mini" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
+                <span class="pct num">{pct(d)}</span>
+              </span>
+            {:else if d.status === "paused"}
+              <span class="st paused"><Icon name="pause" size={14} />{locale.t("st-paused")} <span class="num">{pct(d)}</span></span>
+            {:else if d.status === "done"}
+              <span class="st done"><Icon name="circle-check" size={14} />{locale.t("status-done")}</span>
+            {:else if d.status === "failed"}
+              {@const code = errorCode(d.error)}
+              <span class="st failed" title={d.error ?? undefined}><Icon name="circle-alert" size={14} />{code ? locale.t("st-error", { code }) : locale.t("st-failed")}</span>
+            {:else}
+              <span class="st waiting"><Icon name="list-end" size={14} />{locale.t("st-in-queue")}</span>
+            {/if}
+          </td>
+          <td class="num muted">{d.status === "active" && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : ""}</td>
+          <td class="num">{d.status === "active" ? speed(locale.lang, locale.digits, d.speed) : ""}</td>
+          <!-- «Last try» and «Description» come with #95 (zajil-core). -->
+          <td class="num faint"></td>
+          <td class="faint"></td>
         </tr>
       {/each}
     </tbody>
@@ -94,27 +160,63 @@
   .scroll {
     overflow: auto;
     flex: 1;
+    min-height: 0;
   }
-  table {
+  table.grid {
     width: 100%;
+    min-width: 900px;
     border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+  }
+  .c-name {
+    width: 34%;
+  }
+  .c-size {
+    width: 11%;
+  }
+  .c-status {
+    width: 15%;
+  }
+  .c-left {
+    width: 10%;
+  }
+  .c-speed {
+    width: 11%;
+  }
+  .c-last {
+    width: 10%;
+  }
+  .c-desc {
+    width: 9%;
   }
   th {
     text-align: start;
     font-size: 12px;
     font-weight: 600;
     color: var(--faint);
-    padding: 8px 12px;
+    padding: 7px 10px;
     border-bottom: 1px solid var(--line);
+    background: var(--surface);
     position: sticky;
     top: 0;
-    background: var(--surface);
+    white-space: nowrap;
+  }
+  th + th::before {
+    content: "";
+    position: absolute;
+    inset-block: 7px;
+    inset-inline-start: 0;
+    width: 1px;
+    background: var(--line);
   }
   td {
-    padding: 9px 12px;
+    padding: 6px 10px;
     border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
-    vertical-align: middle;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
   }
   tr {
     cursor: default;
@@ -126,36 +228,64 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
-  .name {
+  .nm {
     display: flex;
     align-items: center;
-    gap: 10px;
-    max-width: 360px;
+    gap: 8px;
+    min-width: 0;
   }
-  .type {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
+  .ft {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
     display: grid;
     place-items: center;
+    flex: none;
     background: var(--sunken);
     color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-    flex: none;
     border: 1px solid var(--line);
   }
   .muted {
     color: var(--muted);
   }
-  .progress {
+  .faint {
+    color: var(--faint);
+  }
+  .st {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
   }
   .pct {
-    font-size: 12px;
-    color: var(--muted);
     min-width: 34px;
+    font-size: 12px;
+  }
+  .mini {
+    display: inline-block;
+    width: 64px;
+    height: 6px;
+    border-radius: 99px;
+    background: var(--feather-bg);
+    overflow: hidden;
+    position: relative;
+  }
+  .mini b {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    border-radius: inherit;
+    background: var(--feather);
+  }
+  .done {
+    color: var(--green);
+  }
+  .paused {
+    color: var(--amber);
+  }
+  .failed {
+    color: var(--red);
+  }
+  .waiting {
+    color: var(--muted);
   }
 </style>

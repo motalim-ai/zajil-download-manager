@@ -30,12 +30,12 @@ connections-count =
     }
 queues-count =
     { PLURAL($count) ->
-        [zero] لا قوائم
-        [one] قائمة واحدة
-        [two] قائمتان
-        [few] { $count } قوائم
-        [many] { $count } قائمةً
-       *[other] { $count } قائمة
+        [zero] لا طوابير
+        [one] طابور واحد
+        [two] طابوران
+        [few] { $count } طوابير
+        [many] { $count } طابورًا
+       *[other] { $count } طابور
     }
 files-count =
     { PLURAL($count) ->
@@ -100,7 +100,7 @@ nav-all = كل التحميلات
 nav-active = تعمل الآن
 nav-done = مكتملة
 nav-categories = الفئات
-nav-queues = القوائم
+nav-queues = الطوابير
 nav-settings = الإعدادات
 queue-window = من { $start } إلى { $stop }
 
@@ -123,7 +123,7 @@ action-delete = حذف
 action-details = التفاصيل
 action-open-folder = فتح المجلد
 action-cancel-download = إلغاء التحميل
-search-placeholder = ابحث في التحميلات
+search-placeholder = بحث وتصفية
 
 ## الجدول
 
@@ -178,7 +178,7 @@ add-file-name = اسم الملف
 add-category = الفئة
 add-category-extension = { $category } (من الامتداد { $extension })
 add-category-site = { $category } (من الموقع { $site })
-add-queue = القائمة
+add-queue = الطابور
 add-folder = المجلد
 add-change = تغيير
 add-connections = الاتصالات
@@ -186,7 +186,7 @@ add-connections-hint = من { $min } إلى { $max }
 add-limit = حد السرعة لهذا التحميل
 add-limit-none = بلا حد
 add-cancel = إلغاء
-add-later = أضف إلى القائمة
+add-later = أضف إلى الطابور
 add-start = ابدأ التحميل
 
 ## التفاصيل
@@ -209,7 +209,7 @@ details-no = لا
 details-unknown = غير معروف
 details-back = رجوع إلى القائمة
 details-limit = حد السرعة
-details-queue = القائمة
+details-queue = الطابور
 details-speed-chart = السرعة في آخر دقيقة
 details-chart-then = قبل دقيقة
 details-chart-now = الآن
@@ -277,8 +277,8 @@ settings-browser-working = يسجّل…
 settings-clipboard = الحافظة
 settings-clipboard-label = راقب الحافظة، وضع رابط التحميل الذي أنسخه في خانة الإضافة
 settings-clipboard-hint = ينظر زاجِل في الحافظة مرتين في الثانية بحثًا عن رابط ملف، ولا يحفظ ما فيها. ولا يتصل بالرابط ولا يضيف شيئًا قبل أن تضغط «حمّل».
-settings-export = صدّر القوائم
-settings-import = استورد قوائم
+settings-export = صدّر الطوابير
+settings-import = استورد طوابير
 settings-export-warning = الملف فيه الروابط كما هي، وبعضها قد يحمل مفاتيح دخول مؤقتة. لا تنشره.
 
 ## الفئات
@@ -313,7 +313,7 @@ notify-failed-title = فشل التحميل
 notify-failed-body = { $name }: { $reason }
 
 ## الإعدادات والفئات (مفاتيح كانت ناقصة: مراجعة #57)
-settings-queues = القوائم
+settings-queues = الطوابير
 settings-folder-choose = اختر مجلدًا
 settings-folder-default = مجلد التحميلات في النظام
 settings-import-keep-folders = استخدم المجلدات التي في الملف المستورد
@@ -321,7 +321,7 @@ settings-limit-value = الحد
 settings-limit-unit = الوحدة
 unit-kib-per-second = كيلوبايت/ث
 unit-mib-per-second = ميجابايت/ث
-export-done = صُدّرت القوائم.
+export-done = صُدّرت الطوابير.
 import-done =
     { PLURAL($count) ->
         [zero] لم يُضف أي تحميل.
@@ -331,7 +331,43 @@ import-done =
         [many] أُضيف { $count } تحميلًا.
        *[other] أُضيف { $count } تحميل.
     }
-import-kept = هذه القوائم أبقت إعداداتها: { $names }.
+import-kept = هذه الطوابير أبقت إعداداتها: { $names }.
 categories-add-site = أضف موقعًا
 categories-folder-clear = بلا مجلد
 categories-remove = احذف { $value }
+
+## النافذة الرئيسية (M5.5، تصميم #83)
+
+tb-add = إضافة رابط
+tb-resume = استكمال
+tb-pause = إيقاف
+tb-pause-all = إيقاف الكل
+tb-delete = حذف
+tb-delete-done = حذف المكتمل
+tb-settings = الإعدادات
+tb-schedule = الجدولة
+tb-run-queue = تشغيل الطابور
+tb-halt-queue = إيقاف الطابور
+tb-toolbar = أدوات التحميل
+tree-unfinished = غير مكتملة
+tree-finished = مكتملة
+tree-expand = أظهر ما تحتها
+queue-main = الطابور الرئيسي
+queue-starts = يبدأ { $time }
+col-name = اسم الملف
+col-size = الحجم
+col-status = الحالة
+col-left = الوقت المتبقي
+col-speed = السرعة
+col-last-try = آخر محاولة
+col-description = الوصف
+st-in-queue = في الطابور
+st-paused = متوقف
+st-error = خطأ { $code }
+st-failed = فشل
+footer-selected = التحديد: { $number }
+addlink-title = إضافة رابط
+addlink-url = الرابط
+addlink-from-clipboard = أُخذ الرابط من الحافظة
+addlink-ok = تمام
+addlink-cancel = إلغاء

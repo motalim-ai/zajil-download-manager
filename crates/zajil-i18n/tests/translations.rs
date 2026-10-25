@@ -173,12 +173,12 @@ const ARABIC: &[(&str, [&str; 6])] = &[
     (
         "queues-count",
         [
-            "لا قوائم",
-            "قائمة واحدة",
-            "قائمتان",
-            "3 قوائم",
-            "11 قائمةً",
-            "100 قائمة",
+            "لا طوابير",
+            "طابور واحد",
+            "طابوران",
+            "3 طوابير",
+            "11 طابورًا",
+            "100 طابور",
         ],
     ),
     (
@@ -672,6 +672,11 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-connections-value", &["active", "total"]),
     ("details-file-map", &["size"]),
     ("details-from-to", &["folder", "site"]),
+    // M5.5: a time already formatted, an HTTP status code, and a number
+    // shown alone (no noun after it).
+    ("queue-starts", &["time"]),
+    ("st-error", &["code"]),
+    ("footer-selected", &["number"]),
     // The engine's own words (English), and two sizes formatted beforehand.
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
@@ -798,7 +803,7 @@ const WHOLE_TEXTS: &[Whole] = &[
     },
     Whole {
         key: "import-kept",
-        ar: (&[("names", "NAMES")], "هذه القوائم أبقت إعداداتها: NAMES."),
+        ar: (&[("names", "NAMES")], "هذه الطوابير أبقت إعداداتها: NAMES."),
         en: (
             &[("names", "NAMES")],
             "These queues kept their own settings: NAMES.",
@@ -830,6 +835,21 @@ const WHOLE_TEXTS: &[Whole] = &[
             &[("theirs", "THEIRS"), ("ours", "OURS")],
             "The new link is to another file: its size is THEIRS, this download's OURS.",
         ),
+    },
+    Whole {
+        key: "queue-starts",
+        ar: (&[("time", "TIME")], "يبدأ TIME"),
+        en: (&[("time", "TIME")], "Starts TIME"),
+    },
+    Whole {
+        key: "st-error",
+        ar: (&[("code", "CODE")], "خطأ CODE"),
+        en: (&[("code", "CODE")], "Error CODE"),
+    },
+    Whole {
+        key: "footer-selected",
+        ar: (&[("number", "NUMBER")], "التحديد: NUMBER"),
+        en: (&[("number", "NUMBER")], "Selected: NUMBER"),
     },
     Whole {
         key: "footer-limit",
