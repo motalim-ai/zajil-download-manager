@@ -127,6 +127,14 @@ fn d(
         // A demo row's segments are its feathers.
         segments: parts.len().max(1) as u32,
         error: (status == StatusView::Failed).then(|| "the server answered 404 Not Found".into()),
+        // «Last try» and «Description» (#95), on a few rows.
+        last_try: (status != StatusView::Waiting)
+            .then(|| format!("2026-10-25T{:02}:{:02}:00Z", 6 + id % 7, (id * 13) % 60)),
+        description: match id {
+            1 => Some("للتثبيت على جهاز المكتب".into()),
+            3 => Some("Q3 sales, for the board".into()),
+            _ => None,
+        },
         // The night queue's waiting archive came from a browser that is
         // not open (M5).
         waits_for_browser: id == 5,

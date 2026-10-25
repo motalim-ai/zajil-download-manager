@@ -73,6 +73,10 @@ pub struct DownloadView {
     /// It waits for its browser's cookies after a restart, and that
     /// browser is not open (M5): «افتح المتصفح ليكمل».
     pub waits_for_browser: bool,
+    /// The user's description (#95).
+    pub description: Option<String>,
+    /// When it last started or resumed (#95): RFC 3339 in UTC.
+    pub last_try: Option<String>,
     /// A file that can run code, from the browser: it waits for the user
     /// to start it (security review #84).
     pub needs_ok: bool,
@@ -145,6 +149,15 @@ pub fn is_web_page(content_type: Option<&str>) -> bool {
 #[ts(export)]
 pub struct AddRequest {
     pub url: String,
+    /// The name the user gave the file; `null`: the server's (#103).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The category the user chose; `null`: by its name or site (#103).
+    #[serde(default)]
+    pub category: Option<String>,
+    /// The user's description (#95).
+    #[serde(default)]
+    pub description: Option<String>,
     pub queue: Option<String>,
     /// A folder of its own; `null`: by category.
     pub folder: Option<String>,
@@ -537,6 +550,8 @@ pub fn download(
                 .and_then(file_name)
                 .and_then(|n| n.strip_suffix(STATE_SUFFIX).map(str::to_owned))
         })
+        // The user's own name (#103) before the server has been asked.
+        .or_else(|| item.name.clone())
         .unwrap_or_else(|| name_from_url(&item.url));
     let host = host_of(&item.url);
     let folder = item
@@ -562,9 +577,16 @@ pub fn download(
     };
     DownloadView {
         id: item.id,
-        category: categories
-            .classify(&name, host.as_deref())
+        // The category the user chose (#103), while it exists; else the
+        // one its name or site gives.
+        category: item
+            .category
+            .as_deref()
+            .and_then(|id| categories.get(id))
+            .or_else(|| categories.classify(&name, host.as_deref()))
             .map(|c| c.id.clone()),
+        description: item.description.clone(),
+        last_try: item.last_try.clone(),
         name,
         host,
         size,

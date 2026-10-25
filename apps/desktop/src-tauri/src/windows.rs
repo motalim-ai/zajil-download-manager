@@ -29,7 +29,7 @@ pub const INFO: &str = "add-info";
 /// The «Add a link» window's size, in logical pixels.
 pub const LINK_SIZE: (f64, f64) = (560.0, 230.0);
 /// The «Download file info» window's.
-pub const INFO_SIZE: (f64, f64) = (680.0, 440.0);
+pub const INFO_SIZE: (f64, f64) = (680.0, 500.0);
 
 /// A progress window's size with its details shown (design window 4).
 pub const PROGRESS_SIZE: (f64, f64) = (600.0, 640.0);

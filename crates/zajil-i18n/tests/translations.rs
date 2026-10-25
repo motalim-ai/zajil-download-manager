@@ -732,6 +732,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A time already written for the user's language.
+    ("last-try-yesterday", &["time"]),
     ("progress-working", &["number"]),
     // Two texts already made, a count and «N working».
     ("progress-connections", &["connections", "working"]),
@@ -996,6 +998,11 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "progress-working",
         ar: (&[("number", "NUMBER")], "يعمل NUMBER"),
         en: (&[("number", "NUMBER")], "NUMBER working"),
+    },
+    Whole {
+        key: "last-try-yesterday",
+        ar: (&[("time", "TIME")], "أمس TIME"),
+        en: (&[("time", "TIME")], "Yesterday TIME"),
     },
     Whole {
         key: "footer-selected",

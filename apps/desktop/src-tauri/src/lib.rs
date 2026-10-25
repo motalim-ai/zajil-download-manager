@@ -1480,6 +1480,9 @@ fn from_extension(
             .any(zajil_core::category::runs_code);
             let add = AddRequest {
                 url: url.clone(),
+                name: None,
+                category: None,
+                description: None,
                 queue: None,
                 folder: None,
                 start: !runs_code,
@@ -1545,6 +1548,27 @@ fn add_blocking(
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
         let id = queues.add(queue, &request.url, given)?;
+        // The user's name, category and description (#103, #95), in the
+        // same write: the queue never sees the download without them.
+        let given_name = request
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        if given_name.is_some() {
+            queues.set_name(id, given_name)?;
+        }
+        if let Some(category) = request.category.as_deref() {
+            queues.set_category(id, Some(category))?;
+        }
+        let description = request
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty());
+        if description.is_some() {
+            queues.set_description(id, description)?;
+        }
         let item = queues.item_mut(id).expect("just added");
         // Without a folder of its own, a download goes by its category.
         item.categorize = request.folder.is_none();
@@ -1996,6 +2020,49 @@ async fn remove<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// «Download file info» adds the download with the user's own name,
+    /// category and description (#103, #95); an empty name or description
+    /// leaves the server's name and none.
+    #[test]
+    fn a_download_is_added_with_the_users_name_category_and_description() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = AddRequest {
+            url: "https://example.com/v.mp4".into(),
+            name: Some("  درس أول.mp4 ".into()),
+            category: Some("music".into()),
+            description: Some(" للمراجعة ".into()),
+            queue: None,
+            folder: None,
+            start: false,
+            limit: None,
+        };
+        let id = add_blocking(&store, &request, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(item.name.as_deref(), Some("درس أول.mp4"));
+        assert_eq!(item.category.as_deref(), Some("music"));
+        assert_eq!(item.description.as_deref(), Some("للمراجعة"));
+
+        let plain = AddRequest {
+            name: Some("   ".into()),
+            category: None,
+            description: Some("".into()),
+            ..request
+        };
+        let id = add_blocking(&store, &plain, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(
+            (
+                item.name.as_ref(),
+                item.category.as_ref(),
+                item.description.as_ref()
+            ),
+            (None, None, None)
+        );
+    }
 
     /// The main window is the same on every system but for its title bar
     /// (the design of #83): hidden under the page on macOS, none on Windows

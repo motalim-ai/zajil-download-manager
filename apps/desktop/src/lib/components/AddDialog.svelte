@@ -3,7 +3,6 @@
   import Icon from "./Icon.svelte";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
-  import FileName from "./FileName.svelte";
   import { probeSentence, sizeText } from "../probeText";
   import { chosenFolder } from "../addFolder";
   import type { ProbeView } from "../bindings/ProbeView";
@@ -77,9 +76,27 @@
   const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? locale.t(`category-${id}`);
   const extension = $derived((/\.([^.]+)$/.exec(probe?.name ?? "")?.[1] ?? "").toUpperCase());
 
+  // The name and the description as the user leaves them (#103, #95).
+  let name = $state("");
+  let description = $state("");
+  $effect(() => {
+    if (probe) name = probe.name;
+  });
   function add(start: boolean, queue = "main") {
     later = false;
-    if (!busy) onadd({ url, queue, folder: where.request, start, limit: null }, remember && folder !== null ? category : null);
+    const own = name.trim();
+    const request = {
+      url,
+      name: own && own !== probe?.name ? own : null,
+      // Kept only when the user picked one (#103); else by name or site.
+      category: picked === undefined ? null : category,
+      description: description.trim() || null,
+      queue,
+      folder: where.request,
+      start,
+      limit: null,
+    };
+    if (!busy) onadd(request, remember && folder !== null ? category : null);
   }
   async function change() {
     const chosen = await onchoosefolder();
@@ -152,12 +169,10 @@
           </button>
         </div>
 
-        <span class="label" id="add-name-label">{locale.t("add-file-name")}</span>
-        <!-- The name it is saved under, with the names' bidi rule
-             (fname.ts); editable once zajil-core keeps one (#103). -->
-        <div class="value name" role="textbox" aria-readonly="true" aria-labelledby="add-name-label" tabindex="0">
-          <span class="text"><FileName name={probe.name} /></span>
-        </div>
+        <label class="label" for="add-name">{locale.t("add-file-name")}</label>
+        <!-- The name it is saved under: the server's, or the user's own
+             (#103); never empty (an emptied box means the server's). -->
+        <input id="add-name" class="value name" dir="auto" autocomplete="off" spellcheck="false" bind:value={name} />
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
@@ -172,6 +187,16 @@
             {locale.t("add-remember", { category: categoryName(category) })}
           </label>
         {/if}
+
+        <label class="label" for="add-description">{locale.t("add-description")}</label>
+        <input
+          id="add-description"
+          class="value name"
+          dir="auto"
+          maxlength="1000"
+          placeholder={locale.t("add-description-hint")}
+          bind:value={description}
+        />
       {/if}
     </div>
 
@@ -289,9 +314,16 @@
      owner's test: the name came out empty). */
   .name {
     min-width: 8ch;
+    font: inherit;
+    color: var(--ink);
+    outline: none;
   }
-  .name .text {
-    flex: 1;
+  .name:focus {
+    border-color: var(--accent);
+    background: var(--surface);
+  }
+  .name::placeholder {
+    color: var(--faint);
   }
   .page {
     display: flex;
