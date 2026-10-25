@@ -12,6 +12,7 @@ const files = [
   "capture.js",
   "compat.js",
   "cookies.js",
+  "link.js",
   "page.js",
   "settings.js",
   "options.html",

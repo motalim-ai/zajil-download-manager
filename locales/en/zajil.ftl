@@ -60,6 +60,8 @@ status-active = Downloading
 status-paused = Paused
 status-done = Done
 status-failed = Failed
+status-open-browser = Open the browser to go on
+status-needs-ok = Waits for your OK
 status-scheduled = Scheduled { $time }
 
 ## Sidebar
@@ -170,6 +172,9 @@ details-speed-chart = Speed over the last minute
 details-chart-then = A minute ago
 details-chart-now = Now
 details-failed = The download stopped: { $error }
+details-open-browser = This download came from the browser with its cookies, and Zajil does not keep cookies. Open the browser (and the same profile) it came from: Zajil takes them from it and goes on by itself. If that browser is gone, go on without the cookies.
+details-without-cookies = Go on without cookies
+details-needs-ok = This file can run programs on your computer (a program, an installer, a script or an Office file with macros), and it came from a page in the browser, so it will not download until you start it. Start it only if you trust the site.
 
 ## Refresh the download link
 

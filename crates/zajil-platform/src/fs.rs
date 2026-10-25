@@ -166,9 +166,11 @@ pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {
 
 /// Whether no other user can change `path` (a program a browser will be
 /// told to start, or its folder): on macOS and Linux it is owned by the
-/// current user or root, and not writable by its group or others. Read
-/// without following a link at `path`. On Windows not checked yet: `true`
-/// (an install folder is the system's, a per-user one the user's).
+/// current user or root, and not writable by its group or others. On
+/// Windows its owner is the current user, SYSTEM, the Administrators or
+/// TrustedInstaller, and its access list lets no one else write to it,
+/// add to it, delete it or change its permissions or owner (review #84:
+/// this was not checked at all). Read without following a link at `path`.
 pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
     imp::only_user_or_root_can_change(path)
 }
@@ -646,10 +648,12 @@ mod imp {
         GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
         DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
-        GetSecurityDescriptorControl, GetTokenInformation, PSECURITY_DESCRIPTOR, PSID,
-        SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        GetSecurityDescriptorControl, GetTokenInformation, INHERIT_ONLY_ACE, IsWellKnownSid,
+        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
+        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid,
+        WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL,
@@ -659,7 +663,9 @@ mod imp {
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
-    use windows_sys::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
+    use windows_sys::Win32::System::SystemServices::{
+        ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE,
+    };
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -784,8 +790,126 @@ mod imp {
         Ok(unsafe { File::from_raw_handle(handle as RawHandle) })
     }
 
+    /// The rights that let someone change a file or a folder: write or
+    /// add to it, delete it or what is in it, change its permissions or
+    /// owner, or anything (generic).
+    const CHANGE: u32 = 0x0002 // FILE_WRITE_DATA, FILE_ADD_FILE
+        | 0x0004 // FILE_APPEND_DATA, FILE_ADD_SUBDIRECTORY
+        | 0x0010 // FILE_WRITE_EA
+        | 0x0040 // FILE_DELETE_CHILD
+        | 0x0100 // FILE_WRITE_ATTRIBUTES
+        | 0x0001_0000 // DELETE
+        | 0x0004_0000 // WRITE_DAC
+        | 0x0008_0000 // WRITE_OWNER
+        | 0x1000_0000 // GENERIC_ALL
+        | 0x4000_0000; // GENERIC_WRITE
+
+    /// TrustedInstaller's service SID.
+    const TRUSTED_INSTALLER: &str =
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+    /// The current user, SYSTEM, the Administrators or TrustedInstaller.
+    fn trusted(sid: PSID, user: &UserSid) -> io::Result<bool> {
+        // SAFETY: `sid` is a valid SID inside a live descriptor.
+        let well_known = unsafe {
+            EqualSid(sid, user.as_psid()) != 0
+                || IsWellKnownSid(sid, WinLocalSystemSid) != 0
+                || IsWellKnownSid(sid, WinBuiltinAdministratorsSid) != 0
+        };
+        if well_known {
+            return Ok(true);
+        }
+        let mut text: *mut u16 = std::ptr::null_mut();
+        // SAFETY: `sid` is valid; `text` receives a LocalAlloc'ed string.
+        if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _text = LocalMemory(text.cast());
+        // SAFETY: a NUL-terminated UTF-16 string, alive until `_text` drops.
+        let len = (0..).take_while(|&i| unsafe { *text.add(i) } != 0).count();
+        // SAFETY: `len` UTF-16 units precede the NUL.
+        let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, len) });
+        Ok(text == TRUSTED_INSTALLER)
+    }
+
     pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
-        std::fs::symlink_metadata(path).map(|_| true)
+        // Not through a link: the link itself is what is checked.
+        std::fs::symlink_metadata(path)?;
+        let user = UserSid::current()?;
+        let path_w = wide(&std::path::absolute(path)?);
+        let (mut owner, mut dacl): (PSID, *mut ACL) = (std::ptr::null_mut(), std::ptr::null_mut());
+        let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        // SAFETY: `path_w` is a NUL-terminated UTF-16 string alive for the
+        // call; the outputs are writable pointers, the unused ones null.
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                path_w.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        let _descriptor = LocalMemory(descriptor);
+        // Its owner may always change its permissions.
+        if owner.is_null() || !trusted(owner, &user)? {
+            return Ok(false);
+        }
+        if dacl.is_null() {
+            return Ok(false); // no list at all: everyone may change it
+        }
+        let mut size = ACL_SIZE_INFORMATION::default();
+        // SAFETY: `dacl` points into `descriptor`, alive here; `size` is a
+        // writable structure of the size given.
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        for index in 0..size.AceCount {
+            let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
+            // SAFETY: `index` is below the entry count of `dacl`.
+            if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: every entry starts with an ACE_HEADER.
+            let header = unsafe { *(ace as *const ACE_HEADER) };
+            // An entry only for what is created inside it does not apply
+            // to it.
+            if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 {
+                continue;
+            }
+            match u32::from(header.AceType) {
+                ACCESS_ALLOWED_ACE_TYPE => {
+                    let ace = ace as *const ACCESS_ALLOWED_ACE;
+                    // SAFETY: an allowing entry has this layout; its SID
+                    // starts at SidStart.
+                    let (mask, sid) =
+                        unsafe { ((*ace).Mask, std::ptr::addr_of!((*ace).SidStart) as PSID) };
+                    if mask & CHANGE != 0 && !trusted(sid, &user)? {
+                        return Ok(false);
+                    }
+                }
+                // Denying entries only take rights away.
+                ACCESS_DENIED_ACE_TYPE => {}
+                // Any other kind of allowing entry (object, callback…) is
+                // not read: refused.
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
     }
 
     pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {
@@ -1071,6 +1195,67 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    /// Review #84: on Windows the check was `true` whatever the
+    /// permissions. A folder of the user's own is trusted, and a program in
+    /// it; once others may change the folder (as under `C:\`, where
+    /// Authenticated Users may modify), or only the program, neither is;
+    /// letting others read is fine.
+    #[cfg(windows)]
+    #[test]
+    fn others_who_may_change_a_program_or_its_folder_are_seen_on_windows() {
+        let icacls = |path: &Path, grant: &str| {
+            let status = std::process::Command::new("icacls")
+                .arg(path)
+                .args(["/grant", grant])
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "icacls {grant}");
+        };
+        let mine = tempdir();
+        let program = mine.as_path().join("zajil-host.exe");
+        fs::write(&program, b"MZ").unwrap();
+        assert!(only_user_or_root_can_change(mine.as_path()).unwrap());
+        assert!(only_user_or_root_can_change(&program).unwrap());
+
+        // Everyone may read and run: still only the user can change it.
+        icacls(&program, "*S-1-1-0:(RX)");
+        assert!(only_user_or_root_can_change(&program).unwrap());
+
+        // Everyone may write to the program alone.
+        icacls(&program, "*S-1-1-0:(W)");
+        assert!(!only_user_or_root_can_change(&program).unwrap());
+
+        // Authenticated Users may modify the folder, and what is made in it.
+        let shared = tempdir();
+        icacls(shared.as_path(), "*S-1-5-11:(OI)(CI)(M)");
+        let program = shared.as_path().join("zajil-host.exe");
+        fs::write(&program, b"MZ").unwrap();
+        assert!(!only_user_or_root_can_change(shared.as_path()).unwrap());
+        assert!(!only_user_or_root_can_change(&program).unwrap());
+        let _ = fs::remove_dir_all(&mine);
+        let _ = fs::remove_dir_all(&shared);
+    }
+
+    /// The same on macOS and Linux: writable by others, or not.
+    #[cfg(unix)]
+    #[test]
+    fn others_who_may_change_a_program_or_its_folder_are_seen_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir();
+        let program = dir.as_path().join("zajil-host");
+        fs::write(&program, b"#!").unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(dir.as_path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(only_user_or_root_can_change(dir.as_path()).unwrap());
+        assert!(only_user_or_root_can_change(&program).unwrap());
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o757)).unwrap();
+        assert!(!only_user_or_root_can_change(&program).unwrap());
+        fs::set_permissions(dir.as_path(), fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(!only_user_or_root_can_change(dir.as_path()).unwrap());
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn syncs_an_existing_folder() {

@@ -61,6 +61,15 @@ pub enum QueueEvent {
         queue: String,
         until: jiff::Zoned,
     },
+    /// Item `item` came from the browser with its cookies, and has none in
+    /// memory (Zajil was restarted): it waits for that browser to give
+    /// them again (M5). Said at every look while it waits.
+    NeedsBrowser {
+        item: u64,
+        /// Its link, whose cookies are wanted.
+        url: String,
+        source: crate::queue::BrowserSource,
+    },
 }
 
 /// What the schedules say at one look.
@@ -119,6 +128,9 @@ struct Running {
     stop: Stop,
     /// The runner itself asked it to stop: it goes back to waiting.
     by_runner: bool,
+    /// From a private window: nothing of it stays if it fails or is taken
+    /// out of the queues (review of #91).
+    private: bool,
 }
 
 impl Runner {
@@ -419,10 +431,34 @@ impl Runner {
                 .filter(|i| running.contains_key(&i.id))
                 .count();
             let room = (queue.max_active as usize).saturating_sub(busy);
+            // A download that needs the browser's cookies again waits for
+            // them, taking no room in its queue (M5).
+            let kept = self.from_browser.as_ref().map(|map| {
+                map.lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keys()
+                    .copied()
+                    .collect::<HashSet<u64>>()
+            });
+            let needs_browser = |i: &crate::queue::Item| match (&kept, &i.browser) {
+                (Some(kept), Some(source)) => source.cookies && !kept.contains(&i.id),
+                _ => false,
+            };
+            for item in queue.items.iter().filter(|i| {
+                i.status == Status::Waiting && !running.contains_key(&i.id) && needs_browser(i)
+            }) {
+                on_event(QueueEvent::NeedsBrowser {
+                    item: item.id,
+                    url: item.url.clone(),
+                    source: item.browser.clone().expect("checked"),
+                });
+            }
             let next: Vec<_> = queue
                 .items
                 .iter()
-                .filter(|i| i.status == Status::Waiting && !running.contains_key(&i.id))
+                .filter(|i| {
+                    i.status == Status::Waiting && !running.contains_key(&i.id) && !needs_browser(i)
+                })
                 .take(room)
                 .map(|i| i.id)
                 .collect();
@@ -436,6 +472,11 @@ impl Runner {
                             return Ok(None);
                         }
                         item.status = Status::Active;
+                        // Started while held: that is the user's OK.
+                        if item.needs_ok {
+                            item.needs_ok = false;
+                            item.ok_given = true;
+                        }
                         item.error = None;
                         Ok(Some(item.clone()))
                     })
@@ -451,18 +492,34 @@ impl Runner {
                 });
                 let stop = Stop::new();
                 let mut engine = engine.with_download_limit(item.limit);
+                // From a page, not yet started by the user: a file that can
+                // run code is held by the name the download itself gets
+                // (review of #90: the probe's name could differ).
+                if item.from_page && !item.ok_given {
+                    engine = engine.holding(Arc::new(crate::category::runs_code));
+                }
                 if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
                 }
-                if let Some(from) = self.from_browser.as_ref().and_then(|map| {
+                // The browser's headers kept in memory; else, after a
+                // restart, its page alone, from the queues file (the
+                // cookies were never written there).
+                let kept = self.from_browser.as_ref().and_then(|map| {
                     map.lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .get(&id)
                         .cloned()
-                }) {
+                });
+                let from = kept.or_else(|| {
+                    let source = item.browser.as_ref()?;
+                    let referrer = source.referrer.as_deref()?;
+                    Some(crate::FromBrowser::new(&item.url, None, Some(referrer)))
+                });
+                if let Some(from) = from {
                     engine = engine.with_browser(from);
                 }
                 let categories = self.categories.clone().filter(|_| item.categorize);
+                let private = item.private;
                 let events = events.clone();
                 let task_stop = stop.clone();
                 let task = tasks.spawn(async move {
@@ -523,6 +580,7 @@ impl Runner {
                         task: task.id(),
                         stop,
                         by_runner: false,
+                        private,
                     },
                 );
             }
@@ -580,7 +638,9 @@ impl Runner {
                 (id, Err(Error::Io(error)))
             }
         };
-        let by_runner = running.remove(&id).is_some_and(|run| run.by_runner);
+        let (by_runner, private) = running
+            .remove(&id)
+            .map_or((false, false), |run| (run.by_runner, run.private));
         let event = match &result {
             Ok(done) => {
                 summary.finished += 1;
@@ -593,7 +653,8 @@ impl Runner {
                     file: done.file.clone(),
                 }
             }
-            Err(Error::Stopped { .. }) => QueueEvent::Stopped { item: id },
+            // Held for the user is not a failure: it waits, paused.
+            Err(Error::Stopped { .. } | Error::Held(_)) => QueueEvent::Stopped { item: id },
             Err(err) => {
                 summary.failed += 1;
                 QueueEvent::Failed {
@@ -602,15 +663,66 @@ impl Runner {
                 }
             }
         };
+        // A private window's download that failed, or was taken out of the
+        // queues while it ran (its window closed): it leaves the queues, and
+        // its part and state files are deleted (review of #91). Paused by
+        // the user, it stays while its window is open.
+        if private && result.is_err() {
+            let stopped = matches!(result, Err(Error::Stopped { .. }));
+            let mut files: Vec<PathBuf> = match &result {
+                Err(Error::Stopped {
+                    state_file: Some(state),
+                })
+                | Err(Error::Interrupted {
+                    state_file: state, ..
+                }) => crate::queue::store::private_files(state),
+                _ => Vec::new(),
+            };
+            let taken = self
+                .update(move |queues| match queues.item(id) {
+                    Some(_) if stopped => Ok(None),
+                    Some(_) => Ok(Some(queues.remove(id)?.state_file)),
+                    None => Ok(Some(None)),
+                })
+                .await;
+            let taken = match taken {
+                Err(StoreError::NoSuchItem(_)) => Some(None),
+                other => other?,
+            };
+            if let Some(state) = taken {
+                files.extend(
+                    state
+                        .iter()
+                        .flat_map(|s| crate::queue::store::private_files(s)),
+                );
+                blocking(move || {
+                    for file in files {
+                        let _ = std::fs::remove_file(file);
+                    }
+                    Ok::<_, StoreError>(())
+                })
+                .await?;
+                on_event(event);
+                return Ok(());
+            }
+        }
         ignore_removed(
             self.update(move |queues| {
                 let item = queues.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+                // A private window's download, done: nothing of it stays in
+                // the queues, only its file (security review #84).
+                if item.private && result.is_ok() {
+                    queues.remove(id)?;
+                    return Ok(());
+                }
                 match result {
                     Ok(done) => {
                         item.status = Status::Done;
                         item.file = Some(done.file);
                         item.state_file = None;
                         item.error = None;
+                        // Where it came from is no longer needed.
+                        item.browser = None;
                     }
                     Err(Error::Stopped { state_file }) => {
                         // The user's own change (paused) stays; a stop by
@@ -621,6 +733,12 @@ impl Runner {
                         // `None`: nothing was written and the files are
                         // gone; the name may soon be another download's.
                         item.state_file = state_file;
+                    }
+                    // Held for the user: nothing was made.
+                    Err(Error::Held(_)) => {
+                        item.status = Status::Paused;
+                        item.needs_ok = true;
+                        item.error = None;
                     }
                     Err(err) => {
                         item.status = Status::Failed;
