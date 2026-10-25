@@ -74,6 +74,7 @@ fn toolbox(tools: &Tools, root: &Path) -> Toolbox {
             Tool::YtDlp => "yt-dlp",
             Tool::Ffmpeg => "ffmpeg",
             Tool::Ffprobe => "ffprobe",
+            Tool::QuickJs => unreachable!("not among the tools copied here"),
         };
         let mut file = zajil_platform::fs::create_private(&exe(&folder, name)).unwrap();
         file.write_all(&bytes).unwrap();

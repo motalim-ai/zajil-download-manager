@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use zajil_core::tools::{Pinned, Tool, ToolError, Toolbox};
 use zajil_core::video::{
-    Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner,
+    Choice, Download, Format, JsRuntime, Probed, Runs, VideoError, VideoEvent, VideoRunner,
 };
 use zajil_core::{Engine, Options, Stop};
 
@@ -19,6 +19,9 @@ struct Setup {
     dest: PathBuf,
     /// The stand-in, as the tools folder holds it.
     yt_dlp: PathBuf,
+    /// A stand-in for QuickJS-NG's `qjs`, installed and pinned: the runner
+    /// checks it only when it is the runtime.
+    qjs: PathBuf,
     runner: VideoRunner,
 }
 
@@ -55,6 +58,11 @@ fn setup(script: &str) -> Setup {
     let control = tools.join("ffmpeg").join(VERSION);
     put_tool(&control, &exe("ffmpeg"), b"ffmpeg stand-in");
     put_tool(&control, &exe("ffprobe"), b"ffprobe stand-in");
+    let qjs = put_tool(
+        &tools.join("quickjs").join(VERSION),
+        &exe("qjs"),
+        b"qjs stand-in",
+    );
     let hashes = [
         (Tool::YtDlp, zajil_testserver::sha256_hex(&fake)),
         (
@@ -65,6 +73,7 @@ fn setup(script: &str) -> Setup {
             Tool::Ffprobe,
             zajil_testserver::sha256_hex(b"ffprobe stand-in"),
         ),
+        (Tool::QuickJs, zajil_testserver::sha256_hex(b"qjs stand-in")),
     ];
     fs::write(control.join("script"), script).unwrap();
     let toolbox = Toolbox::with_pins(
@@ -89,6 +98,7 @@ fn setup(script: &str) -> Setup {
         runs,
         dest,
         yt_dlp,
+        qjs,
         runner,
     }
 }
@@ -828,6 +838,107 @@ async fn a_tool_changed_after_it_was_installed_is_never_run() {
         calls(&s.control).is_empty(),
         "yt-dlp ran with a changed ffmpeg"
     );
+}
+
+/// What yt-dlp got as `call`'s environment.
+fn env_of(call: &serde_json::Value) -> Vec<(String, String)> {
+    call["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p[0].as_str().unwrap().to_owned(),
+                p[1].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn quickjs_is_checked_before_every_run_and_named_only_to_the_box() {
+    let s = setup("probe");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    let runner = s.runner.with_js(Some(JsRuntime::QuickJs {
+        jsbox: "/app/zajil-jsbox".into(),
+    }));
+    runner
+        .probe("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap();
+    let call = &calls(&s.control)[0];
+    let a = args(call);
+    let set = a.iter().position(|x| x == "--js-runtimes").unwrap();
+    assert_eq!(a[set + 1], "quickjs:/app/zajil-jsbox");
+    assert!(a.iter().position(|x| x == "--no-js-runtimes").unwrap() < set);
+    // yt-dlp never gets `qjs` itself: only the box does, through its
+    // environment, with the pinned SHA-256 and the run's report folder.
+    let qjs = s.qjs.to_string_lossy().into_owned();
+    assert!(!a.iter().any(|x| x.contains(&qjs)), "{a:?}");
+    let env = env_of(call);
+    let get = |name: &str| {
+        env.iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| panic!("{name} not given: {env:?}"))
+    };
+    assert_eq!(Path::new(&get("ZAJIL_QJS")), s.qjs.as_path());
+    assert_eq!(
+        get("ZAJIL_QJS_SHA256"),
+        zajil_testserver::sha256_hex(b"qjs stand-in")
+    );
+    assert!(Path::new(&get("ZAJIL_JSBOX_REPORT")).starts_with(&s.runs));
+    assert!(
+        names_in(&s.runs).is_empty(),
+        "the run left {:?}",
+        names_in(&s.runs)
+    );
+
+    // Another `qjs` in its place, after the runner was made: nothing runs.
+    fs::remove_file(&s.qjs).unwrap();
+    put_tool(s.qjs.parent().unwrap(), &exe("qjs"), b"another qjs");
+    let err = runner
+        .probe("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            VideoError::Tools(ToolError::Mismatch {
+                tool: Tool::QuickJs,
+                ..
+            })
+        ),
+        "{err}"
+    );
+    assert_eq!(calls(&s.control).len(), 1, "yt-dlp ran with a changed qjs");
+}
+
+#[tokio::test]
+async fn without_quickjs_as_the_runtime_its_file_is_not_needed() {
+    // Tools installed before QuickJS-NG came, or Deno found: `qjs` is not
+    // checked, and yt-dlp gets nothing of it.
+    for js in [None, Some(JsRuntime::Deno("/opt/deno".into()))] {
+        let s = setup("probe");
+        fs::write(s.control.join("probe.json"), PROBE).unwrap();
+        fs::remove_file(&s.qjs).unwrap();
+        let runner = s.runner.with_js(js.clone());
+        runner
+            .probe("https://example.com/v", None, &Stop::new())
+            .await
+            .unwrap();
+        let call = &calls(&s.control)[0];
+        let names: Vec<String> = env_of(call).into_iter().map(|(k, _)| k).collect();
+        assert!(
+            !names.iter().any(|n| n.starts_with("ZAJIL_QJS")),
+            "{names:?}"
+        );
+        let a = args(call);
+        match js {
+            None => assert!(!a.iter().any(|x| x == "--js-runtimes")),
+            Some(_) => assert!(a.iter().any(|x| x == "deno:/opt/deno"), "{a:?}"),
+        }
+    }
 }
 
 /// ADR-0009, section 10, test 8: the cookie file is gone after a run that

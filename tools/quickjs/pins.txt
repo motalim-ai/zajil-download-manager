@@ -1,0 +1,15 @@
+# The QuickJS-NG that Zajil downloads for YouTube's JavaScript challenges,
+# when neither Deno nor Node is installed (ADR-0009): its version, then one
+# line per target: the release file and its SHA-256. QuickJS-NG publishes
+# no checksums or signatures: these were computed from the files as
+# downloaded over HTTPS from its GitHub release when the version was
+# pinned. It has no Windows arm64 build: Windows on arm64 runs the x86_64
+# one (Windows 11 emulates x86_64).
+# Read by crates/zajil-core/src/tools.rs (built in) and by the CI.
+version v0.17.0
+windows-x86_64 qjs-windows-x86_64.exe 2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77
+windows-aarch64 qjs-windows-x86_64.exe 2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77
+macos-x86_64 qjs-darwin-x86_64 9e5e101b4fd13cda3204222ca9f8be35412c41dcdef3745829633b7a67245412
+macos-aarch64 qjs-darwin-arm64 8be3ddfe3397d2e692e4e1e8972ee9d032a0a580505d2f8b4ea528cf1b651c11
+linux-x86_64 qjs-linux-x86_64 0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5
+linux-aarch64 qjs-linux-aarch64 3372133484edf50a69f3c67903af41206d22a061e930e3cfb63269272ef56d2e

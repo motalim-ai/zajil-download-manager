@@ -493,6 +493,9 @@ mod imp {
 }
 
 #[cfg(windows)]
+pub(crate) use imp::{Group, spawn_alone};
+
+#[cfg(windows)]
 #[allow(unsafe_code)]
 mod imp {
     use std::io;
@@ -505,10 +508,11 @@ mod imp {
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
     };
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
-        QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject,
     };
     use windows_sys::Win32::System::Threading::{
         CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
@@ -583,7 +587,9 @@ mod imp {
         }
     }
 
-    fn new_job() -> io::Result<Handle> {
+    /// A new job whose processes end when its last handle closes; with
+    /// `alone`, it may hold one process only (it cannot start another).
+    fn new_job(alone: bool) -> io::Result<Handle> {
         // SAFETY: no attributes, no name: a new, unnamed job.
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() {
@@ -593,6 +599,10 @@ mod imp {
         // SAFETY: a plain C struct, valid when zeroed.
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if alone {
+            limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+            limits.BasicLimitInformation.ActiveProcessLimit = 1;
+        }
         // SAFETY: the buffer is the size the call is told.
         let ok = unsafe {
             SetInformationJobObject(
@@ -657,8 +667,18 @@ mod imp {
         Ok(child.try_wait()?.is_some())
     }
 
-    pub fn spawn(mut command: Command, _record: Record) -> io::Result<(Child, Group)> {
-        let job = new_job()?;
+    pub fn spawn(command: Command, _record: Record) -> io::Result<(Child, Group)> {
+        spawn_in_job(command, false)
+    }
+
+    /// Starts `command` alone in a job of its own: it can start no other
+    /// process (`zajil_platform::sandbox`).
+    pub fn spawn_alone(command: Command) -> io::Result<(Child, Group)> {
+        spawn_in_job(command, true)
+    }
+
+    fn spawn_in_job(mut command: Command, alone: bool) -> io::Result<(Child, Group)> {
+        let job = new_job(alone)?;
         command.creation_flags(CREATE_SUSPENDED);
         let mut child = command.spawn()?;
         let joined = (|| {
