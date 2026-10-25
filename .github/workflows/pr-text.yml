@@ -1,0 +1,36 @@
+name: PR text
+
+# A pull request's title and description name no AI tool and carry no
+# "generated with/by" line (owner's rule; AGENTS.md, section 5.10). Runs
+# again whenever the title or description is edited.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  no-tool-names:
+    name: PR text names no AI tool
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the title and description
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          # The forbidden words, one per line, base64-encoded so that this
+          # file does not itself name them. Matched without regard to case.
+          WORDS: Y2xhdWRlCmFudGhyb3BpYwpnZW5lcmF0ZWQgd2l0aApnZW5lcmF0ZWQgYnkK
+        run: |
+          set -euo pipefail
+          words="$(mktemp)"
+          printf '%s' "$WORDS" | base64 -d > "$words"
+          found=0
+          for part in TITLE BODY; do
+            if printf '%s\n' "${!part}" | grep -inF -f "$words" > /dev/null; then
+              lines="$(printf '%s\n' "${!part}" | grep -inF -f "$words" | cut -d: -f1 | paste -sd, -)"
+              echo "::error::the PR ${part,,} names an AI tool or has a 'generated' line (line $lines). Remove it and save: this check runs again."
+              found=1
+            fi
+          done
+          exit "$found"
