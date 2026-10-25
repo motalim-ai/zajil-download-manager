@@ -164,7 +164,7 @@
   }
   table.grid {
     width: 100%;
-    min-width: 780px;
+    min-width: 760px;
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;
@@ -172,22 +172,22 @@
   /* The small columns are as wide as what they show; the name takes the
      rest. */
   .c-size {
-    width: 104px;
+    width: 100px;
   }
   .c-status {
-    width: 140px;
+    width: 128px;
   }
   .c-left {
-    width: 96px;
+    width: 84px;
   }
   .c-speed {
     width: 112px;
   }
   .c-last {
-    width: 100px;
+    width: 88px;
   }
   .c-desc {
-    width: 110px;
+    width: 88px;
   }
   th {
     text-align: start;
