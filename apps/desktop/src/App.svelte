@@ -517,6 +517,8 @@
    * decision on #83). */
   let quitting = false;
   async function quit() {
+    // A close that quits waits for this page's answer (`closing.rs`).
+    void api.quitHeard().catch(() => {});
     // One question at a time (review of #105: a second ⌘Q asked again).
     if (quitting) return;
     const running = active.length;

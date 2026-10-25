@@ -11,6 +11,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
@@ -37,29 +39,65 @@ pub struct Closing {
     path: PathBuf,
     prefs: Mutex<WindowPrefs>,
     notice: Mutex<Notice>,
+    /// Whether there is a tray: looked for once, off the window's thread
+    /// (review of #109: a D-Bus round trip at every close). 0: not known
+    /// yet, 1: yes, 2: no.
+    tray: std::sync::Arc<AtomicU8>,
+    /// The page answered the «quit» a close sent it.
+    heard: AtomicBool,
 }
+
+/// How long the page has to answer a close's «quit» before Zajil quits
+/// without it (a page not loaded or stuck: review of #109).
+const PAGE_ANSWER: Duration = Duration::from_secs(3);
 
 const FILE: &str = "window.json";
 
 impl Closing {
     pub fn new(data_dir: &Path) -> Self {
         let path = data_dir.join(FILE);
+        let tray = std::sync::Arc::new(AtomicU8::new(0));
+        let found = tray.clone();
+        std::thread::spawn(move || found.store(if has_tray() { 1 } else { 2 }, Ordering::SeqCst));
         Closing {
             prefs: Mutex::new(load(&path)),
             path,
             notice: Mutex::default(),
+            tray,
+            heard: AtomicBool::new(false),
         }
+    }
+
+    /// Whether the desktop shows tray icons (looked for at start).
+    pub fn tray(&self) -> bool {
+        match self.tray.load(Ordering::SeqCst) {
+            1 => true,
+            2 => false,
+            _ => {
+                let found = has_tray();
+                self.tray.store(if found { 1 } else { 2 }, Ordering::SeqCst);
+                found
+            }
+        }
+    }
+
+    pub fn heard(&self) {
+        self.heard.store(true, Ordering::SeqCst);
     }
 
     pub fn prefs(&self) -> WindowPrefs {
         self.prefs.lock().unwrap().clone()
     }
 
-    /// Changes the preferences and keeps them.
+    /// Changes the preferences and keeps them; nothing changes if they
+    /// cannot be kept (review of #109: the page and Rust disagreed).
     pub fn change(&self, change: impl FnOnce(&mut WindowPrefs)) -> std::io::Result<()> {
         let mut prefs = self.prefs.lock().unwrap();
-        change(&mut prefs);
-        save(&self.path, &prefs)
+        let mut next = prefs.clone();
+        change(&mut next);
+        save(&self.path, &next)?;
+        *prefs = next;
+        Ok(())
     }
 
     pub fn set_notice(&self, notice: Notice) {
@@ -142,14 +180,25 @@ pub fn watch<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
         }
         api.prevent_close();
         let closing = app.state::<Closing>();
-        match on_close(&closing.prefs(), has_tray()) {
+        match on_close(&closing.prefs(), closing.tray()) {
             OnClose::Quit => {
+                // The page's Quit asks first while downloads run; a page
+                // that does not answer does not keep Zajil open.
+                closing.heard.store(false, Ordering::SeqCst);
                 let _ = app.emit_to("main", "menu-command", "quit");
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(PAGE_ANSWER);
+                    if !app.state::<Closing>().heard.load(Ordering::SeqCst) {
+                        app.exit(0);
+                    }
+                });
             }
             OnClose::Hide { notice } => {
                 let _ = window.hide();
-                if notice {
-                    show_notice(&app, &closing);
+                // Kept as said only once it was (review of #109: before
+                // the page gave the texts, it was lost for good).
+                if notice && show_notice(&app, &closing) {
                     let _ = closing.change(|p| p.tray_notice_shown = true);
                 }
             }
@@ -157,18 +206,19 @@ pub fn watch<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     });
 }
 
-fn show_notice<R: tauri::Runtime>(app: &tauri::AppHandle<R>, closing: &Closing) {
+/// Whether the notice went.
+fn show_notice<R: tauri::Runtime>(app: &tauri::AppHandle<R>, closing: &Closing) -> bool {
     use tauri_plugin_notification::NotificationExt;
     let notice = closing.notice.lock().unwrap().clone();
     if notice.body.is_empty() {
-        return;
+        return false;
     }
-    let _ = app
-        .notification()
+    app.notification()
         .builder()
         .title(notice.title)
         .body(notice.body)
-        .show();
+        .show()
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -196,5 +246,14 @@ mod tests {
         assert!(Closing::new(dir.path()).prefs().close_quits);
         std::fs::write(dir.path().join(FILE), b"{not json").unwrap();
         assert_eq!(Closing::new(dir.path()).prefs(), WindowPrefs::default());
+    }
+
+    /// A change that cannot be kept changes nothing.
+    #[test]
+    fn a_change_that_cannot_be_kept_is_not_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let closing = Closing::new(&dir.path().join("missing"));
+        assert!(closing.change(|p| p.close_quits = true).is_err());
+        assert!(!closing.prefs().close_quits);
     }
 }

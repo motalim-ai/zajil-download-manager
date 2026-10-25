@@ -44,6 +44,7 @@ zajil-core = { path = "../../../crates/zajil-core" }
 zajil-host = { path = "../../../crates/zajil-host" }
 zajil-i18n = { path = "../../../crates/zajil-i18n" }
 zajil-platform = { path = "../../../crates/zajil-platform" }
+tauri-plugin-single-instance = "2.5.4"
 
 [dev-dependencies]
 # Tauri's mock runtime, for the test that the UI test commands are not in

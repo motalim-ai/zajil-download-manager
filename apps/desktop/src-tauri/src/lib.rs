@@ -146,7 +146,19 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    let builder = tauri::Builder::default()
+    // One Zajil per user: with its window hidden in the tray, opening Zajil
+    // again shows it instead of starting a second program on the same
+    // queues (review of #109). Not with `--data-dir` (the tests and the
+    // screenshots, each on a folder of its own).
+    let builder = tauri::Builder::default();
+    let builder = if args.iter().any(|a| a == "--data-dir") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
+    };
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Opens a finished download or its folder from Rust only
@@ -297,6 +309,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_tray_texts,
         close_quits,
         set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -339,6 +352,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_tray_texts,
         close_quits,
         set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -481,7 +495,13 @@ fn set_tray_texts<R: tauri::Runtime>(
 /// this desktop has a system tray to go on in.
 #[tauri::command]
 fn close_quits(closing: State<'_, closing::Closing>) -> (bool, bool) {
-    (closing.prefs().close_quits, closing::has_tray())
+    (closing.prefs().close_quits, closing.tray())
+}
+
+/// The page heard «quit» from closing the window (`closing.rs`).
+#[tauri::command]
+fn quit_heard(closing: State<'_, closing::Closing>) {
+    closing.heard();
 }
 
 #[tauri::command]
