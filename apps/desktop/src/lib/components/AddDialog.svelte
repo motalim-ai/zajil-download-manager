@@ -5,6 +5,7 @@
   import { locale } from "../i18n.svelte";
   import FileName from "./FileName.svelte";
   import { probeSentence, sizeText } from "../probeText";
+  import { chosenFolder } from "../addFolder";
   import type { ProbeView } from "../bindings/ProbeView";
   import type { AddRequest } from "../bindings/AddRequest";
   import type { QueueView } from "../bindings/QueueView";
@@ -35,16 +36,32 @@
     busy: boolean;
     queues: QueueView[];
     categories: CategoryView[];
-    /// `remember`: the chosen folder becomes the category's.
-    onadd: (request: AddRequest, remember: boolean) => void;
+    /// `remember`: the category whose folder the chosen one becomes.
+    onadd: (request: AddRequest, remember: string | null) => void;
     oncancel: () => void;
     onchoosefolder: () => Promise<string | null>;
     onnewcategory: () => void;
   } = $props();
 
-  // A folder the user chose; `null`: the category's (or the downloads
-  // folder).
+  // A folder the user chose by hand; `null`: the picked category's.
   let folder = $state<string | null>(null);
+  // The category the user picked (the detected one at first). Its folder
+  // becomes the download's; the category itself is kept once zajil-core
+  // keeps one for an item (#103).
+  let picked = $state<string | null | undefined>(undefined);
+  const category = $derived(picked === undefined ? (probe?.category ?? null) : picked);
+  const where = $derived(
+    probe
+      ? chosenFolder({
+          categories,
+          detected: probe.category,
+          picked: category,
+          byHand: folder,
+          detectedFolder: probe.folder,
+          downloadFolder: probe.download_folder,
+        })
+      : { shown: "", request: null },
+  );
   let remember = $state(false);
   let later = $state(false);
   let main: HTMLElement | undefined = $state();
@@ -62,7 +79,7 @@
 
   function add(start: boolean, queue = "main") {
     later = false;
-    if (!busy) onadd({ url, queue, folder, start, limit: null }, remember && folder !== null && Boolean(probe?.category));
+    if (!busy) onadd({ url, queue, folder: where.request, start, limit: null }, remember && folder !== null ? category : null);
   }
   async function change() {
     const chosen = await onchoosefolder();
@@ -109,18 +126,27 @@
       {#if probe}
         <span class="label">{locale.t("add-category")}</span>
         <div class="with">
-          <div class="value">
-            <Icon name={categoryIcon(probe.category)} />
-            <span class="text">
-              {#if probe.category && probe.category_site}
-                {locale.t("add-category-site", { category: categoryName(probe.category), site: probe.category_site })}
-              {:else if probe.category}
-                {locale.t("add-category-extension", { category: categoryName(probe.category), extension: probe.category_extension ?? "" })}
-              {:else}
-                {locale.t("category-none")}
-              {/if}
-            </span>
-          </div>
+          <label class="value pick">
+            <Icon name={categoryIcon(category)} />
+            <select
+              aria-label={locale.t("add-category")}
+              value={category ?? ""}
+              onchange={(e) => (picked = e.currentTarget.value || null)}
+            >
+              {#each categories as c (c.id)}
+                <option value={c.id}>
+                  {#if c.id === probe.category && probe.category_site}
+                    {locale.t("add-category-site", { category: categoryName(c.id), site: probe.category_site })}
+                  {:else if c.id === probe.category && probe.category_extension}
+                    {locale.t("add-category-extension", { category: categoryName(c.id), extension: probe.category_extension })}
+                  {:else}
+                    {categoryName(c.id)}
+                  {/if}
+                </option>
+              {/each}
+              <option value="">{locale.t("category-none")}</option>
+            </select>
+          </label>
           <button class="btn square" title={locale.t("add-new-category")} aria-label={locale.t("add-new-category")} onclick={onnewcategory}>
             <Icon name="circle-plus" />
           </button>
@@ -135,15 +161,15 @@
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
-          <div class="value"><Icon name="folder" /><bdi dir="ltr" class="text">{folder ?? probe.folder}</bdi></div>
+          <div class="value"><Icon name="folder" /><bdi dir="ltr" class="text">{where.shown}</bdi></div>
           <button class="btn" onclick={() => void change()}>{locale.t("add-change")}</button>
         </div>
 
-        {#if probe.category}
+        {#if category}
           <span></span>
           <label class="check" class:off={folder === null}>
             <input type="checkbox" bind:checked={remember} disabled={folder === null} />
-            {locale.t("add-remember", { category: categoryName(probe.category) })}
+            {locale.t("add-remember", { category: categoryName(category) })}
           </label>
         {/if}
       {/if}
@@ -277,6 +303,18 @@
     background: var(--amber-bg);
     color: var(--ink);
     font-size: 13px;
+  }
+  .pick select {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--ink);
+    outline: none;
+  }
+  .pick:focus-within {
+    border-color: var(--accent);
   }
   .square {
     padding-inline: 8px;

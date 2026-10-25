@@ -670,6 +670,7 @@
           category_extension: null,
           folder: "~/Downloads",
           page: true,
+          download_folder: "~/Downloads",
         },
       };
     else if (screen === "add")
@@ -685,6 +686,7 @@
           category_extension: "iso",
           folder: "~/Downloads",
           page: false,
+          download_folder: "~/Downloads",
         },
       };
     if (screen === "progress") progressScene = true;

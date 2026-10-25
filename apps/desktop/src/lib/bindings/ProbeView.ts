@@ -18,4 +18,9 @@ folder: string,
  * The server sent a web page, not a file (a Google Drive or sign-in
  * page): «Download file info» warns.
  */
-page: boolean, };
+page: boolean, 
+/**
+ * The downloads folder: where a category with no folder of its own
+ * saves (the window's folder follows the category the user picks).
+ */
+download_folder: string, };

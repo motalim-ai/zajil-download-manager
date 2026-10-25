@@ -131,6 +131,9 @@ pub struct ProbeView {
     /// The server sent a web page, not a file (a Google Drive or sign-in
     /// page): «Download file info» warns.
     pub page: bool,
+    /// The downloads folder: where a category with no folder of its own
+    /// saves (the window's folder follows the category the user picks).
+    pub download_folder: String,
 }
 
 /// Whether a response's media type is a web page.
@@ -635,6 +638,7 @@ pub fn probe(found: &Probe, categories: &CategoriesFile, given: &Path) -> ProbeV
             .display()
             .to_string(),
         page: is_web_page(found.content_type.as_deref()),
+        download_folder: given.display().to_string(),
     }
 }
 
@@ -691,6 +695,7 @@ mod tests {
         };
         let view = probe(&found, &categories, Path::new("/d"));
         assert_eq!(view.name, "download");
+        assert_eq!(view.download_folder, "/d");
         assert_eq!(view.size, None);
         assert!(view.page);
         let file = Probe {
