@@ -29,7 +29,8 @@ trap 'rm -rf "$gnupg"' EXIT
 export GNUPGHOME="$gnupg"
 gpg --batch --quiet --import "$dir/ffmpeg-devel.asc"
 # The key file must hold the pinned key; a different key in it signs nothing.
-gpg --batch --with-colons --fingerprint | grep -q "^fpr:::::::::$FFMPEG_SIGNING_KEY:" || {
+fingerprints="$(gpg --batch --with-colons --fingerprint)"
+grep -q "^fpr:::::::::$FFMPEG_SIGNING_KEY:" <<< "$fingerprints" || {
   echo "::error::ffmpeg-devel.asc does not hold the key $FFMPEG_SIGNING_KEY" >&2
   exit 1
 }

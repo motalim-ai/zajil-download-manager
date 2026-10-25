@@ -125,9 +125,9 @@ jobs:
             lipo -info "out/$tool"
           done
           # Ad-hoc signed (codesign -s -), not signed by Apple: the owner's
-          # decision for 0.1, until M8 (ADR-0009, section 2). Zajil checks
-          # the SHA-256 before every run, and its tools carry no quarantine
-          # mark, so Gatekeeper does not stop them.
+          # decision for 0.1, until M8 (ADR-0009, section 2). Zajil is to pin
+          # the SHA-256 and check it before every run, and its tools carry no
+          # quarantine mark, so Gatekeeper does not stop them.
           codesign --force --sign - out/ffmpeg out/ffprobe
           for tool in ffmpeg ffprobe; do
             codesign --verify --strict "out/$tool"
@@ -151,6 +151,8 @@ jobs:
           ZAJIL_FFMPEG_EXTRA: |-
             --cc=${{ matrix.cc }}
             --extra-ldflags=-static
+            --enable-w32threads
+            --disable-pthreads
         run: |
           set -euo pipefail
           . tools/ffmpeg/source.env
@@ -170,7 +172,7 @@ jobs:
       # started from an x86_64 one runs its x86_64 half.
       - name: Smoke test (macOS, the x86_64 half under Rosetta)
         if: runner.os == 'macOS'
-        run: arch -x86_64 /bin/bash tools/ffmpeg/smoke-test.sh out test-tools/ffmpeg-testgen
+        run: ZAJIL_EXPECT_ARCH=x86_64 arch -x86_64 /bin/bash tools/ffmpeg/smoke-test.sh out test-tools/ffmpeg-testgen
       - name: Sizes and SHA-256
         run: |
           set -euo pipefail
@@ -215,10 +217,9 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "::error::$GITHUB_REF_NAME is not on main: only merged code is released"; exit 1
           }
-          case "$GITHUB_REF_NAME" in
-            "tools-ffmpeg-$FFMPEG_VERSION-"[0-9]*) ;;
-            *) echo "::error::$GITHUB_REF_NAME does not name FFmpeg $FFMPEG_VERSION (tools-ffmpeg-$FFMPEG_VERSION-<n>)"; exit 1 ;;
-          esac
+          [[ "$GITHUB_REF_NAME" =~ ^tools-ffmpeg-${FFMPEG_VERSION//./\\.}-[0-9]+$ ]] || {
+            echo "::error::$GITHUB_REF_NAME does not name FFmpeg $FFMPEG_VERSION (tools-ffmpeg-$FFMPEG_VERSION-<n>)"; exit 1
+          }
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/artifacts
@@ -258,7 +259,8 @@ jobs:
           cp tools/ffmpeg/build.sh tools/ffmpeg/configure-dist.txt tools/ffmpeg/source.env \
             .github/workflows/ffmpeg.yml "$work/ffmpeg-$FFMPEG_VERSION/zajil-build/"
           tar -cJf "$r/ffmpeg-$FFMPEG_VERSION-zajil-source.tar.xz" -C "$work" "ffmpeg-$FFMPEG_VERSION"
-          cp "$work/ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" "$r/"
+          # The LGPL, and FFmpeg's own notes on the licenses of its parts.
+          cp "$work/ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" "$work/ffmpeg-$FFMPEG_VERSION/LICENSE.md" "$r/"
           (cd "$r" && sha256sum * > SHA256SUMS)
           cat "$r/SHA256SUMS"
       - name: Publish
@@ -274,7 +276,7 @@ jobs:
             echo
             echo "Source SHA-256: $FFMPEG_SHA256 ($FFMPEG_TARBALL, signed by FFmpeg's key $FFMPEG_SIGNING_KEY)."
             echo
-            echo "macOS: ad-hoc signed only, not signed or notarized by Apple (until M8). Zajil checks each file's SHA-256 before every run."
+            echo "macOS: ad-hoc signed only, not signed or notarized by Apple (until M8). Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
             echo
             echo "No change to the FFmpeg source. Built by .github/workflows/ffmpeg.yml from commit $GITHUB_SHA. FFmpeg belongs to its authors: https://ffmpeg.org"
           } > "$RUNNER_TEMP/notes.md"

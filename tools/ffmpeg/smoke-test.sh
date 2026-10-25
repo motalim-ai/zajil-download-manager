@@ -27,6 +27,10 @@ run() { "$@" | tr -d '\r'; }
 
 # The build itself.
 conf="$(run "$ff" -hide_banner -buildconf)"
+# The half that runs, when the caller says which (macOS under Rosetta).
+if [ -n "${ZAJIL_EXPECT_ARCH:-}" ]; then
+  grep -q -- "--arch=$ZAJIL_EXPECT_ARCH" <<< "$conf" || fail "the $ZAJIL_EXPECT_ARCH half did not run"
+fi
 for bad in --enable-gpl --enable-nonfree --enable-version3 --enable-lib; do
   case "$conf" in *"$bad"*) fail "the distributed ffmpeg was built with $bad" ;; esac
 done

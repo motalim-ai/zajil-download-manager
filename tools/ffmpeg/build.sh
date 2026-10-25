@@ -66,7 +66,18 @@ for opt in "${opts[@]}"; do
     --enable-filter=*|--enable-muxer=*|--enable-parser=*|--enable-protocol=*) ;;
     --enable-ffmpeg|--enable-ffprobe|--enable-small|--enable-static) ;;
     --enable-swresample|--enable-swscale|--enable-cross-compile) ;;
-    --arch=*|--target-os=*|--cc=*|--extra-cflags=*|--extra-ldflags=*) ;;
+    --enable-w32threads|--disable-pthreads) ;;
+    --arch=*|--target-os=*) ;;
+    --cc=gcc|--cc=clang) ;;
+    # How to compile, never what to link: no -l, -L, -Wl, archive or define.
+    --extra-cflags=*|--extra-ldflags=*)
+      for word in ${opt#*=}; do
+        case "$word" in
+          -l*|-L*|-Wl,*|*.a|*.lib|-D*)
+            echo "::error::$opt is not allowed in a Zajil FFmpeg build (ADR-0009)" >&2
+            exit 1 ;;
+        esac
+      done ;;
     *)
       echo "::error::$opt is not allowed in a Zajil FFmpeg build (ADR-0009)" >&2
       exit 1 ;;
@@ -85,6 +96,14 @@ grep -qx '#define CONFIG_GPL 0' "$src/config.h"
 grep -qx '#define CONFIG_NONFREE 0' "$src/config.h"
 grep -qx '#define CONFIG_VERSION3 0' "$src/config.h"
 grep -q '^License: LGPL version 2.1 or later$' "$work/configure.log"
+# Windows: Windows' own threads, never winpthreads, which a static link
+# would put in the file with a notice we do not ship.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    grep -qx '#define HAVE_W32THREADS 1' "$src/config.h" || { echo "::error::not built with Windows threads" >&2; exit 1; }
+    grep -qx '#define HAVE_PTHREADS 0' "$src/config.h" || { echo "::error::built with pthreads (winpthreads)" >&2; exit 1; }
+    ;;
+esac
 # And no external library at all, hardware acceleration included: both
 # lists configure prints are there, and empty (an empty line right after).
 awk '
@@ -116,7 +135,7 @@ cp "$src/ffprobe$exe" "$out/ffprobe$suffix$exe"
   echo
   echo "configure line:"
   printf './configure'
-  printf ' %s' "${opts[@]}"
+  printf ' %q' "${opts[@]}"
   echo
 } > "$out/ffmpeg-build$suffix.txt"
 

@@ -38,12 +38,16 @@ case "$(uname -s)" in
     for f in "$dir/ffmpeg" "$dir/ffprobe"; do
       deps="$(otool -arch all -L "$f")"
       grep -q '/usr/lib/libSystem.B.dylib' <<< "$deps" || fail "otool could not read the libraries of $f"
-      needed="$(grep -E '^[[:space:]]+/' <<< "$deps" | awk '{ print $1 }' | sort -u)"
+      # Every indented line, @rpath and the like included: they are refused.
+      needed="$(grep -E '^[[:space:]]+[^[:space:]]' <<< "$deps" | awk '{ print $1 }' | sort -u)"
       echo "$(basename "$f") needs: $(tr '\n' ' ' <<< "$needed")"
       while IFS= read -r lib; do
         case "$lib" in
-          /usr/lib/libSystem.B.dylib|/System/Library/Frameworks/*.framework/*) ;;
-          *) fail "$f needs $lib, which is not part of macOS" ;;
+          *..*) fail "$f needs $lib, a path that leaves where it says" ;;
+          /usr/lib/libSystem.B.dylib) ;;
+          *)
+            [[ "$lib" =~ ^/System/Library/Frameworks/[A-Za-z0-9]+\.framework/Versions/[A-Za-z0-9]+/[A-Za-z0-9]+$ ]] ||
+              fail "$f needs $lib, which is not part of macOS" ;;
         esac
       done <<< "$needed"
     done
