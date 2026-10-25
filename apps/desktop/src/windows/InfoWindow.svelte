@@ -4,6 +4,7 @@
   import AddDialog from "../lib/components/AddDialog.svelte";
   import { api } from "../lib/api";
   import { startWindow } from "../lib/windowStart";
+  import { locale } from "../lib/i18n.svelte";
   import type { ProbeView } from "../lib/bindings/ProbeView";
   import type { AddRequest } from "../lib/bindings/AddRequest";
   import type { QueueView } from "../lib/bindings/QueueView";
@@ -16,6 +17,9 @@
   let probe = $state<ProbeView | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  // Added: the buttons stay off, whatever comes next (review of #104: a
+  // failed «remember» let a second click add it again).
+  let added = false;
   let queues = $state<QueueView[]>([]);
   let categories = $state<CategoryView[]>([]);
 
@@ -39,23 +43,32 @@
   });
 
   async function add(request: AddRequest, remember: boolean) {
-    if (busy) return;
+    if (busy || added) return;
     busy = true;
     error = null;
     try {
       await api.add(request);
-      // The folder becomes the category's: the next file of that kind goes
-      // there.
-      if (remember && probe?.category && request.folder !== null) {
-        const id = probe.category;
-        const folder = request.folder;
-        await api.saveCategories(categories.map((c) => (c.id === id ? { ...c, folder } : c)));
-      }
-      await api.closeWindow();
+      added = true;
     } catch (e) {
       busy = false;
       error = String(e);
+      return;
     }
+    // The folder becomes the category's: the next file of that kind goes
+    // there. The categories as they are now, not as they were when the
+    // window opened (review of #104: one added meanwhile was lost).
+    if (remember && probe?.category && request.folder !== null) {
+      const id = probe.category;
+      const folder = request.folder;
+      try {
+        const now = (await api.snapshot()).categories;
+        await api.saveCategories(now.map((c) => (c.id === id ? { ...c, folder } : c)));
+      } catch (e) {
+        error = locale.t("add-remember-failed", { error: String(e) });
+        return;
+      }
+    }
+    await api.closeWindow();
   }
 
   async function chooseFolder(): Promise<string | null> {

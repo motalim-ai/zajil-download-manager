@@ -8,6 +8,7 @@
   let {
     url: given,
     fromClipboard,
+    problem = null,
     onok,
     oncancel,
   }: {
@@ -15,6 +16,8 @@
     url: string;
     /** That link came from the clipboard: said under the box. */
     fromClipboard: boolean;
+    /** Why OK did nothing (another link's info window is open). */
+    problem?: string | null;
     onok: (url: string) => void;
     oncancel: () => void;
   } = $props();
@@ -61,6 +64,10 @@
         />
         <Icon name="link-2" size={16} />
       </div>
+      {#if problem}
+        <span></span>
+        <p class="problem" role="alert"><Icon name="circle-alert" size={15} />{problem}</p>
+      {/if}
       {#if fromClipboard}
         <span></span>
         <p id="addlink-clip" class="note"><Icon name="clipboard-paste" size={15} />{locale.t("addlink-from-clipboard")}</p>
@@ -127,6 +134,14 @@
     align-items: center;
     font-size: 12.5px;
     color: var(--muted);
+    margin: 0;
+  }
+  .problem {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12.5px;
+    color: var(--red);
     margin: 0;
   }
   .actions {

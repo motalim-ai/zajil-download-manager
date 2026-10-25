@@ -454,3 +454,5 @@ add-not-resumable = لا يمكن استكماله
 add-later-queue = نزّل لاحقًا في طابور
 add-checking = جارٍ سؤال السيرفر عن الملف…
 add-about-file = عن الملف
+addlink-info-open = نافذة «معلومات ملف التحميل» مفتوحة لرابط آخر. كمّله أو ألغِه أولًا.
+add-remember-failed = أُضيف التحميل، لكن لم يُحفظ المجلد للفئة: { $error }

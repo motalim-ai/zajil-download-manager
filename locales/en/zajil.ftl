@@ -400,3 +400,5 @@ add-not-resumable = Can't be resumed
 add-later-queue = Download later in a queue
 add-checking = Asking the server about the file…
 add-about-file = About the file
+addlink-info-open = «Download file info» is open for another link. Finish or cancel it first.
+add-remember-failed = The download was added, but the folder wasn't kept for the category: { $error }

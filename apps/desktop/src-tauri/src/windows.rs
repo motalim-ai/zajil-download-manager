@@ -115,8 +115,8 @@ pub fn pending_link(pending: State<'_, Shared>) -> Option<PendingLink> {
 }
 
 /// «Download file info» for `url`, titled `title`; «Add a link» closes.
-/// One info window at a time: an open one keeps its link and comes to the
-/// front.
+/// One info window at a time: while one is open, it comes to the front and
+/// [`INFO_OPEN`] is the answer.
 #[tauri::command]
 pub fn open_add_info<R: tauri::Runtime>(
     pending: State<'_, Shared>,
@@ -127,13 +127,39 @@ pub fn open_add_info<R: tauri::Runtime>(
     if crate::in_scene(&handle) {
         return Ok(());
     }
+    // One at a time: another link would be lost behind the open one
+    // (review of #104), so the link window stays and says so.
+    if let Some(info) = handle.get_webview_window(INFO) {
+        let _ = info.set_focus();
+        return Err(INFO_OPEN.into());
+    }
     if let Some(link) = handle.get_webview_window(LINK) {
         let _ = link.close();
     }
-    if handle.get_webview_window(INFO).is_none() {
-        pending.lock().unwrap().info = Some(url);
-    }
+    pending.lock().unwrap().info = Some(url);
     open(&handle, INFO, &title, INFO_SIZE).map_err(|e| e.to_string())
+}
+
+/// What [`open_add_info`] answers while «Download file info» is open: the
+/// page says it in the user's language.
+pub const INFO_OPEN: &str = "info-open";
+
+/// The add windows close when the main one does: without it the program
+/// would go on with no main window to come back to (review of #104).
+pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let Some(main) = handle.get_webview_window("main") else {
+        return;
+    };
+    let app = handle.clone();
+    main.on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            for label in [LINK, INFO] {
+                if let Some(window) = app.get_webview_window(label) {
+                    let _ = window.close();
+                }
+            }
+        }
+    });
 }
 
 /// The link «Download file info» is for.

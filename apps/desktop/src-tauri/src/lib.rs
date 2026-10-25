@@ -206,8 +206,10 @@ pub fn run() {
                     *kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(integration);
                 });
             }
-            // The add windows' own permissions (`windows.rs`).
+            // The add windows' own permissions (`windows.rs`), and they
+            // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            windows::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -221,11 +223,7 @@ pub fn run() {
                         Some("link") => Some(windows::LINK_SIZE),
                         _ => None,
                     };
-                    if let Some((width, height)) = size {
-                        window.set_min_size(None::<tauri::LogicalSize<f64>>)?;
-                        window.set_size(tauri::LogicalSize::new(width, height))?;
-                    }
-                    ui_test::fit_to_screen(&window)?;
+                    ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
             }
