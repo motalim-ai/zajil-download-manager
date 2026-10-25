@@ -106,20 +106,118 @@ async fn a_link_to_another_file_is_refused() {
         matches!(err, Error::Status(s) if s.as_u16() == 403),
         "{err}"
     );
-    for bad in [
-        "https://user:pw@example.com/f.bin",
-        "ftp://example.com/f.bin",
-    ] {
-        assert!(
-            engine().refresh_link(&state_file, bad).await.is_err(),
-            "{bad}"
-        );
-    }
+    let err = engine()
+        .refresh_link(&state_file, "https://user:pw@127.0.0.1:9/f.bin")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::InvalidUrl { reason, .. } if reason.contains("password")),
+        "{err}"
+    );
+    let err = engine()
+        .refresh_link(&state_file, "ftp://127.0.0.1:9/f.bin")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::UnsupportedScheme(_)), "{err}");
     assert_eq!(
         fs::read(&state_file).unwrap(),
         before,
         "the state file changed"
     );
+}
+
+/// A new link that redirects: the state keeps the new link and its target,
+/// the target without a user name or password (review of #74), and no
+/// credentials flag; the download then completes.
+#[tokio::test]
+async fn a_new_link_that_redirects_is_kept_without_credentials() {
+    let server = TestServer::http();
+    let data = random_bytes(SIZE, 88);
+    let spec = || FileSpec::new(data.clone()).etag(Some("\"v1\""));
+    server.put("/a/f.bin", spec().cut_after(CUT, 1));
+    let dir = tempfile::tempdir().unwrap();
+    let state_file = cut_download(&server, "/a/f.bin", dir.path()).await;
+    let target = server
+        .url("/cdn/f.bin")
+        .replace("http://", "http://cdnuser:CDNPASS@");
+    server.redirect("/new", &target, 302);
+    server.put("/cdn/f.bin", spec());
+    engine()
+        .refresh_link(&state_file, &server.url("/new"))
+        .await
+        .unwrap();
+    let text = fs::read_to_string(&state_file).unwrap();
+    assert!(
+        !text.contains("CDNPASS") && !text.contains("cdnuser"),
+        "{text}"
+    );
+    let state = zajil_core::state::DownloadState::load(&state_file).unwrap();
+    assert_eq!(state.url, server.url("/new"));
+    assert_eq!(state.final_url, server.url("/cdn/f.bin"));
+    assert!(!state.had_credentials);
+    let finished = engine().resume(&state_file, &mut |_| {}).await.unwrap();
+    assert_eq!(fs::read(finished.file).unwrap(), data);
+}
+
+/// With the part file missing, a refresh still holds its lock: a resume
+/// that starts meanwhile is refused, and a refresh that fails leaves no
+/// part file behind (review of #74).
+#[tokio::test]
+async fn a_refresh_without_a_part_file_still_holds_the_lock() {
+    let server = TestServer::http();
+    let data = random_bytes(SIZE, 89);
+    server.put(
+        "/a/f.bin",
+        FileSpec::new(data.clone())
+            .etag(Some("\"v1\""))
+            .cut_after(CUT, 1),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let state_file = cut_download(&server, "/a/f.bin", dir.path()).await;
+    let part = state_file.with_file_name("f.bin.zajil-part");
+    fs::remove_file(&part).unwrap();
+
+    // A new link that never answers: the refresh waits on it with the
+    // lock held (a listener that accepts and keeps quiet).
+    let quiet = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let quiet_url = format!("http://{}/f.bin", quiet.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in quiet.incoming().flatten() {
+            held.push(stream);
+        }
+    });
+    let refresh = {
+        let state_file = state_file.clone();
+        tokio::spawn(async move { engine().refresh_link(&state_file, &quiet_url).await })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !part.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no part file to hold the lock"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let err = engine().resume(&state_file, &mut |_| {}).await.unwrap_err();
+    assert!(matches!(err, Error::Locked(_)), "{err}");
+    refresh.abort();
+    let _ = refresh.await;
+
+    // A refresh that fails (another file) removes the part file it made.
+    let _ = fs::remove_file(&part);
+    server.put(
+        "/other.bin",
+        FileSpec::new(random_bytes(SIZE, 90)).etag(Some("\"v2\"")),
+    );
+    assert!(
+        engine()
+            .refresh_link(&state_file, &server.url("/other.bin"))
+            .await
+            .is_err()
+    );
+    assert!(!part.exists(), "the part file made for the lock was left");
 }
 
 /// Without a strong validator Zajil cannot tell another link is the same
@@ -196,11 +294,9 @@ async fn the_browser_s_cookies_go_only_to_their_origin_and_never_to_disk() {
         FileSpec::new(data.clone()).etag(Some("\"v1\"")),
     );
     let url = server.url("/f.bin");
-    let from = FromBrowser::new(
-        &url,
-        Some("sid=SECRET-COOKIE"),
-        Some("https://example.com/page"),
-    );
+    // A page of the same origin: sent whole.
+    let page = server.url("/page?q=1");
+    let from = FromBrowser::new(&url, Some("sid=SECRET-COOKIE"), Some(&page));
     let browser = engine().with_browser(from.clone());
     let dir = tempfile::tempdir().unwrap();
     let state_file = match browser.download(&url, dir.path(), &mut |_| {}).await {
@@ -212,7 +308,7 @@ async fn the_browser_s_cookies_go_only_to_their_origin_and_never_to_disk() {
     assert_eq!(fs::read(finished.file).unwrap(), data);
     for get in server.gets("/f.bin") {
         assert_eq!(get.cookie.as_deref(), Some("sid=SECRET-COOKIE"), "{get:?}");
-        assert_eq!(get.referer.as_deref(), Some("https://example.com/page"));
+        assert_eq!(get.referer.as_deref(), Some(page.as_str()));
     }
 
     // Through a redirect to another origin: the page goes, the cookies not.
@@ -227,6 +323,40 @@ async fn the_browser_s_cookies_go_only_to_their_origin_and_never_to_disk() {
         .download(&server.url("/go"), dir.path(), &mut |_| {})
         .await
         .unwrap();
+    // On several connections to the same origin, every ranged request
+    // carries them too (review of #74).
+    let dir = tempfile::tempdir().unwrap();
+    server.put(
+        "/split.bin",
+        FileSpec::new(data.clone()).etag(Some("\"v1\"")),
+    );
+    let split_url = server.url("/split.bin");
+    let from = FromBrowser::new(
+        &split_url,
+        Some("sid=SECRET-COOKIE"),
+        Some("https://example.com/page"),
+    );
+    Engine::new(Options {
+        connections: 4,
+        min_segment_size: 256 * 1024,
+        ..Options::default()
+    })
+    .unwrap()
+    .with_browser(from)
+    .download(&split_url, dir.path(), &mut |_| {})
+    .await
+    .unwrap();
+    let gets = server.gets("/split.bin");
+    assert!(
+        gets.iter().filter(|g| g.range.is_some()).count() >= 2,
+        "{gets:?}"
+    );
+    for get in gets {
+        assert_eq!(get.cookie.as_deref(), Some("sid=SECRET-COOKIE"), "{get:?}");
+        // http here, so a page on https is not sent (a downgrade).
+        assert_eq!(get.referer, None, "{get:?}");
+    }
+
     // With several connections the segments go straight to the final
     // address, outside the redirect: still no cookies there.
     let dir = tempfile::tempdir().unwrap();

@@ -792,26 +792,51 @@ impl Engine {
     pub async fn refresh_link(&self, state_file: &Path, new_url: &str) -> Result<(), Error> {
         let final_path = checked_final_path(state_file)?;
         let state_file = state_path(&final_path);
-        let mut state = DownloadState::load(&state_file)?;
         let url = parse_url(new_url)?;
         if !url.username().is_empty() || url.password().is_some() {
-            return Err(Error::NotTheSameFile(
-                "a link with a user name or password is not accepted".into(),
-            ));
+            return Err(Error::InvalidUrl {
+                url: shown_url(new_url),
+                reason: "a new link with a user name or password is not accepted".into(),
+            });
         }
-        // Held while the state file changes: a running download holds it.
+        // The part file's lock is held from before the state is read until
+        // after it is written: a running download holds it. With no part
+        // file, one is made empty to hold it (the resume then starts over,
+        // as it would have), and removed again if the refresh fails
+        // (review of #74).
         let part_file = part_path(&final_path);
-        let part = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {
-            Ok(part) => Some(part),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        let (part, made) = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {
+            Ok(part) => (part, false),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                let part = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(&part_file)?;
+                (part, true)
+            }
             Err(err) if zajil_platform::fs::is_not_regular_file(&err) => {
                 return Err(Error::NotRegularFile(part_file));
             }
             Err(err) => return Err(err.into()),
         };
-        if let Some(part) = &part {
-            lock(part, &final_path)?;
+        lock(&part, &final_path)?;
+        let result = self.refresh_locked(&state_file, &url, new_url).await;
+        if result.is_err() && made {
+            drop(part);
+            let _ = std::fs::remove_file(&part_file);
         }
+        result
+    }
+
+    /// [`Engine::refresh_link`], with the part file locked.
+    async fn refresh_locked(
+        &self,
+        state_file: &Path,
+        url: &Url,
+        new_url: &str,
+    ) -> Result<(), Error> {
+        let mut state = DownloadState::load(state_file)?;
         let Some(ours) = if_range_value(&state.validator) else {
             return Err(Error::NotTheSameFile(
                 "the server gave this download no strong validator (ETag or Last-Modified), \
@@ -827,25 +852,47 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
+        // Built as a download's state is: the final URL without a user
+        // name or password (review of #74: a redirect's were kept).
         let theirs = state_from_response(new_url.to_owned(), false, &response);
-        let size = |n: Option<u64>| n.map_or("unknown".to_owned(), |n| n.to_string());
+        drop(response);
+        let size = |n: Option<u64>| n.map_or("unknown".to_owned(), |n| format!("{n} bytes"));
         if state.content_length.is_none() || theirs.content_length != state.content_length {
             return Err(Error::NotTheSameFile(format!(
-                "its size is {} bytes, the download's {}",
+                "its size is {}, the download's {}",
                 size(theirs.content_length),
                 size(state.content_length)
             )));
         }
-        if if_range_value(&theirs.validator).as_deref() != Some(ours.as_str()) {
-            return Err(Error::NotTheSameFile(
-                "the server says it is another version of the file (its validator differs)".into(),
-            ));
+        match if_range_value(&theirs.validator) {
+            Some(new) if new == ours => {}
+            // Another kind of validator, or none: not shown to differ, but
+            // nothing shows it is the same file either.
+            Some(new) if new.starts_with('"') != ours.starts_with('"') => {
+                return Err(Error::NotTheSameFile(
+                    "the server describes it differently (an ETag on one side, a date on the \
+                     other), so Zajil cannot tell it is the same file"
+                        .into(),
+                ));
+            }
+            None => {
+                return Err(Error::NotTheSameFile(
+                    "the new link has no strong validator, so Zajil cannot tell it is the same \
+                     file"
+                        .into(),
+                ));
+            }
+            Some(_) => {
+                return Err(Error::NotTheSameFile(
+                    "the server says it is another version of the file (its validator differs)"
+                        .into(),
+                ));
+            }
         }
-        state.url = new_url.to_owned();
-        state.final_url = response.url().to_string();
+        state.url = theirs.url;
+        state.final_url = theirs.final_url;
         state.had_credentials = false;
-        drop(response);
-        state.save(&state_file)?;
+        state.save(state_file)?;
         Ok(())
     }
 
@@ -1785,6 +1832,10 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
     }
     builder
         .redirect(policy)
+        // No `Referer` of our own: after a redirect reqwest would send the
+        // redirecting link, with its `?sig=…` token, to the target (review
+        // of #74). The browser's page is sent by `FromBrowser` instead.
+        .referer(false)
         .connect_timeout(options.connect_timeout)
         .read_timeout(options.idle_timeout)
         // Proxies arrive in M3; until then never pick them up implicitly.

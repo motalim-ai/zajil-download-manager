@@ -94,7 +94,9 @@ enum Command {
         #[arg(long, value_name = "RATE", value_parser = rate)]
         limit: Option<u64>,
         /// A new link to the same file, when the old one expired: used only
-        /// if the server shows the same size and validator.
+        /// if the server shows the same size and the same strong validator
+        /// (ETag or Last-Modified); a download without one cannot take a
+        /// new link.
         #[arg(long, value_name = "URL")]
         link: Option<String>,
     },
