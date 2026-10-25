@@ -1,27 +1,35 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+  import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
-  import AddLink from "./lib/components/AddLink.svelte";
-  import { isMod } from "./lib/keys";
+  import { onMac } from "./lib/keys";
+  import { accelerator, commandFor, keyOf, type Command } from "./lib/commands";
+  import { MENU_BAR, commandKey } from "./lib/menus";
+  import MenuBar from "./lib/components/MenuBar.svelte";
+  import TitleBar from "./lib/components/TitleBar.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import Categories from "./lib/components/Categories.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
+  import AddLink from "./lib/components/AddLink.svelte";
+  import ProgressWindow from "./windows/ProgressWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
+  import { scheduleApi } from "./lib/scheduleApi";
+  import { showTrayTip, trayTip } from "./lib/trayTip";
+  import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
   import { num, size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
   import type { DetailsView } from "./lib/bindings/DetailsView";
   import type { ProbeView } from "./lib/bindings/ProbeView";
-  import type { AddRequest } from "./lib/bindings/AddRequest";
   import type { SettingsView } from "./lib/bindings/SettingsView";
   import type { SettingsChange } from "./lib/bindings/SettingsChange";
   import type { CategoryView } from "./lib/bindings/CategoryView";
@@ -32,10 +40,18 @@
   let selected = $state<number[]>([]);
   let details = $state<DetailsView | null>(null);
   let search = $state("");
+  // The table's columns chooser, and the right-click menu where it opened.
+  let chooser = $state(false);
+  let rowMenu = $state<{ x: number; y: number } | null>(null);
   // The small «add a link» dialog, and whether its link came from the
   // clipboard.
-  let linking = $state<{ url: string; fromClipboard: boolean } | null>(null);
-  let adding = $state<{ url: string; probe: ProbeView | null; error: string | null; busy: boolean } | null>(null);
+  // The «add» UI test scene: «Download file info» drawn in this window
+  // (the add windows are windows of their own, M5.5).
+  let addScene = $state<{ url: string; probe: ProbeView } | null>(null);
+  // The «progress» scene: the first demo download's progress window.
+  let progressScene = $state(false);
+  // The «link» scene: «Add a link» with a link from the clipboard.
+  let linkScene = $state(false);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -99,7 +115,7 @@
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
     // The tray menu speaks the same language.
-    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit")).catch(() => {});
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
@@ -195,6 +211,7 @@
       if (mine !== asked) return;
       snapshot = next;
       announce(snapshot.downloads);
+      showTrayTip(trayTip(next.downloads, locale.lang, locale.digits, locale.t));
       error = snapshot.problem;
       // The details follow the list: closed when their download is gone
       // (review of #48: they stayed, stale, and every refresh failed), and
@@ -210,42 +227,6 @@
       }
     } catch (e) {
       if (mine === asked) error = String(e);
-    }
-  }
-
-  async function startAdding(url: string) {
-    if (adding) return; // one dialog at a time
-    adding = { url, probe: null, error: null, busy: false };
-    try {
-      const probe = await api.probe(url);
-      if (adding?.url === url) adding = { ...adding, probe, error: null };
-    } catch (e) {
-      if (adding?.url === url) adding = { ...adding, probe: null, error: String(e) };
-    }
-  }
-
-  // Closed: a probe still running is given up, and the focus goes back to
-  // the «add a link» button (review of #48).
-  function closeAdding() {
-    adding = null;
-    void api.cancelProbe().catch(() => {});
-    void tick().then(() => document.getElementById("tb-add")?.focus());
-  }
-
-  function closeLinking() {
-    linking = null;
-    void tick().then(() => document.getElementById("tb-add")?.focus());
-  }
-
-  async function add(request: AddRequest) {
-    if (!adding || adding.busy) return;
-    adding = { ...adding, busy: true };
-    try {
-      await api.add(request);
-      closeAdding();
-      await refresh();
-    } catch (e) {
-      if (adding) adding = { ...adding, busy: false, error: String(e) };
     }
   }
 
@@ -329,7 +310,7 @@
 
   // A dialog is open: the toolbar waits (review of #96: a second dialog
   // lost the first one's link).
-  const dialogOpen = $derived(Boolean(adding || linking || refreshing));
+  const dialogOpen = $derived(Boolean(refreshing));
   // The table is on screen: what the selection buttons act on is seen
   // (review of #96: Delete removed rows hidden behind the settings).
   const tableShown = $derived(view === "list" && !details);
@@ -364,7 +345,7 @@
   function doAction(action: ToolAction) {
     switch (action) {
       case "add":
-        linking = { url: "", fromClipboard: false };
+        void api.openAddLink(null, false, locale.t("addlink-title")).catch((e) => (failed = String(e)));
         break;
       case "resume":
         void act("resume");
@@ -391,12 +372,13 @@
       case "halt-queue":
         void act("pause", idsOf((d) => d.queue === queueShown && (d.status === "active" || d.status === "waiting")));
         break;
-      // The queues' schedules are in the settings until the schedule
-      // window comes.
       case "settings":
-      case "schedule":
         details = null;
         view = "settings";
+        break;
+      // The schedule window (M5.5), a window of its own.
+      case "schedule":
+        void scheduleApi.open(locale.t("schedule-title")).catch((e) => (failed = String(e)));
         break;
     }
   }
@@ -423,20 +405,234 @@
     await then();
   }
 
-  // Ctrl+F (⌘F) goes to the search box, unless a dialog is open.
-  function onWindowKey(event: KeyboardEvent) {
-    if (isMod(event, "f") && !adding && !linking && !refreshing) {
-      event.preventDefault();
-      view = "list";
-      details = null;
-      document.getElementById("search")?.focus();
+  // The commands of the menus, the right-click menu and the keyboard
+  // (M5.5): the toolbar's own, and the rest.
+  const TOOL: Command[] = ["add", "resume", "pause", "pause-all", "delete", "delete-done", "run-queue", "halt-queue", "schedule", "settings"];
+  const one = $derived(chosen.length === 1 ? chosen[0] : undefined);
+
+  /** Whether `command` has something to act on now. */
+  function canRun(command: Command): boolean {
+    if (TOOL.includes(command)) return can(command as ToolAction);
+    if (dialogOpen && command !== "quit" && command !== "about") return false;
+    switch (command) {
+      case "open":
+      case "open-folder":
+      case "progress":
+      case "properties":
+        return tableShown && one !== undefined;
+      case "refresh-link":
+        return tableShown && one !== undefined && one.status !== "done";
+      case "copy-link":
+        return tableShown && chosen.length > 0;
+      default:
+        return true;
     }
   }
 
-  function setTheme(theme: string) {
-    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-    else delete document.documentElement.dataset.theme;
+  // The macOS menu and the page's keydown can both see one shortcut: the
+  // second is the same press.
+  let last = { command: "", at: 0 };
+  function run(command: Command) {
+    const now = performance.now();
+    if (last.command === command && now - last.at < 300) return;
+    last = { command, at: now };
+    // In a text box, Select all is its text's, dialog or not (review of
+    // #101: ⌘A goes through the macOS menu).
+    const box = document.activeElement;
+    if (command === "select-all" && (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement)) return box.select();
+    if (!canRun(command)) return;
+    if (TOOL.includes(command)) return doAction(command as ToolAction);
+    switch (command) {
+      case "import":
+        return void importQueues();
+      case "export":
+        return void exportQueues();
+      case "quit":
+        return void quit();
+      case "find":
+        view = "list";
+        details = null;
+        return document.getElementById("search")?.focus();
+      // In a text box, its text; elsewhere, every download the table shows.
+      case "select-all":
+        if (tableShown) selected = shown.map((d) => d.id);
+        return;
+      case "copy-link":
+        return void copyLinks();
+      case "categories":
+        details = null;
+        view = "categories";
+        return;
+      case "columns":
+        details = null;
+        view = "list";
+        chooser = true;
+        return;
+      case "open":
+        return void openOne(one!.id);
+      case "open-folder":
+        return void showIn(one!.id, true);
+      case "progress":
+        return void showProgress(one!.id);
+      case "properties":
+        return void open(one!.id);
+      case "refresh-link":
+        return void open(one!.id).then(() => details && startRefreshing());
+      case "about":
+        return void about();
+    }
   }
+
+  /** A finished download opens; one still on its way shows its progress. */
+  async function openOne(id: number) {
+    const d = snapshot.downloads.find((x) => x.id === id);
+    if (d?.status === "done") await showIn(id, false);
+    else await showProgress(id);
+  }
+  /** The download's progress window (M5.5). */
+  async function showProgress(id: number) {
+    const d = snapshot.downloads.find((x) => x.id === id);
+    await api.openProgress(id, d?.name ?? locale.t("progress-title")).catch((e) => (failed = String(e)));
+  }
+
+  let shownProgress: number | null | undefined = undefined;
+  // The running downloads' progress on the taskbar (Windows) or the Dock
+  // (macOS): how much of what they fetch has come, or nothing.
+  $effect(() => {
+    const sized = active.filter((d) => d.size !== null && d.size > 0);
+    const all = sized.reduce((sum, d) => sum + (d.size ?? 0), 0);
+    const got = sized.reduce((sum, d) => sum + d.done, 0);
+    const shown = all > 0 ? Math.min(100, Math.floor((got / all) * 100)) : null;
+    // Only when it changes (review of #111).
+    if (shown === shownProgress) return;
+    shownProgress = shown;
+    void getCurrentWindow()
+      .setProgressBar(shown === null ? { status: ProgressBarStatus.None } : { status: ProgressBarStatus.Normal, progress: shown })
+      .catch(() => {});
+  });
+  // A file that can run code opens once the user agrees (#84; review of
+  // #101: a double-click ran a program).
+  async function showIn(id: number, folder: boolean) {
+    failed = null;
+    try {
+      if (await api.openDownload(id, folder)) return;
+      const name = snapshot.downloads.find((x) => x.id === id)?.name ?? "";
+      const yes = await ask(locale.t("open-code-question", { name }), {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("open-code-ok"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
+      if (yes) await api.openDownload(id, folder, true);
+    } catch (e) {
+      failed = String(e);
+    }
+  }
+  async function copyLinks() {
+    failed = null;
+    try {
+      await api.copyLinks(selected);
+    } catch (e) {
+      failed = String(e);
+    }
+  }
+  async function moveTo(queue: string) {
+    failed = null;
+    try {
+      await api.moveToQueue(selected, queue);
+    } catch (e) {
+      failed = String(e);
+    }
+    await refresh();
+  }
+  /** Quits; with downloads running, once the user agrees (owner's
+   * decision on #83). */
+  let quitting = false;
+  async function quit() {
+    // A close that quits waits for this page's answer (`closing.rs`).
+    void api.quitHeard().catch(() => {});
+    // One question at a time (review of #105: a second ⌘Q asked again).
+    if (quitting) return;
+    const running = active.length;
+    if (running > 0) {
+      quitting = true;
+      const yes = await ask(locale.t("quit-question", { count: running }), {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("quit-ok"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
+      quitting = false;
+      if (!yes) return;
+    }
+    await api.quitApp();
+  }
+
+  async function about() {
+    const version = await api.appVersion().catch(() => "");
+    await message(locale.t("about-text", { version }), { title: locale.t("app-name"), kind: "info" }).catch(() => {});
+  }
+
+  // Copy (Ctrl+C, or the system's Copy on macOS) on the table is «Copy
+  // link», unless the copy is a text box's own or of selected text. The app
+  // writes the clipboard, so its monitoring does not offer the links back.
+  function onCopy(event: ClipboardEvent) {
+    const box = document.activeElement;
+    if (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || !canRun("copy-link")) return;
+    if (window.getSelection()?.toString()) return;
+    event.preventDefault();
+    void copyLinks();
+  }
+
+  /** A command from the macOS menu: in a text box, the keys a text box
+   * has (⌘⌫, ⌘O, ⌘I) do not act on the downloads (review of #101). */
+  function fromMenu(command: Command) {
+    const box = document.activeElement;
+    const typing = box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || (box instanceof HTMLElement && box.isContentEditable);
+    if (typing && command !== "select-all" && TEXT_KEYS.includes(command)) return;
+    run(command);
+  }
+
+  // The shortcuts. In a text box, its own keys stay its own.
+  const TEXT_KEYS: Command[] = ["select-all", "copy-link", "delete", "open", "properties"];
+  function onWindowKey(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
+    const command = commandFor(event);
+    if (!command) return;
+    const target = event.target as HTMLElement | null;
+    const typing = target?.closest("input, textarea, select, [contenteditable]") !== null && target !== null;
+    if (typing && TEXT_KEYS.includes(command)) return;
+    // Enter on a row is the table's; elsewhere it is the focused button's.
+    if (command === "open" && keyOf("open")?.key === "Enter") return;
+    // Ctrl+C copies through the copy event.
+    if (command === "copy-link") return;
+    event.preventDefault();
+    run(command);
+  }
+
+  // The system's menu bar on macOS, in the page's language.
+  $effect(() => {
+    if (!onMac() || NamesPage) return;
+    const t = locale.t;
+    const menus = MENU_BAR.map((m) => ({
+      label: t(m.key),
+      edit: Boolean(m.edit),
+      items: m.items.flatMap((item): { id: Command | null; label?: string; accelerator?: string | null }[] => {
+        if (item === "-") return [{ id: null }];
+        if (!("command" in item)) return [];
+        const key = keyOf(item.command, true);
+        // ⌘C is the system's Copy, which «Copy link» answers.
+        const shortcut = key && item.command !== "copy-link" ? accelerator(key) : null;
+        return [{ id: item.command, label: t(commandKey(item.command)), accelerator: shortcut }];
+      }),
+    }));
+    const system = Object.fromEntries(
+      ["hide", "hide_others", "show_all", "undo", "redo", "cut", "copy", "paste", "window", "minimize", "zoom"].map((k) => [k, t(`sys-${k.replace("_", "-")}`, { app: t("app-name") })]),
+    );
+    void api.setMenu(t("app-name"), menus, system).catch(() => {});
+  });
+
+
 
   /// `ui-test` builds only: show a fixed scenario (`<view>-<lang>-<theme>`)
   /// and tell the Rust side when it is on screen.
@@ -465,8 +661,27 @@
       const said = refreshText(locale.t, locale.lang, locale.digits, problem);
       refreshing = { id: 6, name: details.download.name, problem: said.text, detail: null, busy: false };
     }
-    if (screen === "add")
-      adding = {
+    // Dark: a Google Drive link as the owner tried it (a web page, no
+    // size, the link's last part as its name), to see its warning, name
+    // and size in words; light: an ordinary file.
+    if (screen === "add" && theme === "dark")
+      addScene = {
+        url: "https://drive.google.com/uc?export=download&id=1AbC",
+        probe: {
+          name: "download",
+          size: null,
+          resumable: false,
+          ranges: false,
+          category: null,
+          category_site: null,
+          category_extension: null,
+          folder: "~/Downloads",
+          page: true,
+          download_folder: "~/Downloads",
+        },
+      };
+    else if (screen === "add")
+      addScene = {
         url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
         probe: {
           name: "ubuntu-24.04.3-desktop-amd64.iso",
@@ -477,10 +692,12 @@
           category_site: null,
           category_extension: "iso",
           folder: "~/Downloads",
+          page: false,
+          download_folder: "~/Downloads",
         },
-        error: null,
-        busy: false,
       };
+    if (screen === "progress") progressScene = true;
+    if (screen === "link") linkScene = true;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
       await tick();
@@ -518,6 +735,8 @@
     locale.set("ar");
     let unlisten: (() => void) | undefined;
     let unlistenClipboard: (() => void) | undefined;
+    let unlistenMenu: (() => void) | undefined;
+    let unlistenView: (() => void) | undefined;
     void (async () => {
       if (await runUiTest()) return;
       try {
@@ -532,26 +751,55 @@
       // (review of #67). Ignored while a dialog is open: with the refresh
       // dialog, the new link is copied for it (review of #78).
       unlistenClipboard = await api.onClipboardLink((url) => {
-        if (adding || refreshing || linking) return;
-        linking = { url, fromClipboard: true };
-        void api.showWindow().catch(() => {});
+        if (refreshing) return;
+        void api.openAddLink(url, true, locale.t("addlink-title")).catch(() => {});
       });
+      // «New category» in «Download file info».
+      unlistenView = await api.onMainView((next) => {
+        if (next !== "categories") return;
+        details = null;
+        view = "categories";
+      });
+      unlistenMenu = await api.onMenuCommand((command) => fromMenu(command as Command));
       await refresh();
     })();
     return () => {
       unlisten?.();
       unlistenClipboard?.();
+      unlistenMenu?.();
+      unlistenView?.();
     };
   });
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
+<svelte:document oncopy={onCopy} />
 
 {#if NamesPage}
   <NamesPage />
+{:else if linkScene}
+  <div class="scene" class:mac={onMac()}><AddLink url="https://cdn.example.org/courses/rust/part-2.mp4" fromClipboard={true} onok={() => {}} oncancel={() => {}} /></div>
+{:else if progressScene}
+  <div class="scene" class:mac={onMac()}><ProgressWindow id={1} /></div>
+{:else if addScene}
+  <div class="scene" class:mac={onMac()}><AddDialog
+    url={addScene.url}
+    probe={addScene.probe}
+    error={null}
+    busy={false}
+    queues={snapshot.queues}
+    categories={snapshot.categories}
+    onadd={() => {}}
+    oncancel={() => {}}
+    onchoosefolder={async () => null}
+    onnewcategory={() => {}}
+  /></div>
 {:else}
   <div class="window">
+    <TitleBar />
     <header>
+      <h1 class="visually-hidden">{locale.t("app-name")}</h1>
+      {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}
       <Toolbar bind:search {can} {hint} onaction={doAction} />
     </header>
     <div class="body">
@@ -594,29 +842,27 @@
       {:else}
         {#if error}<p class="problem" role="alert"><Icon name="alert" />{error}</p>{/if}
         {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}
-        <DownloadTable downloads={shown} bind:selected onopen={(id) => void open(id)} />
-      {/if}
-      {#if adding}
-        <AddDialog
-          url={adding.url}
-          probe={adding.probe}
-          error={adding.error}
-          busy={adding.busy}
-          queues={snapshot.queues}
-          categories={snapshot.categories}
-          onadd={(r) => void add(r)}
-          oncancel={closeAdding}
+        <DownloadTable
+          downloads={shown}
+          bind:selected
+          bind:chooser
+          label={locale.t("table-label")}
+          onopen={(id) => void openOne(id)}
+          oncontext={(x, y) => (rowMenu = { x, y })}
         />
       {/if}
-      {#if linking}
-        <AddLink
-          url={linking.url}
-          fromClipboard={linking.fromClipboard}
-          onok={(url) => {
-            linking = null;
-            void startAdding(url);
+      {#if rowMenu && tableShown && !dialogOpen}
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          queues={snapshot.queues.map((q) => ({ name: q.name, label: q.name === "main" ? locale.t("queue-main") : q.name }))}
+          can={canRun}
+          onrun={run}
+          onmove={(q) => void moveTo(q)}
+          onclose={(refocus) => {
+            rowMenu = null;
+            if (refocus) document.querySelector<HTMLElement>('tr[tabindex="0"]')?.focus();
           }}
-          oncancel={closeLinking}
         />
       {/if}
       {#if refreshing}
@@ -644,6 +890,16 @@
 {/if}
 
 <style>
+  /* A window scene (the add, link and progress windows, drawn here for
+     the screenshots): on macOS the main window's own title bar is hidden
+     (#118), and the real windows have the system's above their content. */
+  .scene {
+    height: 100%;
+  }
+  .scene.mac {
+    box-sizing: border-box;
+    padding-top: 28px;
+  }
   .window {
     display: flex;
     flex-direction: column;

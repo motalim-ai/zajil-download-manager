@@ -8,11 +8,16 @@
 
 #![forbid(unsafe_code)]
 
+mod closing;
+mod complete;
 mod live;
+mod menu;
+mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
 pub mod view;
+mod windows;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -53,6 +58,12 @@ pub struct App {
     connections: Arc<AtomicUsize>,
     /// Clipboard monitoring is on (the settings, M5).
     clipboard: Arc<AtomicBool>,
+    /// What «Copy link» put on the clipboard: the monitoring does not offer
+    /// it back (M5.5).
+    copied: Arc<std::sync::Mutex<String>>,
+    /// The clipboard «Copy link» writes with, kept open: on Linux the text
+    /// lives only while its writer does, with no clipboard manager.
+    copier: Arc<std::sync::Mutex<Option<zajil_platform::clipboard::SystemClipboard>>>,
     /// The data folder (`--data-dir` or the system's).
     data_dir: PathBuf,
     /// The browser's cookies and page of each download the extension sent,
@@ -120,6 +131,8 @@ pub fn run() {
         system_download_dir,
         connections: Arc::new(AtomicUsize::new(connections)),
         clipboard: Arc::new(AtomicBool::new(clipboard)),
+        copied: Arc::default(),
+        copier: Arc::default(),
         data_dir: data.clone(),
         from_browser: Arc::default(),
         links: zajil_host::Links::default(),
@@ -135,17 +148,59 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    let builder = tauri::Builder::default()
+    // One Zajil per user: with its window hidden in the tray, opening Zajil
+    // again shows it instead of starting a second program on the same
+    // queues (review of #109). Not with `--data-dir` (the tests and the
+    // screenshots, each on a folder of its own).
+    let builder = tauri::Builder::default();
+    let builder = if args.iter().any(|a| a == "--data-dir") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
+    };
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Opens a finished download or its folder from Rust only
+        // (`open_download`): the page has no opener permission.
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(app);
+        .manage(app)
+        .manage(windows::Shared::default())
+        .manage(closing::Closing::new(
+            &data,
+            args.iter().any(|a| a == "--close-quits"),
+        ))
+        .manage(schedule::SharedAfter::default())
+        .manage(complete::Show::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
+        // The macOS menu bar's commands go to the page (`menu.rs`).
+        .on_menu_event(|handle, event| {
+            // To the window in front: in an add window, Select all is its
+            // text box's, not the main window's rows (M5.5).
+            if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
+                let front = handle
+                    .webview_windows()
+                    .into_iter()
+                    .find(|(_, w)| w.is_focused().unwrap_or(false))
+                    .map_or_else(|| "main".to_owned(), |(label, _)| label);
+                // Quit is the main window's, which asks first while
+                // downloads run (review of #105: an add window quit at once).
+                let front = if command == "quit" {
+                    "main"
+                } else {
+                    front.as_str()
+                };
+                let _ = handle.emit_to(front, "menu-command", command.to_owned());
+            }
+        })
         .invoke_handler(handlers())
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
@@ -176,12 +231,44 @@ pub fn run() {
                     *kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(integration);
                 });
             }
+            // The add windows' own permissions (`windows.rs`), and they
+            // close with the main window (review of #104).
+            tauri_app.add_capability(windows::CAPABILITY)?;
+            // The close button hides the window into the tray (`closing.rs`).
+            closing::watch(tauri_app.handle());
+            tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
+            windows::close_with_main(tauri_app.handle());
+            // The schedule window's and the «download complete» windows'
+            // (`schedule.rs`, `complete.rs`); they close with the main one too.
+            tauri_app.add_capability(schedule::CAPABILITY)?;
+            tauri_app.add_capability(complete::CAPABILITY)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
                 tauri_app.state::<App>().stopped.send_replace(true);
                 if let Some(window) = tauri_app.get_webview_window("main") {
-                    ui_test::fit_to_screen(&window)?;
+                    // The add windows' scenes draw that window in the main
+                    // one, at its own size.
+                    let scenario = tauri_app.state::<ui_test::UiTest>().scenario.clone();
+                    let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
+                        Some("add") => Some(windows::INFO_SIZE),
+                        Some("link") => Some(windows::LINK_SIZE),
+                        Some("progress") => Some(windows::PROGRESS_SIZE),
+                        _ => None,
+                    };
+                    // macOS: the system's title bar is drawn by the page in
+                    // a scene (the main window's own is hidden, #118).
+                    let size = size.map(|(w, h)| {
+                        (
+                            w,
+                            if cfg!(target_os = "macos") {
+                                h + 28.0
+                            } else {
+                                h
+                            },
+                        )
+                    });
+                    ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
             }
@@ -226,6 +313,9 @@ pub fn run() {
                 app.stop.request();
                 tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
             }
+            // macOS: a click on the Dock icon shows the window it hid.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::show_window(handle),
             _ => {}
         });
 }
@@ -243,6 +333,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        tray::set_tray_tooltip,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -255,7 +349,34 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         browser_integration,
         refresh_link,
         cancel_refresh,
-        go_without_cookies
+        go_without_cookies,
+        windows::open_add_link,
+        windows::pending_link,
+        windows::open_add_info,
+        windows::pending_info,
+        windows::close_window,
+        windows::show_main_view,
+        windows::open_progress,
+        set_limit,
+        menu::set_menu,
+        quit_app,
+        app_version,
+        open_download,
+        move_to_queue,
+        copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out
     ]
 }
 
@@ -271,6 +392,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        tray::set_tray_tooltip,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -284,6 +409,33 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         refresh_link,
         cancel_refresh,
         go_without_cookies,
+        windows::open_add_link,
+        windows::pending_link,
+        windows::open_add_info,
+        windows::pending_info,
+        windows::close_window,
+        windows::show_main_view,
+        windows::open_progress,
+        set_limit,
+        menu::set_menu,
+        quit_app,
+        app_version,
+        open_download,
+        move_to_queue,
+        copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -293,11 +445,18 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
 /// ended. After that it gives up: every download's progress is in its state
 /// file, at most a second old (ADR-0004), and the next start resumes there.
 async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
+    // How long the stop took, said every time (#132: on Windows it ran
+    // out a few times; the time shows how near the limit it usually is).
+    let asked = std::time::Instant::now();
     let wait = stopped.wait_for(|stopped| *stopped);
     match tokio::time::timeout(STOP_WAIT, wait).await {
-        Ok(_) => eprintln!("zajil: the downloads stopped; exiting"),
+        Ok(_) => eprintln!(
+            "zajil: the downloads stopped; exiting (after {} ms)",
+            asked.elapsed().as_millis()
+        ),
         Err(_) => eprintln!(
-            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files"
+            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files (after {} ms)",
+            asked.elapsed().as_millis()
         ),
     }
 }
@@ -384,10 +543,37 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
 #[tauri::command]
 fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
+    closing: State<'_, closing::Closing>,
     show: String,
     quit: String,
+    notice_title: String,
+    notice: String,
 ) -> Result<(), String> {
+    closing.set_notice(closing::Notice {
+        title: notice_title,
+        body: notice,
+    });
     tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+}
+
+/// Whether closing the main window quits Zajil (the settings), and whether
+/// this desktop has a system tray to go on in.
+#[tauri::command]
+fn close_quits(closing: State<'_, closing::Closing>) -> (bool, bool) {
+    (closing.prefs().close_quits, closing.tray())
+}
+
+/// The page heard «quit» from closing the window (`closing.rs`).
+#[tauri::command]
+fn quit_heard(closing: State<'_, closing::Closing>) {
+    closing.heard();
+}
+
+#[tauri::command]
+fn set_close_quits(closing: State<'_, closing::Closing>, quits: bool) -> Result<(), String> {
+    closing
+        .change(|p| p.close_quits = quits)
+        .map_err(|e| e.to_string())
 }
 
 /// Tells the page that something changed: at once, or once the throttle
@@ -461,6 +647,8 @@ async fn run_queues(handle: tauri::AppHandle) {
                     }
                 };
                 on_queue_event(&event, &live, &links, &asks, &from_browser, &store, changed);
+                schedule::on_event(&handle, &event);
+                complete::on_event(&handle, &event);
                 notify(&handle, &live);
             })
             .await;
@@ -652,7 +840,10 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 let app = handle.state::<App>();
                 let given = download_dir(&app.settings, &app.system_download_dir);
                 let reach = extension_reach(&app.engine);
-                let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
+                // The user's language, for what the extension is told.
+                let lang = app.settings.load().map(|s| s.language).unwrap_or_default();
+                let answer =
+                    from_extension(&app.store, &request, &given, &app.from_browser, lang, reach);
                 if answer.ok {
                     let _ = handle.emit("downloads-changed", ());
                     tray::show_window(&handle);
@@ -916,7 +1107,8 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
                 &app.categories,
                 std::time::Instant::now(),
             );
-            if let Some(link) = link {
+            let own = |link: &str| app.copied.lock().is_ok_and(|c| copied_here(&c, link));
+            if let Some(link) = link.filter(|l| !own(l)) {
                 let _ = handle.emit("clipboard-link", link);
             }
         }
@@ -1253,11 +1445,7 @@ fn reach_file(engine: &Engine, url: &str) -> Result<zajil_core::Probe, String> {
 /// web page (a sign-in page a link redirected to, review of #70), or a file
 /// of another type than the name the browser had.
 fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option<String> {
-    let page = matches!(
-        probe.content_type.as_deref(),
-        Some("text/html" | "application/xhtml+xml")
-    );
-    if page {
+    if view::is_web_page(probe.content_type.as_deref()) {
         return Some("the server sent a web page (a sign-in page?), not the file".into());
     }
     let extension = |name: &str| {
@@ -1288,6 +1476,7 @@ fn from_extension(
     request: &zajil_host::Request,
     given: &Path,
     headers: &zajil_core::queue::FromBrowserById,
+    lang: zajil_core::settings::Language,
     reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
 ) -> zajil_host::Response {
     match request {
@@ -1296,6 +1485,9 @@ fn from_extension(
         zajil_host::Request::Link { .. } | zajil_host::Request::Cookies { .. } => {
             zajil_host::Response::refused("not here")
         }
+        // Video downloads (M6) are not in the program yet: the extension
+        // is told so, in the user's language, and nothing else happens.
+        zajil_host::Request::Video { .. } => zajil_host::Response::refused(video_soon(lang)),
         zajil_host::Request::PrivateClosed { .. } => match discard_private(store) {
             Ok(()) => zajil_host::Response::ok(),
             Err(err) => zajil_host::Response::refused(err.to_string()),
@@ -1345,6 +1537,9 @@ fn from_extension(
             .any(zajil_core::category::runs_code);
             let add = AddRequest {
                 url: url.clone(),
+                name: None,
+                category: None,
+                description: None,
                 queue: None,
                 folder: None,
                 start: !runs_code,
@@ -1384,6 +1579,18 @@ fn from_extension(
     }
 }
 
+/// «Video downloads are coming soon», in `lang` (the translations' own
+/// text, `video-soon`).
+fn video_soon(lang: zajil_core::settings::Language) -> String {
+    let lang = match lang {
+        zajil_core::settings::Language::Ar => zajil_i18n::Lang::Ar,
+        zajil_core::settings::Language::En => zajil_i18n::Lang::En,
+    };
+    zajil_i18n::Localizer::new(lang)
+        .text("video-soon", &[])
+        .unwrap_or_else(|_| "Video downloads are coming soon.".to_owned())
+}
+
 /// Nothing is created here: the download makes its folder when it starts,
 /// so a refused add leaves nothing behind (review of #48).
 fn add_blocking(
@@ -1398,6 +1605,27 @@ fn add_blocking(
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
         let id = queues.add(queue, &request.url, given)?;
+        // The user's name, category and description (#103, #95), in the
+        // same write: the queue never sees the download without them.
+        let given_name = request
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty());
+        if given_name.is_some() {
+            queues.set_name(id, given_name)?;
+        }
+        if let Some(category) = request.category.as_deref() {
+            queues.set_category(id, Some(category))?;
+        }
+        let description = request
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty());
+        if description.is_some() {
+            queues.set_description(id, description)?;
+        }
         let item = queues.item_mut(id).expect("just added");
         // Without a folder of its own, a download goes by its category.
         item.categorize = request.folder.is_none();
@@ -1681,6 +1909,159 @@ async fn refresh_item(
     })
 }
 
+/// «Quit» from the menus: the same way as the tray's (the downloads record
+/// their progress and stop first).
+#[tauri::command]
+fn quit_app<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    handle.exit(0);
+}
+
+/// The program's version, for «About Zajil».
+#[tauri::command]
+fn app_version<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> String {
+    handle.package_info().version.to_string()
+}
+
+/// Opens a finished download (`folder` false) with the system's program
+/// for it, or shows it in its folder (`folder` true; a download with no
+/// file yet shows its folder, selected in the one above, never opened: an
+/// imported folder could be a program, as a macOS `.app` is). Only a
+/// download's own paths: the page names the download, never a path. A file
+/// that can run code (#84) opens only once the user is `sure`: `false`
+/// comes back, and the page asks.
+#[tauri::command]
+async fn open_download<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    folder: bool,
+    sure: bool,
+    handle: tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    use tauri_plugin_opener::OpenerExt;
+    if in_scene(&handle) {
+        return Ok(true);
+    }
+    let store = app.store.clone();
+    let queues = tokio::task::spawn_blocking(move || store.load())
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
+    let file = item.file.clone().filter(|f| f.is_file());
+    let opener = handle.opener();
+    match (folder, file) {
+        (false, Some(file)) if !sure && asks_before_opening(&file) => Ok(false),
+        (false, Some(file)) => opener
+            .open_path(file.to_string_lossy(), None::<&str>)
+            .map(|()| true)
+            .map_err(|e| e.to_string()),
+        (false, None) => Err(format!("download {id} has no finished file")),
+        (true, Some(file)) => opener
+            .reveal_item_in_dir(&file)
+            .map(|()| true)
+            .map_err(|e| e.to_string()),
+        (true, None) if item.dir.is_dir() => opener
+            .reveal_item_in_dir(&item.dir)
+            .map(|()| true)
+            .map_err(|e| e.to_string()),
+        (true, None) => Err(format!("download {id} has no folder")),
+    }
+}
+
+/// A file that can run code (#84): opening it runs it.
+fn asks_before_opening(file: &std::path::Path) -> bool {
+    file.file_name()
+        .is_some_and(|n| zajil_core::category::runs_code(&n.to_string_lossy()))
+}
+
+/// Whether `link` is one of the links «Copy link» put on the clipboard.
+fn copied_here(copied: &str, link: &str) -> bool {
+    copied.lines().any(|l| l.trim() == link.trim())
+}
+
+/// A download's own speed limit (the progress window, M5.5); `None` or 0:
+/// none. A running download takes it the next time it starts (the runner
+/// reads it then).
+#[tauri::command]
+async fn set_limit<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    limit: Option<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| {
+        q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?.limit = limit.filter(|l| *l > 0);
+        Ok(())
+    })
+    .await
+}
+
+/// Moves downloads to queue `queue`, in their order, at its end.
+#[tauri::command]
+async fn move_to_queue<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    queue: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| move_items(q, &ids, &queue)).await
+}
+
+/// [`move_to_queue`]: an unknown download or queue changes nothing.
+fn move_items(queues: &mut QueuesFile, ids: &[u64], queue: &str) -> Result<(), StoreError> {
+    queues
+        .queue(queue)
+        .ok_or_else(|| StoreError::NoSuchQueue(queue.to_owned()))?;
+    for id in ids {
+        queues.item(*id).ok_or(StoreError::NoSuchItem(*id))?;
+    }
+    for id in ids {
+        let item = queues.remove(*id)?;
+        queues.queue_mut(queue).expect("checked").items.push(item);
+    }
+    Ok(())
+}
+
+/// «Copy link»: the downloads' links on the clipboard, one a line, kept
+/// so the clipboard monitoring does not offer them back. How many went.
+#[tauri::command]
+async fn copy_links<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<usize, String> {
+    let store = app.store.clone();
+    let queues = tokio::task::spawn_blocking(move || store.load())
+        .await
+        .map_err(blocking_err)?
+        .map_err(|e| e.to_string())?;
+    let links: Vec<String> = ids
+        .iter()
+        .filter_map(|id| queues.item(*id).map(|i| i.url.clone()))
+        .collect();
+    if links.is_empty() || in_scene(&handle) {
+        return Ok(links.len());
+    }
+    let text = links.join("\n");
+    if let Ok(mut copied) = app.copied.lock() {
+        copied.clone_from(&text);
+    }
+    let copier = app.copier.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut copier = copier
+            .lock()
+            .map_err(|_| std::io::Error::other("clipboard"))?;
+        if copier.is_none() {
+            *copier = Some(zajil_platform::clipboard::SystemClipboard::new()?);
+        }
+        copier.as_mut().map_or(Ok(()), |c| c.set_text(&text))
+    })
+    .await
+    .map_err(blocking_err)?
+    .map_err(|e| e.to_string())?;
+    Ok(links.len())
+}
+
 #[tauri::command]
 async fn remove<R: tauri::Runtime>(
     app: State<'_, App>,
@@ -1697,6 +2078,103 @@ async fn remove<R: tauri::Runtime>(
 mod tests {
     use super::*;
 
+    /// «Download file info» adds the download with the user's own name,
+    /// category and description (#103, #95); an empty name or description
+    /// leaves the server's name and none.
+    #[test]
+    fn a_download_is_added_with_the_users_name_category_and_description() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = AddRequest {
+            url: "https://example.com/v.mp4".into(),
+            name: Some("  درس أول.mp4 ".into()),
+            category: Some("music".into()),
+            description: Some(" للمراجعة ".into()),
+            queue: None,
+            folder: None,
+            start: false,
+            limit: None,
+        };
+        let id = add_blocking(&store, &request, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(item.name.as_deref(), Some("درس أول.mp4"));
+        assert_eq!(item.category.as_deref(), Some("music"));
+        assert_eq!(item.description.as_deref(), Some("للمراجعة"));
+
+        let plain = AddRequest {
+            name: Some("   ".into()),
+            category: None,
+            description: Some("".into()),
+            ..request
+        };
+        let id = add_blocking(&store, &plain, data.path(), None, false, false, false).unwrap();
+        let queues = store.load().unwrap();
+        let item = queues.item(id).unwrap();
+        assert_eq!(
+            (
+                item.name.as_ref(),
+                item.category.as_ref(),
+                item.description.as_ref()
+            ),
+            (None, None, None)
+        );
+    }
+
+    /// The main window is the same on every system but for its title bar
+    /// (the design of #83): hidden under the page on macOS, none on Windows
+    /// and Linux, where the page draws it.
+    #[test]
+    fn the_main_window_differs_by_system_only_in_its_title_bar() {
+        let read = |name: &str| -> serde_json::Value {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        for (name, own) in [
+            (
+                "tauri.macos.conf.json",
+                serde_json::json!({"titleBarStyle": "Overlay", "hiddenTitle": true}),
+            ),
+            (
+                "tauri.windows.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+            (
+                "tauri.linux.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+        ] {
+            let mut expected = base.clone();
+            for (k, v) in own.as_object().unwrap() {
+                expected[k] = v.clone();
+            }
+            assert_eq!(
+                read(name)["app"]["windows"],
+                serde_json::json!([expected]),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_copied_by_the_app_is_not_offered_back() {
+        let copied = "https://a.example/x.zip\nhttps://b.example/y.iso";
+        assert!(copied_here(copied, "https://b.example/y.iso"));
+        assert!(copied_here(copied, " https://a.example/x.zip "));
+        assert!(!copied_here(copied, "https://a.example/x"));
+        assert!(!copied_here("", "https://a.example/x.zip"));
+    }
+
+    #[test]
+    fn a_file_that_runs_code_is_not_opened_without_asking() {
+        use std::path::Path;
+        assert!(asks_before_opening(Path::new("/d/setup.EXE")));
+        assert!(asks_before_opening(Path::new("/d/run.sh")));
+        assert!(!asks_before_opening(Path::new("/d/film.mkv")));
+        assert!(!asks_before_opening(Path::new("/d/setup.exe.zip")));
+    }
+
     fn three() -> QueuesFile {
         let mut q = QueuesFile::empty();
         let dir = std::env::temp_dir();
@@ -1705,6 +2183,31 @@ mod tests {
                 .unwrap();
         }
         q
+    }
+
+    /// M5.5 «Move to queue»: the downloads go to the end of that queue, in
+    /// their order; an unknown queue or download changes nothing.
+    #[test]
+    fn downloads_move_to_another_queue_in_their_order() {
+        let mut q = three();
+        q.add("night", "https://example.com/n.iso", &std::env::temp_dir())
+            .unwrap();
+        let before = q.clone();
+        assert!(matches!(
+            move_items(&mut q, &[1], "nowhere"),
+            Err(StoreError::NoSuchQueue(_))
+        ));
+        assert!(matches!(
+            move_items(&mut q, &[1, 99], "night"),
+            Err(StoreError::NoSuchItem(99))
+        ));
+        assert_eq!(q, before);
+        move_items(&mut q, &[3, 1], "night").unwrap();
+        let ids = |name: &str| -> Vec<u64> {
+            q.queue(name).unwrap().items.iter().map(|i| i.id).collect()
+        };
+        assert_eq!(ids("night"), [4, 3, 1]);
+        assert_eq!(ids("main"), [2]);
     }
 
     #[test]
@@ -2014,9 +2517,14 @@ mod tests {
             zajil_host::serve(
                 listener,
                 move |request| {
-                    from_extension(&served, &request, &given, &Default::default(), |_, _| {
-                        Ok(probe_of("b.iso", None))
-                    })
+                    from_extension(
+                        &served,
+                        &request,
+                        &given,
+                        &Default::default(),
+                        zajil_core::settings::Language::Ar,
+                        |_, _| Ok(probe_of("b.iso", None)),
+                    )
                 },
                 Default::default(),
             );
@@ -2055,6 +2563,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe_of("a.zip", None))
             ),
             zajil_host::Response::ok()
@@ -2072,6 +2581,7 @@ mod tests {
                 &ping,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| panic!("a ping reaches nothing")
             ),
             zajil_host::Response::ok()
@@ -2122,6 +2632,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe),
             );
             assert!(!answer.ok);
@@ -2134,6 +2645,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("L.ZIP", Some("application/zip"))),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2142,9 +2654,14 @@ mod tests {
             br#"{"type":"download","protocol_version":1,"url":"https://example.com/get?id=1"}"#,
         )
         .unwrap();
-        let answer = from_extension(&store, &bare, data.path(), &Default::default(), |_, _| {
-            Ok(probe_of("get", None))
-        });
+        let answer = from_extension(
+            &store,
+            &bare,
+            data.path(),
+            &Default::default(),
+            zajil_core::settings::Language::Ar,
+            |_, _| Ok(probe_of("get", None)),
+        );
         assert!(answer.ok, "{answer:?}");
     }
 
@@ -2161,10 +2678,17 @@ mod tests {
         )
         .unwrap();
         let mut checked_with = None;
-        let answer = from_extension(&store, &request, data.path(), &headers, |_, from| {
-            checked_with = Some(from.has_cookies());
-            Ok(probe_of("a.zip", None))
-        });
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &headers,
+            zajil_core::settings::Language::Ar,
+            |_, from| {
+                checked_with = Some(from.has_cookies());
+                Ok(probe_of("a.zip", None))
+            },
+        );
         assert!(answer.ok, "{answer:?}");
         assert_eq!(checked_with, Some(true));
         let id = store.load().unwrap().queues[0].items[0].id;
@@ -2175,10 +2699,17 @@ mod tests {
             br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.zip"}"#,
         )
         .unwrap();
-        let answer = from_extension(&store, &bare, data.path(), &headers, |_, from| {
-            assert!(!from.has_cookies());
-            Ok(probe_of("b.zip", None))
-        });
+        let answer = from_extension(
+            &store,
+            &bare,
+            data.path(),
+            &headers,
+            zajil_core::settings::Language::Ar,
+            |_, from| {
+                assert!(!from.has_cookies());
+                Ok(probe_of("b.zip", None))
+            },
+        );
         assert!(answer.ok);
         let second = store.load().unwrap().queues[0].items[1].id;
         assert!(!headers.lock().unwrap()[&second].has_cookies());
@@ -2434,6 +2965,7 @@ mod tests {
                 &request,
                 data.path(),
                 &Default::default(),
+                zajil_core::settings::Language::Ar,
                 |_, _| Ok(probe_of(served, None)),
             );
             assert!(answer.ok, "{answer:?}");
@@ -2486,6 +3018,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("b.iso", None)),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2527,6 +3060,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| unreachable!("nothing is checked"),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2535,6 +3069,42 @@ mod tests {
         assert!(queues.item(other).is_some());
         assert!(!state.exists());
         assert!(!data.path().join("p.bin.zajil-part").exists());
+    }
+
+    /// A video from the extension (M6 is not here yet): answered «coming
+    /// soon» in the user's language, without the check (no request to the
+    /// page) and without anything added to the queues.
+    #[test]
+    fn a_video_from_the_extension_is_answered_coming_soon() {
+        use zajil_core::settings::Language;
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"video","protocol_version":1,"page":"https://video.example.com/watch?v=1"}"#,
+        )
+        .unwrap();
+        for (lang, text) in [
+            (Language::Ar, "تحميل الفيديو قادم قريبًا."),
+            (Language::En, "Video downloads are coming soon."),
+        ] {
+            let answer = from_extension(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                lang,
+                |_, _| unreachable!("a video is not checked here"),
+            );
+            assert_eq!(answer, zajil_host::Response::refused(text));
+        }
+        assert!(
+            store
+                .load()
+                .unwrap()
+                .queues
+                .iter()
+                .all(|q| q.items.is_empty())
+        );
     }
 
     /// M5: a download from the extension keeps where it came from (the
@@ -2553,6 +3123,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |_, _| Ok(probe_of("b.iso", None)),
         );
         assert!(answer.ok, "{answer:?}");
@@ -2841,6 +3412,7 @@ mod tests {
             &request,
             data.path(),
             &Default::default(),
+            zajil_core::settings::Language::Ar,
             |url, _| {
                 asked.push(url.to_owned());
                 Err("the server answered 403 Forbidden".into())

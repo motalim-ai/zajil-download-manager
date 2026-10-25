@@ -39,6 +39,14 @@ segments: number, error: string | null,
  */
 waits_for_browser: boolean, 
 /**
+ * The user's description (#95).
+ */
+description: string | null, 
+/**
+ * When it last started or resumed (#95): RFC 3339 in UTC.
+ */
+last_try: string | null, 
+/**
  * A file that can run code, from the browser: it waits for the user
  * to start it (security review #84).
  */

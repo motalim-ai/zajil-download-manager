@@ -160,6 +160,17 @@ const ARABIC: &[(&str, [&str; 6])] = &[
         ],
     ),
     (
+        "quit-question",
+        [
+            "لا تحميلات تعمل الآن. هل تُنهي زاجِل؟",
+            "يعمل الآن تحميل واحد. هل تُنهي زاجِل؟",
+            "يعمل الآن تحميلان. هل تُنهي زاجِل؟",
+            "يعمل الآن 3 تحميلات. هل تُنهي زاجِل؟",
+            "يعمل الآن 11 تحميلًا. هل تُنهي زاجِل؟",
+            "يعمل الآن 100 تحميل. هل تُنهي زاجِل؟",
+        ],
+    ),
+    (
         "connections-count",
         [
             "لا اتصالات",
@@ -284,6 +295,13 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
     ("downloads-count", ["1 download", "2 downloads"]),
+    (
+        "quit-question",
+        [
+            "1 download is running. Quit Zajil?",
+            "2 downloads are running. Quit Zajil?",
+        ],
+    ),
     ("import-done", ["1 download added.", "2 downloads added."]),
     ("connections-count", ["1 connection", "2 connections"]),
     ("queues-count", ["1 queue", "2 queues"]),
@@ -703,6 +721,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("add-probe-ranges", &["size"]),
     ("add-probe-single", &["size"]),
     ("add-probe-unsure", &["size"]),
+    ("add-probe-unsure-no-size", &["size"]),
     ("connections-count", &["count"]),
     ("details-part", &["number"]),
     ("details-connections-value", &["active", "total"]),
@@ -713,10 +732,26 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A time already written for the user's language.
+    ("last-try-yesterday", &["time"]),
+    ("progress-working", &["number"]),
+    // Two texts already made, a count and «N working».
+    ("progress-connections", &["connections", "working"]),
+    // Bounds shown alone (no noun after them).
+    ("progress-limit-bad", &["max", "min"]),
+    ("add-remember", &["category"]),
+    // The engine's or the system's own words (English).
+    ("add-remember-failed", &["error"]),
+    // A version, a column's name and the app's name: no number to count.
+    ("about-text", &["version"]),
+    ("col-resize", &["column"]),
+    ("sys-hide", &["app"]),
+    ("open-code-question", &["name"]),
     // The engine's own words (English), and two sizes formatted beforehand.
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
+    ("quit-question", &["count"]),
     ("import-done", &["count"]),
     ("import-kept", &["names"]),
     ("files-count", &["count"]),
@@ -820,6 +855,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         ),
     },
     Whole {
+        key: "add-probe-unsure-no-size",
+        ar: (
+            &[("size", "SIZE")],
+            "SIZE. السيرفر يدعم التقسيم، لكنه لا يعطي ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.",
+        ),
+        en: (
+            &[("size", "SIZE")],
+            "SIZE. The server allows ranges but gives no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.",
+        ),
+    },
+    Whole {
         key: "details-part",
         ar: (&[("number", "11")], "الجزء 11"),
         en: (&[("number", "1")], "Part 1"),
@@ -883,6 +929,80 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "st-error",
         ar: (&[("code", "CODE")], "خطأ CODE"),
         en: (&[("code", "CODE")], "Error CODE"),
+    },
+    Whole {
+        key: "about-text",
+        ar: (&[("version", "VERSION")], "زاجِل، الإصدار VERSION"),
+        en: (&[("version", "VERSION")], "Zajil, version VERSION"),
+    },
+    Whole {
+        key: "col-resize",
+        ar: (&[("column", "COLUMN")], "عرض عمود COLUMN"),
+        en: (&[("column", "COLUMN")], "COLUMN column width"),
+    },
+    Whole {
+        key: "open-code-question",
+        ar: (
+            &[("name", "NAME")],
+            "«NAME» برنامج أو ملف يمكنه تشغيل أوامر على جهازك. هل تفتحه؟",
+        ),
+        en: (
+            &[("name", "NAME")],
+            "“NAME” is a program, or a file that can run commands on your computer. Open it?",
+        ),
+    },
+    Whole {
+        key: "sys-hide",
+        ar: (&[("app", "APP")], "إخفاء APP"),
+        en: (&[("app", "APP")], "Hide APP"),
+    },
+    Whole {
+        key: "add-remember-failed",
+        ar: (
+            &[("error", "ERR")],
+            "أُضيف التحميل، لكن لم يُحفظ المجلد للفئة: ERR",
+        ),
+        en: (
+            &[("error", "ERR")],
+            "The download was added, but the folder wasn't kept for the category: ERR",
+        ),
+    },
+    Whole {
+        key: "add-remember",
+        ar: (&[("category", "CAT")], "تذكّر هذا المجلد لفئة «CAT»"),
+        en: (&[("category", "CAT")], "Remember this folder for “CAT”"),
+    },
+    Whole {
+        key: "progress-limit-bad",
+        ar: (
+            &[("min", "11"), ("max", "32")],
+            "اكتب رقمًا صحيحًا من 11 إلى 32.",
+        ),
+        en: (
+            &[("min", "1"), ("max", "32")],
+            "Write a whole number from 1 to 32.",
+        ),
+    },
+    Whole {
+        key: "progress-connections",
+        ar: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN، WORK",
+        ),
+        en: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN, WORK",
+        ),
+    },
+    Whole {
+        key: "progress-working",
+        ar: (&[("number", "NUMBER")], "يعمل NUMBER"),
+        en: (&[("number", "NUMBER")], "NUMBER working"),
+    },
+    Whole {
+        key: "last-try-yesterday",
+        ar: (&[("time", "TIME")], "أمس TIME"),
+        en: (&[("time", "TIME")], "Yesterday TIME"),
     },
     Whole {
         key: "footer-selected",

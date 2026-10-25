@@ -7,24 +7,107 @@
 </script>
 
 <script lang="ts">
+  import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
-  import { isMod } from "../keys";
-  import { left, percent, size, speed } from "../format";
+  import { lastTry, left, percent, size, speed } from "../format";
+  import { COLUMNS, clampWidth, load, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
   import type { DownloadView } from "../bindings/DownloadView";
 
   let {
     downloads,
     selected = $bindable(),
+    label,
+    chooser = $bindable(),
     onopen,
+    oncontext,
   }: {
     downloads: DownloadView[];
     /** The selected downloads' ids, in table order. */
     selected: number[];
+    /** What the table shows (the tree's choice), for screen readers. */
+    label: string;
+    /** The columns chooser is open (the «Columns» button, or View ›
+     * Columns). */
+    chooser: boolean;
     onopen: (id: number) => void;
+    /** A right click (or the menu key) on a row, at that point. */
+    oncontext: (x: number, y: number) => void;
   } = $props();
+
+  // The columns as the user left them (M5.5).
+  let columns = $state<Columns>(load());
+  const shownColumns = $derived(visible(columns));
+  function keep(next: Columns) {
+    columns = next;
+    save(next);
+  }
+
+  // Resizing: the grip at a header's end follows the pointer.
+  function startResize(event: PointerEvent, id: ColumnId, width: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    const grip = event.currentTarget as HTMLElement;
+    grip.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    // In a right-to-left table the end is on the left: moving left widens.
+    const sign = getComputedStyle(grip).direction === "rtl" ? -1 : 1;
+    const moved = (e: PointerEvent) => {
+      columns = { ...columns, widths: { ...columns.widths, [id]: clampWidth(width + sign * (e.clientX - startX)) } };
+    };
+    const done = () => {
+      grip.removeEventListener("pointermove", moved);
+      grip.removeEventListener("pointerup", done);
+      grip.removeEventListener("lostpointercapture", done);
+      save(columns);
+    };
+    grip.addEventListener("pointermove", moved);
+    grip.addEventListener("pointerup", done);
+    // A drag the system cancels ends too.
+    grip.addEventListener("lostpointercapture", done);
+  }
+  // The chooser: its first box takes the focus when it opens; Escape, the
+  // button or a click elsewhere closes it, and the focus goes back to the
+  // button (review of #101).
+  let colButton: HTMLButtonElement | undefined = $state();
+  let chooserBox: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (chooser) void tick().then(() => chooserBox?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus());
+  });
+  function closeChooser(refocus: boolean) {
+    chooser = false;
+    if (refocus) colButton?.focus();
+  }
+  // From the keyboard: the grip is a slider, the arrows change the width.
+  function resizeKey(event: KeyboardEvent, id: ColumnId, width: number) {
+    const step = event.shiftKey ? 32 : 8;
+    const wider = getComputedStyle(event.currentTarget as HTMLElement).direction === "rtl" ? "ArrowLeft" : "ArrowRight";
+    const narrower = wider === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
+    if (event.key !== wider && event.key !== narrower) return;
+    event.preventDefault();
+    keep({ ...columns, widths: { ...columns.widths, [id]: clampWidth(width + (event.key === wider ? step : -step)) } });
+  }
+
+  // Reordering: a header dragged onto another goes before it.
+  let dragging = $state<ColumnId | null>(null);
+  function drop(before: ColumnId) {
+    if (dragging && dragging !== before) keep(move(columns, dragging, before));
+    dragging = null;
+  }
+
+  function context(event: MouseEvent, index: number) {
+    event.preventDefault();
+    const id = downloads[index]!.id;
+    // A right click on a row that is not selected selects it alone.
+    if (!selected.includes(id)) {
+      selected = [id];
+      anchor = id;
+    }
+    focus = id;
+    oncontext(event.clientX, event.clientY);
+  }
 
   const fraction = (d: DownloadView) => (d.size ? d.done / d.size : d.status === "done" ? 1 : 0);
   const pct = (d: DownloadView) => percent(locale.lang, locale.digits, fraction(d));
@@ -59,11 +142,14 @@
   }
 
   // The arrows, Home and End move (Shift extends the selection); Space
-  // selects the row; Enter opens it; Ctrl+A (⌘A) selects every row.
+  // selects the row; Enter opens it; the menu key (or Shift+F10) opens the
+  // right-click menu at the row. Select all is the window's (⌘A, Ctrl+A).
   function onkeydown(event: KeyboardEvent, index: number) {
-    if (isMod(event, "a")) {
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
       event.preventDefault();
-      selected = downloads.map((d) => d.id);
+      const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      if (!selected.includes(downloads[index]!.id)) selected = [downloads[index]!.id];
+      oncontext(box.left + 24, box.bottom - 4);
       return;
     }
     const next =
@@ -87,27 +173,134 @@
       }
       focus = id;
       document.getElementById(`row-${id}`)?.focus();
-    } else if (event.key === "Enter") {
+    } else if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      // Enter opens it here; the window does not see it again.
+      event.preventDefault();
+      event.stopPropagation();
       const id = downloads[index]?.id;
       if (id !== undefined) onopen(id);
     }
   }
 </script>
 
+<svelte:document onpointerdown={(e) => chooser && !chooserBox?.contains(e.target as Node) && !colButton?.contains(e.target as Node) && closeChooser(false)} />
+
+{#snippet cell(d: DownloadView, id: ColumnId)}
+  {#if id === "name"}
+    <td>
+      <span class="nm">
+        <span class="ft" aria-hidden="true"><Icon name={categoryIcon(d.category)} size={14} /></span>
+        <FileName name={d.name} />
+      </span>
+    </td>
+  {:else if id === "size"}
+    <td class="num muted">{d.size === null ? "" : size(locale.lang, locale.digits, d.size)}</td>
+  {:else if id === "status"}
+    <td>
+      {#if d.needs_ok}
+        <span class="st paused"><Icon name="circle-alert" size={14} />{locale.t("status-needs-ok")}</span>
+      {:else if d.waits_for_browser}
+        <span class="st paused"><Icon name="link-2" size={14} />{locale.t("status-open-browser")}</span>
+      {:else if d.status === "active"}
+        <span class="st">
+          <span class="mini" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
+          <span class="pct num">{pct(d)}</span>
+        </span>
+      {:else if d.status === "paused"}
+        <span class="st paused"><Icon name="pause" size={14} />{locale.t("st-paused")} <span class="num">{pct(d)}</span></span>
+      {:else if d.status === "done"}
+        <span class="st done"><Icon name="circle-check" size={14} />{locale.t("status-done")}</span>
+      {:else if d.status === "failed"}
+        {@const code = errorCode(d.error)}
+        <span class="st failed" title={d.error ?? undefined}><Icon name="circle-alert" size={14} />{code ? locale.t("st-error", { code }) : locale.t("st-failed")}</span>
+      {:else}
+        <span class="st waiting"><Icon name="list-end" size={14} />{locale.t("st-in-queue")}</span>
+      {/if}
+    </td>
+  {:else if id === "left"}
+    <td class="num muted">{d.status === "active" && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : ""}</td>
+  {:else if id === "speed"}
+    <td class="num">{d.status === "active" ? speed(locale.lang, locale.digits, d.speed) : ""}</td>
+  {:else if id === "last"}
+    <td class="num muted">{d.last_try ? lastTry(locale.lang, locale.digits, d.last_try, locale.t) : ""}</td>
+  {:else}
+    <td class="muted"><span class="desc" title={d.description ?? undefined}>{d.description ?? ""}</span></td>
+  {/if}
+{/snippet}
+
 <div class="scroll">
-  <table class="grid" aria-label={locale.t("nav-all")} aria-multiselectable="true" role="grid">
+  <table class="grid" aria-label={label} aria-multiselectable="true" role="grid">
     <colgroup>
-      <col class="c-name" /><col class="c-size" /><col class="c-status" /><col class="c-left" /><col class="c-speed" /><col class="c-last" /><col class="c-desc" />
+      {#each shownColumns as c (c.id)}<col style:width={c.width === null ? undefined : `${c.width}px`} />{/each}
+      <col class="c-cols" />
     </colgroup>
     <thead>
       <tr>
-        <th scope="col">{locale.t("col-name")}</th>
-        <th scope="col">{locale.t("col-size")}</th>
-        <th scope="col">{locale.t("col-status")}</th>
-        <th scope="col">{locale.t("col-left")}</th>
-        <th scope="col">{locale.t("col-speed")}</th>
-        <th scope="col">{locale.t("col-last-try")}</th>
-        <th scope="col">{locale.t("col-description")}</th>
+        {#each shownColumns as c (c.id)}
+          <th
+            scope="col"
+            draggable="true"
+            class:target={dragging !== null && dragging !== c.id}
+            ondragstart={(e) => {
+              dragging = c.id;
+              e.dataTransfer?.setData("text/plain", c.id);
+            }}
+            ondragover={(e) => dragging && e.preventDefault()}
+            ondrop={(e) => {
+              e.preventDefault();
+              drop(c.id);
+            }}
+            ondragend={() => (dragging = null)}
+          >
+            {locale.t(c.key)}
+            {#if c.width !== null}
+              <!-- A focusable separator is a splitter, a widget (WAI-ARIA). -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+              <span
+                class="grip"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={locale.t("col-resize", { column: locale.t(c.key) })}
+                aria-valuenow={c.width}
+                aria-valuemin={56}
+                aria-valuemax={600}
+                tabindex="0"
+                draggable="false"
+                onpointerdown={(e) => startResize(e, c.id, c.width ?? 100)}
+                onkeydown={(e) => resizeKey(e, c.id, c.width ?? 100)}
+              ></span>
+            {/if}
+          </th>
+        {/each}
+        <th class="cols" scope="col">
+          <button bind:this={colButton} class="colbtn" aria-label={locale.t("cmd-columns")} title={locale.t("cmd-columns")} aria-expanded={chooser} onclick={() => (chooser ? closeChooser(true) : (chooser = true))}>
+            <Icon name="columns-3" size={15} />
+          </button>
+          {#if chooser}
+            <!-- Escape from any of its boxes closes it. -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div
+              class="chooser"
+              role="group"
+              aria-label={locale.t("cmd-columns")}
+              bind:this={chooserBox}
+              onkeydown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeChooser(true);
+                }
+              }}
+            >
+              {#each COLUMNS as c (c.id)}
+                <label class="choice">
+                  <input type="checkbox" checked={!columns.hidden.includes(c.id)} disabled={c.id === "name"} onchange={() => keep(toggle(columns, c.id))} />
+                  {locale.t(c.key)}
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -118,41 +311,11 @@
           aria-selected={selected.includes(d.id)}
           onclick={(e) => pick(e, i)}
           ondblclick={() => onopen(d.id)}
+          oncontextmenu={(e) => context(e, i)}
           onkeydown={(e) => onkeydown(e, i)}
         >
-          <td>
-            <span class="nm">
-              <span class="ft" aria-hidden="true"><Icon name={categoryIcon(d.category)} size={14} /></span>
-              <FileName name={d.name} />
-            </span>
-          </td>
-          <td class="num muted">{d.size === null ? "" : size(locale.lang, locale.digits, d.size)}</td>
-          <td>
-            {#if d.needs_ok}
-              <span class="st paused"><Icon name="circle-alert" size={14} />{locale.t("status-needs-ok")}</span>
-            {:else if d.waits_for_browser}
-              <span class="st paused"><Icon name="link-2" size={14} />{locale.t("status-open-browser")}</span>
-            {:else if d.status === "active"}
-              <span class="st">
-                <span class="mini" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
-                <span class="pct num">{pct(d)}</span>
-              </span>
-            {:else if d.status === "paused"}
-              <span class="st paused"><Icon name="pause" size={14} />{locale.t("st-paused")} <span class="num">{pct(d)}</span></span>
-            {:else if d.status === "done"}
-              <span class="st done"><Icon name="circle-check" size={14} />{locale.t("status-done")}</span>
-            {:else if d.status === "failed"}
-              {@const code = errorCode(d.error)}
-              <span class="st failed" title={d.error ?? undefined}><Icon name="circle-alert" size={14} />{code ? locale.t("st-error", { code }) : locale.t("st-failed")}</span>
-            {:else}
-              <span class="st waiting"><Icon name="list-end" size={14} />{locale.t("st-in-queue")}</span>
-            {/if}
-          </td>
-          <td class="num muted">{d.status === "active" && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : ""}</td>
-          <td class="num">{d.status === "active" ? speed(locale.lang, locale.digits, d.speed) : ""}</td>
-          <!-- «Last try» and «Description» come with #95 (zajil-core). -->
-          <td class="num faint"></td>
-          <td class="faint"></td>
+          {#each shownColumns as c (c.id)}{@render cell(d, c.id)}{/each}
+          <td class="cols"></td>
         </tr>
       {/each}
     </tbody>
@@ -160,6 +323,12 @@
 </div>
 
 <style>
+  .desc {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .scroll {
     overflow: auto;
     flex: 1;
@@ -167,30 +336,13 @@
   }
   table.grid {
     width: 100%;
-    min-width: 760px;
+    min-width: 640px;
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;
   }
-  /* The small columns are as wide as what they show; the name takes the
-     rest. */
-  .c-size {
-    width: 100px;
-  }
-  .c-status {
-    width: 128px;
-  }
-  .c-left {
-    width: 84px;
-  }
-  .c-speed {
-    width: 112px;
-  }
-  .c-last {
-    width: 88px;
-  }
-  .c-desc {
-    width: 88px;
+  .c-cols {
+    width: 34px;
   }
   th {
     text-align: start;
@@ -203,6 +355,71 @@
     position: sticky;
     top: 0;
     white-space: nowrap;
+  }
+  th[draggable="true"] {
+    cursor: grab;
+  }
+  th.target {
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+  .grip {
+    position: absolute;
+    inset-block: 4px;
+    inset-inline-end: -4px;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 2;
+  }
+  .grip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 3px;
+  }
+  th.cols,
+  td.cols {
+    width: 34px;
+    padding: 0;
+    text-align: center;
+  }
+  .colbtn {
+    border: 0;
+    background: none;
+    color: var(--muted);
+    padding: 4px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-grid;
+  }
+  .colbtn:hover {
+    background: var(--sunken);
+  }
+  .chooser {
+    position: absolute;
+    top: 100%;
+    inset-inline-end: 4px;
+    z-index: 5;
+    min-width: 190px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-weight: 400;
+    color: var(--ink);
+    text-align: start;
+  }
+  .choice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
+  .choice:hover {
+    background: var(--sunken);
   }
   th + th::before {
     content: "";
@@ -249,9 +466,6 @@
   }
   .muted {
     color: var(--muted);
-  }
-  .faint {
-    color: var(--faint);
   }
   .st {
     display: flex;

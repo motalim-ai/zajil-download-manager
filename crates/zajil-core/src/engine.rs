@@ -409,8 +409,9 @@ pub enum Error {
     },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
-    /// A download held for the user before anything was made: the server
-    /// named a file that can run code ([`Engine::holding`]).
+    /// A download held for the user before anything was made: the name it
+    /// would be saved under (the server's, or the user's) is one that
+    /// [`Engine::holding`] holds.
     #[error("{0} can run code: it waits for you to start it")]
     Held(String),
     /// "Refresh the link": the new link is not the same file (M5).
@@ -442,11 +443,22 @@ pub struct Engine {
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
     hold: Option<Hold>,
+    /// The download's own limit, given by its caller so that its rate can
+    /// change while it runs (#106); `None`: a fresh one from
+    /// [`Options::download_limit`].
+    own_limit: Option<SpeedLimit>,
+    /// The name a new download is saved under instead of the server's
+    /// (the user's, M5.5, #103). `None`: the server's.
+    name: Option<String>,
 }
 
-/// What [`Engine::holding`] checks a new download's name with.
+/// What [`Engine::holding`] checks a new download's names with.
 #[derive(Clone)]
-struct Hold(Arc<dyn Fn(&str) -> bool + Send + Sync>);
+struct Hold(HoldCheck);
+
+/// Whether to hold a new download, from the name the server gives and the
+/// name it is saved under ([`Engine::named`]; the same when it has none).
+pub type HoldCheck = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 impl std::fmt::Debug for Hold {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -462,6 +474,8 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
+            name: None,
         })
     }
 
@@ -479,6 +493,8 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
+            name: None,
         })
     }
 
@@ -500,14 +516,25 @@ impl Engine {
         engine
     }
 
-    /// This engine, holding a new download whose name makes `hold` true:
-    /// it stops with [`Error::Held`] once the server has named the file,
-    /// before anything is created. For a file from a page that can run
-    /// code: the probe's name is not enough, the download's own answer
-    /// may name another file (review of #90).
-    pub fn holding(&self, hold: Arc<dyn Fn(&str) -> bool + Send + Sync>) -> Engine {
+    /// This engine, holding a new download whose names make `hold` true
+    /// (the server's, then the one it is saved under): it stops with
+    /// [`Error::Held`] once the server has named the file, before anything
+    /// is created. For a file from a page that can run code: the probe's
+    /// name is not enough, the download's own answer may name another file
+    /// (review of #90).
+    pub fn holding(&self, hold: HoldCheck) -> Engine {
         let mut engine = self.clone();
         engine.hold = Some(Hold(hold));
+        engine
+    }
+
+    /// This engine, saving a new download under `name` instead of the name
+    /// the server gives (`None`: the server's). Cleaned like any name
+    /// ([`sanitize_file_name`]), and numbered like any name if it is
+    /// taken. A resumed download keeps the name it has.
+    pub fn named(&self, name: Option<&str>) -> Engine {
+        let mut engine = self.clone();
+        engine.name = name.map(sanitize_file_name);
         engine
     }
 
@@ -526,20 +553,35 @@ impl Engine {
     }
 
     /// This engine, with `rate` bytes per second for each download (`None`:
-    /// no limit of its own). The program-wide limit stays shared.
+    /// no limit of its own), instead of a limit given with
+    /// [`Engine::with_own_limit`]. The program-wide limit stays shared.
     pub fn with_download_limit(&self, rate: Option<u64>) -> Engine {
         let mut engine = self.clone();
         engine.options.download_limit = rate;
+        engine.own_limit = None;
+        engine
+    }
+
+    /// This engine, with `limit` as the limit of its own of the download it
+    /// starts (instead of [`Options::download_limit`]): the caller keeps a
+    /// clone and changes its rate while the download runs (#106). Every
+    /// download this engine and its clones start shares it, so it is for
+    /// one download. The program-wide limit stays shared. It wins over
+    /// [`Engine::with_download_limit`], which clears it.
+    pub fn with_own_limit(&self, limit: SpeedLimit) -> Engine {
+        let mut engine = self.clone();
+        engine.own_limit = Some(limit);
         engine
     }
 
     /// The limits a new download goes through: the program's, shared, and
-    /// a fresh one of its own.
+    /// its own: the one given ([`Engine::with_own_limit`]), or a fresh one.
     fn limits(&self) -> Limits {
-        let own = self
-            .options
-            .download_limit
-            .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()));
+        let own = self.own_limit.clone().or_else(|| {
+            self.options
+                .download_limit
+                .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()))
+        });
         Limits {
             limits: self
                 .options
@@ -602,14 +644,19 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let name = suggested_name(
+        let server_name = suggested_name(
             response
                 .headers()
                 .get(header::CONTENT_DISPOSITION)
                 .map(|v| v.as_bytes()),
             response.url(),
         );
-        if self.hold.as_ref().is_some_and(|hold| (hold.0)(&name)) {
+        let name = self.name.clone().unwrap_or_else(|| server_name.clone());
+        if self
+            .hold
+            .as_ref()
+            .is_some_and(|hold| (hold.0)(&server_name, &name))
+        {
             return Err(Error::Held(name));
         }
         let dir = choose(&name, response.url());

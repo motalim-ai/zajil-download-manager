@@ -3,8 +3,10 @@
 //!
 //! - What goes in: the program's settings, and each queue with its
 //!   settings and its downloads (URL, folder, status, limit, whether it
-//!   goes by category). Not the progress, the state files, the finished
-//!   files or errors: those belong to this computer.
+//!   goes by category, and what the user gave it: a file name, a category
+//!   and a description, #95 and #103). Not the progress, the state files,
+//!   the finished files, errors or the time of the last try: those belong
+//!   to this computer.
 //! - Never a user name or password: queues cannot hold them, and an
 //!   export that somehow met one would refuse it. A token that is part of
 //!   a URL (`?sig=…`) is kept, under the two conditions of AGENTS.md
@@ -27,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use super::schedule::Schedule;
 use super::store::{
     DEFAULT_MAX_ACTIVE, Item, MAX_ACTIVE, Queue, QueuesFile, Settings, Status, StoreError,
-    check_name,
+    check_name, check_user_details,
 };
 use crate::category::{has_hidden, is_unsafe_in_url, printable};
 use crate::state::{checksum_of, now_rfc3339};
@@ -74,6 +76,15 @@ pub struct ExportItem {
     #[serde(default)]
     pub categorize: bool,
     pub added_at: String,
+    /// The user's name for the file (#103).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The category the user chose (#103).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The user's description (#95).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Where an exported download stands. A running or failed download is
@@ -157,6 +168,11 @@ impl QueuesFile {
                         limit: i.limit,
                         categorize: i.categorize,
                         added_at: i.added_at.clone(),
+                        // A download already made keeps the name it got;
+                        // on the other side it is made again under it.
+                        name: i.name.clone(),
+                        category: i.category.clone(),
+                        description: i.description.clone(),
                     })
                     .collect(),
             })
@@ -274,6 +290,10 @@ impl QueuesFile {
                     added_at: ei.added_at.clone(),
                     // An export says nothing about a browser.
                     browser: None,
+                    name: ei.name.clone(),
+                    category: ei.category.clone(),
+                    description: ei.description.clone(),
+                    last_try: None,
                 };
                 self.queues[index[&eq.name]].items.push(item);
                 summary.items_added += 1;
@@ -445,6 +465,13 @@ fn check(export: &ExportFile) -> Result<(), String> {
             if i.added_at.len() > 64 || i.added_at.parse::<jiff::Timestamp>().is_err() {
                 return Err(format!("{at} has an added_at that is not an RFC 3339 time"));
             }
+            // The rules of the setters, so Zajil imports what it exports.
+            check_user_details(
+                i.name.as_deref(),
+                i.category.as_deref(),
+                i.description.as_deref(),
+            )
+            .map_err(|why| format!("{at} {why}"))?;
         }
     }
     Ok(())

@@ -10,7 +10,7 @@
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const ID: &str = "zajil";
 
@@ -29,8 +29,16 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_window(app),
-            // The same path as closing the window (`RunEvent::ExitRequested`).
-            "quit" => app.exit(0),
+            // The page's Quit, which asks first while downloads run (owner's
+            // decision on #83), its window shown for the question; without
+            // the window, the same path as closing it.
+            "quit" => match app.get_webview_window("main") {
+                Some(_) => {
+                    show_window(app);
+                    let _ = app.emit_to("main", "menu-command", "quit");
+                }
+                None => app.exit(0),
+            },
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -67,10 +75,54 @@ pub fn show_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// The longest tooltip Windows shows (`NOTIFYICONDATAW::szTip` holds 128
+/// UTF-16 units with its end).
+const TIP_UNITS: usize = 127;
+
+/// What runs now, on the icon's tooltip (from the page, in its language).
+/// Windows and macOS show it; Linux's tray (AppIndicator) has no tooltip.
+#[tauri::command]
+pub fn set_tray_tooltip<R: Runtime>(handle: AppHandle<R>, text: String) -> Result<(), String> {
+    if let Some(tray) = handle.tray_by_id(ID) {
+        tray.set_tooltip(Some(fit(&text)))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// `text` cut to [`TIP_UNITS`] UTF-16 units, at a character's edge.
+fn fit(text: &str) -> String {
+    let mut units = 0;
+    text.chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= TIP_UNITS
+        })
+        .collect()
+}
+
 /// The menu's texts in the interface's language.
 pub fn set_texts<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(ID) {
         tray.set_menu(Some(menu(app, show, quit)?))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_tooltip_is_cut_at_a_character_within_windows_limit() {
+        assert_eq!(fit("زاجِل"), "زاجِل");
+        let long = "ب".repeat(200);
+        let cut = fit(&long);
+        assert_eq!(cut.encode_utf16().count(), TIP_UNITS);
+        // A character of two UTF-16 units is never cut in half.
+        let wide = "😀".repeat(100);
+        let cut = fit(&wide);
+        assert_eq!(cut.encode_utf16().count(), TIP_UNITS - 1);
+        assert!(cut.chars().all(|c| c == '😀'));
+    }
 }

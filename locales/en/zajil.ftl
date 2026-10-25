@@ -78,7 +78,7 @@ queue-window = from { $start } to { $stop }
 
 category-programs = Programs
 category-video = Videos
-category-music = Music
+category-music = Audio
 category-documents = Documents
 category-archives = Archives
 category-none = No category
@@ -144,7 +144,7 @@ add-connections-hint = { $min } to { $max }
 add-limit = Speed limit for this download
 add-limit-none = None
 add-cancel = Cancel
-add-later = Add to queue
+add-later = Download later
 add-start = Start download
 
 ## Details
@@ -339,3 +339,206 @@ addlink-url = Link
 addlink-from-clipboard = Taken from the clipboard
 addlink-ok = OK
 addlink-cancel = Cancel
+
+## M5.5: the menus, the right-click menu and the columns
+
+menu-bar = Menus
+menu-file = File
+menu-edit = Edit
+menu-downloads = Downloads
+menu-view = View
+menu-help = Help
+cmd-add = Add link…
+cmd-import = Import queues…
+cmd-export = Export queues…
+cmd-quit = Quit
+cmd-select-all = Select all
+cmd-find = Find
+cmd-copy-link = Copy link
+cmd-delete-done = Delete finished
+cmd-resume = Resume
+cmd-pause = Pause
+cmd-pause-all = Pause all
+cmd-delete = Delete…
+cmd-run-queue = Start queue
+cmd-halt-queue = Stop queue
+cmd-schedule = Schedule…
+cmd-settings = Settings…
+cmd-categories = Categories…
+cmd-columns = Columns
+cmd-open = Open
+cmd-open-folder = Open folder
+cmd-progress = Progress window
+cmd-refresh-link = Refresh link…
+cmd-properties = Properties
+cmd-about = About Zajil
+cmd-move-to-queue = Move to queue
+about-text = Zajil, version { $version }
+table-label = Downloads
+col-resize = { $column } column width
+sys-hide = Hide { $app }
+sys-hide-others = Hide Others
+sys-show-all = Show All
+sys-undo = Undo
+sys-redo = Redo
+sys-cut = Cut
+sys-copy = Copy
+sys-paste = Paste
+sys-window = Window
+sys-minimize = Minimize
+sys-zoom = Zoom
+row-menu = Download menu
+open-code-question = “{ $name }” is a program, or a file that can run commands on your computer. Open it?
+open-code-ok = Open
+
+## M5.5: the add windows
+info-title = Download file info
+add-new-category = New category
+add-remember = Remember this folder for “{ $category }”
+add-resumable = Can be resumed
+add-not-resumable = Can't be resumed
+add-later-queue = Download later in a queue
+add-checking = Asking the server about the file…
+add-about-file = About the file
+addlink-info-open = «Download file info» is open for another link. Finish or cancel it first.
+add-remember-failed = The download was added, but the folder wasn't kept for the category: { $error }
+
+## Quit with downloads running (owner's decision on #83)
+quit-question =
+    { PLURAL($count) ->
+        [one] { $count } download is running. Quit Zajil?
+       *[other] { $count } downloads are running. Quit Zajil?
+    }
+quit-ok = Quit Zajil
+
+## الجدولة
+
+schedule-title = Schedule
+schedule-queues = Queues
+schedule-new = New queue
+schedule-new-name = The new queue's name
+schedule-new-hint = Letters, digits, - and _ only, no spaces.
+schedule-create = Create
+schedule-cancel = Cancel
+schedule-delete = Delete
+schedule-delete-confirm = This queue is deleted, and its downloads go to the end of the main queue. Delete it?
+schedule-main-stays = The main queue cannot be deleted.
+schedule-summary-none = No set time
+schedule-start = Start
+schedule-start-any = No set time: runs whenever something waits in it
+schedule-start-at = Start at
+schedule-days = Days
+schedule-days-hint = No days chosen: every day.
+schedule-day-sat = Sat
+schedule-day-sun = Sun
+schedule-day-mon = Mon
+schedule-day-tue = Tue
+schedule-day-wed = Wed
+schedule-day-thu = Thu
+schedule-day-fri = Fri
+schedule-stop = Stop
+schedule-stop-at = Stop at
+schedule-stop-hint = What is not finished stops, and goes on at the next start.
+schedule-max-active = Downloads at the same time
+schedule-after = When the queue is done
+schedule-after-nothing = Nothing
+schedule-after-shutdown = Shut down the computer
+schedule-after-sleep = Sleep
+schedule-after-hint = For this run only, never saved. Zajil counts down a minute first, which you can cancel.
+schedule-countdown-shutdown = The queue is done. The computer shuts down in:
+schedule-countdown-sleep = The queue is done. The computer goes to sleep in:
+schedule-countdown-cancel = Cancel
+schedule-after-failed = That did not happen:
+schedule-files = Downloads in the queue (in starting order)
+schedule-up = Up
+schedule-down = Down
+schedule-move = Move to queue…
+schedule-empty = No downloads in this queue.
+schedule-start-now = Start now
+schedule-started = The queue has started.
+schedule-closed-now = The queue is outside its time now: its downloads wait for its next start.
+schedule-save = Save
+schedule-saved = Saved.
+schedule-close = Close
+schedule-tries = Tries per file
+schedule-after-open = And open a file or program after it:
+schedule-after-open-pick = Choose a file…
+schedule-soon = Coming soon
+
+## الاكتمال
+
+complete-title = Download complete
+complete-name = Name
+complete-size = Size
+complete-folder = Saved in
+complete-url = Link
+complete-open = Open
+complete-open-folder = Open folder
+complete-close = Close
+complete-dont-show = Don't show this window again
+complete-setting = Show the «Download complete» window when a download finishes
+complete-drag = Drag it from here
+complete-drag-hint = Drag the file from here into any program or folder
+
+## Video (M6)
+
+video-soon = Video downloads are coming soon.
+
+## The main window's title bar (the design of #83)
+app-title = Zajil Download Manager
+win-minimize = Minimize
+win-maximize = Maximize
+win-restore = Restore
+win-close = Close
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = Zajil is still running in the system tray, and the downloads go on. Choose “Quit Zajil” from its icon to quit.
+settings-closing = Closing the window
+settings-closing-label = Closing the window quits Zajil
+settings-closing-hint = Without this, the window hides and Zajil stays in the system tray while the downloads go on, as in IDM.
+settings-closing-no-tray = This desktop shows no system tray, so closing the window always quits Zajil (asking first while downloads run).
+
+## M5.5: the progress window (design window 4)
+progress-title = Download progress
+progress-tab-status = Download status
+progress-tab-limit = Speed limit
+progress-tab-finish = When finished
+progress-status = Status
+progress-size = File size
+progress-done = Downloaded
+progress-resume = Resume
+progress-resume-yes = Possible
+progress-resume-no = Not possible
+progress-receiving = Receiving data…
+progress-more = Show details
+progress-less = Hide details
+progress-close = Close
+progress-connection = Connection
+progress-got = Downloaded
+progress-working = { $number } working
+progress-left-part = Left
+progress-no-parts = The parts show once the download starts.
+progress-limit-on = Limit this download's speed
+progress-limit-unit = KB/s
+progress-limit-hint = The limit for the whole program, in the settings, still applies too.
+progress-limit-save = Save
+progress-limit-saved = The limit is saved.
+progress-limit-next = The limit is saved; it applies the next time the download resumes.
+progress-finish-hint = What this window does when the download finishes while it is open:
+progress-finish-open = Open the file
+progress-finish-folder = Open the folder
+progress-finish-close = Close this window
+progress-gone = This download was taken off the list.
+progress-parts-done = The download is complete; every part has come.
+progress-limit-bad = Write a whole number from { $min } to { $max }.
+progress-connections = { $connections }, { $working }
+
+## «Download file info»: the owner's test with a Google Drive link
+add-size-unknown = Size unknown
+add-web-page = This link is a web page, not a file. To download the file, open the page in the browser and press its download button, or copy the file's own link, if the site gives one, and add it here.
+add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.
+
+## «Download file info»: the user's name, category and description (#103, #95)
+add-description = Description
+add-description-hint = Optional
+last-try-yesterday = Yesterday { $time }

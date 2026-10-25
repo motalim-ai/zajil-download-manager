@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | `clap` | 4.6.7 | MIT أو Apache-2.0 | `zajil-cli` | تحليل أوامر سطر الأوامر ورسائل المساعدة | M1 |
 | `arboard` | 3.7.0 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | الحافظة: NSPasteboard في ماك، وX11 أو Wayland (data-control، عبر `wl-clipboard-rs`) في لينكس، لمراقبة الحافظة. بلا دعم الصور. وفي ويندوز نستعمل Win32 مباشرة، فلا تدخل واجهتها في ويندوز (`clipboard-win` و`error-code`، بترخيص BSL-1.0) أي بناء، وهما مستثنيتان من رسم cargo-deny بسببهما في `deny.toml` | M5 |
+| `drag` | 2.1.1 | Apache-2.0 أو MIT | `zajil-desktop` | سحب الملف المكتمل من نافذة «اكتمل التحميل» إلى أي برنامج أو مجلد، بسحب النظام نفسه (M5.5). يستدعيه Rust وحده على ملف التحميل نفسه؛ الصفحة تسمّي التحميل ولا تمرّر مسارًا. ومعه `core-graphics` (Apache-2.0 أو MIT) و`objc2-core-video` (Zlib أو Apache-2.0 أو MIT) في ماك، وإصدار آخر من `windows` و`windows-core` وما معهما (Apache-2.0 أو MIT) في ويندوز | M5.5 |
 | `objc2-app-kit` | 0.3.2 | Zlib أو Apache-2.0 أو MIT | `zajil-platform` (ماك فقط) | `NSPasteboard.changeCount`، فلا تُقرأ الحافظة إلا بعد نسخة (مراقبة الحافظة). وكانت في الشجرة تحت `arboard` | M5 |
 | `getrandom` | 0.4.3 | MIT أو Apache-2.0 | `zajil-platform` | أرقام عشوائية من النظام، لاسم الـ named pipe في ويندوز (قناة الإضافة، M5) | M5 |
 | `dirs` | 7.0.0 | MIT أو Apache-2.0 | `zajil-platform` | مسارات النظام القياسية: Known Folders في ويندوز، وXDG في لينكس (يعتمد على `option-ext` بترخيص MPL-2.0) | M1 |
@@ -48,6 +49,8 @@
 | `tauri-plugin-autostart` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | التشغيل مع بدء النظام (استثناء من ADR-0006 في تطبيق سطح المكتب): LaunchAgent في ماك، ومفتاح الريجستري في ويندوز، وملف autostart في لينكس | M4 |
 | `tauri-plugin-notification` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | إشعارات النظام عند اكتمال تحميل أو فشله (استثناء من ADR-0006 في تطبيق سطح المكتب، انظر ARCHITECTURE). **ثلاثة استثناءات في `deny.toml`** (RUSTSEC-2026-0370 و0371 و0372)، وهي «غير مصونة» لا ثغرات: `zbus_names` و`zvariant` و`zvariant_derive` دُمجت في `zbus` نفسها فلن تصدر لها نسخ، و`zbus` 5 (D-Bus في لينكس) ما زال يستخدمها عبر هذه الإضافة. ولا ترقية متاحة بعد | M4 |
 | `tauri-plugin-dialog` | 2.8.3 | Apache-2.0 أو MIT | `zajil-desktop` | نوافذ الفتح والحفظ التي يعرضها النظام نفسه: اختيار مجلد التحميل، وملف الاستيراد والتصدير. الصفحة لا تقرأ ولا تكتب ملفات بنفسها، بل تمرر المسار المختار إلى أوامر زاجِل | M4 |
+| `tauri-plugin-opener` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | «فتح» التحميل المكتمل بالبرنامج الافتراضي و«فتح المجلد» مع تحديد الملف (M5.5). يستدعيه Rust وحده على مسار التحميل نفسه؛ الصفحة لا تملك صلاحيات هذه الإضافة. ومعه `open` و`is-wsl` و`is-docker` (MIT) | M5.5 |
+| `tauri-plugin-single-instance` | 2.5.4 | Apache-2.0 أو MIT | `zajil-desktop` | نسخة واحدة من زاجِل للمستخدم: حين تكون النافذة مخفية في شريط النظام، فتح زاجِل مرة أخرى يُظهرها بدل أن يبدأ برنامجًا ثانيًا على الطوابير نفسها. لا يُستعمل مع `--data-dir` (الاختبارات والصور). لا يجلب حزمًا أخرى | M5.5 |
 | `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 
@@ -68,7 +71,7 @@
 
 | الأداة | الترخيص | ملاحظات | الحالة |
 |---|---|---|---|
-| ffmpeg | LGPL أو GPL حسب طريقة البناء | **تُراجع قبل M6** | لم تُعتمد |
+| ffmpeg وffprobe | LGPL 2.1 أو أحدث (بناؤنا من المصدر الرسمي، بلا `--enable-gpl` ولا `--enable-nonfree` ولا أي مكتبة خارجية) | يُبنيان في الـ CI من المصدر الرسمي الموقّع (`tools/ffmpeg`)، ويُنشران مع مصدرهما في إصدار `tools-ffmpeg-*` من هذا المستودع ([ADR-0009](adr/0009-video-tools.md)). وسينزّلهما زاجِل عند أول تحميل فيديو بموافقة المستخدم (في PR أدوات الفيديو) | معتمدة (M6) |
 | yt-dlp | Unlicense (يحتاج تحقق عند المراجعة) | **تُراجع قبل M6، مع شروط استخدام المواقع** | لم تُعتمد |
 
 ## الخطوط والأيقونات والصور
@@ -85,6 +88,11 @@
 | actions/checkout (v7.0.1) | MIT | سحب الكود في الـ CI |
 | Swatinem/rust-cache (v2.9.3) | LGPL-3.0 | تخزين مؤقت لبناء Rust في الـ CI |
 | EmbarkStudios/cargo-deny-action (v2.1.1) | Apache-2.0 | تشغيل cargo-deny في الـ CI |
+| actions/upload-artifact (v7.0.2) وactions/download-artifact (v8.0.2) | MIT | نقل الملفات بين مهام الـ CI (بناء FFmpeg، M6) |
+| actions/cache (v6.1.0) | MIT | تخزين `ffmpeg-testgen` المؤقت في الـ CI (M6) |
+| msys2/setup-msys2 (v2.33.0) | MIT | بيئة بناء FFmpeg في ويندوز (M6) |
+| GnuPG | GPL-3.0 أو أحدث | التحقق من توقيع مصدر FFmpeg في الـ CI (موجود على أجهزة الـ CI) |
+| مُترجما FFmpeg في ويندوز (MSYS2: gcc لـ x64، وclang لـ arm64) | GPL-3.0 مع استثناء مكتبات التشغيل (libgcc)، وApache-2.0 مع استثناء LLVM (compiler-rt)، والملكية العامة/ZPL لكود بدء التشغيل في MinGW-w64 | الربط الثابت يضع في `ffmpeg.exe` كود بدء التشغيل وlibgcc (x64) أو compiler-rt (arm64). والاستثناءات تعفي الملف الناتج من شروط تلك التراخيص ومن إلزام نشر إشعاراتها. أما winpthreads (ترخيصها يطلب إشعارًا) فلا تدخل: `build.sh` يفرض خيوط ويندوز (`HAVE_W32THREADS 1` و`HAVE_PTHREADS 0`) |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>

@@ -2,7 +2,12 @@
 import type { DownloadView } from "./DownloadView";
 import type { SegmentView } from "./SegmentView";
 
-export type DetailsView = { download: DownloadView, segments: Array<SegmentView>, 
+export type DetailsView = { download: DownloadView, 
+/**
+ * The link, whole (the progress window shows it, as the add windows
+ * do; never printed in a log).
+ */
+url: string, segments: Array<SegmentView>, 
 /**
  * `null` when unknown: no state file (finished, or not started yet).
  */
