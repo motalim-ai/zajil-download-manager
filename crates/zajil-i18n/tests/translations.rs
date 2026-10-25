@@ -732,6 +732,10 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
     ("progress-working", &["number"]),
+    // Two texts already made, a count and «N working».
+    ("progress-connections", &["connections", "working"]),
+    // Bounds shown alone (no noun after them).
+    ("progress-limit-bad", &["max", "min"]),
     ("add-remember", &["category"]),
     // The engine's or the system's own words (English).
     ("add-remember-failed", &["error"]),
@@ -953,6 +957,28 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "add-remember",
         ar: (&[("category", "CAT")], "تذكّر هذا المجلد لفئة «CAT»"),
         en: (&[("category", "CAT")], "Remember this folder for “CAT”"),
+    },
+    Whole {
+        key: "progress-limit-bad",
+        ar: (
+            &[("min", "11"), ("max", "32")],
+            "اكتب رقمًا صحيحًا من 11 إلى 32.",
+        ),
+        en: (
+            &[("min", "1"), ("max", "32")],
+            "Write a whole number from 1 to 32.",
+        ),
+    },
+    Whole {
+        key: "progress-connections",
+        ar: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN، WORK",
+        ),
+        en: (
+            &[("connections", "CONN"), ("working", "WORK")],
+            "CONN, WORK",
+        ),
     },
     Whole {
         key: "progress-working",

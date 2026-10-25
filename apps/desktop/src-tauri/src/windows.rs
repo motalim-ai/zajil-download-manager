@@ -77,7 +77,14 @@ fn open<R: tauri::Runtime>(
     )
     .title(title)
     .inner_size(width, height)
-    .min_inner_size(width.min(560.0), height.min(320.0))
+    .min_inner_size(
+        width,
+        height.min(if label == INFO || label == LINK {
+            height
+        } else {
+            320.0
+        }),
+    )
     .resizable(true)
     .maximizable(false)
     .minimizable(false)

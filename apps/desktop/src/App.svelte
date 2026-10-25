@@ -488,6 +488,7 @@
     await api.openProgress(id, d?.name ?? locale.t("progress-title")).catch((e) => (failed = String(e)));
   }
 
+  let shownProgress: number | null | undefined = undefined;
   // The running downloads' progress on the taskbar (Windows) or the Dock
   // (macOS): how much of what they fetch has come, or nothing.
   $effect(() => {
@@ -495,6 +496,9 @@
     const all = sized.reduce((sum, d) => sum + (d.size ?? 0), 0);
     const got = sized.reduce((sum, d) => sum + d.done, 0);
     const shown = all > 0 ? Math.min(100, Math.floor((got / all) * 100)) : null;
+    // Only when it changes (review of #111).
+    if (shown === shownProgress) return;
+    shownProgress = shown;
     void getCurrentWindow()
       .setProgressBar(shown === null ? { status: ProgressBarStatus.None } : { status: ProgressBarStatus.Normal, progress: shown })
       .catch(() => {});

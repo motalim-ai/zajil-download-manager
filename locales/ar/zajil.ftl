@@ -517,3 +517,7 @@ progress-finish-hint = ما تفعله هذه النافذة حين ينتهي �
 progress-finish-open = افتح الملف
 progress-finish-folder = افتح المجلد
 progress-finish-close = أغلق هذه النافذة
+progress-gone = أُزيل هذا التحميل من القائمة.
+progress-parts-done = اكتمل التحميل، وكل أجزائه وصلت.
+progress-limit-bad = اكتب رقمًا صحيحًا من { $min } إلى { $max }.
+progress-connections = { $connections }، { $working }

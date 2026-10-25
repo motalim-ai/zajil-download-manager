@@ -459,3 +459,7 @@ progress-finish-hint = What this window does when the download finishes while it
 progress-finish-open = Open the file
 progress-finish-folder = Open the folder
 progress-finish-close = Close this window
+progress-gone = This download was taken off the list.
+progress-parts-done = The download is complete; every part has come.
+progress-limit-bad = Write a whole number from { $min } to { $max }.
+progress-connections = { $connections }, { $working }

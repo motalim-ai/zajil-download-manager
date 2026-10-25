@@ -40,43 +40,67 @@
 
   const d = $derived(details?.download);
   const total = $derived(d?.size ?? 0);
-  const fraction = $derived(d ? (total ? d.done / total : d.status === "done" ? 1 : 0) : 0);
+  const fraction = $derived(d ? Math.min(1, total ? d.done / total : d.status === "done" ? 1 : 0) : 0);
   const running = $derived(d?.status === "active");
   // A part's connection is at work while the download runs and the part
   // is not whole.
-  const whole = (s: DetailsView["segments"][number]) => s.end !== null && s.start + s.done > s.end;
+  const whole = (s: DetailsView["segments"][number]) =>
+    d?.status === "done" || (s.end !== null && s.start + s.done > s.end);
   const working = $derived(running && details ? details.segments.filter((s) => !whole(s)).length : 0);
 
-  let asked = 0;
+  // One read at a time, and one more after it if changes came meanwhile
+  // (review of #111: every change of any download read three files).
+  let loading = false;
+  let again = false;
+  let gone = $state(false);
   async function load() {
-    const mine = ++asked;
+    if (gone) return;
+    if (loading) {
+      again = true;
+      return;
+    }
+    loading = true;
     try {
       const next = await api.details(id);
-      if (mine !== asked) return;
       const was = details?.download.status;
       details = next;
       problem = null;
       if (was && was !== "done" && next.download.status === "done") void finished();
     } catch (e) {
-      if (mine === asked) problem = String(e);
+      // Taken off the list: nothing more to show (review of #111).
+      if (/^no download \d+$/.test(String(e))) gone = true;
+      else problem = String(e);
+    } finally {
+      loading = false;
+      if (again && !gone) {
+        again = false;
+        void load();
+      }
     }
   }
 
-  // The title: the percentage, then the name (as IDM).
+  // The title: the percentage, then the name (as IDM); set only when it
+  // changes.
+  let title = "";
   $effect(() => {
     if (!d) return;
     const shown = d.status === "done" ? locale.t("status-done") : percent(locale.lang, locale.digits, fraction);
+    const next = `${shown} ${d.name}`;
+    if (next === title) return;
+    title = next;
     void getCurrentWindow()
-      .setTitle(`${shown} ${d.name}`)
+      .setTitle(next)
       .catch(() => {});
   });
 
-  // With the details, the window is taller.
+  // With the details, the window is taller; its width stays the user's.
   $effect(() => {
     const height = more ? 640 : 430;
-    void getCurrentWindow()
-      .setSize(new LogicalSize(600, height))
-      .catch(() => {});
+    const win = getCurrentWindow();
+    void (async () => {
+      const [inner, scale] = await Promise.all([win.innerSize(), win.scaleFactor()]);
+      await win.setSize(new LogicalSize(inner.width / scale, height));
+    })().catch(() => {});
     try {
       localStorage.setItem("zajil.progress.more", more ? "1" : "0");
     } catch {
@@ -84,8 +108,13 @@
     }
   });
 
+  // The kept limit fills the tab when it changes, not at every update
+  // (review of #111: what the user typed was taken back four times a
+  // second).
+  let shownLimit: number | null | undefined = undefined;
   $effect(() => {
-    if (!details) return;
+    if (!details || details.limit === shownLimit) return;
+    shownLimit = details.limit;
     limited = details.limit !== null;
     if (details.limit !== null) limitKb = Math.max(1, Math.round(details.limit / 1024));
   });
@@ -132,10 +161,18 @@
     if (d && (d.status === "active" || d.status === "waiting")) await api.pause([id]).catch(() => {});
     await api.closeWindow();
   }
+  // KB/s: a whole number from 1 to 10 GB/s; anything else is said, not
+  // kept (review of #111: an empty box kept 1 KB/s).
+  const MAX_KB = 10 * 1024 * 1024;
   async function saveLimit() {
     limitSaid = null;
+    const kb = Number(limitKb);
+    if (limited && !(Number.isFinite(kb) && kb >= 1 && kb <= MAX_KB)) {
+      limitSaid = locale.t("progress-limit-bad", { min: num(locale.lang, locale.digits, 1, 0), max: num(locale.lang, locale.digits, MAX_KB, 0) });
+      return;
+    }
     try {
-      await api.setLimit(id, limited ? Math.max(1, Math.round(limitKb)) * 1024 : null);
+      await api.setLimit(id, limited ? Math.round(kb) * 1024 : null);
       limitSaid = locale.t(running ? "progress-limit-next" : "progress-limit-saved");
       await load();
     } catch (e) {
@@ -178,6 +215,9 @@
 <svelte:window {onkeydown} />
 
 <main class="progress" aria-labelledby="progress-name">
+  {#if gone}
+    <p class="gone" role="status">{locale.t("progress-gone")}</p>
+  {/if}
   <h1 id="progress-name" class="visually-hidden">{d ? d.name : locale.t("progress-title")}</h1>
   <div class="tabs" role="tablist" aria-label={locale.t("progress-title")}>
     {#each TABS as [key, text] (key)}
@@ -186,7 +226,7 @@
         role="tab"
         class="tab"
         aria-selected={tab === key}
-        aria-controls="panel-{key}"
+        aria-controls={tab === key ? `panel-${key}` : undefined}
         tabindex={tab === key ? 0 : -1}
         onclick={() => (tab = key)}
         onkeydown={onTabKey}>{locale.t(text)}</button
@@ -209,7 +249,7 @@
           <dt>{locale.t("details-speed")}</dt>
           <dd class="num">{running && d ? speed(locale.lang, locale.digits, d.speed) : "—"}</dd>
           <dt>{locale.t("col-left")}</dt>
-          <dd class="num">{running && d && d.size !== null ? left(locale.lang, locale.digits, d.size - d.done, d.speed) : "—"}</dd>
+          <dd class="num">{running && d && d.size !== null ? left(locale.lang, locale.digits, Math.max(0, d.size - d.done), d.speed) : "—"}</dd>
           <dt>{locale.t("progress-resume")}</dt>
           <dd>
             {#if details?.resumable === true}<strong class="yes">{locale.t("progress-resume-yes")}</strong>
@@ -248,7 +288,9 @@
         <Icon name={more ? "chevron-up" : "chevron-down"} size={15} />{locale.t(more ? "progress-less" : "progress-more")}
       </button>
       <span class="gap"></span>
-      {#if d && (d.status === "active" || d.status === "waiting")}
+      {#if gone}
+        <!-- Nothing to pause or resume. -->
+      {:else if d && (d.status === "active" || d.status === "waiting")}
         <button class="btn" id="progress-pause" onclick={() => void act("pause")}><Icon name="pause" />{locale.t("action-pause")}</button>
       {:else if d && d.status !== "done"}
         <button class="btn" id="progress-pause" onclick={() => void act("resume")}><Icon name="play" />{locale.t("action-resume")}</button>
@@ -262,7 +304,7 @@
       <div class="head">
         <h2 id="parts-title">{locale.t("details-parts")}</h2>
         {#if details && details.segments.length > 0}
-          <span class="muted">{counted(locale.lang, locale.digits, "connections-count", details.segments.length)}، {locale.t("progress-working", { number: num(locale.lang, locale.digits, working, 0) })}</span>
+          <span class="muted">{locale.t("progress-connections", { connections: counted(locale.lang, locale.digits, "connections-count", details.segments.length), working: locale.t("progress-working", { number: num(locale.lang, locale.digits, working, 0) }) })}</span>
         {/if}
       </div>
       {#if details && total > 0 && details.segments.length > 0}
@@ -288,20 +330,27 @@
                 <td class="num">{num(locale.lang, locale.digits, i + 1, 0)}</td>
                 <td class="num">{size(locale.lang, locale.digits, s.done)}</td>
                 <td class:yes={whole(s)}>
-                  {whole(s) ? locale.t("details-part-done") : running ? locale.t("progress-receiving") : locale.t("status-paused")}
+                  {whole(s) ? locale.t("details-part-done") : running ? locale.t("progress-receiving") : locale.t(`status-${d?.status ?? "paused"}`)}
                 </td>
               </tr>
             {/each}
           </tbody>
         </table>
       {:else}
-        <p class="muted">{locale.t("progress-no-parts")}</p>
+        <p class="muted">{locale.t(d?.status === "done" ? "progress-parts-done" : "progress-no-parts")}</p>
       {/if}
     </section>
   {/if}
 </main>
 
 <style>
+  .gone {
+    margin: 0;
+    padding: 8px 20px;
+    background: var(--sunken);
+    color: var(--muted);
+    font-size: 13px;
+  }
   .progress {
     display: flex;
     flex-direction: column;
