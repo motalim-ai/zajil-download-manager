@@ -20,7 +20,9 @@ pub mod settings;
 pub mod state;
 
 pub use browser::FromBrowser;
-pub use engine::{Engine, Error, Event, Finished, Mismatch, Options, Probe, RestartReason, Stop};
+pub use engine::{
+    Engine, Error, Event, Finished, Mismatch, Options, Page, Probe, RestartReason, Stop,
+};
 /// URLs as the engine parses them (for [`Engine::download_choosing_until`]).
 pub use reqwest::Url;
 pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};

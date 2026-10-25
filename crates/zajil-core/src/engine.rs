@@ -280,6 +280,25 @@ pub struct Finished {
     pub bytes: u64,
 }
 
+/// A page [`Engine::fetch_page`] fetched (M7, the site grabber).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page {
+    /// The status the server answered, redirects included.
+    pub status: u16,
+    /// A redirect's `Location`, as the server sent it: never followed, so
+    /// the caller can check the target before asking for it.
+    pub location: Option<String>,
+    /// The media type, lowercase, without parameters (`text/html`).
+    pub content_type: Option<String>,
+    /// The name the file would get (as [`Probe::name`]).
+    pub name: String,
+    /// The body, read only for a successful HTML page (`text/html` or
+    /// `application/xhtml+xml`), and at most the size asked for.
+    pub body: Option<Vec<u8>>,
+    /// The body was longer than the size asked for: the rest was not read.
+    pub truncated: bool,
+}
+
 /// What [`Engine::probe`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Probe {
@@ -435,6 +454,9 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct Engine {
     client: Client,
+    /// The same client, but it never follows a redirect: for
+    /// [`Engine::fetch_page`], whose caller checks each target first.
+    page_client: Client,
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
@@ -456,9 +478,11 @@ impl std::fmt::Debug for Hold {
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
-        let client = build_client(&options, &[])?;
+        let client = build_client(&options, &[], Redirects::Follow)?;
+        let page_client = build_client(&options, &[], Redirects::Never)?;
         Ok(Engine {
             client,
+            page_client,
             options,
             browser: Arc::default(),
             hold: None,
@@ -473,9 +497,11 @@ impl Engine {
     /// trusted root, and CI checks that its release build lacks the feature.
     #[cfg(feature = "test-support")]
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
-        let client = build_client(&options, &[ca_der.to_vec()])?;
+        let client = build_client(&options, &[ca_der.to_vec()], Redirects::Follow)?;
+        let page_client = build_client(&options, &[ca_der.to_vec()], Redirects::Never)?;
         Ok(Engine {
             client,
+            page_client,
             options,
             browser: Arc::default(),
             hold: None,
@@ -693,6 +719,80 @@ impl Engine {
                 .map(|v| v.trim().to_ascii_lowercase())
                 .filter(|v| !v.is_empty()),
         })
+    }
+
+    /// Fetches the page at `url` into memory, for the site grabber (M7,
+    /// ADR-0010): **without following a redirect** (its `Location` is
+    /// returned, for the caller to check), with the body read only for a
+    /// successful HTML page, and at most `max_bytes` of it. One try; the
+    /// same TLS checks, user agent and browser headers as a download.
+    pub async fn fetch_page(&self, url: &str, max_bytes: usize) -> Result<Page, Error> {
+        self.fetch_page_until(url, max_bytes, &Stop::new()).await
+    }
+
+    /// [`fetch_page`](Self::fetch_page), given up when `stop` is requested.
+    pub async fn fetch_page_until(
+        &self,
+        url: &str,
+        max_bytes: usize,
+        stop: &Stop,
+    ) -> Result<Page, Error> {
+        let url = parse_url(url)?;
+        let request = self.browser.apply(&url, self.page_client.get(url.clone()));
+        let mut response = tokio::select! {
+            result = request.send() => result.map_err(|err| Error::Http(without_secrets(err)))?,
+            () = stop.requested() => return Err(Error::Stopped { state_file: None }),
+        };
+        let header_text = |name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v: &header::HeaderValue| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let location = header_text(header::LOCATION).filter(|_| response.status().is_redirection());
+        let content_type = header_text(header::CONTENT_TYPE)
+            .and_then(|v| v.split(';').next().map(|v| v.trim().to_ascii_lowercase()))
+            .filter(|v| !v.is_empty());
+        let name = suggested_name(
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .map(|v| v.as_bytes()),
+            response.url(),
+        );
+        let html = matches!(
+            content_type.as_deref(),
+            Some("text/html" | "application/xhtml+xml")
+        );
+        let mut page = Page {
+            status: response.status().as_u16(),
+            location,
+            content_type,
+            name,
+            body: None,
+            truncated: false,
+        };
+        if !(response.status().is_success() && html) {
+            return Ok(page);
+        }
+        let mut body = Vec::new();
+        loop {
+            let chunk = tokio::select! {
+                chunk = response.chunk() => chunk.map_err(|err| Error::Http(without_secrets(err)))?,
+                () = stop.requested() => return Err(Error::Stopped { state_file: None }),
+            };
+            let Some(chunk) = chunk else { break };
+            let room = max_bytes.saturating_sub(body.len());
+            if chunk.len() > room {
+                body.extend_from_slice(&chunk[..room]);
+                page.truncated = true;
+                break;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        page.body = Some(body);
+        Ok(page)
     }
 
     /// Continues the download described by `state_file`
@@ -1896,7 +1996,21 @@ async fn check_space(dir: &Path, needed: u64, reusable: u64) -> Result<(), Error
     Ok(())
 }
 
-fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Error> {
+/// Whether a client follows redirects ([`build_client`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Redirects {
+    /// Up to [`Options::max_redirects`], never from https to http: every
+    /// download, probe and refresh.
+    Follow,
+    /// Never: [`Engine::fetch_page`] returns the redirect itself.
+    Never,
+}
+
+fn build_client(
+    options: &Options,
+    extra_roots: &[Vec<u8>],
+    redirects: Redirects,
+) -> Result<Client, Error> {
     // rustls with the `ring` provider, and reqwest's built-in use of the
     // operating system's certificate store and checks
     // (`rustls-platform-verifier`). Nothing here can turn verification off.
@@ -1904,7 +2018,7 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let max_redirects = options.max_redirects;
-    let policy = redirect::Policy::custom(move |attempt| {
+    let follow = redirect::Policy::custom(move |attempt| {
         let downgrade = attempt.url().scheme() != "https"
             && attempt.previous().iter().any(|url| url.scheme() == "https");
         if attempt.previous().len() > max_redirects {
@@ -1925,7 +2039,10 @@ fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Er
             builder.tls_certs_merge([reqwest::Certificate::from_der(der).map_err(Error::Http)?]);
     }
     builder
-        .redirect(policy)
+        .redirect(match redirects {
+            Redirects::Follow => follow,
+            Redirects::Never => redirect::Policy::none(),
+        })
         // No `Referer` of our own: after a redirect reqwest would send the
         // redirecting link, with its `?sig=…` token, to the target (review
         // of #74). The browser's page is sent by `FromBrowser` instead.
