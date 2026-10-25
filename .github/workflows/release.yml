@@ -10,9 +10,10 @@
 #
 # The app's own tauri.conf.json is not changed: scripts/release/
 # tauri.release.json is merged into it here (`tauri build --config`). It
-# sets the version, puts zajil-host next to the program (a Tauri sidecar:
-# the app looks for it there, lib.rs `host_beside`), asks for the ad-hoc
-# signature on macOS and a per-user installer on Windows.
+# sets the version, puts zajil-host (the app looks for it there, lib.rs
+# `host_beside`) and the `zajil` command next to the program as Tauri
+# sidecars, ships the GPL licence, asks for the ad-hoc signature on macOS
+# and a per-user installer on Windows.
 
 name: Release
 
@@ -50,8 +51,14 @@ jobs:
           for m in apps/extension/src/manifest.chrome.json apps/extension/src/manifest.firefox.json; do
             [ "$(jq -r .version "$m")" = "$version" ] || { echo "::error::$m is not $version"; exit 1; }
           done
-          if [[ "$GITHUB_REF" == refs/tags/* ]] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not name version $version"; exit 1
+          # A release also needs, before half an hour of builds: the tag, the
+          # workspace version (`zajil --version`, the User-Agent), its
+          # CHANGELOG section and its release page.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "::error::tag $GITHUB_REF_NAME does not name version $version"; exit 1; }
+            grep -qx "version = \"$version\"" Cargo.toml || { echo "::error::the workspace version in Cargo.toml is not $version"; exit 1; }
+            grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$version] section"; exit 1; }
+            test -f "docs/releases/v$version.md" || { echo "::error::docs/releases/v$version.md is missing"; exit 1; }
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Zajil $version"
@@ -115,25 +122,32 @@ jobs:
           sudo apt-get $APT_OPTIONS update -q
           sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf file
-      # zajil-host, the program the browsers start (ADR-0005), named as Tauri
-      # wants a sidecar: binaries/zajil-host-<target>. On macOS one file for
-      # both processors.
-      - name: Build zajil-host
+      # zajil-host, the program the browsers start (ADR-0005), and the zajil
+      # command, named as Tauri wants a sidecar: binaries/<name>-<target>.
+      # On macOS the build script of each processor's half wants its own
+      # file, and the bundle the universal one made from both.
+      - name: Build zajil-host and zajil
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
           set -euo pipefail
           bin=apps/desktop/src-tauri/binaries
           mkdir -p "$bin"
           if [ "${{ matrix.target }}" = universal-apple-darwin ]; then
             for t in aarch64-apple-darwin x86_64-apple-darwin; do
-              cargo build --release --locked -p zajil-host --target "$t"
+              cargo build --release --locked -p zajil-host -p zajil-cli --target "$t"
+              for p in zajil-host zajil; do cp "target/$t/release/$p" "$bin/$p-$t"; done
             done
-            lipo -create -output "$bin/zajil-host-universal-apple-darwin" \
-              target/aarch64-apple-darwin/release/zajil-host target/x86_64-apple-darwin/release/zajil-host
-            lipo -archs "$bin/zajil-host-universal-apple-darwin"
+            for p in zajil-host zajil; do
+              lipo -create -output "$bin/$p-universal-apple-darwin" "$bin/$p-aarch64-apple-darwin" "$bin/$p-x86_64-apple-darwin"
+              lipo -archs "$bin/$p-universal-apple-darwin"
+            done
           else
-            cargo build --release --locked -p zajil-host --target "${{ matrix.target }}"
+            cargo build --release --locked -p zajil-host -p zajil-cli --target "${{ matrix.target }}"
             ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
-            cp "target/${{ matrix.target }}/release/zajil-host$ext" "$bin/zajil-host-${{ matrix.target }}$ext"
+            for p in zajil-host zajil; do
+              cp "target/${{ matrix.target }}/release/$p$ext" "$bin/$p-${{ matrix.target }}$ext"
+            done
           fi
           ls -l "$bin"
       - name: Install npm packages (from the lock file only)
@@ -175,6 +189,9 @@ jobs:
           app="$mnt/Zajil.app"
           ls -l "$app/Contents/MacOS"
           test -x "$app/Contents/MacOS/zajil-host"
+          test -x "$app/Contents/MacOS/zajil"
+          test -f "$app/Contents/Resources/LICENSE"
+          "$app/Contents/MacOS/zajil" --version
           # Every program in the bundle runs on both processors.
           for f in "$app"/Contents/MacOS/*; do
             archs=$(lipo -archs "$f")
@@ -192,16 +209,18 @@ jobs:
         run: |
           $setup = Get-ChildItem "$env:RUNNER_TEMP\installers\*-setup.exe" | Select-Object -First 1
           Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
-          $host_exe = Get-ChildItem -Path "$env:LOCALAPPDATA" -Recurse -Filter 'zajil-host.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $host_exe) { throw 'zajil-host.exe was not installed' }
-          $dir = $host_exe.DirectoryName
-          Write-Host "installed in $dir"
+          # A per-user install goes to %LOCALAPPDATA%\Zajil.
+          $dir = Join-Path $env:LOCALAPPDATA 'Zajil'
           Get-ChildItem $dir | Format-Table Name, Length
-          $programs = Get-ChildItem "$dir\*.exe" | Where-Object { $_.Name -notin @('zajil-host.exe', 'uninstall.exe') }
-          if (-not $programs) { throw 'the program is not next to zajil-host.exe' }
-          Start-Process -FilePath "$dir\uninstall.exe" -ArgumentList '/S' -Wait
-          Start-Sleep -Seconds 5
-          if (Test-Path "$dir\zajil-host.exe") { throw 'zajil-host.exe is still there after uninstall' }
+          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'LICENSE')) {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "$f is not in $dir" }
+          }
+          & (Join-Path $dir 'zajil.exe') --version
+          # `_?=` keeps the uninstaller in place, so -Wait waits for it.
+          Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait
+          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe')) {
+            if (Test-Path (Join-Path $dir $f)) { throw "$f is still there after uninstall" }
+          }
       - name: Try the Linux package
         if: runner.os == 'Linux'
         run: |
@@ -211,13 +230,16 @@ jobs:
           package=$(dpkg-deb -f "$deb" Package)
           sudo apt-get install -y -q "$deb"
           test -x /usr/bin/zajil-host
-          dpkg -L "$package" | grep -q '^/usr/bin/'
+          test -x /usr/bin/zajil
+          /usr/bin/zajil --version
+          dpkg -L "$package" | grep -q '/LICENSE$'
           sudo apt-get remove -y -q "$package"
           test ! -e /usr/bin/zajil-host
           appimage=$(ls "$RUNNER_TEMP"/installers/*.AppImage)
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
           test -x squashfs-root/usr/bin/zajil-host
+          test -x squashfs-root/usr/bin/zajil
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-${{ matrix.name }}
@@ -287,7 +309,6 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "::error::$GITHUB_REF_NAME is not on main: only merged code is released"; exit 1
           }
-          test -f "docs/releases/v$VERSION.md" || { echo "::error::docs/releases/v$VERSION.md is missing"; exit 1; }
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/artifacts
@@ -300,7 +321,8 @@ jobs:
           (cd "$r" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
           [ "$(wc -l < "$r/SHA256SUMS")" -eq 6 ] || { echo "::error::expected 6 files"; exit 1; }
       # A draft: visible to the repository's maintainers only, published by
-      # the owner by hand after trying it.
+      # the owner by hand after trying it. A pre-release (0.x is a test
+      # build); the update check reads /releases, which lists those.
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
