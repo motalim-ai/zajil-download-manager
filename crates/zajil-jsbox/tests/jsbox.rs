@@ -278,6 +278,9 @@ Promise.all([import('qjs:os'), import('qjs:std')]).then(([os, std]) => {
   const shell = os.platform === 'win32'
     ? [std.getenv('SystemRoot') + '\\System32\\cmd.exe', '/c', 'type nul > "' + target + '"']
     : ['/bin/sh', '-c', 'echo x > "' + target + '"'];
+  // Windows builds of QuickJS-NG have no os.exec at all: there the
+  // one-process job is proven by zajil-platform's tests/sandbox.rs.
+  if (typeof os.exec !== 'function') { console.log('absent'); return; }
   let code;
   try { code = os.exec(shell); } catch (e) { code = 'threw'; }
   console.log(code === 0 ? 'ran' : 'refused ' + code);
@@ -292,9 +295,73 @@ Promise.all([import('qjs:os'), import('qjs:std')]).then(([os, std]) => {
         .unwrap();
     let (out, err) = text(&output);
     let report = run.report();
-    if report.contains("programs=true") {
+    if cfg!(windows) {
+        assert_eq!(out.trim(), "absent", "{err}");
+        assert!(!outside.exists());
+    } else if report.contains("programs=true") {
         assert!(out.trim().starts_with("refused"), "{out}{err}");
         assert!(!outside.exists());
+    } else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "no program ban on CI: {report}"
+        );
+        eprintln!("NOT RUN: this system cannot refuse other programs ({report})");
+    }
+}
+
+/// The processes whose command line holds `marker` (`pgrep -f`).
+#[cfg(unix)]
+fn running_with(marker: &str) -> Vec<String> {
+    let out = Command::new("pgrep").args(["-f", marker]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+// Unix only: Windows builds of QuickJS-NG have no os.exec (see above).
+#[cfg(unix)]
+#[test]
+fn a_challenge_cannot_run_qjs_again_without_its_limits() {
+    let Some(qjs) = tool("ZAJIL_TEST_QJS") else {
+        return;
+    };
+    let run = Run::new();
+    // Landlock lets the box run qjs, so a challenge could start it again,
+    // without the limits, the time limit or the run's token, and leave it
+    // running after the box (review of the YouTube PR).
+    let marker = format!("zajil-escape-{}", std::process::id());
+    let template = r#"
+import('qjs:os').then((os) => {
+  let code;
+  try {
+    code = os.exec([QJS, '-e', 'for (;;) {} // MARKER'], { block: false, env: {} });
+  } catch (e) { code = 'threw'; }
+  console.log(typeof code === 'number' && code > 0 ? 'started ' + code : 'refused ' + code);
+});
+"#;
+    let script = run.script(
+        "again.js",
+        &template
+            .replace("QJS", &format!("{:?}", qjs.to_string_lossy()))
+            .replace("MARKER", &marker),
+    );
+    let output = run
+        .jsbox(&qjs)
+        .args(["--script".as_ref(), script.as_os_str()])
+        .output()
+        .unwrap();
+    let (out, err) = text(&output);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let left = running_with(&marker);
+    for pid in &left {
+        let _ = Command::new("kill").args(["-9", pid]).status();
+    }
+    let report = run.report();
+    if report.contains("programs=true") {
+        assert!(out.trim().starts_with("refused"), "{out}{err}");
+        assert!(left.is_empty(), "a qjs outlived the box: {left:?}");
     } else {
         assert!(
             std::env::var_os("CI").is_none(),

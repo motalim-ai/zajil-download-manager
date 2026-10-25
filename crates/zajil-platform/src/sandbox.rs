@@ -55,6 +55,13 @@ impl Confinement {
     };
 }
 
+/// What the sandbox would hold on this system, found without entering it:
+/// for Zajil, which must not take the sandboxed program's word for it (a
+/// program that is not confined could write its own report).
+pub fn supported() -> Confinement {
+    imp::supported()
+}
+
 /// A sandbox around one folder and one program.
 #[derive(Debug)]
 pub struct Sandbox {
@@ -128,6 +135,7 @@ impl Sandbox {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
 mod imp {
     use std::io;
     use std::path::Path;
@@ -150,6 +158,33 @@ mod imp {
             )));
         }
         Ok(())
+    }
+
+    /// The Landlock ABI of the running kernel, or 0 without Landlock
+    /// (not built, or not among the enabled security modules).
+    fn landlock_abi() -> libc::c_long {
+        const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
+        // SAFETY: with this flag and no attributes the call only answers
+        // the ABI version; it creates nothing.
+        let abi = unsafe {
+            libc::syscall(
+                libc::SYS_landlock_create_ruleset,
+                std::ptr::null::<libc::c_void>(),
+                0usize,
+                LANDLOCK_CREATE_RULESET_VERSION,
+            )
+        };
+        abi.max(0)
+    }
+
+    pub fn supported() -> Confinement {
+        let abi = landlock_abi();
+        Confinement {
+            // SAFETY: geteuid has no preconditions.
+            programs: abi >= 1 && unsafe { libc::geteuid() } != 0,
+            files: abi >= 3,
+            network: abi >= 4,
+        }
     }
 
     pub fn enter(work: &Path, program: &Path) -> io::Result<Confinement> {
@@ -191,19 +226,49 @@ mod imp {
         if status.ruleset == RulesetStatus::NotEnforced {
             return Ok(Confinement::NONE);
         }
-        let network = matches!(
-            status.landlock,
-            LandlockStatus::Available { effective_abi, .. } if effective_abi >= ABI::V4
-        );
+        let at_least = |abi: ABI| {
+            matches!(
+                status.landlock,
+                LandlockStatus::Available { effective_abi, .. } if effective_abi >= abi
+            )
+        };
+        // Before ABI 3 (Linux 6.2), opening a file with O_TRUNC is checked
+        // as a read only: any file the user can write could be emptied.
+        let files = at_least(ABI::V3);
+        let network = at_least(ABI::V4);
         Ok(Confinement {
-            programs: true,
-            files: true,
+            // Landlock lets the program run itself again, so new processes
+            // are refused by `command`'s limit, which the kernel does not
+            // apply to root (review of the YouTube PR).
+            // SAFETY: geteuid has no preconditions.
+            programs: unsafe { libc::geteuid() } != 0,
+            files,
             network,
         })
     }
 
     pub fn command(program: &Path, _work: &Path) -> Command {
-        Command::new(program)
+        use std::os::unix::process::CommandExt;
+        let mut command = Command::new(program);
+        // No new process at all, not even a copy of the program run again
+        // without its limits (Landlock allows running it): with a limit
+        // of 0 processes, fork, vfork and clone fail (EAGAIN) for any user
+        // but root.
+        // SAFETY: the closure runs in the child between fork and exec and
+        // calls only setrlimit, which is async-signal-safe.
+        unsafe {
+            command.pre_exec(|| {
+                let none = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                if libc::setrlimit(libc::RLIMIT_NPROC, &none) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        command
     }
 }
 
@@ -217,14 +282,18 @@ mod imp {
 
     const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 
-    pub fn enter(_work: &Path, _program: &Path) -> io::Result<Confinement> {
-        // The program is wrapped by `command`; this process stays as it is.
+    pub fn supported() -> Confinement {
         let there = Path::new(SANDBOX_EXEC).is_file();
-        Ok(Confinement {
+        Confinement {
             programs: there,
             files: there,
             network: there,
-        })
+        }
+    }
+
+    pub fn enter(_work: &Path, _program: &Path) -> io::Result<Confinement> {
+        // The program is wrapped by `command`; this process stays as it is.
+        Ok(supported())
     }
 
     /// A string literal of the sandbox profile language.
@@ -395,14 +464,18 @@ mod imp {
         result
     }
 
-    pub fn enter(work: &Path, _program: &Path) -> io::Result<Confinement> {
-        label_low(work)?;
-        lower_self()?;
-        Ok(Confinement {
+    pub fn supported() -> Confinement {
+        Confinement {
             programs: true,
             files: true,
             network: false,
-        })
+        }
+    }
+
+    pub fn enter(work: &Path, _program: &Path) -> io::Result<Confinement> {
+        label_low(work)?;
+        lower_self()?;
+        Ok(supported())
     }
 
     pub fn command(program: &Path, _work: &Path) -> Command {
@@ -417,6 +490,10 @@ mod imp {
     use std::process::Command;
 
     use super::Confinement;
+
+    pub fn supported() -> Confinement {
+        Confinement::NONE
+    }
 
     pub fn enter(_work: &Path, _program: &Path) -> io::Result<Confinement> {
         Ok(Confinement::NONE)

@@ -31,12 +31,20 @@ fn deno_first_then_node_then_quickjs() {
     let path = path_of(&[a.path(), b.path()]);
     assert_eq!(
         find_js_runtime(Some(&path), quickjs(), false),
-        Some(JsRuntime::Node(node.canonicalize().unwrap()))
+        Some(JsRuntime::Node(
+            node.canonicalize()
+                .map(|p| dunce::simplified(&p).to_path_buf())
+                .unwrap()
+        ))
     );
     let deno = runtime(a.path(), "deno", "deno 2.5.6 (stable, release)\nv8 14.0\n");
     assert_eq!(
         find_js_runtime(Some(&path), quickjs(), false),
-        Some(JsRuntime::Deno(deno.canonicalize().unwrap()))
+        Some(JsRuntime::Deno(
+            deno.canonicalize()
+                .map(|p| dunce::simplified(&p).to_path_buf())
+                .unwrap()
+        ))
     );
     // Deno found after Node on the PATH still comes first.
     let path = path_of(&[b.path(), a.path()]);
@@ -44,6 +52,22 @@ fn deno_first_then_node_then_quickjs() {
         find_js_runtime(Some(&path), quickjs(), false),
         Some(JsRuntime::Deno(_))
     ));
+}
+
+#[test]
+fn an_unusable_runtime_early_on_the_path_does_not_hide_a_usable_one() {
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    runtime(a.path(), "node", "v20.1.0\n");
+    let node = runtime(b.path(), "node", "v22.3.0\n");
+    let path = path_of(&[a.path(), b.path()]);
+    assert_eq!(
+        find_js_runtime(Some(&path), quickjs(), false),
+        Some(JsRuntime::Node(
+            node.canonicalize()
+                .map(|p| dunce::simplified(&p).to_path_buf())
+                .unwrap()
+        ))
+    );
 }
 
 #[test]
@@ -113,6 +137,39 @@ fn a_runtime_another_user_could_change_is_passed_over() {
     ));
 }
 
+// Unix only, as above: a folder above the runtime's own folder that anyone
+// can write in (not sticky), so another user could put their own tree in
+// its place (review of the YouTube PR).
+#[cfg(unix)]
+#[test]
+fn a_runtime_under_a_folder_another_user_could_change_is_passed_over() {
+    use std::os::unix::fs::PermissionsExt;
+    let top = tempfile::tempdir().unwrap();
+    let bin = top.path().join("node-v22").join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for dir in [top.path().join("node-v22"), bin.clone()] {
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    runtime(&bin, "node", "v22.3.0\n");
+    let path = path_of(&[&bin]);
+    std::fs::set_permissions(top.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(matches!(
+        find_js_runtime(Some(&path), quickjs(), false),
+        Some(JsRuntime::Node(_))
+    ));
+    std::fs::set_permissions(top.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(matches!(
+        find_js_runtime(Some(&path), quickjs(), false),
+        Some(JsRuntime::QuickJs { .. })
+    ));
+    // Sticky, like /tmp: others may add, not replace. Used.
+    std::fs::set_permissions(top.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+    assert!(matches!(
+        find_js_runtime(Some(&path), quickjs(), false),
+        Some(JsRuntime::Node(_))
+    ));
+}
+
 #[test]
 fn a_runtime_behind_a_link_is_checked_and_named_at_its_real_place() {
     // As Homebrew, snap and Debian's alternatives install them.
@@ -126,7 +183,11 @@ fn a_runtime_behind_a_link_is_checked_and_named_at_its_real_place() {
     let path = path_of(&[bin.path()]);
     assert_eq!(
         find_js_runtime(Some(&path), quickjs(), false),
-        Some(JsRuntime::Node(node.canonicalize().unwrap()))
+        Some(JsRuntime::Node(
+            node.canonicalize()
+                .map(|p| dunce::simplified(&p).to_path_buf())
+                .unwrap()
+        ))
     );
 }
 

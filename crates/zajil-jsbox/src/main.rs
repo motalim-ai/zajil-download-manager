@@ -117,13 +117,27 @@ fn run(args: Vec<OsString>) -> io::Result<ExitCode> {
     };
     // Opened before the sandbox, which may refuse it after.
     let report = match std::env::var_os("ZAJIL_JSBOX_REPORT") {
-        Some(dir) => Some(zajil_platform::fs::create_private(
-            &Path::new(&dir).join(format!("{}.txt", random_name()?)),
-        )?),
+        Some(dir) => {
+            let path = Path::new(&dir).join(format!("{}.txt", random_name()?));
+            let file = zajil_platform::fs::create_private(&path)?;
+            Some((path, file))
+        }
         None => None,
     };
     // No thread before this (Landlock confines the calling thread).
-    let sandbox = Sandbox::enter(&work, &qjs)?;
+    let sandbox = match Sandbox::enter(&work, &qjs) {
+        Ok(sandbox) => sandbox,
+        Err(err) => {
+            // qjs never ran: no report, rather than an empty one, which
+            // would read as "ran with no sandbox".
+            if let Some((path, file)) = report {
+                drop(file);
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(err);
+        }
+    };
+    let report = report.map(|(_, file)| file);
     if let Some(mut report) = report {
         report.write_all(report_line(sandbox.confinement()).as_bytes())?;
     }
@@ -222,7 +236,8 @@ fn report_line(confinement: Confinement) -> String {
 /// Copies yt-dlp's challenge file, refusing one larger than [`MAX_SCRIPT`].
 fn copy_script(from: &Path, to: &Path) -> io::Result<()> {
     let mut text = Vec::new();
-    std::fs::File::open(from)?
+    // Never through a link (AGENTS.md, section 10).
+    zajil_platform::fs::open_regular_nofollow(from, false)?
         .take(MAX_SCRIPT + 1)
         .read_to_end(&mut text)?;
     if text.len() as u64 > MAX_SCRIPT {
@@ -270,7 +285,16 @@ fn run_for(
     let err = reader(child.stderr.take().expect("piped"));
     let deadline = Instant::now() + time;
     let status = loop {
-        if let Some(status) = child.try_wait()? {
+        let ended = match child.try_wait() {
+            Ok(ended) => ended,
+            Err(err) => {
+                // Never left running without its time limit.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        };
+        if let Some(status) = ended {
             break Some(status.code().unwrap_or(1));
         }
         if Instant::now() >= deadline {

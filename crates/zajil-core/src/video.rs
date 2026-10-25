@@ -75,13 +75,16 @@ pub enum JsRuntime {
 const DENO_MIN: (u64, u64) = (2, 3);
 const NODE_MIN: (u64, u64) = (22, 0);
 
-/// `name` (with `.exe` on Windows) in one of `path`'s folders.
-fn on_path(path: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+/// Every `name` (with `.exe` on Windows) in `path`'s folders, in order:
+/// one that is not usable must not hide a usable one further on (review
+/// of the YouTube PR). Relative folders are never searched.
+fn on_path<'a>(path: &'a std::ffi::OsStr, name: &str) -> impl Iterator<Item = PathBuf> + 'a {
     let suffix = zajil_platform::target::current().map_or("", |t| t.exe_suffix());
+    let file_name = format!("{name}{suffix}");
     std::env::split_paths(path)
         .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join(format!("{name}{suffix}")))
-        .find(|file| file.is_file())
+        .map(move |dir| dir.join(&file_name))
+        .filter(|file| file.is_file())
 }
 
 /// The major and minor version a runtime prints for `--version` (`deno
@@ -131,12 +134,20 @@ fn parse_version(text: &str) -> Option<(u64, u64)> {
 
 /// The real file behind `file` (through any link: Homebrew, snap and
 /// Debian's alternatives install runtimes as links), if no other user can
-/// change it or its folder (ADR-0009, section 3: a runtime the user
-/// installed has no pinned hash).
+/// change it, or put another in its place through any folder above it
+/// (ADR-0009, section 3: a runtime the user installed has no pinned hash;
+/// review of the YouTube PR: only its own folder was checked).
 fn only_ours(file: &Path) -> Option<PathBuf> {
     let real = file.canonicalize().ok()?;
-    let can = |p: &Path| zajil_platform::fs::only_user_or_root_can_change(p).unwrap_or(false);
-    (real.is_file() && can(&real) && real.parent().is_some_and(can)).then_some(real)
+    let ok = |result: io::Result<bool>| result.unwrap_or(false);
+    let folders_ok = real
+        .ancestors()
+        .skip(1)
+        .all(|dir| ok(zajil_platform::fs::no_other_user_can_replace_in(dir)));
+    (real.is_file() && ok(zajil_platform::fs::only_user_or_root_can_change(&real)) && folders_ok)
+        // Without Windows' `\\?\` prefix, which yt-dlp is not known to
+        // run a program from (checked above in its full form).
+        .then(|| dunce::simplified(&real).to_path_buf())
 }
 
 /// The runtime for YouTube's challenges, in the owner's order: Deno 2.3+
@@ -159,9 +170,10 @@ pub fn find_js_runtime(
             ),
             ("node", NODE_MIN, JsRuntime::Node),
         ] {
-            if let Some(found) = on_path(path, name).and_then(|f| only_ours(&f))
-                && version_of(&found).is_some_and(|v| v >= min)
-            {
+            let usable = on_path(path, name)
+                .filter_map(|file| only_ours(&file))
+                .find(|found| version_of(found).is_some_and(|v| v >= min));
+            if let Some(found) = usable {
                 return Some(make(found));
             }
         }
@@ -198,6 +210,30 @@ impl JsSandbox {
                 network: self.network && o.network,
             },
         }
+    }
+}
+
+impl From<zajil_platform::sandbox::Confinement> for JsSandbox {
+    fn from(c: zajil_platform::sandbox::Confinement) -> Self {
+        JsSandbox {
+            programs: c.programs,
+            files: c.files,
+            network: c.network,
+        }
+    }
+}
+
+/// What the sandbox held in a run that may have used `zajil-jsbox`: never
+/// more than this system supports, whatever the reports say (a program the
+/// system does not confine could write its own). With no report, the box
+/// never ran, unless the system cannot keep the box from the report folder:
+/// then the reports may have been removed, and only the system's answer is
+/// left (review of the YouTube PR).
+fn js_held(reports: Option<JsSandbox>, system: JsSandbox) -> Option<JsSandbox> {
+    match reports {
+        Some(reports) => Some(reports.weakest(Some(system))),
+        None if !system.files => Some(system),
+        None => None,
     }
 }
 
@@ -1260,6 +1296,7 @@ impl VideoRunner {
             .qjs
             .as_ref()
             .map(|(qjs, sha256)| (qjs.path().to_owned(), sha256.clone()));
+        let uses_qjs = qjs.is_some();
         let runs_root = self.runs.root.clone();
         let dest = finish.as_ref().map(|f| f.dest.clone());
         let cookie_text = cookies.map(|header| {
@@ -1374,7 +1411,14 @@ impl VideoRunner {
                 placed: None,
                 status_ok: status.success(),
                 error: read.error,
-                js: js_reports(&run.dir.join(JS_REPORTS)),
+                js: if uses_qjs {
+                    js_held(
+                        js_reports(&run.dir.join(JS_REPORTS)),
+                        zajil_platform::sandbox::supported().into(),
+                    )
+                } else {
+                    None
+                },
             };
             if output.status_ok
                 && !was_stopped
@@ -1688,6 +1732,35 @@ mod tests {
         }
         assert!((2, 5) >= DENO_MIN && (2, 2) < DENO_MIN && (1, 46) < DENO_MIN);
         assert!((22, 0) >= NODE_MIN && (21, 9) < NODE_MIN);
+    }
+
+    #[test]
+    fn a_report_never_says_more_than_the_system_supports() {
+        let held = |programs, files, network| JsSandbox {
+            programs,
+            files,
+            network,
+        };
+        let all = held(true, true, true);
+        // A box that is not confined could write "all held".
+        assert_eq!(
+            js_held(Some(all), held(false, false, false)),
+            Some(held(false, false, false))
+        );
+        assert_eq!(
+            js_held(Some(all), held(true, true, false)),
+            Some(held(true, true, false))
+        );
+        assert_eq!(
+            js_held(Some(held(true, false, true)), all),
+            Some(held(true, false, true))
+        );
+        // No report: it never ran, unless it could have removed its report.
+        assert_eq!(js_held(None, all), None);
+        assert_eq!(
+            js_held(None, held(true, false, true)),
+            Some(held(true, false, true))
+        );
     }
 
     #[test]
