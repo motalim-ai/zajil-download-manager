@@ -260,7 +260,8 @@ pub enum Arg {
     Cookies(PathBuf),
     /// The fixed, relative output name `media.%(ext)s`.
     Output,
-    /// A format checked by [`check_format_id`] (or two joined by `+`).
+    /// A format spec built by [`Choice::args`] from ids checked by
+    /// [`check_format_id`].
     Format(String),
     /// Audio only, as m4a (AAC).
     AudioOnlyM4a,
@@ -389,19 +390,16 @@ fn tool_args(ffmpeg_dir: PathBuf, js: Option<&JsRuntime>) -> Vec<Arg> {
     args
 }
 
-/// Checks a format id from a probe before it becomes `--format`: letters,
-/// digits, `_`, `.` and `-` only, since `/`, `+`, `[`, `,` and others are
-/// operators of yt-dlp's format language; and never one of its keywords,
-/// which it reads before ids (review of the video runner: a page's format
-/// `all` downloaded every format, and one named `mp4` any mp4).
+/// Checks a format id from a probe before it goes into `--format`:
+/// letters, digits, `_`, `.` and `-` only, so it can never close the
+/// quotes of [`format_spec`] or be an operator of yt-dlp's format language.
 pub fn check_format_id(id: &str) -> Result<(), VideoError> {
     let ok = !id.is_empty()
         && id.len() <= 64
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
-        && !id.starts_with('-')
-        && !is_format_keyword(id);
+        && !id.starts_with('-');
     if ok {
         Ok(())
     } else {
@@ -409,35 +407,16 @@ pub fn check_format_id(id: &str) -> Result<(), VideoError> {
     }
 }
 
-/// Whether yt-dlp reads `id` as one of its format keywords rather than an
-/// id: `all`, `mergeall`, `best`, `worst`, `b`, `w` with `video`, `audio`,
-/// `v` or `a`, a `*` and a `.<n>`, and the media extensions it selects by.
-fn is_format_keyword(id: &str) -> bool {
-    let id = id.to_ascii_lowercase();
-    if matches!(id.as_str(), "all" | "mergeall") {
-        return true;
-    }
-    const EXTENSIONS: &[&str] = &[
-        "mp4", "m4a", "m4v", "mp3", "webm", "weba", "flv", "3gp", "ogg", "opus", "aac", "wav",
-        "mkv", "mov", "mka", "flac", "alac", "vorbis",
-    ];
-    if EXTENSIONS.contains(&id.as_str()) {
-        return true;
-    }
-    // (best|worst|b|w)(video|audio|v|a)?\*?(\.\d+)?
-    let rest = ["best", "worst", "b", "w"]
-        .iter()
-        .find_map(|p| id.strip_prefix(p));
-    let Some(rest) = rest else { return false };
-    let rest = ["video", "audio", "v", "a"]
-        .iter()
-        .find_map(|p| rest.strip_prefix(p))
-        .unwrap_or(rest);
-    let rest = rest.strip_prefix('*').unwrap_or(rest);
-    rest.is_empty()
-        || rest
-            .strip_prefix('.')
-            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+/// The format with id `id` and no other: yt-dlp reads a bare id as one of
+/// its keywords first (`all` downloads every format, `mp4` the best of any
+/// mp4: review of the video runner), and a site may name its formats so
+/// (yt-dlp's generic extractor names a direct file `mp4`). The filter keeps
+/// only that id, compared as text (unquoted, `137` would be compared as a
+/// number and match nothing), and `b*` then takes it whatever it holds:
+/// picture, sound or both.
+fn format_spec(id: &str) -> Result<String, VideoError> {
+    check_format_id(id)?;
+    Ok(format!("b*[format_id='{id}']"))
 }
 
 /// What to download.
@@ -455,15 +434,12 @@ pub enum Choice {
 impl Choice {
     fn args(&self) -> Result<Vec<Arg>, VideoError> {
         Ok(match self {
-            Choice::Format(id) => {
-                check_format_id(id)?;
-                vec![Arg::Format(id.clone())]
-            }
-            Choice::Merge { video, audio } => {
-                check_format_id(video)?;
-                check_format_id(audio)?;
-                vec![Arg::Format(format!("{video}+{audio}"))]
-            }
+            Choice::Format(id) => vec![Arg::Format(format_spec(id)?)],
+            Choice::Merge { video, audio } => vec![Arg::Format(format!(
+                "{}+{}",
+                format_spec(video)?,
+                format_spec(audio)?
+            ))],
             Choice::AudioOnly => vec![
                 Arg::Format("bestaudio[ext=m4a]/bestaudio".to_owned()),
                 Arg::AudioOnlyM4a,
@@ -1751,30 +1727,29 @@ mod tests {
             "--exec=id",
             "a b",
             "ä",
-            // yt-dlp's keywords, read before ids (review of the runner).
-            "all",
-            "mergeall",
-            "best",
-            "worst",
-            "b",
-            "bv",
-            "ba",
-            "bestvideo",
-            "bv*",
-            "b.2",
-            "worstaudio.3",
-            "w",
-            "mp4",
-            "M4A",
-            "webm",
-            "3gp",
         ] {
             assert!(check_format_id(bad).is_err(), "{bad:?}");
         }
-        // Ids that only look like them are ids.
-        for good in ["best-1080", "b1", "mp4-720", "webm_dash", "allx"] {
-            check_format_id(good).unwrap();
+        // yt-dlp's keywords are ids too: the spec keeps only that id.
+        for keyword in ["all", "mergeall", "best", "b", "bv*", "mp4", "M4A", "w"] {
+            if check_format_id(keyword).is_ok() {
+                assert_eq!(
+                    format_spec(keyword).unwrap(),
+                    format!("b*[format_id='{keyword}']")
+                );
+            }
         }
+        assert_eq!(
+            Choice::Merge {
+                video: "137".into(),
+                audio: "mp4".into()
+            }
+            .args()
+            .unwrap(),
+            vec![Arg::Format(
+                "b*[format_id='137']+b*[format_id='mp4']".into()
+            )]
+        );
     }
 
     #[test]

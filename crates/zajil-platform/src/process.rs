@@ -225,7 +225,7 @@ mod imp {
                 // id is still that group's.
                 if !*reaped && unsafe { libc::killpg(self.pgid, libc::SIGKILL) } != 0 {
                     let err = io::Error::last_os_error();
-                    if err.raw_os_error() != Some(libc::ESRCH) {
+                    if !nothing_left_to_signal(&err) {
                         return Err(err);
                     }
                 }
@@ -240,6 +240,15 @@ mod imp {
             *self.reaped.lock().unwrap_or_else(|e| e.into_inner()) = true;
             Ok(())
         }
+    }
+
+    /// Whether `killpg` failed only because no live process is left in the
+    /// group: ESRCH; and on macOS also EPERM, which Darwin returns for a
+    /// group whose only members are zombies, as our leader is until it is
+    /// reaped (Linux returns ESRCH then).
+    fn nothing_left_to_signal(err: &io::Error) -> bool {
+        let code = err.raw_os_error();
+        code == Some(libc::ESRCH) || (cfg!(target_os = "macos") && code == Some(libc::EPERM))
     }
 
     /// Waits until `child` has ended, without reaping it.
