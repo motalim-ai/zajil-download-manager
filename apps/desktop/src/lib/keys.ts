@@ -20,8 +20,10 @@ export function shortcut(keys: string, mac = onMac()): string {
  * with `key`, and no other modifier. */
 export function isMod(event: KeyboardEvent, key: string, mac = onMac()): boolean {
   const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-  // By the key's place too: with the Arabic layout, Ctrl+F gives «ب» as
-  // `key`, but `code` is still KeyF (review of #96).
-  const same = event.key.toLowerCase() === key.toLowerCase() || event.code === `Key${key.toUpperCase()}`;
+  // By the key's place when it gives no Latin letter: with the Arabic
+  // layout, Ctrl+F gives «ب» as `key`, but `code` is still KeyF (review of
+  // #96). Not otherwise: on AZERTY, Q sits where QWERTY has A.
+  const latin = /^[a-z]$/i.test(event.key);
+  const same = event.key.toLowerCase() === key.toLowerCase() || (!latin && event.code === `Key${key.toUpperCase()}`);
   return mod && !event.altKey && !event.shiftKey && same;
 }

@@ -411,7 +411,13 @@
   /** Runs `then` once the user agrees to `question` (when `needed`). */
   async function confirmThen(question: string, needed: boolean, then: () => Promise<void>) {
     if (needed) {
-      const yes = await ask(question, { title: locale.t("app-name"), kind: "warning" }).catch(() => false);
+      // The buttons in the user's language, not the system's Yes/No.
+      const yes = await ask(question, {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("confirm-remove"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
       if (!yes) return;
     }
     await then();

@@ -307,6 +307,8 @@ tb-toolbar = Download tools
 tree-unfinished = Unfinished
 tree-finished = Finished
 tree-label = Downloads, categories and queues
+confirm-remove = Take off the list
+confirm-cancel = Cancel
 confirm-delete-done =
     { PLURAL($count) ->
         [one] { $count } finished download shown is taken off the list. The file itself stays where it is.

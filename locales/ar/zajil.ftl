@@ -353,6 +353,8 @@ tb-toolbar = أدوات التحميل
 tree-unfinished = غير مكتملة
 tree-finished = مكتملة
 tree-label = التحميلات والفئات والطوابير
+confirm-remove = احذف من القائمة
+confirm-cancel = إلغاء
 confirm-delete-done =
     { PLURAL($count) ->
         [zero] لا تحميلات مكتملة معروضة.

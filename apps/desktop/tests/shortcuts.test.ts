@@ -26,6 +26,8 @@ describe("shortcuts", () => {
     // The Arabic layout: the key is «ب», its place is still F.
     expect(isMod(key({ key: "ب", code: "KeyF", ctrlKey: true }), "f", false)).toBe(true);
     expect(isMod(key({ key: "ش", code: "KeyA", metaKey: true }), "a", true)).toBe(true);
+    // AZERTY: Q where QWERTY has A is Ctrl+Q, not Ctrl+A.
+    expect(isMod(key({ key: "q", code: "KeyA", ctrlKey: true }), "a", false)).toBe(false);
   });
 });
 
