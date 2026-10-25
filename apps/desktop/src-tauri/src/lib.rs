@@ -673,8 +673,12 @@ async fn run_queues(handle: tauri::AppHandle) {
                 () = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
             let store = store.clone();
+            let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
             let waiting = tokio::task::spawn_blocking(move || {
                 store.load().map_err(|e| e.to_string()).map(|q| {
+                    // No runner looks meanwhile: a queue started now and
+                    // paused at once leaves the set here (review of #125).
+                    schedule::prune_run_now(&run_now, &q);
                     q.queues
                         .iter()
                         .flat_map(|q| &q.items)

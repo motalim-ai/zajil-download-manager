@@ -490,6 +490,23 @@ pub async fn start_queue<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Keeps in `run_now` only the queues that are there, have a schedule and
+/// something waiting or running: the queue runner's own rule at each look
+/// (#125), for while no runner looks.
+pub fn prune_run_now(run_now: &zajil_core::queue::RunNow, queues: &QueuesFile) {
+    run_now
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|name| {
+            queues.queue(name).is_some_and(|q| {
+                q.schedule.is_some()
+                    && q.items
+                        .iter()
+                        .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+            })
+        });
+}
+
 fn startable(queues: &QueuesFile, name: &str) -> Result<Vec<u64>, StoreError> {
     let queue = queues
         .queue(name)
@@ -781,6 +798,27 @@ mod tests {
         let app = dir.path().join("Sync.app");
         std::fs::create_dir(&app).unwrap();
         assert_eq!(after_open_of(&app), Ok(app.clone()));
+    }
+
+    /// #125, review: a queue started now and paused before a runner looks
+    /// leaves the set; one with work and a schedule stays.
+    #[test]
+    fn a_queue_started_now_with_nothing_to_run_leaves_the_set() {
+        let mut q = queues();
+        q.queue_mut("night").unwrap().schedule =
+            Some(Schedule::new(Some("02:00".parse().unwrap()), None, vec![]).unwrap());
+        let run_now: zajil_core::queue::RunNow = Default::default();
+        run_now
+            .lock()
+            .unwrap()
+            .extend(["night".to_owned(), "main".to_owned(), "gone".to_owned()]);
+        prune_run_now(&run_now, &q);
+        // main has no schedule, gone is not there.
+        assert_eq!(*run_now.lock().unwrap(), ["night".to_owned()].into());
+        let night = ids(&q, "night")[0];
+        q.item_mut(night).unwrap().status = Status::Paused;
+        prune_run_now(&run_now, &q);
+        assert!(run_now.lock().unwrap().is_empty());
     }
 
     #[test]
