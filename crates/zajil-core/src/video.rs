@@ -93,6 +93,11 @@ pub enum Arg {
     PrintFinalPath,
     /// Prints progress in a fixed form Zajil reads.
     ProgressTemplate,
+    /// Tests only ([`VideoRunner::with_test_root`]): trust the system's
+    /// store, where the test sets its authority, instead of the list
+    /// bundled in yt-dlp. Never in a shipped build (no `test-support`).
+    #[cfg(feature = "test-support")]
+    TestNoCertifi,
 }
 
 /// The progress line Zajil asks for: a fixed word, then numbers or `NA`.
@@ -146,6 +151,11 @@ impl Arg {
             Arg::PrintFinalPath => {
                 add("--print");
                 add("after_move:filepath");
+            }
+            #[cfg(feature = "test-support")]
+            Arg::TestNoCertifi => {
+                add("--compat-options");
+                add("no-certifi");
             }
             Arg::ProgressTemplate => {
                 add("--progress-template");
@@ -786,6 +796,9 @@ pub struct VideoRunner {
     runs: Runs,
     /// For Zajil's own requests (the HLS playlists of the DRM check).
     engine: Engine,
+    /// Tests only: a PEM file of the test authority that yt-dlp trusts.
+    #[cfg(feature = "test-support")]
+    test_root: Option<PathBuf>,
 }
 
 impl VideoRunner {
@@ -796,7 +809,32 @@ impl VideoRunner {
             tools,
             runs,
             engine,
+            #[cfg(feature = "test-support")]
+            test_root: None,
         }
+    }
+
+    /// Lets yt-dlp trust the tests' temporary authority (a PEM file), like
+    /// [`Engine::with_test_root`]: only with the `test-support` feature,
+    /// which no shipped binary enables (checked in CI).
+    #[cfg(feature = "test-support")]
+    pub fn with_test_root(mut self, ca_pem: PathBuf) -> Self {
+        self.test_root = Some(ca_pem);
+        self
+    }
+
+    /// The run's arguments and the environment it adds: nothing but in
+    /// tests that trust their own authority.
+    #[cfg_attr(not(feature = "test-support"), allow(unused_mut))]
+    fn all_args(&self, mut args: Vec<Arg>) -> (Vec<Arg>, Vec<(String, std::ffi::OsString)>) {
+        #[cfg_attr(not(feature = "test-support"), allow(unused_mut))]
+        let mut env = Vec::new();
+        #[cfg(feature = "test-support")]
+        if let Some(ca) = &self.test_root {
+            args.push(Arg::TestNoCertifi);
+            env.push(("SSL_CERT_FILE".to_owned(), ca.clone().into_os_string()));
+        }
+        (args, env)
     }
 
     /// yt-dlp, ffmpeg and ffprobe, checked now.
@@ -960,6 +998,7 @@ impl VideoRunner {
         // The tools, checked now and held until the whole tree has ended.
         let checked = self.checked_tools().await?;
         args.push(Arg::FfmpegLocation(checked.ffmpeg_dir()));
+        let (mut args, extra_env) = self.all_args(args);
         let yt_dlp = checked.yt_dlp.path().to_owned();
         let runs_root = self.runs.root.clone();
         let dest = finish.as_ref().map(|f| f.dest.clone());
@@ -995,7 +1034,7 @@ impl VideoRunner {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            for (key, value) in environment(&run) {
+            for (key, value) in environment(&run).into_iter().chain(extra_env) {
                 command.env(key, value);
             }
             let tree = match zajil_platform::process::spawn(command) {

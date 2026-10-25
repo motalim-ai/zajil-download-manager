@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Downloads the pinned yt-dlp for this machine into <dir> and checks its
+# SHA-256 against tools/yt-dlp/pins.txt, the file Zajil itself reads
+# (ADR-0009). For the CI's video tests and for developers; prints the
+# program's path.
+#
+#   scripts/get-yt-dlp.sh <dir>
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+pins="$root/tools/yt-dlp/pins.txt"
+dir="${1:?dir}"
+
+case "$(uname -s)" in
+  Linux) os=linux ;;
+  Darwin) os=macos ;;
+  MINGW*|MSYS*|CYGWIN*) os=windows ;;
+  *) echo "unknown system $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) arch=x86_64 ;;
+  arm64|aarch64) arch=aarch64 ;;
+  *) echo "unknown processor $(uname -m)" >&2; exit 1 ;;
+esac
+
+version="$(awk '$1 == "version" { print $2 }' "$pins")"
+read -r file sha256 < <(awk -v t="$os-$arch" '$1 == t { print $2, $3 }' "$pins")
+[ -n "${file:-}" ] || { echo "no yt-dlp is pinned for $os-$arch" >&2; exit 1; }
+
+name="yt-dlp"
+[ "$os" = windows ] && name="yt-dlp.exe"
+mkdir -p "$dir"
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+  --retry 4 --retry-delay 5 --retry-all-errors \
+  -o "$dir/$name.download" "https://github.com/yt-dlp/yt-dlp/releases/download/$version/$file"
+actual="$( (sha256sum "$dir/$name.download" 2>/dev/null || shasum -a 256 "$dir/$name.download") | cut -d' ' -f1)"
+if [ "$actual" != "$sha256" ]; then
+  rm -f "$dir/$name.download"
+  echo "yt-dlp $version ($file) has SHA-256 $actual, not the pinned $sha256" >&2
+  exit 1
+fi
+mv "$dir/$name.download" "$dir/$name"
+chmod 700 "$dir/$name"
+echo "$dir/$name"
