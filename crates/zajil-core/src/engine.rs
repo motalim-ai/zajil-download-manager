@@ -409,6 +409,10 @@ pub enum Error {
     },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
+    /// A download held for the user before anything was made: the server
+    /// named a file that can run code ([`Engine::holding`]).
+    #[error("{0} can run code: it waits for you to start it")]
+    Held(String),
     /// "Refresh the link": the new link is not the same file (M5).
     #[error("the new link is not the same file: {0}")]
     NotTheSameFile(Mismatch),
@@ -434,6 +438,20 @@ pub struct Engine {
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
+    /// Hold a new download whose name it says: the name the server gives
+    /// at the download itself, before any file is made (security review
+    /// #84). `None`: no check.
+    hold: Option<Hold>,
+}
+
+/// What [`Engine::holding`] checks a new download's name with.
+#[derive(Clone)]
+struct Hold(Arc<dyn Fn(&str) -> bool + Send + Sync>);
+
+impl std::fmt::Debug for Hold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Hold")
+    }
 }
 
 impl Engine {
@@ -443,6 +461,7 @@ impl Engine {
             client,
             options,
             browser: Arc::default(),
+            hold: None,
         })
     }
 
@@ -459,6 +478,7 @@ impl Engine {
             client,
             options,
             browser: Arc::default(),
+            hold: None,
         })
     }
 
@@ -477,6 +497,17 @@ impl Engine {
     pub fn with_browser(&self, from: crate::browser::FromBrowser) -> Engine {
         let mut engine = self.clone();
         engine.browser = Arc::new(from);
+        engine
+    }
+
+    /// This engine, holding a new download whose name makes `hold` true:
+    /// it stops with [`Error::Held`] once the server has named the file,
+    /// before anything is created. For a file from a page that can run
+    /// code: the probe's name is not enough, the download's own answer
+    /// may name another file (review of #90).
+    pub fn holding(&self, hold: Arc<dyn Fn(&str) -> bool + Send + Sync>) -> Engine {
+        let mut engine = self.clone();
+        engine.hold = Some(Hold(hold));
         engine
     }
 
@@ -578,6 +609,9 @@ impl Engine {
                 .map(|v| v.as_bytes()),
             response.url(),
         );
+        if self.hold.as_ref().is_some_and(|hold| (hold.0)(&name)) {
+            return Err(Error::Held(name));
+        }
         let dir = choose(&name, response.url());
         // Only a folder that does not exist yet (a category's) is created:
         // creating one waits for a blocking thread, and a download into an
@@ -1742,9 +1776,6 @@ impl Transfer {
     }
 }
 
-/// Completes a download whose bytes are all written to `part`: syncs it,
-/// records that everything is on disk, renames it to its final name (or a
-/// numbered one) and removes the state file.
 /// The origin (`scheme://host[:port]`) the download's bytes came from: its
 /// final address, else its link.
 fn origin_of(state: &DownloadState) -> Option<String> {
@@ -1756,6 +1787,9 @@ fn origin_of(state: &DownloadState) -> Option<String> {
         .map(|o| o.ascii_serialization())
 }
 
+/// Completes a download whose bytes are all written to `part`: syncs it,
+/// records that everything is on disk, renames it to its final name (or a
+/// numbered one) and removes the state file.
 pub(crate) async fn finish_download(
     part: File,
     mut state: DownloadState,
@@ -1777,6 +1811,17 @@ pub(crate) async fn finish_download(
     drop(part); // releases the lock before the rename
 
     let part = part_path(&final_path);
+    // From the internet: the system warns before it runs, and Office opens
+    // it in Protected View (security review #84). On the part file, before
+    // it takes its name, so the file never has its name without the mark
+    // (review of #90): the mark goes with the file through the rename and
+    // the link fallbacks. The link's origin only: its path and query may
+    // hold a token. A file system that cannot keep the mark (FAT32, exFAT)
+    // keeps the file without it.
+    if let Some(origin) = origin_of(&state) {
+        let marked = part.clone();
+        let _ = blocking(move || zajil_platform::origin::mark(&marked, &origin)).await;
+    }
     let wanted = final_path.clone();
     let placed = blocking(move || place_final(&part, &wanted)).await;
     let file = match placed {
@@ -1788,14 +1833,6 @@ pub(crate) async fn finish_download(
             });
         }
     };
-    // From the internet: the system warns before it runs, and Office opens
-    // it in Protected View (security review #84). The link's origin only:
-    // its path and query may hold a token. A file system that cannot keep
-    // the mark (FAT32, exFAT) keeps the file without it.
-    if let Some(origin) = origin_of(&state) {
-        let marked = file.clone();
-        let _ = blocking(move || zajil_platform::origin::mark(&marked, &origin)).await;
-    }
     // The download is complete. A state file that cannot be removed is
     // left behind rather than reported as a failed download.
     let _ = std::fs::remove_file(&state_file);

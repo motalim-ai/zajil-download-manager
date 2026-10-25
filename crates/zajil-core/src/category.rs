@@ -300,71 +300,27 @@ impl CategoriesFile {
     }
 }
 
-/// `programs`, `my-books`: 1 to [`MAX_ID_CHARS`] lowercase ASCII letters,
-/// digits, `-` or `_`.
 /// File types that can run code when opened (security review #84):
 /// programs and installers, scripts, Java, macOS images and packages,
 /// shortcuts and system settings files, Office files that can hold macros,
 /// and disk images, which hand files inside them on without the mark of a
 /// file from the internet.
+#[rustfmt::skip]
 pub const RUNS_CODE: &[&str] = &[
-    // Windows programs, installers and scripts
-    "exe",
-    "msi",
-    "msix",
-    "msixbundle",
-    "msp",
-    "appx",
-    "appxbundle",
-    "com",
-    "scr",
-    "cpl",
-    "bat",
-    "cmd",
-    "ps1",
-    "psm1",
-    "vbs",
-    "vbe",
-    "js",
-    "jse",
-    "wsf",
-    "wsh",
-    "hta",
-    "lnk",
-    "reg",
+    // Windows programs, installers, scripts and what runs them
+    "exe", "msi", "msix", "msixbundle", "msp", "msu", "appx", "appxbundle", "com", "pif", "scr",
+    "cpl", "bat", "cmd", "ps1", "psm1", "psd1", "ps1xml", "vbs", "vbe", "js", "jse", "wsf",
+    "wsh", "wsc", "sct", "hta", "chm", "msc", "inf", "reg", "lnk", "url", "scf", "cab",
+    "diagcab", "library-ms", "appref-ms", "application", "settingcontent-ms",
     // Java, macOS and Unix
-    "jar",
-    "dmg",
-    "pkg",
-    "mpkg",
-    "app",
-    "command",
-    "sh",
-    "run",
-    // Office files that can hold macros
-    "doc",
-    "dot",
-    "docm",
-    "dotm",
-    "xls",
-    "xlt",
-    "xlsm",
-    "xltm",
-    "xlsb",
-    "xlam",
-    "ppt",
-    "pot",
-    "pps",
-    "pptm",
-    "potm",
-    "ppsm",
-    "ppam",
-    "sldm",
+    "jar", "dmg", "pkg", "mpkg", "app", "command", "terminal", "tool", "workflow", "scpt",
+    "fileloc", "sh", "run", "desktop", "appimage", "deb", "rpm",
+    // Office and other documents that can hold macros or run code
+    "doc", "dot", "docm", "dotm", "wll", "xls", "xlt", "xla", "xll", "xlsm", "xltm", "xlsb",
+    "xlam", "ppt", "pot", "pps", "ppa", "pptm", "potm", "ppsm", "ppam", "sldm", "one", "rtf",
+    "mdb", "accdb", "accde", "pub", "vsd", "vsdm",
     // Disk images
-    "iso",
-    "img",
-    "vhd",
-    "vhdx",
+    "iso", "img", "vhd", "vhdx",
 ];
 
 /// Whether a file named `name` can run code when opened (its extension is
@@ -377,6 +333,8 @@ pub fn runs_code(name: &str) -> bool {
         .is_some_and(|ext| RUNS_CODE.contains(&ext.as_str()))
 }
 
+/// `programs`, `my-books`: 1 to [`MAX_ID_CHARS`] lowercase ASCII letters,
+/// digits, `-` or `_`.
 pub fn check_id(id: &str) -> Result<(), CategoryError> {
     let ok = (1..=MAX_ID_CHARS).contains(&id.len())
         && id

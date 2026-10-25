@@ -582,7 +582,7 @@ async fn add<R: tauri::Runtime>(
     let id = tokio::task::spawn_blocking(move || {
         let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
             .map_err(StoreError::Refused)?;
-        add_blocking(&store, &request, &given, None, false)
+        add_blocking(&store, &request, &given, None, false, false)
     })
     .await
     .map_err(blocking_err)?
@@ -1344,7 +1344,7 @@ fn from_extension(
                     referrer: page,
                     ticket: ticket.clone(),
                 });
-            match add_blocking(store, &add, given, source, runs_code) {
+            match add_blocking(store, &add, given, source, runs_code, true) {
                 Ok(id) => {
                     headers
                         .lock()
@@ -1366,6 +1366,7 @@ fn add_blocking(
     given: &Path,
     browser: Option<zajil_core::queue::BrowserSource>,
     needs_ok: bool,
+    from_page: bool,
 ) -> Result<u64, StoreError> {
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
@@ -1380,6 +1381,7 @@ fn add_blocking(
         }
         // In the same write: the queue never sees it waiting.
         item.needs_ok = needs_ok;
+        item.from_page = from_page;
         Ok(id)
     })
 }

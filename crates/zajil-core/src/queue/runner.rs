@@ -469,8 +469,11 @@ impl Runner {
                             return Ok(None);
                         }
                         item.status = Status::Active;
-                        // Started: the user's OK, if it waited for one.
-                        item.needs_ok = false;
+                        // Started while held: that is the user's OK.
+                        if item.needs_ok {
+                            item.needs_ok = false;
+                            item.ok_given = true;
+                        }
                         item.error = None;
                         Ok(Some(item.clone()))
                     })
@@ -486,6 +489,12 @@ impl Runner {
                 });
                 let stop = Stop::new();
                 let mut engine = engine.with_download_limit(item.limit);
+                // From a page, not yet started by the user: a file that can
+                // run code is held by the name the download itself gets
+                // (review of #90: the probe's name could differ).
+                if item.from_page && !item.ok_given {
+                    engine = engine.holding(Arc::new(crate::category::runs_code));
+                }
                 if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
                 }
@@ -637,7 +646,8 @@ impl Runner {
                     file: done.file.clone(),
                 }
             }
-            Err(Error::Stopped { .. }) => QueueEvent::Stopped { item: id },
+            // Held for the user is not a failure: it waits, paused.
+            Err(Error::Stopped { .. } | Error::Held(_)) => QueueEvent::Stopped { item: id },
             Err(err) => {
                 summary.failed += 1;
                 QueueEvent::Failed {
@@ -667,6 +677,12 @@ impl Runner {
                         // `None`: nothing was written and the files are
                         // gone; the name may soon be another download's.
                         item.state_file = state_file;
+                    }
+                    // Held for the user: nothing was made.
+                    Err(Error::Held(_)) => {
+                        item.status = Status::Paused;
+                        item.needs_ok = true;
+                        item.error = None;
                     }
                     Err(err) => {
                         item.status = Status::Failed;

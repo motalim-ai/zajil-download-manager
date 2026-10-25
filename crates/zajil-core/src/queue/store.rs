@@ -115,6 +115,14 @@ pub struct Item {
     /// to start it (security review #84). Cleared when it starts.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_ok: bool,
+    /// It came from a page (the browser extension): held if the server
+    /// names a file that can run code at the download itself, unless the
+    /// user has already started it (review of #90).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_page: bool,
+    /// The user started it while it was held: it is not held again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ok_given: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
     /// It came from the browser extension (M5): what Zajil needs to ask
@@ -306,6 +314,8 @@ impl QueuesFile {
             limit: None,
             categorize: false,
             needs_ok: false,
+            from_page: false,
+            ok_given: false,
             added_at: now_rfc3339(),
             browser: None,
         };

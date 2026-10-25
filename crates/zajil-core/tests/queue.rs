@@ -864,3 +864,70 @@ async fn a_held_download_starts_only_when_the_user_starts_it() {
     let item = store.load().unwrap().item(id).unwrap().clone();
     assert_eq!((item.status, item.needs_ok), (Status::Done, false));
 }
+
+/// Review of #90: a server that names another file at the download itself
+/// than at the check (`a.zip`, then `setup.exe`) cannot start a file that
+/// runs code: a download from a page is held by the name the download
+/// gets, before anything is made; once the user starts it, it goes.
+#[tokio::test]
+async fn a_download_from_a_page_is_held_by_the_name_the_download_itself_gets() {
+    let server = TestServer::http();
+    let data = random_bytes(50_000, 98);
+    server.put(
+        "/get",
+        FileSpec::new(data.clone())
+            .content_disposition("attachment; filename=\"a.zip\"")
+            .replaced_after(
+                1,
+                FileSpec::new(data.clone())
+                    .content_disposition("attachment; filename=\"setup.exe\""),
+            ),
+    );
+    // The check, as the app makes it: it is told `a.zip`.
+    let engine = Engine::new(Options::default()).unwrap();
+    assert_eq!(
+        engine.probe(&server.url("/get")).await.unwrap().name,
+        "a.zip"
+    );
+    let data_dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, "main", &server.url("/get"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().from_page = true;
+            Ok(())
+        })
+        .unwrap();
+    let mut failed = false;
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            failed |= matches!(event, QueueEvent::Failed { .. })
+        })
+        .await
+        .unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(
+        (item.status, item.needs_ok),
+        (Status::Paused, true),
+        "{item:?}"
+    );
+    assert!(!failed, "a hold is not a failure");
+    assert_eq!(
+        fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a file was made"
+    );
+    // The user starts it: it goes, and is not held again.
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(item.status, Status::Done, "{item:?}");
+    assert!(item.ok_given);
+    assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+}
