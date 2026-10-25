@@ -96,11 +96,11 @@
   // With the details, the window is taller; its width stays the user's.
   $effect(() => {
     const height = more ? 640 : 430;
-    const win = getCurrentWindow();
-    void (async () => {
-      const [inner, scale] = await Promise.all([win.innerSize(), win.scaleFactor()]);
-      await win.setSize(new LogicalSize(inner.width / scale, height));
-    })().catch(() => {});
+    // The page's own width is the window's, in logical pixels: no
+    // permission to read the window (review of #111).
+    void getCurrentWindow()
+      .setSize(new LogicalSize(window.innerWidth || 600, height))
+      .catch(() => {});
     try {
       localStorage.setItem("zajil.progress.more", more ? "1" : "0");
     } catch {
