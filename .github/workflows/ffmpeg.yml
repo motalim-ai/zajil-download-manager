@@ -147,21 +147,13 @@ jobs:
           tarball="$(cygpath -u "$RUNNER_TEMP")/source/$FFMPEG_TARBALL"
           bash tools/ffmpeg/build.sh dist "$tarball" out
           [ "$TESTGEN_HIT" = true ] || bash tools/ffmpeg/build.sh testgen "$tarball" test-tools/ffmpeg-testgen
-          # No DLL from MinGW or MSYS2: the files run on a plain Windows.
-          dump="$(command -v objdump || command -v llvm-objdump)"
-          for f in out/*.exe; do
-            # Read first, and proved read: every Windows program imports
-            # KERNEL32.dll, so a dump without it is a dump that failed.
-            deps="$("$dump" -p "$f")"
-            # A here-string, not a pipe: `grep -q` stops at the first match,
-            # and a writer cut off then fails the pipe under pipefail.
-            grep -qiE 'DLL Name: KERNEL32\.dll' <<< "$deps" || {
-              echo "::error::$dump could not read the imports of $f"; exit 1
-            }
-            if grep -iE 'DLL Name: (lib|msys-)' <<< "$deps"; then
-              echo "::error::$f needs a MinGW or MSYS2 DLL"; exit 1
-            fi
-          done
+          # Only Windows' own DLLs, none from MinGW or MSYS2: the files run
+          # on a plain Windows (objdump is MSYS2's).
+          bash tools/ffmpeg/check-linked.sh out
+      # What the real files load, on Linux and macOS (Windows: above).
+      - name: Linked libraries
+        if: runner.os != 'Windows'
+        run: bash tools/ffmpeg/check-linked.sh out
       - name: Smoke test
         run: bash tools/ffmpeg/smoke-test.sh out test-tools/ffmpeg-testgen
       # The same test on the x86_64 half: under Rosetta a universal program
