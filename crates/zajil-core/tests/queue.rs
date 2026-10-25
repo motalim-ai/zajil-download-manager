@@ -649,8 +649,9 @@ async fn a_queued_download_sends_the_browser_s_headers_kept_for_it() {
     assert!(headers.lock().unwrap().is_empty(), "kept after it finished");
 }
 
-/// The headers of a failed download are kept for a retry, and those of a
-/// download removed from the queues are forgotten (review of #76).
+/// The headers of a failed download are kept for a retry, those of a
+/// download removed from the queues are forgotten, and those of a download
+/// added after the runner's last look are not (review of #76).
 #[tokio::test]
 async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
     let server = TestServer::http();
@@ -662,8 +663,14 @@ async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
     let headers = zajil_core::queue::FromBrowserById::default();
     let from = || zajil_core::FromBrowser::new(&server.url("/gone.bin"), Some("sid=Q"), None);
     headers.lock().unwrap().insert(failed, from());
-    // An entry for an item that is not in the queues at all.
-    headers.lock().unwrap().insert(9999, from());
+    // An entry for an item that is no longer in the queues.
+    let gone = add(&store, "main", &server.url("/gone.bin"), dir.path());
+    store.update(|q| q.remove(gone).map(drop)).unwrap();
+    headers.lock().unwrap().insert(gone, from());
+    // An entry for an item the runner cannot have seen yet: the app adds
+    // the item, then its headers, between a look and its sweep.
+    let next = store.load().unwrap().next_id;
+    headers.lock().unwrap().insert(next, from());
     let once = Engine::new(Options {
         max_failures: 1,
         ..Options::default()
@@ -676,16 +683,17 @@ async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
     };
     let summary = run().run(&Stop::new(), &mut |_| {}).await.unwrap();
     assert_eq!(summary.failed, 1);
-    let kept = headers.lock().unwrap().keys().copied().collect::<Vec<_>>();
+    let kept = || {
+        let mut kept = headers.lock().unwrap().keys().copied().collect::<Vec<_>>();
+        kept.sort();
+        kept
+    };
     assert_eq!(
-        kept,
-        [failed],
-        "the failed item's entry stays, the stray one goes"
+        kept(),
+        [failed, next],
+        "the failed item's entry stays, and the one not seen yet; the gone one goes"
     );
     store.update(|q| q.remove(failed).map(drop)).unwrap();
     run().run(&Stop::new(), &mut |_| {}).await.unwrap();
-    assert!(
-        headers.lock().unwrap().is_empty(),
-        "kept after the item was removed"
-    );
+    assert_eq!(kept(), [next], "kept after the item was removed");
 }

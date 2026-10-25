@@ -228,7 +228,10 @@ impl Runner {
                 let queues = blocking(move || store.load()).await?;
                 speed_limit.set_rate(queues.settings.speed_limit);
                 // The browser's headers of downloads that are done or gone
-                // are forgotten; a failed one keeps them for a retry.
+                // are forgotten; a failed one keeps them for a retry. An id
+                // from `next_id` on was added after this load (the app adds
+                // the item, then its headers): not gone, just not seen yet
+                // (review of #76).
                 if let Some(map) = &self.from_browser {
                     let keep: HashSet<u64> = queues
                         .queues
@@ -239,7 +242,7 @@ impl Runner {
                         .collect();
                     map.lock()
                         .unwrap_or_else(|e| e.into_inner())
-                        .retain(|id, _| keep.contains(id));
+                        .retain(|id, _| *id >= queues.next_id || keep.contains(id));
                 }
                 if let Some(until) = &self.until
                     && !summary.stopped
