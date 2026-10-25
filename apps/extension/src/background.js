@@ -74,6 +74,13 @@ async function report(result, where, about = {}) {
     await notify(text, actions, url, store);
     return;
   }
+  // A video Zajil refuses: its own answer, in the user's language («Video
+  // downloads are coming soon», until M6; review of #99: the user saw only
+  // "did not take this video").
+  if (where === "video" && result.outcome === "refused" && result.error) {
+    await notify(result.error.slice(0, 300));
+    return;
+  }
   await notify(t(TEXTS[where][result.outcome]));
 }
 

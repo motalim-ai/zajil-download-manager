@@ -300,12 +300,18 @@ describe("the background", () => {
     expect(fake.session.privateSent).toBe(true);
   });
 
-  it("a video Zajil does not take says so, with no sign-in button: the browser cannot download a page's video", async () => {
+  it("a video Zajil does not take says Zajil's own reason, with no sign-in button: the browser cannot download a page's video", async () => {
     let fake = fakeChrome({ granted: false, answer: forbidden });
     await load(fake);
     fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v" });
     await flush();
-    expect(fake.done.notifications.at(-1)).toMatchObject({ message: "videoRefused" });
+    expect(fake.done.notifications.at(-1)).toMatchObject({ message: forbidden.error });
+    // «Coming soon», as the app says it (review of #99).
+    fake = fakeChrome({ granted: false, answer: { protocol_version: 1, ok: false, error: "تحميل الفيديو قادم قريبًا." } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v" });
+    await flush();
+    expect(fake.done.notifications.at(-1)).toMatchObject({ message: "تحميل الفيديو قادم قريبًا." });
     expect(fake.done.notifications.at(-1).buttons).toBeUndefined();
     // A page Zajil cannot read: refused before any cookie is read.
     fake = fakeChrome({ granted: true, answer: { ok: true } });
