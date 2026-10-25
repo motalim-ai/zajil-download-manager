@@ -304,6 +304,43 @@ async fn renaming_is_held_only_when_the_name_brings_code() {
     assert_eq!((item.status, item.needs_ok), (Status::Paused, true));
 }
 
+/// Owner's decision on #114: from a page, a harmless name the user turns
+/// into one that runs code (`notes.txt` to `notes.exe`) is held before
+/// anything is made, and goes once the user starts it.
+#[tokio::test]
+async fn a_page_s_harmless_file_renamed_to_run_code_is_held() {
+    let data = random_bytes(20_000, 959);
+    let server = server_naming("/get", "notes.txt", &data);
+    let data_dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, &server.url("/get"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().from_page = true;
+            q.set_name(id, Some("notes.exe"))
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(
+        (item.status, item.needs_ok),
+        (Status::Paused, true),
+        "{item:?}"
+    );
+    assert!(names_in(dir.path()).is_empty(), "a file was made");
+
+    set_status(&store, id, Status::Waiting);
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(item.status, Status::Done, "{item:?}");
+    assert_eq!(names_in(dir.path()), ["notes.exe"]);
+    assert_eq!(
+        sha256_hex(&fs::read(dir.path().join("notes.exe")).unwrap()),
+        sha256_hex(&data)
+    );
+}
+
 /// The name is the file's once the download has started: a change then
 /// is refused, and nothing changes.
 #[test]
