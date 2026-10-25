@@ -36,18 +36,18 @@
 
 ## الأحجام الفعلية (FFmpeg 8.1.3)
 
-من سجل البناء في الـ CI ([تشغيل 40213208200](https://github.com/motalim-ai/zajil-download-manager/actions/runs/40213208200)، بلا iconv)، بعد الربط الثابت:
+من سجل البناء في الـ CI ([تشغيل 40216280141](https://github.com/motalim-ai/zajil-download-manager/actions/runs/40216280141))، بعد الربط الثابت، ومعه ما يحمّله كل ملف (`check-linked.sh`):
 
-| النظام | `ffmpeg` | `ffprobe` | المجموع |
-|---|---|---|---|
-| ويندوز x64 | 2.52 MiB | 2.36 MiB | **4.88 MiB** |
-| ويندوز arm64 | 2.38 MiB | 2.22 MiB | **4.60 MiB** |
-| ماك (universal) | 5.20 MiB | 4.84 MiB | **10.04 MiB** |
-| لينكس x64 | 2.69 MiB | 2.51 MiB | **5.20 MiB** |
-| لينكس arm64 | 2.74 MiB | 2.55 MiB | **5.29 MiB** |
+| النظام | `ffmpeg` | `ffprobe` | المجموع | ما يحمّله الملفان |
+|---|---|---|---|---|
+| ويندوز x64 | 2.52 MiB | 2.36 MiB | **4.88 MiB** | UCRT (`api-ms-win-crt-*`)، و`KERNEL32` و`bcrypt` و`SHELL32` |
+| ويندوز arm64 | 2.38 MiB | 2.22 MiB | **4.60 MiB** | مثل ويندوز x64 |
+| ماك (universal، موقَّع ad-hoc) | 5.25 MiB | 4.89 MiB | **10.14 MiB** | `libSystem`، وأُطر CoreFoundation وCoreMedia وCoreVideo |
+| لينكس x64 | 2.69 MiB | 2.51 MiB | **5.20 MiB** | `libc` و`libm` |
+| لينكس arm64 | 2.73 MiB | 2.56 MiB | **5.29 MiB** | `libc` و`libm` و`ld-linux-aarch64` |
 
 **ملاحظات على الأحجام:**
-- ملف ماك أكبر من غيره لأنه يحمل نسختين، واحدة لكل معمارية.
+- ملف ماك أكبر من غيره لأنه يحمل نسختين، واحدة لكل معمارية، ومعهما توقيع ad-hoc (نحو 100 KB).
 - نسخة لينكس تُبنى على Ubuntu 22.04، فتحتاج glibc 2.35 أو أحدث.
 - **للمقارنة:** نسخة BtbN الكاملة بترخيص LGPL حجم أرشيفها 136 MB في لينكس x64.
 
