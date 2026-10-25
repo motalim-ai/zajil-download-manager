@@ -5,12 +5,13 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely } from "./compat.js";
-import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver } from "./capture.js";
+import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
 import { cookieHeader, cookiesAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
 
 const MENU = "zajil-download-link";
+const MENU_VIDEO = "zajil-download-video";
 
 /** @param {string} key */
 const t = (key) => api.i18n.getMessage(key) || key;
@@ -22,6 +23,7 @@ const TEXTS = {
   paused: { refused: "notRefused", unknown: "notAnswered", unreachable: "notReachable" },
   running: { refused: "notRefused", unknown: "notAnsweredRunning", unreachable: "notReachable" },
   menu: { refused: "menuRefused", unknown: "menuNotAnswered", unreachable: "menuNotReachable" },
+  video: { refused: "videoRefused", unknown: "videoNotAnswered", unreachable: "menuNotReachable" },
 };
 
 /**
@@ -48,7 +50,9 @@ async function report(result, where, about = {}) {
     return;
   }
   await api.action.setBadgeText({ text: result.outcome === "unknown" ? "?" : "!" });
-  if (needsSignIn(result)) {
+  // A video goes to yt-dlp, which says no 401 or 403 of its own; and the
+  // browser cannot download a page's video in its place.
+  if (where !== "video" && needsSignIn(result)) {
     // "Even with the cookies" only when cookies went (review of #76: with
     // the permission, a store that gave none, or a header left out, sent
     // nothing).
@@ -140,6 +144,7 @@ onNewDownload(api, (item) => {
 
 api.runtime.onInstalled.addListener((/** @type {any} */ details) => {
   api.contextMenus.create({ id: MENU, title: t("menuDownloadLink"), contexts: ["link"] });
+  api.contextMenus.create({ id: MENU_VIDEO, title: t("menuDownloadVideo"), contexts: ["video", "audio"] });
   // Once, at install: what the extension does, and the cookie permission
   // behind a button (Chrome wants the user's click to ask for it). A flag,
   // since an extension loaded unpacked is "installed" at every start.
@@ -154,6 +159,10 @@ api.runtime.onInstalled.addListener((/** @type {any} */ details) => {
 });
 
 api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any} */ tab) => {
+  if (info.menuItemId === MENU_VIDEO) {
+    void sendVideo(info, tab);
+    return;
+  }
   if (info.menuItemId !== MENU) return;
   void (async () => {
     // The link is checked before any cookie is read (review of #76).
@@ -184,6 +193,26 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
     });
   })();
 });
+
+/**
+ * "Download video with Zajil" (M6): the video's page goes to Zajil, which
+ * shows its formats. The page's cookies go with it when the user allowed
+ * them, never from a private window; it is checked before any is read.
+ * @param {any} info @param {any} tab
+ */
+async function sendVideo(info, tab) {
+  const isPrivate = Boolean(tab?.incognito);
+  const page = videoMessage(info);
+  if (!page) {
+    await notify(t("videoNotWeb"));
+    return;
+  }
+  const cookies = isPrivate ? null : await cookieHeader(api, /** @type {string} */ (page.page), tab?.cookieStoreId);
+  const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate }));
+  const result = await send(api, message);
+  if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
+  await report(result, "video");
+}
 
 // The last private window closed: Zajil takes its downloads out of its
 // queues and deletes what they left (review of #91). Only if one was sent
