@@ -303,7 +303,10 @@ async fn start_now_runs_a_queue_outside_its_window_and_keeps_its_schedule() {
     })
     .unwrap();
     let now: zajil_core::queue::RunNow = Default::default();
-    now.lock().unwrap().insert("main".to_owned());
+    // And a queue that is not there: it leaves the set at the first look.
+    now.lock()
+        .unwrap()
+        .extend(["main".to_owned(), "gone".to_owned()]);
     let mut started = 0;
     let summary = tokio::time::timeout(
         Duration::from_secs(30),

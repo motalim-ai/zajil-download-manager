@@ -7,9 +7,4 @@ export type PlanChange = { max_active: number, start: string | null, stop: strin
 /**
  * Tries for each download, 1 to `MAX_TRIES` (#142).
  */
-max_tries: number, 
-/**
- * The file or program to open when the queue is done (#142): chosen
- * in the system's picker and confirmed by the user in the window.
- */
-after_open: string | null, };
+max_tries: number, };

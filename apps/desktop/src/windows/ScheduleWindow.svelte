@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
   import FileName from "../lib/components/FileName.svelte";
   import StatusChip from "../lib/components/StatusChip.svelte";
@@ -36,7 +35,6 @@
   let days = $state<string[]>([]);
   let maxActive = $state(3);
   let maxTries = $state(1);
-  let afterOpen = $state<string | null>(null);
 
   const plan = $derived(plans.find((p) => p.name === chosen));
   const rows = $derived(downloads.filter((d) => d.queue === chosen));
@@ -52,8 +50,7 @@
         stopOn !== (plan.stop !== null) ||
         (stopOn && stop !== (plan.stop ?? "")) ||
         maxActive !== plan.max_active ||
-        maxTries !== plan.max_tries ||
-        afterOpen !== plan.after_open),
+        maxTries !== plan.max_tries),
   );
 
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
@@ -67,7 +64,6 @@
     days = [...p.days];
     maxActive = p.max_active;
     maxTries = p.max_tries;
-    afterOpen = p.after_open;
   }
 
   async function load(keepForm: boolean) {
@@ -140,7 +136,6 @@
       await scheduleApi.saveQueue(chosen, {
         max_active: maxActive,
         max_tries: maxTries,
-        after_open: afterOpen,
         start: timed && start ? start : null,
         stop: stopOn && stop ? stop : null,
         days: timed ? days : [],
@@ -164,18 +159,18 @@
     });
   }
 
-  /** The file or program to open after the queue (#142): picked in the
-   * system's picker, then confirmed; saved with «Save». */
+  /** The file or program to open after the queue (#142): Rust shows the
+   * system's picker and asks to confirm it with its path, then saves it. */
   async function chooseAfterOpen() {
-    const picked = await openDialog({ directory: false, multiple: false }).catch(() => null);
-    if (typeof picked !== "string") return;
-    const sure = await ask(`${locale.t("schedule-after-open-confirm")}\n\n${picked}`, {
-      title: locale.t("schedule-title"),
-      kind: "warning",
-      okLabel: locale.t("schedule-after-open-ok"),
-      cancelLabel: locale.t("schedule-cancel"),
-    }).catch(() => false);
-    if (sure) afterOpen = picked;
+    await run(async () => {
+      await scheduleApi.chooseAfterOpen(chosen, {
+        title: locale.t("schedule-title"),
+        question: locale.t("schedule-after-open-confirm"),
+        ok: locale.t("schedule-after-open-ok"),
+        cancel: locale.t("schedule-cancel"),
+      });
+      await load(dirty);
+    });
   }
 
   function toggleDay(day: string, on: boolean) {
@@ -310,12 +305,14 @@
           <option value="sleep">{locale.t("schedule-after-sleep")}</option>
         </select>
         <p class="hint">{locale.t("schedule-after-hint")}</p>
-        <!-- #142: picked in the system's picker, confirmed, then saved. -->
+        <!-- #142: picked and confirmed in Rust, saved at once. -->
         <div class="check after-open">
           <span>{locale.t("schedule-after-open")}</span>
-          {#if afterOpen}
-            <bdi dir="ltr" class="path" title={afterOpen}>{afterOpen}</bdi>
-            <button class="btn quiet" onclick={() => (afterOpen = null)}>{locale.t("schedule-after-open-clear")}</button>
+          {#if plan?.after_open}
+            <bdi dir="ltr" class="path" title={plan.after_open}>{plan.after_open}</bdi>
+            <button class="btn quiet" onclick={() => void run(async () => (await scheduleApi.clearAfterOpen(chosen), await load(dirty)))}
+              >{locale.t("schedule-after-open-clear")}</button
+            >
           {:else}
             <span class="none">{locale.t("schedule-after-nothing")}</span>
           {/if}

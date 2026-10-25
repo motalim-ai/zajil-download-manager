@@ -118,6 +118,7 @@ impl Live {
             }
             QueueEvent::Finished { item, .. }
             | QueueEvent::Failed { item, .. }
+            | QueueEvent::Retrying { item, .. }
             | QueueEvent::Stopped { item } => {
                 inner.items.remove(item);
                 inner.urgent = true;

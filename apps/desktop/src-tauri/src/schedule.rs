@@ -30,8 +30,8 @@ use zajil_platform::power::{PowerAction, SystemPower};
 
 use crate::App;
 
-/// The schedule window's capability: Zajil's events, the system's file
-/// picker and its yes-or-no question (the file to open after a queue,
+/// The schedule window's capability: listening to Zajil's events, nothing
+/// else (the file to open after a queue is picked and confirmed from Rust,
 /// #142). Added when the app starts, for this window only.
 pub const CAPABILITY: &str = include_str!("../runtime-capabilities/schedule.json");
 
@@ -103,9 +103,6 @@ pub struct PlanChange {
     pub days: Vec<String>,
     /// Tries for each download, 1 to `MAX_TRIES` (#142).
     pub max_tries: u32,
-    /// The file or program to open when the queue is done (#142): chosen
-    /// in the system's picker and confirmed by the user in the window.
-    pub after_open: Option<String>,
 }
 
 /// The countdown after a queue, as the window shows it.
@@ -270,17 +267,6 @@ pub async fn save_queue<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let schedule = schedule_of(&change)?;
-    let after_open = match change.after_open.as_deref() {
-        None => None,
-        Some(path) => Some(
-            tokio::task::spawn_blocking({
-                let path = path.to_owned();
-                move || after_open_of(&path)
-            })
-            .await
-            .map_err(crate::blocking_err)??,
-        ),
-    };
     crate::change(&app, &handle, move |q| {
         if !(1..=MAX_ACTIVE).contains(&change.max_active) {
             return Err(StoreError::InvalidMaxActive(change.max_active));
@@ -296,20 +282,108 @@ pub async fn save_queue<R: tauri::Runtime>(
         queue.schedule = schedule;
         queue.max_active = change.max_active;
         queue.max_tries = (change.max_tries > 1).then_some(change.max_tries);
-        queue.after_open = after_open;
         Ok(())
     })
     .await
 }
 
-/// The file to open after a queue: an absolute path to a file that is
-/// there now (the user picked it in the system's picker). Blocking.
-fn after_open_of(path: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(path);
-    if !path.is_absolute() || !path.is_file() {
-        return Err(format!("{} is not a file", path.display()));
+/// The texts of the confirmation, in the page's language.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfirmTexts {
+    pub title: String,
+    pub question: String,
+    pub ok: String,
+    pub cancel: String,
+}
+
+/// «Choose a file…» for queue `name` (#142): Rust shows the system's
+/// picker, then asks the user to confirm the file or program with its path
+/// shown, and saves it. The page never sends a path (review of #142: any
+/// page of the app could otherwise set a program to run). `None`: nothing
+/// chosen or not confirmed.
+#[tauri::command]
+pub async fn choose_after_open<R: tauri::Runtime>(
+    app: State<'_, App>,
+    name: String,
+    texts: ConfirmTexts,
+    window: tauri::WebviewWindow<R>,
+    handle: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    if crate::in_scene(&handle) {
+        return Ok(None);
     }
-    Ok(path)
+    let dialogs = handle.clone();
+    let chosen = tokio::task::spawn_blocking(move || {
+        let picked = dialogs
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .blocking_pick_file()?
+            .into_path()
+            .ok()?;
+        let file = after_open_of(&picked).ok()?;
+        let sure = dialogs
+            .dialog()
+            .message(format!("{}\n\n{}", texts.question, file.display()))
+            .title(texts.title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(texts.ok, texts.cancel))
+            .parent(&window)
+            .blocking_show();
+        sure.then_some(file)
+    })
+    .await
+    .map_err(crate::blocking_err)?;
+    let Some(file) = chosen else {
+        return Ok(None);
+    };
+    let shown = file.to_string_lossy().into_owned();
+    crate::change(&app, &handle, move |q| {
+        q.queue_mut(&name)
+            .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
+            .after_open = Some(file);
+        Ok(())
+    })
+    .await?;
+    Ok(Some(shown))
+}
+
+/// «Remove»: queue `name` opens nothing when it is done.
+#[tauri::command]
+pub async fn clear_after_open<R: tauri::Runtime>(
+    app: State<'_, App>,
+    name: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    crate::change(&app, &handle, move |q| {
+        q.queue_mut(&name)
+            .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
+            .after_open = None;
+        Ok(())
+    })
+    .await
+}
+
+/// The file or program to open after a queue, as the user picked it: an
+/// absolute path to a file that is there, or a macOS application (`.app`,
+/// a folder the system opens as a program; review of #142). Blocking.
+fn after_open_of(path: &std::path::Path) -> Result<PathBuf, String> {
+    if openable(path) {
+        Ok(path.to_path_buf())
+    } else {
+        Err(format!("{} is not a file", path.display()))
+    }
+}
+
+fn openable(path: &std::path::Path) -> bool {
+    path.is_absolute()
+        && (path.is_file()
+            || (path.is_dir()
+                && path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("app"))))
 }
 
 fn schedule_of(change: &PlanChange) -> Result<Option<Schedule>, String> {
@@ -373,13 +447,9 @@ pub async fn start_queue<R: tauri::Runtime>(
     name: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    after
-        .run_now
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(name.clone());
     let store = app.store.clone();
-    let ids = tokio::task::spawn_blocking(move || store.load().and_then(|q| startable(&q, &name)))
+    let asked = name.clone();
+    let ids = tokio::task::spawn_blocking(move || store.load().and_then(|q| startable(&q, &asked)))
         .await
         .map_err(crate::blocking_err)?
         .map_err(|e| e.to_string())?;
@@ -389,7 +459,35 @@ pub async fn start_queue<R: tauri::Runtime>(
     crate::change(&app, &handle, move |q| {
         crate::set_status(q, &ids, Status::Waiting)
     })
+    .await?;
+    // Only now, and only for a queue with a schedule and something to run:
+    // the runner would drop it at once otherwise, or keep it past a
+    // schedule set later (review of #125).
+    let store = app.store.clone();
+    let runs = tokio::task::spawn_blocking(move || {
+        store
+            .load()
+            .is_ok_and(|q| {
+                q.queue(&name).is_some_and(|queue| {
+                    queue.schedule.is_some()
+                        && queue
+                            .items
+                            .iter()
+                            .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+                })
+            })
+            .then_some(name)
+    })
     .await
+    .map_err(crate::blocking_err)?;
+    if let Some(name) = runs {
+        after
+            .run_now
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(name);
+    }
+    Ok(())
 }
 
 fn startable(queues: &QueuesFile, name: &str) -> Result<Vec<u64>, StoreError> {
@@ -494,7 +592,7 @@ fn open_after(handle: &tauri::AppHandle, queue: String) {
                 .queue(&queue)?
                 .after_open
                 .clone()
-                .filter(|p| p.is_absolute() && p.is_file())
+                .filter(|p| openable(p))
         })
         .await
         .ok()
@@ -644,7 +742,6 @@ mod tests {
             stop: stop.map(str::to_owned),
             days: days.iter().map(|d| (*d).to_owned()).collect(),
             max_tries: 1,
-            after_open: None,
         };
         assert_eq!(schedule_of(&change(None, Some(""), &[])), Ok(None));
         let s = schedule_of(&change(Some("02:00"), Some("07:30"), &["fri", "mon"]))
@@ -676,10 +773,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("done.txt");
         std::fs::write(&file, b"done").unwrap();
-        assert_eq!(after_open_of(&file.to_string_lossy()), Ok(file.clone()));
-        assert!(after_open_of(&dir.path().to_string_lossy()).is_err());
-        assert!(after_open_of("done.txt").is_err());
-        assert!(after_open_of(&dir.path().join("missing").to_string_lossy()).is_err());
+        assert_eq!(after_open_of(&file), Ok(file.clone()));
+        assert!(after_open_of(dir.path()).is_err(), "a folder");
+        assert!(after_open_of(std::path::Path::new("done.txt")).is_err());
+        assert!(after_open_of(&dir.path().join("missing")).is_err());
+        // A macOS application is a folder named .app: the system opens it.
+        let app = dir.path().join("Sync.app");
+        std::fs::create_dir(&app).unwrap();
+        assert_eq!(after_open_of(&app), Ok(app.clone()));
     }
 
     #[test]
@@ -722,20 +823,15 @@ mod tests {
         assert_eq!(due(&q, night, &mut chosen), None);
     }
 
-    /// The schedule window may listen to Zajil's events, pick a file and
-    /// ask yes or no (the file to open after a queue, #142), and nothing
-    /// more.
+    /// The schedule window may listen to Zajil's events, and nothing more:
+    /// the file to open after a queue is picked and confirmed from Rust.
     #[test]
     fn the_schedule_window_has_only_its_own_permissions() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY).unwrap();
         assert_eq!(capability["windows"], serde_json::json!([LABEL]));
         assert_eq!(
             capability["permissions"],
-            serde_json::json!([
-                "core:event:default",
-                "dialog:allow-open",
-                "dialog:allow-message"
-            ])
+            serde_json::json!(["core:event:default"])
         );
     }
 }

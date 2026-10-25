@@ -658,6 +658,9 @@ fn show(event: QueueEvent) {
             eprintln!("[{item}] waiting for the browser's cookies (open the browser)")
         }
         QueueEvent::QueueDone { queue } => eprintln!("queue {queue} is done"),
+        QueueEvent::Retrying { item, error } => {
+            eprintln!("[{item}] failed: {error}; its queue tries it again later")
+        }
         QueueEvent::Waiting { queue, until } => eprintln!(
             "queue {queue} waits for its schedule until {} (local time)",
             until.strftime("%Y-%m-%d %H:%M:%S")

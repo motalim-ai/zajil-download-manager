@@ -59,6 +59,7 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             }
             QueueEvent::Finished { .. }
             | QueueEvent::Failed { .. }
+            | QueueEvent::Retrying { .. }
             | QueueEvent::Stopped { .. } => now -= 1,
             QueueEvent::Download { .. }
             | QueueEvent::Waiting { .. }
@@ -1093,20 +1094,50 @@ async fn a_private_window_s_download_that_fails_or_is_taken_out_leaves_nothing()
     assert!(store.load().unwrap().item(id).is_none());
 }
 
-/// #142: a download that fails, in a queue with tries left, waits again
-/// at the end of its queue (the others go first), until its tries run out;
-/// then it failed. Without a number of its own, one try, as before.
+/// An engine that gives up on a failure at once: the queue's own tries
+/// are what is tested (#142).
+fn runner_without_engine_retries(store: &QueueStore) -> Runner {
+    let engine = Engine::new(Options {
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    Runner::new(engine, store.clone()).poll(Duration::from_millis(50))
+}
+
+/// #142: a download that fails with an error that can pass (the server's
+/// own 5xx), in a queue with tries left, waits again at the end of its
+/// queue (the others go first, while it pauses), until its tries run out;
+/// then it failed, said once. One that passes on a later try is done.
+/// Without a number of its own, one try, as before.
 #[tokio::test]
 async fn a_failed_download_tries_again_at_the_end_of_its_queue() {
     let server = TestServer::http();
+    let busy = || zajil_testserver::Failure {
+        status: 500,
+        retry_after: None,
+    };
+    server.put(
+        "/flaky.bin",
+        FileSpec::new(random_bytes(10_000, 403)).fail_first(vec![busy(); 10]),
+    );
+    server.put(
+        "/recovers.bin",
+        FileSpec::new(random_bytes(10_000, 404)).fail_first(vec![busy()]),
+    );
     server.put("/ok.bin", FileSpec::new(random_bytes(10_000, 401)));
     let data_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data_dir.path());
     set_max_active(&store, "main", 1);
-    // Nothing is served there: the server answers 404.
-    let gone = add(&store, "main", &server.url("/gone.bin"), downloads.path());
+    let flaky = add(&store, "main", &server.url("/flaky.bin"), downloads.path());
     let ok = add(&store, "main", &server.url("/ok.bin"), downloads.path());
+    let recovers = add(
+        &store,
+        "main",
+        &server.url("/recovers.bin"),
+        downloads.path(),
+    );
     store
         .update(|q| {
             q.queue_mut("main").unwrap().max_tries = Some(3);
@@ -1114,35 +1145,68 @@ async fn a_failed_download_tries_again_at_the_end_of_its_queue() {
         })
         .unwrap();
 
-    let mut order = Vec::new();
-    runner(&store)
-        .run(&Stop::new(), &mut |event| {
-            if let QueueEvent::Started { item, .. } | QueueEvent::Failed { item, .. } = &event {
-                order.push((matches!(event, QueueEvent::Started { .. }), *item));
-            }
+    let mut seen = Vec::new();
+    let summary = runner_without_engine_retries(&store)
+        .run(&Stop::new(), &mut |event| match event {
+            QueueEvent::Started { item, .. } => seen.push(("start", item)),
+            QueueEvent::Retrying { item, .. } => seen.push(("again", item)),
+            QueueEvent::Failed { item, .. } => seen.push(("failed", item)),
+            _ => {}
         })
         .await
         .unwrap();
 
-    // Tried, failed, and the other one went first.
+    // Tried, to be tried again, and the next one went first.
     assert_eq!(
-        order[..3],
-        [(true, gone), (false, gone), (true, ok)],
-        "{order:?}"
+        seen[..3],
+        [("start", flaky), ("again", flaky), ("start", ok)],
+        "{seen:?}"
     );
+    let count = |what: &str, id: u64| seen.iter().filter(|e| **e == (what, id)).count();
+    assert_eq!(count("start", flaky), 3, "{seen:?}");
+    assert_eq!(count("again", flaky), 2, "{seen:?}");
+    assert_eq!(count("failed", flaky), 1, "said failed once, at the end");
+    assert_eq!(summary.failed, 1, "only the last try is a failure");
     let queues = store.load().unwrap();
-    let item = queues.item(gone).unwrap();
-    assert_eq!(item.status, Status::Failed);
-    assert_eq!(item.failed_tries, 3);
-    assert_eq!(order.iter().filter(|(s, i)| *s && *i == gone).count(), 3);
-    assert_eq!(queues.item(ok).unwrap().status, Status::Done);
-    assert_eq!(queues.item(ok).unwrap().failed_tries, 0);
+    let item = queues.item(flaky).unwrap();
+    assert_eq!((item.status, item.failed_tries), (Status::Failed, 3));
+    for id in [ok, recovers] {
+        let item = queues.item(id).unwrap();
+        assert_eq!((item.status, item.failed_tries), (Status::Done, 0));
+    }
 
     // Without a number of its own: one try.
-    let once = add(&store, "other", &server.url("/gone.bin"), downloads.path());
-    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let once = add(&store, "other", &server.url("/flaky.bin"), downloads.path());
+    runner_without_engine_retries(&store)
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
     let item = store.load().unwrap().item(once).unwrap().clone();
     assert_eq!((item.status, item.failed_tries), (Status::Failed, 1));
+}
+
+/// #142, review: a failure that would fail the same way at once (a 404)
+/// is never tried again, whatever the queue's tries.
+#[tokio::test]
+async fn a_download_that_cannot_pass_is_not_tried_again() {
+    let server = TestServer::http();
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let gone = add(&store, "main", &server.url("/gone.bin"), downloads.path());
+    store
+        .update(|q| {
+            q.queue_mut("main").unwrap().max_tries = Some(5);
+            Ok(())
+        })
+        .unwrap();
+    runner_without_engine_retries(&store)
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    let item = store.load().unwrap().item(gone).unwrap().clone();
+    assert_eq!((item.status, item.failed_tries), (Status::Failed, 1));
+    assert_eq!(server.gets("/gone.bin").len(), 1);
 }
 
 /// #142: a queue whose downloads are all done, the last of them in this
@@ -1167,4 +1231,42 @@ async fn a_queue_is_said_done_once_when_all_of_it_is_done() {
         .await
         .unwrap();
     assert_eq!(done, ["main"]);
+
+    // An edit never makes a queue done (review of #142): the failed
+    // download taken out, the next run says nothing.
+    let broken: Vec<u64> = store
+        .load()
+        .unwrap()
+        .queue("broken")
+        .unwrap()
+        .items
+        .iter()
+        .map(|i| i.id)
+        .collect();
+    store
+        .update(move |q| {
+            for id in &broken {
+                q.remove(*id)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    add(&store, "broken", &server.url("/a.bin"), downloads.path());
+    store
+        .update(|q| {
+            let id = q.queue("broken").unwrap().items[0].id;
+            q.item_mut(id).unwrap().status = Status::Done;
+            Ok(())
+        })
+        .unwrap();
+    let mut again = Vec::new();
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            if let QueueEvent::QueueDone { queue } = event {
+                again.push(queue);
+            }
+        })
+        .await
+        .unwrap();
+    assert!(again.is_empty(), "{again:?}");
 }

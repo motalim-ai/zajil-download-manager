@@ -1,13 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "schedule",
-  "description": "Added from Rust when the app starts (schedule.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the schedule window (M5.5) may do: Zajil's own commands and events, the system's file picker (the user picks the file or program to open after a queue, #142) and its yes-or-no question (the user confirms it). Nothing else: no file system, no shell, no network from the page.",
+  "description": "Added from Rust when the app starts (schedule.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the schedule window (M5.5) may do: Zajil's own commands and events. Nothing else: no file system, no shell, no network from the page; the file to open after a queue is picked and confirmed from Rust (#142).",
   "windows": [
     "schedule"
   ],
   "permissions": [
-    "core:event:default",
-    "dialog:allow-open",
-    "dialog:allow-message"
+    "core:event:default"
   ]
 }

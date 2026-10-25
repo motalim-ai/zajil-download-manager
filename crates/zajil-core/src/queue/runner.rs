@@ -55,10 +55,16 @@ pub enum QueueEvent {
     Stopped {
         item: u64,
     },
-    /// Every download of `queue` is done, the last of them in this run
-    /// (#142): said once, until the queue has work again.
+    /// Every download of `queue` is done, one of them finished since the
+    /// runner last looked (#142): said once, until the queue has work again.
     QueueDone {
         queue: String,
+    },
+    /// The download of `item` failed with `error`, and its queue gives it
+    /// another try (#142): it waits at the end of its queue, after a pause.
+    Retrying {
+        item: u64,
+        error: String,
     },
     /// `queue` has downloads but is outside its window until `until`
     /// (local time).
@@ -119,6 +125,9 @@ pub struct Runner {
     from_browser: Option<FromBrowserById>,
     /// Queues started now, outside their window (#125).
     run_now: Option<RunNow>,
+    /// Items that failed and wait for another try (#142): not started
+    /// before this time of the engine's clock.
+    retry_at: Arc<std::sync::Mutex<HashMap<u64, Duration>>>,
 }
 
 /// Queues the user started now (#125, «Start now»): each runs as if its
@@ -160,6 +169,7 @@ impl Runner {
             connections: None,
             from_browser: None,
             run_now: None,
+            retry_at: Arc::default(),
         }
     }
 
@@ -256,8 +266,11 @@ impl Runner {
         let mut announced: HashMap<String, Timestamp> = HashMap::new();
         // Items whose download finished in this run.
         let mut finished_now: HashSet<u64> = HashSet::new();
-        // Queues said to be done (#142), until they have work again.
+        // Queues said to be done (#142), until they have work again, and
+        // the items finished since the last look: a queue is done when one
+        // of its downloads finishes, never by an edit (review of #142).
         let mut done_said: HashSet<String> = HashSet::new();
+        let mut finished_since: HashSet<u64> = HashSet::new();
         loop {
             if look {
                 look = false;
@@ -320,7 +333,7 @@ impl Runner {
                             .all(|i| i.status == Status::Done && !running.contains_key(&i.id));
                     if !all_done {
                         done_said.remove(&queue.name);
-                    } else if queue.items.iter().any(|i| finished_now.contains(&i.id))
+                    } else if queue.items.iter().any(|i| finished_since.contains(&i.id))
                         && done_said.insert(queue.name.clone())
                     {
                         on_event(QueueEvent::QueueDone {
@@ -328,6 +341,7 @@ impl Runner {
                         });
                     }
                 }
+                finished_since.clear();
                 let windows = self.windows(&queues, &mut announced, on_event);
                 change_at = windows.next_change;
                 self.stop_unwanted(&queues, &windows.closed, &mut running);
@@ -364,7 +378,13 @@ impl Runner {
                     while let Ok((item, event)) = messages.try_recv() {
                         self.download_event(item, event, &running, on_event).await?;
                     }
-                    self.finished(joined, &mut running, &mut summary, &mut finished_now, on_event)
+                    self.finished(
+                        joined,
+                        &mut running,
+                        &mut summary,
+                        (&mut finished_now, &mut finished_since),
+                        on_event,
+                    )
                         .await?;
                     look = true;
                 }
@@ -397,6 +417,21 @@ impl Runner {
         let clock = self.engine.clock();
         let (now, wall) = (clock.now(), clock.wall());
         let mut windows = Windows::default();
+        if let Some(set) = &self.run_now {
+            // A queue started now leaves the set once it has nothing waiting
+            // or running, has no schedule, or is gone (review of #125: one
+            // left in it would ignore a schedule set later).
+            set.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|name| {
+                    queues.queue(name).is_some_and(|q| {
+                        q.schedule.is_some()
+                            && q.items
+                                .iter()
+                                .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+                    })
+                });
+        }
         for queue in &queues.queues {
             let Some(schedule) = &queue.schedule else {
                 continue;
@@ -407,11 +442,6 @@ impl Runner {
                 .any(|i| matches!(i.status, Status::Waiting | Status::Active));
             if !has_work {
                 announced.remove(&queue.name);
-                if let Some(set) = &self.run_now {
-                    set.lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(&queue.name);
-                }
                 continue;
             }
             let started_now = self.run_now.as_ref().is_some_and(|set| {
@@ -513,11 +543,27 @@ impl Runner {
                     source: item.browser.clone().expect("checked"),
                 });
             }
+            // A download tried again waits out its pause (#142).
+            let now = self.engine.clock().now();
+            let pausing = |i: &crate::queue::Item| {
+                let mut retry_at = self.retry_at.lock().unwrap_or_else(|e| e.into_inner());
+                match retry_at.get(&i.id) {
+                    Some(at) if *at > now => true,
+                    Some(_) => {
+                        retry_at.remove(&i.id);
+                        false
+                    }
+                    None => false,
+                }
+            };
             let next: Vec<_> = queue
                 .items
                 .iter()
                 .filter(|i| {
-                    i.status == Status::Waiting && !running.contains_key(&i.id) && !needs_browser(i)
+                    i.status == Status::Waiting
+                        && !running.contains_key(&i.id)
+                        && !needs_browser(i)
+                        && !pausing(i)
                 })
                 .take(room)
                 .map(|i| i.id)
@@ -708,7 +754,7 @@ impl Runner {
         joined: Result<(tokio::task::Id, Ended), tokio::task::JoinError>,
         running: &mut HashMap<u64, Running>,
         summary: &mut Summary,
-        finished_now: &mut HashSet<u64>,
+        (finished_now, finished_since): (&mut HashSet<u64>, &mut HashSet<u64>),
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
         let (id, result) = match joined {
@@ -733,6 +779,7 @@ impl Runner {
             Ok(done) => {
                 summary.finished += 1;
                 finished_now.insert(id);
+                finished_since.insert(id);
                 if let Some(map) = &self.from_browser {
                     map.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 }
@@ -743,13 +790,18 @@ impl Runner {
             }
             // Held for the user is not a failure: it waits, paused.
             Err(Error::Stopped { .. } | Error::Held(_)) => QueueEvent::Stopped { item: id },
-            Err(err) => {
-                summary.failed += 1;
-                QueueEvent::Failed {
-                    item: id,
-                    error: err.to_string(),
-                }
-            }
+            Err(err) => QueueEvent::Failed {
+                item: id,
+                error: err.to_string(),
+            },
+        };
+        // Only a failure that can pass is tried again (review of #142: a
+        // 404, a refused certificate or a full disk would fail the same way
+        // at once): a cut, the network, the server's own error.
+        let worth_retrying = match &result {
+            Err(Error::Http(_) | Error::Interrupted { .. } | Error::NoData(_)) => true,
+            Err(Error::Status(status)) => status.is_server_error(),
+            _ => false,
         };
         // A private window's download that failed, or was taken out of the
         // queues while it ran (its window closed): it leaves the queues, and
@@ -790,11 +842,14 @@ impl Runner {
                     Ok::<_, StoreError>(())
                 })
                 .await?;
+                if matches!(event, QueueEvent::Failed { .. }) {
+                    summary.failed += 1;
+                }
                 on_event(event);
                 return Ok(());
             }
         }
-        ignore_removed(
+        let tries = ignore_removed_with(
             self.update(move |queues| {
                 // Its queue's tries for each download (#142).
                 let max_tries = queues
@@ -809,7 +864,7 @@ impl Runner {
                 // the queues, only its file (security review #84).
                 if item.private && result.is_ok() {
                     queues.remove(id)?;
-                    return Ok(());
+                    return Ok(None);
                 }
                 match result {
                     Ok(done) => {
@@ -850,7 +905,7 @@ impl Runner {
                         // With tries left in its queue, it waits again at
                         // the end of the queue (#142); else it failed.
                         item.failed_tries = item.failed_tries.saturating_add(1);
-                        again = item.failed_tries < max_tries;
+                        again = worth_retrying && item.failed_tries < max_tries;
                         item.status = if again {
                             Status::Waiting
                         } else {
@@ -866,12 +921,34 @@ impl Runner {
                     && let Some(at) = queue.items.iter().position(|i| i.id == id)
                 {
                     let item = queue.items.remove(at);
+                    let tries = item.failed_tries;
                     queue.items.push(item);
+                    return Ok(Some(tries));
                 }
-                Ok(())
+                Ok(None)
             })
             .await,
         )?;
+        // Tried again: after a pause that grows with its tries (review of
+        // #142), and said as a new try, not as a failure.
+        let event = match (event, tries) {
+            (QueueEvent::Failed { item, error }, Some(tries)) => {
+                let at = self
+                    .engine
+                    .clock()
+                    .now()
+                    .saturating_add(crate::retry::backoff(tries));
+                self.retry_at
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, at);
+                QueueEvent::Retrying { item, error }
+            }
+            (event, _) => event,
+        };
+        if matches!(event, QueueEvent::Failed { .. }) {
+            summary.failed += 1;
+        }
         on_event(event);
         Ok(())
     }
@@ -910,6 +987,14 @@ fn has_waiting(queues: &QueuesFile) -> bool {
         .iter()
         .flat_map(|q| &q.items)
         .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+}
+
+/// [`ignore_removed`], for a change that answers something: the default.
+fn ignore_removed_with<T: Default>(result: Result<T, StoreError>) -> Result<T, StoreError> {
+    match result {
+        Err(StoreError::NoSuchItem(_)) => Ok(T::default()),
+        other => other,
+    }
 }
 
 /// An item the user removed meanwhile is not an error.
