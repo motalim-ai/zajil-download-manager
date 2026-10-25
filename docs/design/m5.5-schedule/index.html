@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>زاجِل — تصميم نافذة الجدولة (M5.5)</title>
+<!--
+  Zajil M5.5 design ("the IDM experience"): one direction, five windows,
+  Arabic and English, light and dark. A static mock-up for the owner's
+  review (#65), not app code.
+
+  Clean room: the layout follows how IDM looks and works from its public
+  screenshots and help pages only. No code, text, icon or picture from IDM
+  or any other program. Colors and tokens are the app's own
+  (apps/desktop/src/styles/app.css), the bird is assets/icon/zajil-mark.svg,
+  and the icons are from Lucide (ISC license, see the notice at the end
+  of the sprite below), used unchanged.
+
+  The schedule window (owner's request after the M5.5 windows, like IDM's
+  scheduler), added to the design of #83: a copy of its file, with its
+  styles, words and helpers, and the schedule window in two views.
+
+  Query string: ?lang=ar|en &theme=light|dark &win=all|schedule|files
+  (files: the same window on its «Files in the queue» tab).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<style>
+/* Tokens: copied as they are from apps/desktop/src/styles/app.css. */
+:root {
+  --bg: #eef3f8;
+  --surface: #ffffff;
+  --sunken: #f5f8fb;
+  --side: #e4ecf4;
+  --ink: #10263d;
+  --muted: #4a5d72;
+  --faint: #55687e;
+  --line: #d8e2ec;
+  --accent: #1c6cd0;
+  --accent-ink: #ffffff;
+  --feather: #2e9bff;
+  --feather-2: #8adcff;
+  --feather-bg: #dce7f2;
+  --sel: #dcebfc;
+  --amber: #8f5d00;
+  --amber-fill: #b97800;
+  --amber-bg: #fff1cc;
+  --red: #b53232;
+  --red-bg: #fbe4e4;
+  --green: #136e4b;
+  --green-fill: #17845a;
+  --green-bg: #ddf3ea;
+  --shadow: 0 1px 2px rgba(16, 38, 61, 0.06), 0 12px 32px -12px rgba(16, 38, 61, 0.25);
+  --scrim: rgba(10, 24, 40, 0.38);
+  /* New for M5.5 only: the window frame and the desktop behind it. */
+  --frame: #dfe8f1;
+  --desk: #c9d6e3;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #07111d;
+  --surface: #0e2034;
+  --sunken: #0b1a2b;
+  --side: #0a1828;
+  --ink: #e3eef9;
+  --muted: #a3b8cf;
+  --faint: #8aa2bd;
+  --line: #1c3550;
+  --accent: #8adcff;
+  --accent-ink: #0a1828;
+  --feather: #2e9bff;
+  --feather-2: #8adcff;
+  --feather-bg: #183453;
+  --sel: #173a5c;
+  --amber: #ffc94d;
+  --amber-fill: #ffc94d;
+  --amber-bg: #3a2c08;
+  --red: #ff8a80;
+  --red-bg: #3b1518;
+  --green: #6fd9a8;
+  --green-fill: #6fd9a8;
+  --green-bg: #0f3426;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(2, 8, 14, 0.6);
+  --frame: #0a1828;
+  --desk: #040b13;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font: 400 14px/1.6 "IBM Plex Sans Arabic", system-ui, sans-serif;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.num { font-variant-numeric: tabular-nums; }
+.ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+
+/* Buttons, as .btn in app.css. */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); background: var(--surface);
+  padding: 6px 14px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  min-height: 34px;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.btn.split { padding-inline-end: 8px; }
+.btn.split .caret { border-inline-start: 1px solid var(--line); padding-inline-start: 6px; display: inline-flex; }
+.btn .ico { width: 16px; height: 16px; }
+
+/* ---------- Gallery ---------- */
+.gallery { padding: 24px 24px 48px; display: flex; flex-direction: column; gap: 36px; align-items: center; }
+.bar {
+  position: sticky; top: 0; z-index: 5; width: 100%;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.bar h1 { font-size: 16px; margin: 0; margin-inline-end: auto; display: flex; gap: 10px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 4px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--sel); font-weight: 600; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+figcaption { color: var(--muted); font-size: 13px; max-width: 900px; text-align: center; }
+.solo { padding: 28px; display: inline-block; }
+
+/* ---------- A window: frame and title bar ---------- */
+.win {
+  background: var(--surface); border: 1px solid color-mix(in oklab, var(--line) 70%, #000 10%);
+  border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  display: flex; flex-direction: column; position: relative;
+}
+.title {
+  display: flex; align-items: center; gap: 10px; height: 36px;
+  padding-inline: 12px 0; background: var(--frame); border-bottom: 1px solid var(--line);
+  font-size: 13px; user-select: none;
+}
+.title .mark { width: 20px; height: 20px; color: var(--accent); flex: none; }
+.title .t { flex: 1; min-width: 0; font-weight: 600; }
+.title .ctl { display: flex; height: 100%; }
+.title .ctl span { width: 44px; display: grid; place-items: center; color: var(--muted); }
+.title .ctl span:last-child:hover { background: var(--red); color: #fff; }
+.title .ctl .ico { width: 15px; height: 15px; }
+
+/* ---------- Main window ---------- */
+.main { width: 1280px; height: 700px; }
+.menubar { display: flex; gap: 2px; padding: 2px 8px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.menubar span { padding: 3px 10px; border-radius: 6px; }
+.menubar span:first-child { background: var(--sel); }
+.menubar u { text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.toolbar { display: flex; align-items: stretch; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.tb {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 74px; padding: 6px 6px 4px; border-radius: 8px; border: 1px solid transparent;
+  background: none; cursor: pointer; font-size: 12px; color: var(--ink); line-height: 1.3;
+}
+.tb:hover { background: var(--sunken); border-color: var(--line); }
+.tb .tile {
+  width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--feather-bg); color: var(--accent);
+}
+.tb .tile .ico { width: 22px; height: 22px; stroke-width: 1.7; }
+.tb.go .tile { background: var(--green-bg); color: var(--green); }
+.tb.stop .tile { background: var(--amber-bg); color: var(--amber); }
+.tb.del .tile { background: var(--red-bg); color: var(--red); }
+.tb.calm .tile { background: var(--sunken); color: var(--muted); border: 1px solid var(--line); }
+.tb[aria-disabled="true"] { opacity: 0.45; }
+.tsep { width: 1px; background: var(--line); margin: 6px 6px; }
+.search {
+  margin-inline-start: auto; align-self: center; display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; width: 220px; color: var(--faint);
+  background: var(--sunken); font-size: 13px;
+}
+.search kbd { margin-inline-start: auto; }
+kbd {
+  font: 500 11px/1.4 "IBM Plex Sans Arabic", system-ui, sans-serif; direction: ltr; unicode-bidi: isolate;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); background: var(--surface);
+}
+.body { flex: 1; display: grid; grid-template-columns: 228px 1fr; min-height: 0; }
+.tree { background: var(--side); border-inline-end: 1px solid var(--line); padding: 10px 8px; overflow: hidden; font-size: 13px; }
+.tree h3 { font-size: 11.5px; font-weight: 600; color: var(--faint); margin: 12px 8px 2px; }
+.node { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 7px; }
+.node .ico { width: 16px; height: 16px; color: var(--muted); }
+.node .tw { width: 14px; height: 14px; color: var(--faint); }
+.node .tw.none { visibility: hidden; }
+.node.on { background: var(--sel); font-weight: 600; }
+.node .n { margin-inline-start: auto; color: var(--faint); font-size: 12px; }
+.node small { color: var(--faint); font-size: 11px; }
+.l1 { padding-inline-start: 26px; }
+.l1 .ico { width: 15px; height: 15px; }
+
+.list { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.grid th {
+  text-align: start; font-size: 12px; font-weight: 600; color: var(--faint);
+  padding: 7px 10px; border-bottom: 1px solid var(--line); background: var(--surface);
+  position: relative; white-space: nowrap;
+}
+.grid th + th::before { /* the column grip */
+  content: ""; position: absolute; inset-block: 7px; inset-inline-start: 0; width: 1px; background: var(--line);
+}
+.grid th .sort { width: 12px; height: 12px; vertical-align: -1px; color: var(--accent); margin-inline-start: 4px; }
+.grid th.cols { width: 34px; padding: 0; text-align: center; }
+.grid th.cols .ico { width: 15px; height: 15px; vertical-align: middle; }
+.grid td {
+  padding: 6px 10px; border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+.grid tr.sel td { background: var(--sel); }
+.grid tr.focus td { box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+.grid td.cols { padding: 0; }
+.nm { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ft {
+  width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; flex: none;
+  background: var(--sunken); color: var(--muted); border: 1px solid var(--line);
+}
+.ft .ico { width: 14px; height: 14px; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.st { display: inline-flex; align-items: center; gap: 8px; }
+.st .pct { min-width: 34px; font-size: 12px; }
+.mini { display: inline-block; width: 64px; height: 6px; border-radius: 99px; background: var(--feather-bg); overflow: hidden; position: relative; }
+.mini b { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: inherit; background: var(--feather); }
+.st.done { color: var(--green); }
+.st.paused { color: var(--amber); }
+.st.paused .mini b { background: var(--amber-fill); }
+.st.failed { color: var(--red); }
+.st.waiting { color: var(--muted); }
+.st .ico { width: 14px; height: 14px; }
+.statusbar {
+  display: flex; gap: 18px; align-items: center; padding: 5px 14px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--muted); background: var(--surface);
+}
+.statusbar b { color: var(--ink); font-weight: 600; }
+.statusbar .end { margin-inline-start: auto; display: flex; gap: 6px; align-items: center; }
+
+/* The right-click menu. */
+.ctx {
+  position: absolute; z-index: 3; width: 268px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: var(--shadow); padding: 4px; font-size: 13px;
+}
+.ctx .it { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-radius: 6px; }
+.ctx .it .ico { width: 15px; height: 15px; color: var(--muted); }
+.ctx .it.hi { background: var(--sel); }
+.ctx .it.bad { color: var(--red); }
+.ctx .it.bad .ico { color: var(--red); }
+.ctx .it kbd { margin-inline-start: auto; }
+.ctx .it .more { margin-inline-start: auto; width: 14px; height: 14px; }
+.ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
+
+/* ---------- Dialogs ---------- */
+.dlg .content { padding: 18px 20px 6px; display: flex; flex-direction: column; gap: 12px; }
+.dlg .actions { display: flex; gap: 8px; padding: 14px 20px 18px; align-items: center; }
+.dlg .actions .gap { margin-inline-start: auto; }
+.field { display: grid; grid-template-columns: 112px 1fr; gap: 10px; align-items: center; }
+.field > label { color: var(--muted); font-size: 13px; }
+.inp {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--sunken);
+  border-radius: 8px; padding: 6px 10px; min-height: 34px; min-width: 0;
+}
+.inp.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent); background: var(--surface); }
+.inp .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Links and paths read from their start, left to right, in both languages. */
+.inp .v.lv, .facts dd.lv { direction: ltr; text-align: left; }
+.inp .ico { width: 16px; height: 16px; color: var(--faint); }
+.inp.select .ico.caret { margin-inline-start: auto; }
+.row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.row > .inp { flex: 1; }
+.btn.sq { padding: 0; width: 34px; justify-content: center; }
+.note { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.note .ico { width: 15px; height: 15px; }
+.note.good { color: var(--green); }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.box { width: 16px; height: 16px; border: 1.5px solid var(--faint); border-radius: 4px; display: grid; place-items: center; flex: none; }
+.box.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.box .ico { width: 12px; height: 12px; stroke-width: 3; }
+
+.add { width: 520px; }
+.info { width: 640px; }
+.info .content { display: grid; grid-template-columns: 1fr 150px; gap: 12px 20px; }
+.info .fields { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.filecard {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--sunken);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 10px; text-align: center;
+  align-self: start;
+}
+.bigft {
+  width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--feather-bg); color: var(--accent);
+}
+.bigft .ico { width: 28px; height: 28px; stroke-width: 1.6; }
+.filecard .size { font-weight: 700; font-size: 16px; }
+.filecard .kind { font-size: 12px; color: var(--muted); }
+.menu-later {
+  position: absolute; z-index: 3; width: 210px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: var(--shadow); padding: 4px; font-size: 13px;
+}
+
+.prog { width: 600px; }
+.tabs { display: flex; gap: 2px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.tabs span { padding: 6px 12px; border-radius: 8px 8px 0 0; color: var(--muted); border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; }
+.tabs span.on { color: var(--ink); font-weight: 600; background: var(--surface); border-color: var(--line); }
+.facts { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 13px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facts dd.yes { color: var(--green); font-weight: 600; }
+.bigbar { height: 14px; border-radius: 99px; background: var(--feather-bg); overflow: hidden; position: relative; }
+.bigbar b { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: inherit; }
+.bigbar b:dir(rtl) { background: linear-gradient(to left, var(--feather), var(--feather-2)); }
+.bigbar b:dir(ltr) { background: linear-gradient(to right, var(--feather), var(--feather-2)); }
+.details { border-top: 1px solid var(--line); padding: 12px 20px 4px; display: flex; flex-direction: column; gap: 10px; background: var(--sunken); }
+.details h4 { margin: 0; font-size: 12.5px; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.details h4 .n { margin-inline-start: auto; font-weight: 400; }
+.parts { display: flex; gap: 2px; height: 18px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--feather-bg); }
+.parts i { position: relative; background: var(--feather-bg); }
+.parts i b { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--feather); }
+.parts i.done b { background: var(--feather); }
+.parts i b::after { /* where this part is writing now */
+  content: ""; position: absolute; inset-block: 0; inset-inline-end: 0; width: 3px; background: var(--feather-2);
+}
+.parts i.done b::after { display: none; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+table.conn { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.conn th { text-align: start; font-weight: 600; color: var(--faint); font-size: 11.5px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.conn td { padding: 4px 10px; border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
+.conn tr:last-child td { border-bottom: 0; }
+.conn .ok { color: var(--green); }
+.conn .wait { color: var(--muted); }
+
+.done { width: 540px; }
+.done .head { display: flex; gap: 14px; align-items: center; }
+.done .badge { width: 48px; height: 48px; border-radius: 99px; background: var(--green-bg); color: var(--green); display: grid; place-items: center; flex: none; }
+.done .badge .ico { width: 26px; height: 26px; stroke-width: 2.4; }
+.done .head .nm2 { min-width: 0; display: flex; flex-direction: column; }
+.done .head .big { font-weight: 700; font-size: 15px; }
+
+/* ---------- The schedule window ---------- */
+.sched { width: 900px; }
+.sched .split2 { display: grid; grid-template-columns: 210px 1fr; min-height: 470px; }
+.sched .queues { border-inline-end: 1px solid var(--line); background: var(--sunken); display: flex; flex-direction: column; padding: 10px 8px; gap: 2px; }
+.sched .queues h3 { margin: 2px 8px 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.sched .q { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; }
+.sched .q.on { background: var(--sel); font-weight: 600; }
+.sched .q .ico { width: 16px; height: 16px; color: var(--muted); }
+.sched .q small { display: block; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.sched .q .n { margin-inline-start: auto; color: var(--muted); font-size: 12px; }
+.sched .qbtns { margin-top: auto; display: flex; gap: 6px; padding: 8px 2px 2px; }
+.sched .qbtns .btn { flex: 1; justify-content: center; font-size: 12.5px; padding: 6px 8px; }
+.sched .pane { display: flex; flex-direction: column; min-width: 0; }
+.sched .qhead { display: flex; align-items: center; gap: 12px; padding: 14px 18px 0; }
+.sched .qhead label { font-size: 13px; color: var(--muted); }
+.sched .qhead .inp { width: 240px; }
+.sched .tabs { padding: 12px 18px 0; }
+.sched .form { padding: 14px 18px; display: grid; gap: 14px; }
+.sched fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 12px; margin: 0; display: grid; gap: 8px; }
+.sched legend { padding: 0 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.sched .opt { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
+.sched .radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--faint); display: inline-grid; place-items: center; flex: none; }
+.sched .radio.on { border-color: var(--accent); }
+.sched .radio.on::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.sched .mini-inp { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--sunken); border-radius: 7px; padding: 3px 8px; font-size: 13px; }
+.sched .mini-inp .ico { width: 14px; height: 14px; color: var(--muted); }
+.sched .off { color: var(--faint); }
+.sched .off .mini-inp { opacity: .55; }
+.sched .days { display: flex; gap: 4px; margin-inline-start: 25px; }
+.sched .day { min-width: 34px; text-align: center; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.sched .day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sched .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sched .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; font-size: 13px; }
+.sched .stepper span { padding: 3px 10px; }
+.sched .stepper span + span { border-inline-start: 1px solid var(--line); color: var(--muted); }
+.sched .hint { font-size: 11.5px; color: var(--muted); margin: 0; }
+.sched .tag { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; background: var(--amber-bg); color: var(--amber); margin-inline-start: 6px; }
+.sched .files { padding: 14px 18px; display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+.sched .files table { width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.sched .files th { text-align: start; font-weight: 600; color: var(--muted); font-size: 12px; padding: 7px 10px; background: var(--sunken); border-bottom: 1px solid var(--line); }
+.sched .files td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.sched .files tr.sel td { background: var(--sel); }
+.sched .side { display: flex; flex-direction: column; gap: 6px; }
+.sched .side .btn { justify-content: flex-start; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<!-- assets/icon/zajil-mark.svg -->
+<symbol id="zajil-mark" viewBox="44.85 44.40 478.12 478.12"><g fill="currentColor" stroke="none"><path d="M485.797 459.805C483.197 461.645 480.467 461.915 477.467 461.465C473.727 460.895 465.257 459.035 463.127 455.775C460.197 451.295 458.157 441.825 459.127 436.635C455.757 432.805 449.617 428.425 445.407 425.195C447.437 425.655 456.347 429.245 457.877 430.535C466.377 437.745 471.317 452.005 480.407 458.085C481.537 458.835 484.857 457.925 486.717 458.355L486.747 458.835ZM490.857 435.475C481.077 417.445 459.907 409.355 441.527 403.035C431.507 399.645 421.417 396.505 411.237 393.615C412.047 390.095 412.657 386.205 413.447 382.575C414.877 376.075 416.547 369.625 418.437 363.245C430.107 322.455 451.617 285.165 481.087 254.655C479.357 252.505 476.647 249.865 474.657 247.855L460.967 234.235L422.987 195.735L349.657 121.425C331.987 103.355 314.187 85.415 296.247 67.615C296.977 74.565 298.177 81.545 299.307 88.455C302.257 106.575 306.017 124.325 311.127 141.975C312.457 146.575 313.627 152.015 315.837 156.235C317.677 159.755 338.217 179.305 342.737 183.795L408.637 249.185L408.307 249.905C401.397 245.975 394.387 241.555 387.527 237.465L347.657 213.695C340.307 209.275 331.977 203.875 324.527 199.805C327.567 211.755 329.917 223.505 333.217 235.635C343.567 274.125 357.477 311.575 374.757 347.505C382.657 363.685 391.297 379.825 400.327 395.395C406.007 405.195 411.967 414.765 417.567 424.625C403.307 410.055 385.307 389.915 373.117 373.685C337.537 326.275 308.007 264.425 294.077 206.645C281.707 198.315 268.267 190.055 255.687 181.765L132.347 100.935L87.237 71.525L75.167 63.595C72.767 62.005 69.227 59.815 67.167 57.935C72.557 78.935 79.347 99.545 87.497 119.635C90.977 128.275 95.857 139.925 100.517 148.035C103.337 149.415 107.767 152.195 110.507 153.855C120.637 160.145 130.517 166.815 140.127 173.835C158.677 187.085 176.997 200.645 195.077 214.495L241.017 249.525C252.097 257.895 265.077 267.325 275.767 275.965C258.787 267.675 241.867 259.235 225.017 250.645L120.917 197.775C123.057 202.975 125.707 207.805 128.217 213.075C137.477 232.475 148.137 251.435 160.657 268.915C161.427 269.985 170.197 274.165 172.017 275.135C175.117 276.795 178.197 278.505 181.237 280.275C202.857 292.785 224.017 308.815 244.097 323.595C263.787 337.915 283.177 352.645 302.257 367.765C292.317 364.215 279.077 357.975 268.927 353.735L189.127 320.265C198.697 333.815 208.547 347.145 218.677 360.275C247.217 397.425 277.767 432.625 312.537 464.175C318.587 469.125 324.377 476.185 331.057 480.145C356.587 495.295 387.667 493.065 412.227 477.165C426.607 468.865 444.367 471.535 459.337 476.745C462.247 477.755 465.767 479.025 468.727 479.615C470.707 475.515 470.907 474.925 474.687 472.285C478.907 469.335 482.467 467.705 487.367 466.195C487.347 465.275 487.297 464.315 487.267 463.385C487.707 463.765 488.167 464.125 488.627 464.485C489.917 465.475 490.837 466.195 492.457 465.995C493.527 465.415 494.027 463.805 494.327 462.615C496.667 453.595 495.227 443.545 490.857 435.475"/><path d="M408.632 249.187C410.369 250.841 411.014 251.679 408.307 249.904Z"/><path d="M488.371 474.321C490.952 474.100 492.137 474.299 494.563 474.850C500.662 483.022 499.912 499.344 499.482 508.993C498.340 506.308 497.480 504.240 496.058 501.671C490.422 492.898 485.316 488.999 477.128 482.939C477.404 480.888 477.486 480.254 478.142 478.302C480.993 476.466 485.112 475.165 488.371 474.321"/></g></symbol>
+<symbol id="i-link-2" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2" /><path d="M15 7h2a5 5 0 1 1 0 10h-2" /><line x1="8" x2="16" y1="12" y2="12" /></symbol>
+<symbol id="i-circle-plus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" /></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="3" width="5" height="18" rx="1" /><rect x="5" y="3" width="5" height="18" rx="1" /></symbol>
+<symbol id="i-octagon-pause" viewBox="0 0 24 24"><path d="M10 15V9" /><path d="M14 15V9" /><path d="M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z" /></symbol>
+<symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M10 11v6" /><path d="M14 11v6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></symbol>
+<symbol id="i-list-x" viewBox="0 0 24 24"><path d="M16 5H3" /><path d="M11 12H3" /><path d="M16 19H3" /><path d="m15.5 9.5 5 5" /><path d="m20.5 9.5-5 5" /></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></symbol>
+<symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1" /><path d="M16 2v3" /><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338" /><path d="M3 9h5.859" /><path d="M8 2v3" /><circle cx="16" cy="16" r="6" /></symbol>
+<symbol id="i-list-start" viewBox="0 0 24 24"><path d="M3 5h6" /><path d="M3 12h13" /><path d="M3 19h13" /><path d="m16 8-3-3 3-3" /><path d="M21 19V7a2 2 0 0 0-2-2h-6" /></symbol>
+<symbol id="i-list-end" viewBox="0 0 24 24"><path d="M16 5H3" /><path d="M16 12H3" /><path d="M9 19H3" /><path d="m16 16-3 3 3 3" /><path d="M21 5v12a2 2 0 0 1-2 2h-6" /></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></symbol>
+<symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" /><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" /><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" /></symbol>
+<symbol id="i-film" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 3v18" /><path d="M3 7.5h4" /><path d="M3 12h18" /><path d="M3 16.5h4" /><path d="M17 3v18" /><path d="M17 7.5h4" /><path d="M17 16.5h4" /></symbol>
+<symbol id="i-music" viewBox="0 0 24 24"><path d="M21 16V3a1 1 0 0 0-1.28-.96l-10 2.917a1 1 0 0 0-.72.96V19" /><circle cx="18" cy="16" r="3" /><circle cx="6" cy="19" r="3" /></symbol>
+<symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></symbol>
+<symbol id="i-package" viewBox="0 0 24 24"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" /><path d="M12 22V12" /><polyline points="3.29 7 12 12 20.71 7" /><path d="m7.5 4.27 9 5.15" /></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="m16 9-5.5 5.5L8 12" /></symbol>
+<symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0" /><path d="M13.9 21.818a10 10 0 0 1-3.8 0" /><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7" /><path d="M2.182 13.9a10 10 0 0 1 0-3.8" /><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69" /><path d="M21.818 10.1a10 10 0 0 1 0 3.8" /><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69" /><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7" /></symbol>
+<symbol id="i-list-ordered" viewBox="0 0 24 24"><path d="M11 5h10" /><path d="M11 12h10" /><path d="M11 19h10" /><path d="M4 4h1v5" /><path d="M4 9h2" /><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" /></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" /></symbol>
+<symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+<symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+<symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6" /></symbol>
+<symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></symbol>
+<symbol id="i-clipboard-paste" viewBox="0 0 24 24"><path d="M11 14h10" /><path d="M16 4h2a2 2 0 0 1 2 2v1.344" /><path d="m17 18 4-4-4-4" /><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 1.793-1.113" /><rect x="8" y="2" width="8" height="4" rx="1" /></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></symbol>
+<symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+<symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></symbol>
+<symbol id="i-columns-3" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /><path d="M15 3v18" /></symbol>
+<symbol id="i-file-video" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><path d="M15.033 13.44a.647.647 0 0 1 0 1.12l-4.065 2.352a.645.645 0 0 1-.968-.56v-4.704a.645.645 0 0 1 .967-.56z" /></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /></symbol>
+<symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></symbol>
+<symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></symbol>
+<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v3" /><path d="M16 2v3" /><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></symbol>
+<symbol id="i-list-plus" viewBox="0 0 24 24"><path d="M16 5H3" /><path d="M11 12H3" /><path d="M16 19H3" /><path d="M18 9v6" /><path d="M21 12h-6" /></symbol>
+<symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></symbol>
+<!-- Icons above with ids i-*: Lucide 1.61.0 (lucide-static), ISC License.
+     Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT).
+     All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+     Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee
+     is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+     THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES. -->
+</defs>
+</svg>
+<div id="root"></div>
+
+<script>
+"use strict";
+// ---------- Words (in the app they go to locales/*/zajil.ftl) ----------
+const T = {
+  ar: {
+    page: "زاجِل — تصميم M5.5: تجربة IDM",
+    app: "زاجِل لإدارة التحميل",
+    menus: [["م", "لف"], ["ت", "حرير"], ["ا", "لتحميلات"], ["ع", "رض"], ["م", "ساعدة"]],
+    tb: ["إضافة رابط", "استكمال", "إيقاف", "إيقاف الكل", "حذف", "حذف المكتمل", "الإعدادات", "الجدولة", "تشغيل الطابور", "إيقاف الطابور"],
+    search: "بحث وتصفية",
+    all: "كل التحميلات",
+    cats: "الفئات",
+    catNames: { video: "أفلام", music: "موسيقى", docs: "مستندات", apps: "برامج", zip: "مضغوطات" },
+    unfinished: "غير مكتملة",
+    finished: "مكتملة",
+    queues: "الطوابير",
+    q1: "الطابور الرئيسي",
+    q2: "طابور الليل",
+    q2at: "يبدأ 02:00",
+    cols: ["اسم الملف", "الحجم", "الحالة", "الوقت المتبقي", "السرعة", "آخر محاولة", "الوصف"],
+    colsBtn: "الأعمدة",
+    st: { done: "اكتمل", paused: "متوقف", failed: "خطأ 403", waiting: "في الطابور" },
+    descs: ["الدرس الثاني", "", "", "للاجتماع", "", "", "من بريد العمل", ""],
+    today: "اليوم", yesterday: "أمس",
+    sb: (n, a, s) => `<span><b>${n}</b> تحميلات</span><span><b>${a}</b> تعمل الآن</span><span>السرعة الكلية <b>${s}</b></span>`,
+    sbEnd: "التحديد: 2",
+    ctx: [["file", "افتح", "Enter"], ["folder", "افتح المجلد", "Ctrl+Shift+O"], "-", ["play", "استكمال", "Ctrl+R"], ["pause", "إيقاف", "Ctrl+P"], ["external-link", "إظهار نافذة التقدم", ""], "-", ["list-ordered", "نقل إلى طابور", ">"], ["folder", "تغيير الفئة", ">"], "-", ["copy", "نسخ الرابط", "Ctrl+C"], ["rotate-ccw", "تحديث رابط التحميل", ""], "-", ["trash-2", "حذف", "Del", "bad"], ["info", "الخصائص", "Alt+Enter"]],
+    // Add a link
+    addTitle: "إضافة رابط",
+    addUrl: "الرابط",
+    addFromClip: "أُخذ الرابط من الحافظة",
+    ok: "تمام", cancel: "إلغاء",
+    // File info
+    infoTitle: "معلومات ملف التحميل",
+    url: "الرابط",
+    category: "الفئة",
+    newCat: "فئة جديدة",
+    saveAs: "اسم الملف",
+    folder: "المجلد",
+    change: "تغيير",
+    remember: "تذكّر هذا المجلد لفئة «أفلام»",
+    desc: "الوصف",
+    descPh: "اختياري",
+    size: "الحجم",
+    kind: "فيديو MP4",
+    resumable: "يمكن استكماله",
+    start: "ابدأ التحميل",
+    later: "نزّل لاحقًا",
+    laterTo: "إلى أي طابور؟",
+    laterNew: "طابور جديد…",
+    // Progress
+    progTabs: ["حالة التحميل", "حد السرعة", "عند الانتهاء"],
+    facts: ["الرابط", "الحالة", "حجم الملف", "ما نُزّل", "السرعة", "الوقت المتبقي", "الاستكمال"],
+    receiving: "يستقبل البيانات…",
+    yes: "ممكن",
+    hide: "إخفاء التفاصيل",
+    pause: "إيقاف مؤقت",
+    partsTitle: "الأجزاء",
+    partsN: "8 اتصالات، يعمل 5",
+    legendDone: "وصل", legendNow: "يُكتب الآن", legendLeft: "باقٍ",
+    connCols: ["الاتصال", "ما نزّله", "الحالة"],
+    connOk: "انتهى", connRecv: "يستقبل البيانات", connWait: "ينتظر",
+    // Done
+    doneTitle: "اكتمل التحميل",
+    savedTo: "حُفظ في",
+    open: "افتح", openWith: "افتح بـ…", openFolder: "افتح المجلد", close: "إغلاق",
+    never: "لا تُظهر هذه النافذة مرة أخرى",
+    // Gallery
+    caps: [
+      "1. النافذة الرئيسية: قوائم، وشريط أدوات بأزرار كبيرة تحتها أسماؤها، وشجرة الفئات والطوابير، وجدول بأعمدة تُخفى وتُظهر ويتغير عرضها وترتيبها. صفّان محددان.",
+      "1-ب. النافذة الرئيسية وقائمة الزر الأيمن مفتوحة على التحديد، مع اختصار كل أمر.",
+      "2. «إضافة رابط»: الخانة امتلأت من الحافظة وحدها، و«تمام» يفتح نافذة المعلومات.",
+      "3. «معلومات ملف التحميل»: «ابدأ التحميل» و«نزّل لاحقًا» (يختار طابورًا) و«إلغاء».",
+      "4. نافذة التقدم مع «إظهار التفاصيل» مفتوحة: شريط الأجزاء وجدول الاتصالات.",
+      "5. «اكتمل التحميل»: افتح، وافتح بـ، وافتح المجلد، وإغلاق، و«لا تُظهر هذه النافذة مرة أخرى».",
+    ],
+    lang: "اللغة", theme: "المظهر", light: "فاتح", dark: "داكن",
+  },
+  en: {
+    page: "Zajil — M5.5 design: the IDM experience",
+    app: "Zajil Download Manager",
+    menus: [["F", "ile"], ["E", "dit"], ["D", "ownloads"], ["V", "iew"], ["H", "elp"]],
+    tb: ["Add link", "Resume", "Pause", "Pause all", "Delete", "Clear finished", "Settings", "Schedule", "Run queue", "Halt queue"],
+    search: "Search and filter",
+    all: "All downloads",
+    cats: "Categories",
+    catNames: { video: "Video", music: "Music", docs: "Documents", apps: "Programs", zip: "Archives" },
+    unfinished: "Unfinished",
+    finished: "Finished",
+    queues: "Queues",
+    q1: "Main queue",
+    q2: "Night queue",
+    q2at: "Starts 02:00",
+    cols: ["File name", "Size", "Status", "Time left", "Speed", "Last try", "Description"],
+    colsBtn: "Columns",
+    st: { done: "Done", paused: "Paused", failed: "Error 403", waiting: "In queue" },
+    descs: ["Lesson two", "", "", "For the meeting", "", "", "From work mail", ""],
+    today: "Today", yesterday: "Yesterday",
+    sb: (n, a, s) => `<span><b>${n}</b> downloads</span><span><b>${a}</b> running</span><span>Total speed <b>${s}</b></span>`,
+    sbEnd: "Selected: 2",
+    ctx: [["file", "Open", "Enter"], ["folder", "Open folder", "Ctrl+Shift+O"], "-", ["play", "Resume", "Ctrl+R"], ["pause", "Pause", "Ctrl+P"], ["external-link", "Show progress window", ""], "-", ["list-ordered", "Move to queue", ">"], ["folder", "Change category", ">"], "-", ["copy", "Copy link", "Ctrl+C"], ["rotate-ccw", "Refresh download link", ""], "-", ["trash-2", "Delete", "Del", "bad"], ["info", "Properties", "Alt+Enter"]],
+    addTitle: "Add a link",
+    addUrl: "Link",
+    addFromClip: "Taken from the clipboard",
+    ok: "OK", cancel: "Cancel",
+    infoTitle: "Download file info",
+    url: "Link",
+    category: "Category",
+    newCat: "New category",
+    saveAs: "File name",
+    folder: "Folder",
+    change: "Change",
+    remember: "Remember this folder for “Video”",
+    desc: "Description",
+    descPh: "Optional",
+    size: "Size",
+    kind: "MP4 video",
+    resumable: "Can be resumed",
+    start: "Start download",
+    later: "Download later",
+    laterTo: "Which queue?",
+    laterNew: "New queue…",
+    progTabs: ["Download status", "Speed limit", "When finished"],
+    facts: ["Link", "Status", "File size", "Downloaded", "Speed", "Time left", "Resume"],
+    receiving: "Receiving data…",
+    yes: "Possible",
+    hide: "Hide details",
+    pause: "Pause",
+    partsTitle: "Parts",
+    partsN: "8 connections, 5 running",
+    legendDone: "Arrived", legendNow: "Writing now", legendLeft: "Still to come",
+    connCols: ["Connection", "Downloaded", "Status"],
+    connOk: "Finished", connRecv: "Receiving data", connWait: "Waiting",
+    doneTitle: "Download finished",
+    savedTo: "Saved in",
+    open: "Open", openWith: "Open with…", openFolder: "Open folder", close: "Close",
+    never: "Don’t show this window again",
+    caps: [
+      "1. Main window: menus, a toolbar of big buttons with their names under them, the tree of categories and queues, and a table whose columns can be hidden, shown, resized and reordered. Two rows selected.",
+      "1b. Main window with the right-click menu open on the selection, each command with its shortcut.",
+      "2. “Add a link”: the box filled itself from the clipboard; OK opens the file info window.",
+      "3. “Download file info”: Start download, Download later (picks a queue) and Cancel.",
+      "4. The progress window with “Show details” open: the parts bar and the connections table.",
+      "5. “Download finished”: Open, Open with, Open folder, Close, and “Don’t show this window again”.",
+    ],
+    lang: "Language", theme: "Theme", light: "Light", dark: "Dark",
+  },
+};
+
+// ---------- Mixed names: the rule of apps/desktop/src/lib/fname.ts ----------
+const RTL = /[֐-ٟ٭-ۯۺ-ࣿיִ-﷿ﹰ-ﻼ]/;
+const LATIN = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/;
+const OPENING = /[(\[{"'«]/;
+const STUCK = /[0-9_.\-]/;
+const JOINER = /[_.\-]/;
+function nameParts(name) {
+  const m = /^(.*?)((?:\.tar)?\.[A-Za-z0-9]{1,8})$/.exec(name);
+  if (!m) return { head: name, tail: "" };
+  const stem = m[1], ext = m[2];
+  let lastRtl = -1;
+  for (let i = stem.length - 1; i >= 0; i--) if (RTL.test(stem[i])) { lastRtl = i; break; }
+  if (lastRtl < 0) return { head: name, tail: "" };
+  let firstLatin = -1;
+  for (let i = lastRtl + 1; i < stem.length; i++) if (LATIN.test(stem[i])) { firstLatin = i; break; }
+  if (firstLatin < 0) return { head: name, tail: "" };
+  let cut = firstLatin;
+  while (cut > lastRtl + 1 && STUCK.test(stem[cut - 1])) cut--;
+  while (cut < firstLatin && JOINER.test(stem[cut])) cut++;
+  while (cut > lastRtl + 1 && OPENING.test(stem[cut - 1])) cut--;
+  return { head: stem.slice(0, cut), tail: stem.slice(cut) + ext };
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function fname(name, cls = "fn") {
+  const p = nameParts(name);
+  return `<bdi dir="auto" class="${cls}" title="${esc(name)}">${esc(p.head)}${p.tail ? `<bdi dir="ltr">${esc(p.tail)}</bdi>` : ""}</bdi>`;
+}
+const ltr = (s, cls = "") => `<bdi dir="ltr" class="${cls}">${esc(s)}</bdi>`;
+// The arrow that points along the reading direction (a closed branch, a submenu).
+const fwd = (lang) => (lang === "ar" ? "chevron-left" : "chevron-right");
+const ico = (n, cls = "") => `<svg class="ico ${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+
+// ---------- Numbers, as apps/desktop/src/lib/format.ts ----------
+const KIB = 1024, MIB = 1024 * KIB, GIB = 1024 * MIB;
+const UNITS = { ar: ["بايت", "كيلوبايت", "ميجابايت", "جيجابايت"], en: ["B", "KiB", "MiB", "GiB"] };
+function num(lang, n, f = 1) { return new Intl.NumberFormat(`${lang}-u-nu-latn`, { maximumFractionDigits: f }).format(n); }
+function size(lang, b) {
+  const u = UNITS[lang];
+  if (b >= GIB) return `${num(lang, b / GIB)} ${u[3]}`;
+  if (b >= MIB) return `${num(lang, b / MIB, b >= 100 * MIB ? 0 : 1)} ${u[2]}`;
+  if (b >= KIB) return `${num(lang, b / KIB, 0)} ${u[1]}`;
+  return `${num(lang, b, 0)} ${u[0]}`;
+}
+const speed = (lang, b) => `${size(lang, b)}/${lang === "ar" ? "ث" : "s"}`;
+const pct = (lang, f) => new Intl.NumberFormat(`${lang}-u-nu-latn`, { style: "percent" }).format(Math.floor(f * 100) / 100);
+const LEFT = {
+  ar: (m) => (m === 1 ? "دقيقة واحدة" : m === 2 ? "دقيقتان" : m <= 10 ? `${m} دقائق` : `${m} دقيقةً`),
+  en: (m) => (m === 1 ? "1 minute" : `${m} minutes`),
+};
+
+// ---------- The downloads shown ----------
+const ROWS = [
+  { name: "دورة Rust للمبتدئين (Part 2).mp4", size: 1.48 * GIB, st: "active", f: 0.63, left: 3, sp: 7.4 * MIB, last: ["today", "14:05"], cat: "film" },
+  { name: "ubuntu-24.04.1-desktop-amd64.iso", size: 5.7 * GIB, st: "active", f: 0.18, left: 21, sp: 3.9 * MIB, last: ["today", "13:58"], cat: "package" },
+  { name: "أغاني فيروز - Live in Beirut 1998.flac", size: 612 * MIB, st: "paused", f: 0.41, last: ["yesterday", "22:40"], cat: "music" },
+  { name: "تقرير المبيعات 2026 النهائي.pdf", size: 2.4 * MIB, st: "done", last: ["today", "09:12"], cat: "file-text" },
+  { name: "Zajil_Setup_0.1.0_x64.exe", size: 9.8 * MIB, st: "done", last: ["yesterday", "18:31"], cat: "package" },
+  { name: "الخرائط_v3.2.zip", size: 340 * MIB, st: "waiting", last: null, cat: "archive" },
+  { name: "Report Q3 مراجعة.docx", size: 1.1 * MIB, st: "failed", last: ["today", "11:47"], cat: "file-text" },
+  { name: "١٢٣ صورة العطلة.tar.gz", size: 88 * MIB, st: "waiting", last: null, cat: "archive" },
+];
+const FILE = ROWS[0];
+const URL1 = "https://cdn.example.org/courses/rust/part-2.mp4?sig=…";
+const FOLDER = "~/Downloads/Zajil/أفلام";
+
+function titlebar(t, lang, opts = {}) {
+  const ctl = opts.small ? ["x"] : ["minus", "square", "x"];
+  return `<div class="title">${opts.mark === false ? "" : `<svg class="mark" aria-hidden="true"><use href="#zajil-mark"/></svg>`}<span class="t fn">${t}</span>
+    <span class="ctl">${ctl.map((n) => `<span>${ico(n)}</span>`).join("")}</span></div>`;
+}
+
+// ---------- 1. Main window ----------
+function mainWin(lang, withMenu) {
+  const t = T[lang];
+  const tbIcons = ["link-2", "play", "pause", "octagon-pause", "trash-2", "list-x", "settings", "calendar-clock", "list-start", "list-end"];
+  const tbKind = ["", "go", "stop", "stop", "del", "del", "calm", "calm", "go", "stop"];
+  const tbKeys = ["Ctrl+N", "Ctrl+R", "Ctrl+P", "Ctrl+Shift+P", "Del", "Ctrl+Shift+Del", "Ctrl+,", "Ctrl+J", "F5", "Shift+F5"];
+  const seps = new Set([1, 4, 6, 8]);
+  let tb = "";
+  t.tb.forEach((label, i) => {
+    if (seps.has(i)) tb += `<span class="tsep"></span>`;
+    tb += `<button class="tb ${tbKind[i]}" title="${label} (${tbKeys[i]})"><span class="tile">${ico(tbIcons[i])}</span>${label}</button>`;
+  });
+  const menus = t.menus.map(([a, b]) => `<span><u>${a}</u>${b}</span>`).join("");
+  const cats = [
+    ["film", t.catNames.video, 1, true],
+    ["music", t.catNames.music, 1],
+    ["file-text", t.catNames.docs, 2],
+    ["package", t.catNames.apps, 2],
+    ["archive", t.catNames.zip, 2],
+  ];
+  let tree = `<div class="node on">${ico("chevron-down", "tw")}${ico("layers")}${t.all}<span class="n num">8</span></div>`;
+  tree += `<h3>${t.cats}</h3>`;
+  for (const [ic, name, n, open] of cats) {
+    tree += `<div class="node">${ico(open ? "chevron-down" : fwd(lang), "tw")}${ico(ic)}${name}<span class="n num">${n}</span></div>`;
+    if (open) {
+      tree += `<div class="node l1">${ico("circle-dashed")}${t.unfinished}<span class="n num">1</span></div>`;
+      tree += `<div class="node l1">${ico("circle-check")}${t.finished}<span class="n num">0</span></div>`;
+    }
+  }
+  tree += `<h3>${t.queues}</h3>`;
+  tree += `<div class="node">${ico("chevron-down", "tw none")}${ico("list-ordered")}${t.q1}<span class="n num">2</span></div>`;
+  tree += `<div class="node">${ico("chevron-down", "tw none")}${ico("calendar-clock")}<span>${t.q2}<br><small>${t.q2at}</small></span><span class="n num">1</span></div>`;
+
+  const widths = [null, 96, 132, 108, 118, 118, 112];
+  const head = `<tr>${t.cols.map((c, i) => `<th${widths[i] ? ` style="width:${widths[i]}px"` : ""}>${c}${i === 5 ? ico("chevron-down", "sort") : ""}</th>`).join("")}<th class="cols" title="${t.colsBtn}">${ico("columns-3")}</th></tr>`;
+  const stCell = (r) => {
+    if (r.st === "active") return `<span class="st"><span class="mini"><b style="inline-size:${r.f * 100}%"></b></span><span class="pct num">${pct(lang, r.f)}</span></span>`;
+    if (r.st === "paused") return `<span class="st paused">${ico("pause")}${t.st.paused} <span class="num">${pct(lang, r.f)}</span></span>`;
+    if (r.st === "done") return `<span class="st done">${ico("circle-check")}${t.st.done}</span>`;
+    if (r.st === "failed") return `<span class="st failed">${ico("circle-alert")}${t.st.failed}</span>`;
+    return `<span class="st waiting">${ico("list-ordered")}${t.st.waiting}</span>`;
+  };
+  const rows = ROWS.map((r, i) => {
+    const cls = i === 0 ? "sel" : i === 1 ? "sel focus" : "";
+    const last = r.last ? `${t[r.last[0]]} <span class="num">${r.last[1]}</span>` : "";
+    return `<tr class="${cls}"><td><span class="nm"><span class="ft">${ico(r.cat)}</span>${fname(r.name)}</span></td>
+      <td class="num">${size(lang, r.size)}</td><td>${stCell(r)}</td>
+      <td class="num muted">${r.left ? LEFT[lang](r.left) : ""}</td><td class="num">${r.sp ? speed(lang, r.sp) : ""}</td>
+      <td class="muted">${last}</td><td class="muted">${t.descs[i]}</td><td class="cols"></td></tr>`;
+  }).join("");
+
+  let menu = "";
+  if (withMenu) {
+    menu = `<div class="ctx" style="inset-block-start:250px;inset-inline-start:420px">${t.ctx.map((it) => {
+      if (it === "-") return "<hr>";
+      const [ic, label, key, bad] = it;
+      const end = key === ">" ? ico(fwd(lang), "more") : key ? `<kbd>${key}</kbd>` : "";
+      return `<div class="it ${bad || ""} ${label === t.ctx[0][1] ? "hi" : ""}">${ico(ic)}${label}${end}</div>`;
+    }).join("")}</div>`;
+  }
+  return `<div class="win main" role="img" aria-label="${t.app}">
+    ${titlebar(t.app, lang)}
+    <div class="menubar">${menus}</div>
+    <div class="toolbar">${tb}<span class="search">${ico("search")}${t.search}<kbd>Ctrl+F</kbd></span></div>
+    <div class="body"><nav class="tree">${tree}</nav>
+      <div class="list"><table class="grid"><thead>${head}</thead><tbody>${rows}</tbody></table></div></div>
+    <div class="statusbar">${t.sb(8, 2, speed(lang, 11.3 * MIB))}<span class="end">${t.sbEnd}</span></div>
+    ${menu}</div>`;
+}
+
+// ---------- 2. Add a link ----------
+function addWin(lang) {
+  const t = T[lang];
+  return `<div class="win dlg add">${titlebar(t.addTitle, lang, { small: true })}
+    <div class="content">
+      <div class="field"><label>${t.addUrl}</label><div class="inp focus">${ico("link-2")}<span class="v lv">${esc(URL1)}</span></div></div>
+      <div class="field"><span></span><span class="note">${ico("clipboard-paste")}${t.addFromClip}</span></div>
+    </div>
+    <div class="actions"><span class="gap"></span><button class="btn primary">${t.ok}</button><button class="btn">${t.cancel}</button></div></div>`;
+}
+
+// ---------- 3. Download file info ----------
+function infoWin(lang) {
+  const t = T[lang];
+  return `<div class="win dlg info">${titlebar(t.infoTitle, lang, { small: true })}
+    <div class="content"><div class="fields">
+      <div class="field"><label>${t.url}</label><div class="inp">${ico("link-2")}<span class="v lv">${esc(URL1)}</span></div></div>
+      <div class="field"><label>${t.category}</label><div class="row"><div class="inp select">${ico("film")}<span class="v">${t.catNames.video}</span>${ico("chevron-down", "caret")}</div><button class="btn sq" title="${t.newCat}">${ico("circle-plus")}</button></div></div>
+      <div class="field"><label>${t.saveAs}</label><div class="inp focus"><span class="v">${fname(FILE.name)}</span></div></div>
+      <div class="field"><label>${t.folder}</label><div class="row"><div class="inp">${ico("folder")}<span class="v lv">${esc(FOLDER)}</span></div><button class="btn">${t.change}</button></div></div>
+      <div class="field"><span></span><span class="check"><span class="box on">${ico("check")}</span>${t.remember}</span></div>
+      <div class="field"><label>${t.desc}</label><div class="inp"><span class="v faint">${t.descPh}</span></div></div>
+    </div>
+    <div class="filecard"><span class="bigft">${ico("file-video")}</span><span class="size num">${size(lang, FILE.size)}</span><span class="kind">${t.kind}</span><span class="note good">${ico("check")}${t.resumable}</span></div>
+    </div>
+    <div class="actions"><button class="btn primary">${ico("download")}${t.start}</button>
+      <button class="btn split">${ico("list-ordered")}${t.later}<span class="caret">${ico("chevron-down")}</span></button>
+      <span class="gap"></span><button class="btn">${t.cancel}</button></div></div>`;
+}
+
+// ---------- 4. Progress, details shown ----------
+function progWin(lang) {
+  const t = T[lang];
+  const done = FILE.size * FILE.f;
+  const per = FILE.size / 8;
+  // Each part's share written: 3 finished, 5 running.
+  const parts = [1, 1, 0.71, 1, 0.44, 0.38, 0.29, 0.22];
+  const bar = parts.map((p) => `<i class="${p >= 1 ? "done" : ""}" style="flex:1"><b style="inline-size:${p * 100}%"></b></i>`).join("");
+  const conn = parts.map((p, i) => `<tr><td class="num">${i + 1}</td><td class="num">${size(lang, per * p)}</td>
+      <td class="${p >= 1 ? "ok" : ""}">${p >= 1 ? t.connOk : t.connRecv}</td></tr>`).join("");
+  const facts = [
+    esc(URL1),
+    t.receiving,
+    `<span class="num">${size(lang, FILE.size)}</span>`,
+    `<span class="num">${size(lang, done)} (${pct(lang, FILE.f)})</span>`,
+    `<span class="num">${speed(lang, FILE.sp)}</span>`,
+    `<span class="num">${LEFT[lang](3)}</span>`,
+    t.yes,
+  ];
+  const title = `<span class="num">${pct(lang, FILE.f)}</span> ${fname(FILE.name)}`;
+  return `<div class="win dlg prog">${titlebar(title, lang)}
+    <div class="tabs">${t.progTabs.map((x, i) => `<span class="${i ? "" : "on"}">${x}</span>`).join("")}</div>
+    <div class="content">
+      <dl class="facts">${t.facts.map((f, i) => `<dt>${f}</dt><dd class="${i === 6 ? "yes" : i === 0 ? "lv" : ""}">${facts[i]}</dd>`).join("")}</dl>
+      <div class="bigbar" role="img" aria-label="${pct(lang, FILE.f)}"><b style="inline-size:${FILE.f * 100}%"></b></div>
+    </div>
+    <div class="actions"><button class="btn">${ico("chevron-up")}${t.hide}</button><span class="gap"></span>
+      <button class="btn">${ico("pause")}${t.pause}</button><button class="btn">${t.cancel}</button></div>
+    <div class="details">
+      <h4>${t.partsTitle}<span class="n">${t.partsN}</span></h4>
+      <div class="parts" role="img" aria-label="${t.partsTitle}">${bar}</div>
+      <div class="legend"><span><i style="background:var(--feather)"></i>${t.legendDone}</span><span><i style="background:var(--feather-2)"></i>${t.legendNow}</span><span><i style="background:var(--feather-bg);border:1px solid var(--line)"></i>${t.legendLeft}</span></div>
+      <table class="conn"><thead><tr>${t.connCols.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${conn}</tbody></table>
+      <div style="height:10px"></div>
+    </div></div>`;
+}
+
+// ---------- 5. Download finished ----------
+function doneWin(lang) {
+  const t = T[lang];
+  return `<div class="win dlg done">${titlebar(t.doneTitle, lang, { small: true })}
+    <div class="content">
+      <div class="head"><span class="badge">${ico("check")}</span><span class="nm2">${fname(FILE.name, "fn big")}<span class="muted num">${size(lang, FILE.size)}</span></span></div>
+      <dl class="facts"><dt>${t.savedTo}</dt><dd class="lv">${esc(FOLDER)}</dd><dt>${t.url}</dt><dd class="lv">${esc(URL1)}</dd></dl>
+      <span class="check"><span class="box"></span>${t.never}</span>
+    </div>
+    <div class="actions"><button class="btn primary">${ico("file")}${t.open}</button>
+      <button class="btn">${t.openWith}</button><button class="btn">${ico("folder")}${t.openFolder}</button>
+      <span class="gap"></span><button class="btn">${t.close}</button></div></div>`;
+}
+
+
+// ---------- The schedule window (words go to locales/*/zajil.ftl) ----------
+const S = {
+  ar: {
+    title: "الجدولة", queues: "الطوابير", newQ: "طابور جديد", delQ: "حذف",
+    qs: [["list-ordered", "الطابور الرئيسي", "يدوي", 3], ["calendar-clock", "الليل", "يوميًا <bdi dir=\"ltr\">02:00–07:00</bdi>", 2], ["calendar", "تحميلات العمل", "مرة واحدة، الخميس 22:00", 1]],
+    name: "اسم الطابور", tabs: ["الجدولة", "الملفات في الطابور"],
+    start: "البدء", manual: "يدويًا فقط (بزر «ابدأ الآن» أو «تشغيل الطابور»)",
+    once: "مرة واحدة في", daily: "يوميًا في", date: "الخميس 29 أكتوبر", at: "02:00",
+    days: ["سبت", "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة"], daysOn: [1, 2, 3, 4, 5],
+    stop: "الإيقاف", stopAt: "أوقف في", stopTime: "07:00", stopHint: "ما لم يكتمل يتوقف ويُستكمل في الموعد التالي.",
+    limits: "التحميل", together: "عدد التحميلات في نفس الوقت", tries: "عدد المحاولات لكل ملف",
+    after: "بعد انتهاء الطابور", nothing: "لا شيء", openFile: "افتح ملفًا", openFileV: "~/Scripts/بعد-التحميل.sh",
+    sleep: "أدخل الجهاز في وضع السكون", shutdown: "أغلق الجهاز",
+    afterHint: "يسأل زاجِل قبل السكون أو الإغلاق، وينتظر دقيقة يمكنك فيها الإلغاء.",
+    engine: "يحتاج المحرك",
+    startNow: "ابدأ الآن", stopNow: "أوقف", apply: "تطبيق", close: "إغلاق",
+    cols: ["#", "اسم الملف", "الحجم", "الحالة"],
+    rows: [["ubuntu-24.04.1-desktop-amd64.iso", "5.7 جيجابايت", "في الطابور"], ["دورة Rust للمبتدئين (Part 3).mp4", "1.2 جيجابايت", "في الطابور"], ["الخرائط_v3.2.zip", "340 ميجابايت", "متوقف 41%"]],
+    up: "لأعلى", down: "لأسفل", moveTo: "نقل إلى طابور", removeFrom: "إزالة من الطابور",
+    filesHint: "الترتيب هنا هو ترتيب البدء: الأعلى يبدأ أولًا.",
+    page: "زاجِل — تصميم نافذة الجدولة", caps: ["نافذة الجدولة: تبويب «الجدولة»", "نافذة الجدولة: تبويب «الملفات في الطابور»"],
+  },
+  en: {
+    title: "Scheduler", queues: "Queues", newQ: "New queue", delQ: "Delete",
+    qs: [["list-ordered", "Main queue", "Manual", 3], ["calendar-clock", "Night", "Daily <bdi dir=\"ltr\">02:00–07:00</bdi>", 2], ["calendar", "Work downloads", "Once, Thursday 22:00", 1]],
+    name: "Queue name", tabs: ["Schedule", "Files in the queue"],
+    start: "Start", manual: "Manually only (with “Start now” or “Run queue”)",
+    once: "Once on", daily: "Daily at", date: "Thursday, 29 October", at: "02:00",
+    days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], daysOn: [0, 1, 2, 3, 6],
+    stop: "Stop", stopAt: "Stop at", stopTime: "07:00", stopHint: "What is not finished stops, and goes on at the next start.",
+    limits: "Downloading", together: "Downloads at the same time", tries: "Attempts for each file",
+    after: "When the queue finishes", nothing: "Nothing", openFile: "Open a file", openFileV: "~/Scripts/after-download.sh",
+    sleep: "Put the computer to sleep", shutdown: "Shut the computer down",
+    afterHint: "Zajil asks before sleeping or shutting down, and waits a minute in which you can cancel.",
+    engine: "Needs the engine",
+    startNow: "Start now", stopNow: "Stop", apply: "Apply", close: "Close",
+    cols: ["#", "File name", "Size", "Status"],
+    rows: [["ubuntu-24.04.1-desktop-amd64.iso", "5.7 GB", "In queue"], ["دورة Rust للمبتدئين (Part 3).mp4", "1.2 GB", "In queue"], ["الخرائط_v3.2.zip", "340 MB", "Paused 41%"]],
+    up: "Up", down: "Down", moveTo: "Move to queue", removeFrom: "Remove from queue",
+    filesHint: "The order here is the order they start in: the top one first.",
+    page: "Zajil — the schedule window's design", caps: ["The schedule window: the “Schedule” tab", "The schedule window: the “Files in the queue” tab"],
+  },
+};
+
+function schedWin(lang, tab) {
+  const s = S[lang];
+  const radio = (on) => `<span class="radio ${on ? "on" : ""}"></span>`;
+  const box = (on) => `<span class="box ${on ? "on" : ""}">${on ? ico("check") : ""}</span>`;
+  const mini = (icon, v) => `<span class="mini-inp">${ico(icon)}<span class="num">${v}</span></span>`;
+  const step = (v) => `<span class="stepper"><span class="num">${v}</span><span>−</span><span>+</span></span>`;
+  const tag = `<span class="tag">${s.engine}</span>`;
+  const queues = s.qs.map(([ic, n, sub, c], i) =>
+    `<div class="q ${i === 1 ? "on" : ""}">${ico(ic)}<span>${n}<small>${sub}</small></span><span class="n num">${c}</span></div>`).join("");
+  const scheduleTab = `<div class="form">
+      <fieldset><legend>${s.start}</legend>
+        <div class="opt off">${radio(false)}${s.manual}</div>
+        <div class="opt off">${radio(false)}${s.once} ${mini("calendar", s.date)} ${mini("clock", "22:00")}${tag}</div>
+        <div class="opt">${radio(true)}${s.daily} ${mini("clock", s.at)}</div>
+        <div class="days">${s.days.map((d, i) => `<span class="day ${s.daysOn.includes(i) ? "on" : ""}">${d}</span>`).join("")}</div>
+      </fieldset>
+      <div class="two">
+        <fieldset><legend>${s.stop}</legend>
+          <div class="opt">${box(true)}${s.stopAt} ${mini("clock", s.stopTime)}</div>
+          <p class="hint">${s.stopHint}</p>
+        </fieldset>
+        <fieldset><legend>${s.limits}</legend>
+          <div class="opt">${s.together} ${step(2)}</div>
+          <div class="opt">${s.tries} ${step(5)}${tag}</div>
+        </fieldset>
+      </div>
+      <fieldset><legend>${s.after}${tag}</legend>
+        <div class="opt">${radio(true)}${s.nothing}</div>
+        <div class="opt off">${radio(false)}${s.openFile} <span class="mini-inp">${ico("folder")}<bdi dir="ltr">${esc(s.openFileV)}</bdi></span></div>
+        <div class="opt off">${radio(false)}${ico("moon")}${s.sleep}</div>
+        <div class="opt off">${radio(false)}${ico("power")}${s.shutdown}</div>
+        <p class="hint">${s.afterHint}</p>
+      </fieldset>
+    </div>`;
+  const filesTab = `<div class="files">
+      <div><table><thead><tr>${s.cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>
+        ${s.rows.map(([n, z, st], i) => `<tr class="${i === 1 ? "sel" : ""}"><td class="num">${i + 1}</td><td>${fname(n)}</td><td class="num">${z}</td><td>${st}</td></tr>`).join("")}
+      </tbody></table><p class="hint" style="margin-top:8px">${s.filesHint}</p></div>
+      <div class="side"><button class="btn">${ico("arrow-up")}${s.up}</button><button class="btn">${ico("arrow-down")}${s.down}</button>
+        <button class="btn">${ico("list-ordered")}${s.moveTo}${ico("chevron-down", "caret")}</button><button class="btn">${ico("list-x")}${s.removeFrom}</button></div>
+    </div>`;
+  return `<div class="win dlg sched">${titlebar(s.title, lang)}
+    <div class="split2">
+      <div class="queues"><h3>${s.queues}</h3>${queues}
+        <div class="qbtns"><button class="btn">${ico("list-plus")}${s.newQ}</button><button class="btn">${ico("trash-2")}${s.delQ}</button></div></div>
+      <div class="pane">
+        <div class="qhead"><label>${s.name}</label><div class="inp focus"><span class="v">${s.qs[1][1]}</span></div></div>
+        <div class="tabs">${s.tabs.map((x, i) => `<span class="${(tab === "files" ? 1 : 0) === i ? "on" : ""}">${x}</span>`).join("")}</div>
+        ${tab === "files" ? filesTab : scheduleTab}
+      </div>
+    </div>
+    <div class="actions"><button class="btn primary">${ico("play")}${s.startNow}</button><button class="btn">${ico("octagon-pause")}${s.stopNow}</button>
+      <span class="gap"></span><button class="btn">${s.apply}</button><button class="btn">${s.close}</button></div></div>`;
+}
+
+// ---------- Page ----------
+const q = new URLSearchParams(location.search);
+let lang = q.get("lang") === "en" ? "en" : "ar";
+let theme = q.get("theme") === "dark" ? "dark" : "light";
+const win = q.get("win") || "all";
+const WINS = { schedule: (l) => schedWin(l, "schedule"), files: (l) => schedWin(l, "files") };
+
+function render() {
+  const t = T[lang];
+  const root = document.documentElement;
+  root.lang = lang;
+  root.dir = lang === "ar" ? "rtl" : "ltr";
+  root.dataset.theme = theme;
+  document.title = S[lang].page;
+  const el = document.getElementById("root");
+  if (WINS[win]) {
+    el.innerHTML = `<div class="solo" id="shot">${WINS[win](lang)}</div>`;
+    return;
+  }
+  const seg = (name, vals) => `<span class="seg" role="group" aria-label="${t[name]}">${vals.map(([v, label]) =>
+    `<button data-${name}="${v}" aria-pressed="${(name === "lang" ? lang : theme) === v}">${label}</button>`).join("")}</span>`;
+  const shows = [schedWin(lang, "schedule"), schedWin(lang, "files")];
+  el.innerHTML = `<div class="bar"><h1><svg class="ico" style="color:var(--accent);width:22px;height:22px"><use href="#zajil-mark"/></svg>${S[lang].page}</h1>
+    ${seg("lang", [["ar", "العربية"], ["en", "English"]])}${seg("theme", [["light", t.light], ["dark", t.dark]])}</div>
+    <div class="gallery">${shows.map((w, i) => `<figure>${w}<figcaption>${S[lang].caps[i]}</figcaption></figure>`).join("")}</div>`;
+  el.querySelectorAll("[data-lang]").forEach((b) => (b.onclick = () => { lang = b.dataset.lang; render(); }));
+  el.querySelectorAll("[data-theme]").forEach((b) => (b.onclick = () => { theme = b.dataset.theme; render(); }));
+}
+render();
+</script>
+</body>
+</html>
