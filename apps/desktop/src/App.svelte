@@ -514,15 +514,20 @@
   }
   /** Quits; with downloads running, once the user agrees (owner's
    * decision on #83). */
+  let quitting = false;
   async function quit() {
+    // One question at a time (review of #105: a second ⌘Q asked again).
+    if (quitting) return;
     const running = active.length;
     if (running > 0) {
+      quitting = true;
       const yes = await ask(locale.t("quit-question", { count: running }), {
         title: locale.t("app-name"),
         kind: "warning",
         okLabel: locale.t("quit-ok"),
         cancelLabel: locale.t("confirm-cancel"),
       }).catch(() => false);
+      quitting = false;
       if (!yes) return;
     }
     await api.quitApp();

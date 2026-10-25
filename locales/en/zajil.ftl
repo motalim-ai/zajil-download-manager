@@ -406,7 +406,7 @@ add-remember-failed = The download was added, but the folder wasn't kept for the
 ## Quit with downloads running (owner's decision on #83)
 quit-question =
     { PLURAL($count) ->
-        [one] { $count } download is running. Quit Zajil? It goes on when you open Zajil again.
-       *[other] { $count } downloads are running. Quit Zajil? They go on when you open Zajil again.
+        [one] { $count } download is running. Quit Zajil?
+       *[other] { $count } downloads are running. Quit Zajil?
     }
 quit-ok = Quit Zajil

@@ -6,12 +6,11 @@ import { locale, type Digits, type Lang } from "./i18n.svelte";
 import { setTheme } from "./theme";
 
 /** The macOS menu's commands that reach this window (it is in front):
- * Select all takes the text box's text, Quit quits; the others are the
- * main window's. */
+ * Select all takes the text box's text; the others are the main window's
+ * (Quit goes there, which asks first while downloads run). */
 function fromMenu(command: string) {
   const box = document.activeElement;
   if (command === "select-all" && (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement)) box.select();
-  else if (command === "quit") void api.quitApp();
 }
 
 export async function startWindow(): Promise<void> {
