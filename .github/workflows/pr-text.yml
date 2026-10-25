@@ -7,29 +7,51 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   no-tool-names:
     name: PR text names no AI tool
     runs-on: ubuntu-latest
     steps:
+      # The PR's own copy of the script runs: a `pull_request` run has no
+      # secrets, and this job can only read the repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Words
+        env:
+          # The forbidden words, one per line, base64-encoded so that this
+          # file does not itself name them. Matched without regard to case.
+          WORDS: Y2xhdWRlCmFudGhyb3BpYwpnZW5lcmF0ZWQgd2l0aApnZW5lcmF0ZWQgYnkK
+        run: printf '%s' "$WORDS" | base64 -d > "$RUNNER_TEMP/words"
+      # The check itself is checked first: a word in plain text is found
+      # (whatever its case, on the right line), in backticks it is not.
+      - name: Self-test
+        run: |
+          set -euo pipefail
+          check=.github/scripts/pr-text.sh
+          w="$(head -n 1 "$RUNNER_TEMP/words")"
+          upper="$(printf '%s' "$w" | tr '[:lower:]' '[:upper:]')"
+          out="$(printf 'one\ntwo %s three\n' "$upper" | "$check" "$RUNNER_TEMP/words")" && exit 1
+          [ "$out" = 2 ] || { echo "found on line '$out', not 2"; exit 1; }
+          printf 'a `%s` b\n' "$w" | "$check" "$RUNNER_TEMP/words"
+          printf 'a\n```\n%s\n```\nb\n' "$w" | "$check" "$RUNNER_TEMP/words"
+          out="$(printf '```\nx\n```\n%s\n' "$w" | "$check" "$RUNNER_TEMP/words")" && exit 1
+          [ "$out" = 4 ] || { echo "found on line '$out', not 4"; exit 1; }
+          echo "self-test passed"
       - name: Check the title and description
         env:
           TITLE: ${{ github.event.pull_request.title }}
           BODY: ${{ github.event.pull_request.body }}
-          # The forbidden words, one per line, base64-encoded so that this
-          # file does not itself name them. Matched without regard to case.
-          WORDS: Y2xhdWRlCmFudGhyb3BpYwpnZW5lcmF0ZWQgd2l0aApnZW5lcmF0ZWQgYnkK
         run: |
           set -euo pipefail
-          words="$(mktemp)"
-          printf '%s' "$WORDS" | base64 -d > "$words"
           found=0
           for part in TITLE BODY; do
-            if printf '%s\n' "${!part}" | grep -inF -f "$words" > /dev/null; then
-              lines="$(printf '%s\n' "${!part}" | grep -inF -f "$words" | cut -d: -f1 | paste -sd, -)"
-              echo "::error::the PR ${part,,} names an AI tool or has a 'generated' line (line $lines). Remove it and save: this check runs again."
+            if ! lines="$(printf '%s\n' "${!part}" | .github/scripts/pr-text.sh "$RUNNER_TEMP/words")"; then
+              echo "::error::the PR ${part,,} names an AI tool or has a 'generated' line outside backticks (line $lines). Remove it and save: this check runs again."
               found=1
             fi
           done
