@@ -8,9 +8,7 @@ use std::process::ExitCode;
 
 use clap::Subcommand;
 use zajil_core::tools::{Tool, ToolError, Toolbox};
-use zajil_core::video::{
-    Choice, Download, Probed, Runs, Video, VideoEvent, VideoRunner, VideoTools,
-};
+use zajil_core::video::{Choice, Download, Probed, Runs, Video, VideoEvent, VideoRunner};
 use zajil_core::{Engine, Stop};
 
 #[derive(Debug, Subcommand)]
@@ -104,7 +102,7 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
             Err(err) => crate::fail(&format!("could not remove the tools: {err}")),
         },
         VideoCommand::Formats { url } => {
-            let runner = match runner(&toolbox, runs, engine).await {
+            let runner = match runner(&data_dir.join("tools"), runs, engine).await {
                 Ok(runner) => runner,
                 Err(code) => return code,
             };
@@ -143,7 +141,7 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
             audio_only,
             dir,
         } => {
-            let runner = match runner(&toolbox, runs, engine).await {
+            let runner = match runner(&data_dir.join("tools"), runs, engine).await {
                 Ok(runner) => runner,
                 Err(code) => return code,
             };
@@ -198,19 +196,19 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
     }
 }
 
-/// A runner with the checked tools, or a message on how to get them.
-async fn runner(toolbox: &Toolbox, runs: Runs, engine: Engine) -> Result<VideoRunner, ExitCode> {
+/// A runner for the tools folder, or a message on how to get the
+/// tools. The runner checks the tools again before every run; this
+/// first look is only for a clear message when they are missing.
+async fn runner(tools_root: &Path, runs: Runs, engine: Engine) -> Result<VideoRunner, ExitCode> {
+    let toolbox = Toolbox::new(tools_root);
     let checked = async {
-        let yt_dlp = toolbox.verified(Tool::YtDlp).await?;
-        let ffmpeg = toolbox.verified(Tool::Ffmpeg).await?;
-        toolbox.verified(Tool::Ffprobe).await?;
-        Ok::<_, ToolError>(VideoTools {
-            yt_dlp,
-            ffmpeg_dir: ffmpeg.parent().expect("a tool has a folder").to_path_buf(),
-        })
+        for tool in Tool::ALL {
+            toolbox.verified(tool).await?;
+        }
+        Ok::<_, ToolError>(())
     };
     match checked.await {
-        Ok(tools) => Ok(VideoRunner::new(tools, runs, engine)),
+        Ok(()) => Ok(VideoRunner::new(toolbox, runs, engine)),
         Err(ToolError::Missing(_)) => Err(crate::fail(
             "the video tools are not downloaded yet: run `zajil video tools install`",
         )),
