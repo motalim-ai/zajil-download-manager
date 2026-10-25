@@ -212,7 +212,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         save_categories,
         try_category,
         export_queues,
-        import_queues
+        import_queues,
+        show_window
     ]
 }
 
@@ -235,6 +236,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         try_category,
         export_queues,
         import_queues,
+        show_window,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -577,15 +579,21 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
     });
 }
 
-/// How often the clipboard is read while monitoring is on.
+/// How often the clipboard is looked at while monitoring is on.
 const CLIPBOARD_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// The least time between two links offered: a program changing the
+/// clipboard all the time cannot raise the window twice a second.
+const CLIPBOARD_OFFER_GAP: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Clipboard monitoring (M5, off unless the user turns it on): while the
-/// setting is on, the clipboard is read twice a second, and a download link
-/// the user copies opens the add dialog with it (the page's
-/// `clipboard-link` event) and shows the window. Nothing is added without
-/// the user. While it is off the clipboard is not opened; in a ui-test
-/// scene it stays off.
+/// setting is on, the clipboard is looked at twice a second (and read only
+/// after a change where the system says so), and a download link the user
+/// copies goes to the page (`clipboard-link`). The page puts it in the
+/// paste bar and shows the window, unless the add dialog is open: **no
+/// request reaches the link before the user presses "Download"**, and
+/// nothing is added before the user agrees. While it is off the clipboard
+/// is not opened; in a ui-test scene it stays off.
 fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
     std::thread::spawn(move || {
         let mut watcher = ClipboardWatcher::default();
@@ -597,13 +605,20 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
                 on,
                 zajil_platform::clipboard::SystemClipboard::new,
                 &app.categories,
+                std::time::Instant::now(),
             );
             if let Some(link) = link {
                 let _ = handle.emit("clipboard-link", link);
-                tray::show_window(&handle);
             }
         }
     });
+}
+
+/// Shows the window and brings it to the front: the page asks when it has
+/// taken a link from the clipboard.
+#[tauri::command]
+fn show_window<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tray::show_window(&handle);
 }
 
 /// Clipboard monitoring between two reads.
@@ -611,6 +626,8 @@ struct ClipboardWatcher<C> {
     /// Open while monitoring is on.
     clipboard: Option<C>,
     watch: zajil_core::clipboard::Watch,
+    /// When the last link was offered.
+    offered: Option<std::time::Instant>,
     /// The last problem said, so a clipboard that cannot be read is not
     /// reported twice a second.
     said: Option<String>,
@@ -621,22 +638,27 @@ impl<C> Default for ClipboardWatcher<C> {
         ClipboardWatcher {
             clipboard: None,
             watch: Default::default(),
+            offered: None,
             said: None,
         }
     }
 }
 
 impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
-    /// One read: the link to offer, if the user copied one since the last.
+    /// One look at `now`: the link to offer, if the user copied one since
+    /// the last. An unchanged clipboard is not read; text longer than
+    /// `MAX_TEXT` is not kept; a link copied within
+    /// [`CLIPBOARD_OFFER_GAP`] of the last one offered is not offered.
     /// `on` false closes the clipboard and forgets what was seen, so what
     /// is on the clipboard when monitoring is turned on again is not
     /// offered. A clipboard that cannot be opened or read (another program
-    /// holding it, no display) is tried again at the next read.
+    /// holding it, no display) is tried again at the next look.
     fn tick(
         &mut self,
         on: bool,
         open: impl FnOnce() -> std::io::Result<C>,
         categories: &CategoryStore,
+        now: std::time::Instant,
     ) -> Option<String> {
         if !on {
             *self = ClipboardWatcher::default();
@@ -648,15 +670,27 @@ impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
                 Err(err) => return self.say(err),
             }
         }
-        let text = match self.clipboard.as_mut()?.text() {
-            Ok(text) => text,
+        let clipboard = self.clipboard.as_mut()?;
+        if !clipboard.changed() {
+            return None;
+        }
+        let content = match clipboard.text(zajil_core::clipboard::MAX_TEXT) {
+            Ok(content) => content,
             Err(err) => {
                 self.clipboard = None;
                 return self.say(err);
             }
         };
         self.said = None;
-        self.watch.seen(text.as_deref(), || categories.load().ok())
+        let link = self.watch.seen(&content, || categories.load().ok())?;
+        if self
+            .offered
+            .is_some_and(|last| now.duration_since(last) < CLIPBOARD_OFFER_GAP)
+        {
+            return None;
+        }
+        self.offered = Some(now);
+        Some(link)
     }
 
     fn say(&mut self, err: std::io::Error) -> Option<String> {
@@ -849,51 +883,84 @@ mod tests {
         assert!(q.item(2).unwrap().error.is_none());
     }
 
-    /// A clipboard for tests: what each read returns, in turn.
-    struct FakeClipboard(std::collections::VecDeque<std::io::Result<Option<String>>>);
+    /// A clipboard for tests: what each look finds, in turn (`None`: no
+    /// change since the last look).
+    struct FakeClipboard(
+        std::collections::VecDeque<std::io::Result<Option<zajil_core::clipboard::Content>>>,
+        Option<zajil_core::clipboard::Content>,
+    );
 
     impl zajil_platform::clipboard::Clipboard for FakeClipboard {
-        fn text(&mut self) -> std::io::Result<Option<String>> {
-            self.0.pop_front().unwrap_or(Ok(None))
+        fn changed(&mut self) -> bool {
+            match self.0.front() {
+                Some(Ok(None)) => {
+                    self.0.pop_front();
+                    false
+                }
+                _ => true,
+            }
+        }
+
+        fn text(&mut self, _max: usize) -> std::io::Result<zajil_core::clipboard::Content> {
+            match self.0.pop_front() {
+                Some(Ok(Some(content))) => {
+                    self.1 = Some(content.clone());
+                    Ok(content)
+                }
+                Some(Err(err)) => Err(err),
+                _ => Ok(self
+                    .1
+                    .clone()
+                    .unwrap_or(zajil_core::clipboard::Content::Empty)),
+            }
         }
     }
 
     /// M5 clipboard monitoring: a copied download link is offered once;
-    /// what was there when monitoring started, other text and links to
-    /// pages are not; off, the clipboard is not even opened, and turned on
-    /// again what is there is not offered; a read that fails is tried again.
+    /// what was there when monitoring started, other text, text too long
+    /// and links to pages are not; an unchanged clipboard is not read; two
+    /// links closer than the gap give one offer; off, the clipboard is not
+    /// even opened, and turned on again what is there is not offered; a
+    /// read that fails is tried again.
     #[test]
     fn clipboard_monitoring_offers_each_copied_download_link_once() {
+        use zajil_core::clipboard::Content;
         let data = tempfile::tempdir().unwrap();
         let categories = CategoryStore::new(data.path());
         let a = "https://example.com/a.zip";
         let b = "https://example.com/b.mp4";
-        let reads = |texts: &[Option<&str>]| {
-            FakeClipboard(texts.iter().map(|t| Ok(t.map(str::to_owned))).collect())
-        };
+        let t = |s: &str| Ok(Some(Content::Text(s.to_owned())));
+        let start = std::time::Instant::now();
+        let at = |seconds: u64| start + std::time::Duration::from_secs(seconds * 3);
         let mut watcher = ClipboardWatcher::default();
         let mut opened = 0;
         let mut open = || {
             opened += 1;
-            Ok(reads(&[
-                Some(a),
-                Some(a),
-                Some("https://example.com/page.html"),
-                Some("hello"),
-                Some(b),
-                Some(b),
+            Ok(FakeClipboard(
+                [
+                    t(a),
+                    Ok(None),
+                    t("https://example.com/page.html"),
+                    t("hello"),
+                    Ok(Some(Content::Longer)),
+                    t(b),
+                    Ok(None),
+                    Ok(Some(Content::Empty)),
+                    t(a),
+                ]
+                .into(),
                 None,
-                Some(a),
-            ]))
+            ))
         };
         let mut seen = Vec::new();
-        for _ in 0..8 {
-            seen.push(watcher.tick(true, &mut open, &categories));
+        for i in 0..9 {
+            seen.push(watcher.tick(true, &mut open, &categories, at(i)));
         }
         assert_eq!(opened, 1);
         assert_eq!(
             seen,
             [
+                None,
                 None,
                 None,
                 None,
@@ -905,31 +972,48 @@ mod tests {
             ]
         );
 
+        // Two links one second apart: the second is not offered.
+        let mut watcher = ClipboardWatcher::default();
+        let reads = FakeClipboard([t("x"), t(a), t(b)].into(), None);
+        watcher.clipboard = Some(reads);
+        let never = || -> std::io::Result<FakeClipboard> { unreachable!() };
+        assert_eq!(watcher.tick(true, never, &categories, start), None);
+        assert_eq!(
+            watcher.tick(true, never, &categories, start).as_deref(),
+            Some(a)
+        );
+        let soon = start + std::time::Duration::from_secs(1);
+        assert_eq!(watcher.tick(true, never, &categories, soon), None);
+
         // Off: not opened, nothing offered; on again, what is there is
         // remembered only.
         let never = || -> std::io::Result<FakeClipboard> { panic!("opened while off") };
-        assert_eq!(watcher.tick(false, never, &categories), None);
+        assert_eq!(watcher.tick(false, never, &categories, start), None);
         assert!(watcher.clipboard.is_none());
         let mut watcher = ClipboardWatcher::default();
+        let reads = || Ok(FakeClipboard([t(b)].into(), None));
+        assert_eq!(watcher.tick(true, reads, &categories, at(0)), None);
         assert_eq!(
-            watcher.tick(true, || Ok(reads(&[Some(b), Some(b)])), &categories),
+            watcher.tick(true, || unreachable!(), &categories, at(1)),
             None
         );
-        assert_eq!(watcher.tick(true, || unreachable!(), &categories), None);
 
         // A clipboard that cannot be opened, then one whose read fails:
         // both tried again, and the link copied meanwhile is offered.
         let mut watcher = ClipboardWatcher::default();
         let busy = || std::io::Error::other("the clipboard is held by another program");
-        assert_eq!(watcher.tick(true, || Err(busy()), &categories), None);
-        assert_eq!(watcher.tick(true, || Ok(reads(&[None])), &categories), None);
-        watcher.clipboard = Some(FakeClipboard([Err(busy())].into()));
-        assert_eq!(watcher.tick(true, || unreachable!(), &categories), None);
-        assert!(watcher.clipboard.is_none(), "closed to be opened again");
+        assert_eq!(watcher.tick(true, || Err(busy()), &categories, at(0)), None);
+        let empty = || Ok(FakeClipboard([Ok(Some(Content::Empty))].into(), None));
+        assert_eq!(watcher.tick(true, empty, &categories, at(1)), None);
+        watcher.clipboard = Some(FakeClipboard([Err(busy())].into(), None));
         assert_eq!(
-            watcher
-                .tick(true, || Ok(reads(&[Some(a)])), &categories)
-                .as_deref(),
+            watcher.tick(true, || unreachable!(), &categories, at(2)),
+            None
+        );
+        assert!(watcher.clipboard.is_none(), "closed to be opened again");
+        let link = || Ok(FakeClipboard([t(a)].into(), None));
+        assert_eq!(
+            watcher.tick(true, link, &categories, at(3)).as_deref(),
             Some(a)
         );
     }

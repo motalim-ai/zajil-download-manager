@@ -4,9 +4,12 @@
 //! here, the same on every system and tested without a clipboard.
 //!
 //! The text itself is never kept: [`Watch`] remembers a hash of the last
-//! text seen, and only a link it offers leaves this module.
+//! text seen, keyed afresh for each run so it cannot be looked up, and only
+//! a link it offers leaves this module.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{BuildHasher, RandomState};
+
+pub use zajil_platform::clipboard::Content;
 
 use crate::category::CategoriesFile;
 
@@ -40,30 +43,33 @@ pub fn link_to_offer(text: &str, categories: &CategoriesFile) -> Option<String> 
 #[derive(Debug, Default)]
 pub struct Watch {
     last: Option<u64>,
+    /// Random keys for this run (SipHash), so a hash says nothing of a
+    /// short text such as a password.
+    keys: RandomState,
 }
 
 impl Watch {
-    /// The clipboard's `text`, read now. Returns the link to offer when the
-    /// text is new and [`link_to_offer`] accepts it; the categories are
-    /// asked for only then. The first text seen is only remembered: what
-    /// was on the clipboard when monitoring started is not offered.
+    /// What the clipboard holds, read now (text longer than [`MAX_TEXT`]
+    /// as [`Content::Longer`]). Returns the link to offer when the content
+    /// is new and [`link_to_offer`] accepts it; the categories are asked
+    /// for only then. The first content seen is only remembered: what was
+    /// on the clipboard when monitoring started is not offered.
     pub fn seen(
         &mut self,
-        text: Option<&str>,
+        content: &Content,
         categories: impl FnOnce() -> Option<CategoriesFile>,
     ) -> Option<String> {
-        let hash = text.map(|text| {
-            let mut hasher = DefaultHasher::new();
-            text.hash(&mut hasher);
-            hasher.finish()
-        });
+        let hash = self.keys.hash_one(content);
         let first = self.last.is_none();
-        let changed = self.last != Some(hash.unwrap_or(0));
-        self.last = Some(hash.unwrap_or(0));
+        let changed = self.last != Some(hash);
+        self.last = Some(hash);
         if first || !changed {
             return None;
         }
-        link_to_offer(text?, &categories()?)
+        match content {
+            Content::Text(text) => link_to_offer(text, &categories()?),
+            Content::Empty | Content::Longer => None,
+        }
     }
 }
 
@@ -133,6 +139,10 @@ mod tests {
         );
     }
 
+    fn text(text: &str) -> Content {
+        Content::Text(text.to_owned())
+    }
+
     #[test]
     fn each_copy_is_offered_once_and_not_what_was_there_first() {
         let mut watch = Watch::default();
@@ -140,19 +150,21 @@ mod tests {
         let a = "https://example.com/a.zip";
         let b = "https://example.com/b.zip";
         // On the clipboard when monitoring started: remembered only.
-        assert_eq!(watch.seen(Some(a), cats), None);
-        assert_eq!(watch.seen(Some(a), cats), None);
-        assert_eq!(watch.seen(Some(b), cats).as_deref(), Some(b));
-        assert_eq!(watch.seen(Some(b), cats), None);
-        assert_eq!(watch.seen(Some("some text"), cats), None);
+        assert_eq!(watch.seen(&text(a), cats), None);
+        assert_eq!(watch.seen(&text(a), cats), None);
+        assert_eq!(watch.seen(&text(b), cats).as_deref(), Some(b));
+        assert_eq!(watch.seen(&text(b), cats), None);
+        assert_eq!(watch.seen(&text("some text"), cats), None);
         // Copied again after something else: a new copy.
-        assert_eq!(watch.seen(Some(b), cats).as_deref(), Some(b));
-        assert_eq!(watch.seen(None, cats), None);
-        assert_eq!(watch.seen(Some(a), cats).as_deref(), Some(a));
+        assert_eq!(watch.seen(&text(b), cats).as_deref(), Some(b));
+        assert_eq!(watch.seen(&Content::Empty, cats), None);
+        assert_eq!(watch.seen(&text(a), cats).as_deref(), Some(a));
+        assert_eq!(watch.seen(&Content::Longer, cats), None);
+        assert_eq!(watch.seen(&text(a), cats).as_deref(), Some(a));
         // Starting again (monitoring turned off and on): what is there is
         // remembered, not offered.
         let mut watch = Watch::default();
-        assert_eq!(watch.seen(Some(b), cats), None);
+        assert_eq!(watch.seen(&text(b), cats), None);
     }
 
     /// The categories are read only for a new text, and a damaged
@@ -160,8 +172,22 @@ mod tests {
     #[test]
     fn categories_are_read_only_for_a_new_text() {
         let mut watch = Watch::default();
-        watch.seen(Some("x"), || panic!("not for the first text"));
-        watch.seen(Some("x"), || panic!("not for the same text"));
-        assert_eq!(watch.seen(Some("https://example.com/a.zip"), || None), None);
+        watch.seen(&text("x"), || panic!("not for the first text"));
+        watch.seen(&text("x"), || panic!("not for the same text"));
+        watch.seen(&Content::Longer, || panic!("not for a text too long"));
+        assert_eq!(
+            watch.seen(&text("https://example.com/a.zip"), || None),
+            None
+        );
+    }
+
+    /// The hash is keyed for each run: the same text hashes differently in
+    /// two watches, so a remembered hash cannot be looked up in a table.
+    #[test]
+    fn the_hash_is_keyed_for_each_run() {
+        let (mut one, mut two) = (Watch::default(), Watch::default());
+        one.seen(&text("k7#q"), || None);
+        two.seen(&text("k7#q"), || None);
+        assert_ne!(one.last, two.last);
     }
 }

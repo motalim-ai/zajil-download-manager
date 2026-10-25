@@ -165,6 +165,22 @@ jobs:
       # Clipboard monitoring (M5) reads the real clipboard: the test that
       # puts text there and reads it back is ignored by default, because it
       # replaces the clipboard of whoever runs it. Linux needs a display.
+      # deny.toml leaves arboard's Windows backend (BSL-1.0) out of the
+      # license check because no Zajil build contains it; this proves it.
+      - name: arboard's Windows backend is in no build
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-msvc aarch64-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin; do
+            for manifest in Cargo.toml apps/desktop/src-tauri/Cargo.toml; do
+              for crate in clipboard-win error-code; do
+                found=$(cargo tree --locked --manifest-path "$manifest" --target "$target" -e all -i "$crate" 2>/dev/null || true)
+                if [ -n "$found" ]; then echo "$crate is built for $target ($manifest):"; echo "$found"; exit 1; fi
+              done
+            done
+          done
+          echo "clipboard-win and error-code: in no build"
       - name: The real clipboard
         shell: bash
         run: |

@@ -2496,6 +2496,7 @@ dependencies = [
  "dirs",
  "getrandom 0.4.3",
  "libc",
+ "objc2-app-kit",
  "thiserror",
  "windows-sys 0.61.2",
 ]

@@ -17,6 +17,9 @@ clap = { version = "4.6.7", features = ["derive"] }
 # The system clipboard on macOS and Linux, for clipboard monitoring (M5):
 # NSPasteboard, X11 or Wayland (data-control). No image support.
 arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
+# macOS: the pasteboard's change count, so it is read only after a copy
+# (clipboard monitoring, M5). Already under arboard.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"] }
 dirs = "7.0.0"
 getrandom = "0.4.3"
 http-body-util = { version = "0.1.5", features = ["channel"] }

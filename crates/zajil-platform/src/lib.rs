@@ -10,10 +10,12 @@
 //! [`native_host`].
 //!
 //! `unsafe` is denied everywhere except the small, commented system calls in
-//! [`fs`], [`console`] and, on Windows, [`power`] that the standard library
-//! does not offer (no-replace and write-through renames, hard-link counts,
-//! space reservation, sparse files, free space, files only their owner may
-//! read, the console mode, and shutting down or sleeping on Windows).
+//! [`fs`], [`console`] and, on Windows, [`power`], [`session`], [`ipc`],
+//! [`native_host`] and [`clipboard`] that the standard library does not
+//! offer (no-replace and write-through renames, hard-link counts, space
+//! reservation, sparse files, free space, files only their owner may read,
+//! the console mode, shutting down or sleeping, the end of the session,
+//! named pipes, the registry and the clipboard on Windows).
 
 #![deny(unsafe_code)]
 

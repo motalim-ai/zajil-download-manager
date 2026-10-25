@@ -166,3 +166,26 @@ fn a_link_in_place_of_the_file_is_refused_and_what_it_points_to_is_untouched() {
     );
     assert_eq!(fs::read(elsewhere.path()).unwrap(), target_before);
 }
+
+/// Clipboard monitoring (M5) is off by default, and in a file written
+/// before the field existed; turned on, it is kept.
+#[test]
+fn clipboard_monitoring_is_off_unless_turned_on() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(data.path());
+    assert!(!store.load().unwrap().clipboard);
+    store.update(|_| Ok(())).unwrap();
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    value.as_object_mut().unwrap().remove("clipboard");
+    value["checksum"] = checksum_of(&value).into();
+    fs::write(store.path(), value.to_string()).unwrap();
+    assert!(!store.load().unwrap().clipboard, "absent: off");
+    store
+        .update(|file| {
+            file.clipboard = true;
+            Ok(())
+        })
+        .unwrap();
+    assert!(store.load().unwrap().clipboard);
+}
