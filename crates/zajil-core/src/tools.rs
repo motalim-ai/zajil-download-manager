@@ -1,5 +1,6 @@
-//! The programs Zajil runs for video downloads (ADR-0009): yt-dlp, and our
-//! own LGPL build of ffmpeg and ffprobe.
+//! The programs Zajil runs for video downloads (ADR-0009): yt-dlp, our own
+//! LGPL build of ffmpeg and ffprobe, and QuickJS-NG for YouTube's
+//! JavaScript challenges (run only through `zajil-jsbox`, in a sandbox).
 //!
 //! None of them ships in the installer. Each is downloaded the first time
 //! the user downloads a video, after they agree, from the release named
@@ -25,6 +26,8 @@ pub enum Tool {
     YtDlp,
     Ffmpeg,
     Ffprobe,
+    /// QuickJS-NG's `qjs`, used when neither Deno nor Node is installed.
+    QuickJs,
 }
 
 impl std::fmt::Display for Tool {
@@ -33,12 +36,13 @@ impl std::fmt::Display for Tool {
             Tool::YtDlp => "yt-dlp",
             Tool::Ffmpeg => "ffmpeg",
             Tool::Ffprobe => "ffprobe",
+            Tool::QuickJs => "QuickJS-NG",
         })
     }
 }
 
 impl Tool {
-    pub const ALL: [Tool; 3] = [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe];
+    pub const ALL: [Tool; 4] = [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe, Tool::QuickJs];
 
     /// The name the program is saved under (with `.exe` on Windows). FFmpeg's
     /// files keep FFmpeg's own names (LGPL checklist, item 16).
@@ -47,6 +51,7 @@ impl Tool {
             Tool::YtDlp => "yt-dlp",
             Tool::Ffmpeg => "ffmpeg",
             Tool::Ffprobe => "ffprobe",
+            Tool::QuickJs => "qjs",
         };
         format!("{base}{}", target.exe_suffix())
     }
@@ -57,6 +62,7 @@ impl Tool {
         match self {
             Tool::YtDlp => "yt-dlp",
             Tool::Ffmpeg | Tool::Ffprobe => "ffmpeg",
+            Tool::QuickJs => "quickjs",
         }
     }
 }
@@ -78,6 +84,8 @@ pub struct Pinned {
 /// comes with a new Zajil release, after its tests pass (ADR-0009, section
 /// 7).
 const YT_DLP_PINS: &str = include_str!("../../../tools/yt-dlp/pins.txt");
+/// The pinned QuickJS-NG (`tools/quickjs/pins.txt`), in the same form.
+const QUICKJS_PINS: &str = include_str!("../../../tools/quickjs/pins.txt");
 
 /// A pins file: one version, and the file and SHA-256 of each target.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +181,12 @@ fn yt_dlp_pins() -> &'static PinsFile {
     PINS.get_or_init(|| parse_pins(YT_DLP_PINS).expect("tools/yt-dlp/pins.txt is valid"))
 }
 
+/// This build's QuickJS-NG pins (checked by a test, like yt-dlp's).
+fn quickjs_pins() -> &'static PinsFile {
+    static PINS: std::sync::OnceLock<PinsFile> = std::sync::OnceLock::new();
+    PINS.get_or_init(|| parse_pins(QUICKJS_PINS).expect("tools/quickjs/pins.txt is valid"))
+}
+
 /// The pinned version of yt-dlp.
 pub fn yt_dlp_version() -> &'static str {
     &yt_dlp_pins().version
@@ -192,17 +206,17 @@ fn target_name(target: Target) -> String {
     format!("{os}-{arch}")
 }
 
-/// The pinned yt-dlp file for `target`, if pins.txt has one.
-fn yt_dlp(target: Target) -> Option<Pinned> {
+/// The pinned file of `pins` for `target`, if it has one, from the GitHub
+/// releases of `repository`.
+fn from_pins(pins: &PinsFile, repository: &str, target: Target) -> Option<Pinned> {
     let wanted = target_name(target);
-    let pins = yt_dlp_pins();
     let version = &pins.version;
     pins.files
         .iter()
         .find(|(t, _, _)| *t == wanted)
         .map(|(_, file, sha256)| Pinned {
             version: version.clone(),
-            url: format!("https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{file}"),
+            url: format!("https://github.com/{repository}/releases/download/{version}/{file}"),
             sha256: sha256.clone(),
         })
 }
@@ -214,7 +228,8 @@ pub type Pins = dyn Fn(Tool, Target) -> Option<Pinned> + Send + Sync;
 /// The files pinned in this build of Zajil.
 pub fn pinned(tool: Tool, target: Target) -> Option<Pinned> {
     match tool {
-        Tool::YtDlp => yt_dlp(target),
+        Tool::YtDlp => from_pins(yt_dlp_pins(), "yt-dlp/yt-dlp", target),
+        Tool::QuickJs => from_pins(quickjs_pins(), "quickjs-ng/quickjs", target),
         // Pinned once the first tools-ffmpeg release is published by
         // .github/workflows/ffmpeg.yml.
         Tool::Ffmpeg | Tool::Ffprobe => None,
@@ -283,6 +298,11 @@ impl Toolbox {
             return Err(ToolError::InvalidPin(tool));
         }
         Ok((pin, target))
+    }
+
+    /// The pinned SHA-256 of `tool` for this system (lower-case hex).
+    pub fn sha256(&self, tool: Tool) -> Result<String, ToolError> {
+        Ok(self.pin(tool)?.0.sha256)
     }
 
     /// Where `tool` is, or would be, kept.
@@ -581,29 +601,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_target_has_a_pinned_yt_dlp_over_https() {
-        for os in [Os::Windows, Os::Macos, Os::Linux] {
-            for arch in [Arch::X86_64, Arch::Aarch64] {
-                let pin = yt_dlp(Target { os, arch }).expect("a pin for every target");
-                assert!(
-                    pin.url
-                        .starts_with("https://github.com/yt-dlp/yt-dlp/releases/download/")
-                );
-                assert_eq!(pin.sha256.len(), 64);
-                assert!(
-                    pin.sha256
-                        .bytes()
-                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-                );
-                assert_eq!(pin.version, yt_dlp_version());
+    fn every_target_has_a_pinned_yt_dlp_and_quickjs_over_https() {
+        for (tool, release) in [
+            (
+                Tool::YtDlp,
+                "https://github.com/yt-dlp/yt-dlp/releases/download/",
+            ),
+            (
+                Tool::QuickJs,
+                "https://github.com/quickjs-ng/quickjs/releases/download/v",
+            ),
+        ] {
+            for os in [Os::Windows, Os::Macos, Os::Linux] {
+                for arch in [Arch::X86_64, Arch::Aarch64] {
+                    let pin = pinned(tool, Target { os, arch }).expect("a pin for every target");
+                    assert!(pin.url.starts_with(release), "{}", pin.url);
+                    assert_eq!(pin.sha256.len(), 64);
+                    assert!(
+                        pin.sha256
+                            .bytes()
+                            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    );
+                }
             }
         }
+        assert_eq!(
+            pinned(
+                Tool::YtDlp,
+                Target {
+                    os: Os::Linux,
+                    arch: Arch::X86_64
+                }
+            )
+            .unwrap()
+            .version,
+            yt_dlp_version()
+        );
+        // No Windows arm64 build of QuickJS-NG: the x86_64 one, emulated.
+        let win = |arch| {
+            pinned(
+                Tool::QuickJs,
+                Target {
+                    os: Os::Windows,
+                    arch,
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(win(Arch::Aarch64), win(Arch::X86_64));
     }
 
     #[test]
-    fn this_build_s_pins_file_is_valid() {
-        let pins = parse_pins(YT_DLP_PINS).unwrap();
-        assert_eq!(pins.files.len(), KNOWN_TARGETS.len());
+    fn this_build_s_pins_files_are_valid() {
+        for text in [YT_DLP_PINS, QUICKJS_PINS] {
+            let pins = parse_pins(text).unwrap();
+            assert_eq!(pins.files.len(), KNOWN_TARGETS.len());
+        }
     }
 
     #[test]

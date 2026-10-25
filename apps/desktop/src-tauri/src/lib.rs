@@ -10,6 +10,7 @@
 
 mod closing;
 mod complete;
+mod dropbox;
 mod live;
 mod menu;
 mod schedule;
@@ -242,6 +243,11 @@ pub fn run() {
                 let app = tauri_app.state::<App>();
                 video::clean_leftovers(&app);
             }
+            tauri_app.add_capability(dropbox::CAPABILITY)?;
+            // The drop box, if the user left it shown.
+            if tauri_app.state::<closing::Closing>().prefs().drop_box {
+                let _ = dropbox::show(tauri_app.handle(), true);
+            }
             // The close button hides the window into the tray (`closing.rs`).
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
@@ -353,6 +359,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_probe_cancel,
         video::video_download,
         video::video_cancel,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -421,6 +429,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_probe_cancel,
         video::video_download,
         video::video_cancel,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -571,6 +581,7 @@ fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
     closing: State<'_, closing::Closing>,
     show: String,
+    drop_box: String,
     quit: String,
     notice_title: String,
     notice: String,
@@ -579,7 +590,7 @@ fn set_tray_texts<R: tauri::Runtime>(
         title: notice_title,
         body: notice,
     });
-    tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+    tray::set_texts(&handle, &show, &drop_box, &quit).map_err(|e| e.to_string())
 }
 
 /// Whether closing the main window quits Zajil (the settings), and whether
@@ -1471,7 +1482,7 @@ fn reach_file(engine: &Engine, url: &str) -> Result<zajil_core::Probe, String> {
 /// web page (a sign-in page a link redirected to, review of #70), or a file
 /// of another type than the name the browser had.
 fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option<String> {
-    if view::is_web_page(probe.content_type.as_deref()) {
+    if probe.is_page() {
         return Some("the server sent a web page (a sign-in page?), not the file".into());
     }
     let extension = |name: &str| {

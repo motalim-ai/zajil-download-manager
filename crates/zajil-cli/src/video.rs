@@ -69,6 +69,25 @@ fn about(tool: Tool) -> &'static str {
         Tool::Ffmpeg | Tool::Ffprobe => {
             "FFmpeg (ffmpeg and ffprobe), LGPL 2.1 or later, Zajil's build with its source, from github.com/motalim-ai/zajil-download-manager"
         }
+        Tool::QuickJs => {
+            "QuickJS-NG (qjs), MIT, for YouTube's JavaScript when neither Deno nor Node is installed, run in a sandbox, from github.com/quickjs-ng/quickjs"
+        }
+    }
+}
+
+/// Says so when QuickJS-NG ran without all of its sandbox on this system
+/// (owner's condition: it runs, and that is told).
+fn tell_sandbox(runner: &VideoRunner) {
+    if let Some(held) = runner.js_sandbox()
+        && !(held.programs && held.files && held.network)
+    {
+        let yes = |b: bool| if b { "yes" } else { "no" };
+        eprintln!(
+            "note: on this system QuickJS-NG ran with only part of its sandbox (other programs refused: {}; writing elsewhere refused: {}; network refused: {})",
+            yes(held.programs),
+            yes(held.files),
+            yes(held.network),
+        );
     }
 }
 
@@ -106,7 +125,9 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
                 Ok(runner) => runner,
                 Err(code) => return code,
             };
-            match runner.probe(&url, None, &stop_on_ctrl_c()).await {
+            let probed = runner.probe(&url, None, &stop_on_ctrl_c()).await;
+            tell_sandbox(&runner);
+            match probed {
                 Ok(Probed::Video(video)) => {
                     print_formats(&video);
                     ExitCode::SUCCESS
@@ -146,7 +167,9 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
                 Err(code) => return code,
             };
             let stop = stop_on_ctrl_c();
-            let found = match runner.probe(&url, None, &stop).await {
+            let probed = runner.probe(&url, None, &stop).await;
+            tell_sandbox(&runner);
+            let found = match probed {
                 Ok(Probed::Video(video)) => video,
                 Ok(Probed::Playlist { entries, .. }) => {
                     return crate::fail(&format!(
@@ -178,10 +201,11 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
                 name: &found.title,
             };
             let mut progress = Progress::new();
-            match runner
+            let downloaded = runner
                 .download(&request, &stop, &mut |event| progress.show(event))
-                .await
-            {
+                .await;
+            tell_sandbox(&runner);
+            match downloaded {
                 Ok(file) => {
                     progress.end();
                     println!("Saved {}", file.display());
@@ -202,13 +226,31 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
 async fn runner(tools_root: &Path, runs: Runs, engine: Engine) -> Result<VideoRunner, ExitCode> {
     let toolbox = Toolbox::new(tools_root);
     let checked = async {
-        for tool in Tool::ALL {
+        for tool in [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe] {
             toolbox.verified(tool).await?;
         }
-        Ok::<_, ToolError>(())
+        // QuickJS-NG only for YouTube: tools installed before it came still
+        // work without it.
+        let has_qjs = match toolbox.verified(Tool::QuickJs).await {
+            Ok(_) => true,
+            Err(ToolError::Missing(_)) => false,
+            Err(err) => return Err(err),
+        };
+        let js = tokio::task::spawn_blocking(move || {
+            let jsbox = std::env::current_exe()
+                .ok()
+                .and_then(|exe| zajil_core::video::jsbox_beside(&exe))
+                .filter(|_| has_qjs);
+            let path = std::env::var_os("PATH");
+            // The CLI has no settings: «استعمل QuickJS-NG دائمًا» is the app's.
+            zajil_core::video::find_js_runtime(path.as_deref(), jsbox, false)
+        })
+        .await
+        .map_err(std::io::Error::other)?;
+        Ok::<_, ToolError>(js)
     };
     match checked.await {
-        Ok(()) => Ok(VideoRunner::new(toolbox, runs, engine)),
+        Ok(js) => Ok(VideoRunner::new(toolbox, runs, engine).with_js(js)),
         Err(ToolError::Missing(_)) => Err(crate::fail(
             "the video tools are not downloaded yet: run `zajil video tools install`",
         )),

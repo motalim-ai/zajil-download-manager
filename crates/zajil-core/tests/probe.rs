@@ -116,3 +116,74 @@ async fn a_probe_is_given_up_when_stopped() {
     assert!(result.is_err(), "{result:?}");
     assert!(server.gets("/busy").len() < 10);
 }
+
+/// The owner's Google Drive link saved a page named «view» and said it was
+/// done: a web page is said to be one before it is downloaded (the
+/// interface warns), and a name without an extension takes its type's
+/// (`view` sent as `text/html` is `view.html`), at the probe and at the
+/// download alike. A file is not a page, and a name with an extension
+/// keeps it.
+#[tokio::test]
+async fn a_web_page_is_said_and_named_as_one() {
+    let server = TestServer::http();
+    server.put(
+        "/files/view",
+        FileSpec::new("<html><body>A page</body></html>").content_type("text/html; charset=utf-8"),
+    );
+    server.put(
+        "/files/page.xhtml.php",
+        FileSpec::new("<html/>").content_type("application/xhtml+xml"),
+    );
+    server.put(
+        "/files/report",
+        FileSpec::new(random_bytes(5000, 21)).content_type("application/pdf"),
+    );
+    server.put(
+        "/files/setup",
+        FileSpec::new(random_bytes(5000, 22)).content_type("application/x-msdownload"),
+    );
+    let engine = engine();
+    let dir = tempfile::tempdir().unwrap();
+
+    let probe = engine.probe(&server.url("/files/view")).await.unwrap();
+    assert!(probe.is_page());
+    assert_eq!(probe.content_type.as_deref(), Some("text/html"));
+    assert_eq!(probe.name, "view.html");
+    let page = engine
+        .download(&server.url("/files/view"), dir.path(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(page.file.file_name().unwrap(), "view.html");
+
+    let xhtml = engine
+        .probe(&server.url("/files/page.xhtml.php"))
+        .await
+        .unwrap();
+    assert!(xhtml.is_page());
+    assert_eq!(xhtml.name, "page.xhtml.php");
+
+    let report = engine.probe(&server.url("/files/report")).await.unwrap();
+    assert!(!report.is_page());
+    assert_eq!(report.name, "report.pdf");
+
+    // Never an extension that can run code from a server's `Content-Type`.
+    let setup = engine.probe(&server.url("/files/setup")).await.unwrap();
+    assert_eq!(setup.name, "setup");
+}
+
+/// A raw `Content-Type` is a web page in any case and with parameters, as
+/// the probe's own (review of the probe-page change).
+#[test]
+fn a_page_type_is_known_in_any_case_and_with_parameters() {
+    for page in [
+        "text/html",
+        "text/html; charset=utf-8",
+        "Text/HTML",
+        " application/XHTML+xml ;q=1",
+    ] {
+        assert!(zajil_core::is_page_type(page), "{page}");
+    }
+    for file in ["application/zip", "text/plain", "", "text/htmlx", "html"] {
+        assert!(!zajil_core::is_page_type(file), "{file}");
+    }
+}

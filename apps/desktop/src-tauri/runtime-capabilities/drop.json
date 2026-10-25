@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "drop",
+  "description": "Added from Rust when the app starts (dropbox.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the drop box may do: Zajil's own commands and events, and dragging itself to where the user wants it. Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "drop"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging"
+  ]
+}

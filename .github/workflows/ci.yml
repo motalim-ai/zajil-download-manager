@@ -197,8 +197,12 @@ jobs:
           chmod 755 "$t"/ffmpeg/ffmpeg* "$t"/ffmpeg/ffprobe* "$t"/testgen/ffmpeg-testgen* "$t"/testgen/ffprobe-testgen*
           ytdlp="$(bash scripts/get-yt-dlp.sh "$t/yt-dlp")"
           "$ytdlp" --version
+          qjs="$(bash scripts/get-qjs.sh "$t/quickjs")"
+          # qjs --help exits with 1 after printing its version.
+          { "$qjs" --help || true; } | head -n 1
           {
             echo "ZAJIL_TEST_YT_DLP=$ytdlp"
+            echo "ZAJIL_TEST_QJS=$qjs"
             echo "ZAJIL_TEST_FFMPEG_DIR=$t/ffmpeg"
             echo "ZAJIL_TEST_FFMPEG_TESTGEN=$t/testgen"
           } >> "$GITHUB_ENV"
@@ -257,6 +261,11 @@ jobs:
             exit 1
           fi
           echo "zajil-core/test-support is off in release builds"
+          # The QuickJS-NG box (ADR-0009) has no test-only feature at all:
+          # its one knob, a time limit, can only be shortened.
+          cargo metadata --locked --format-version 1 --no-deps \
+            | jq -e '.packages[] | select(.name == "zajil-jsbox") | .features == {}' \
+            || { echo "::error::zajil-jsbox has features"; exit 1; }
 
   desktop:
     name: Desktop app (${{ matrix.os }})
