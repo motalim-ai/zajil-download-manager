@@ -27,7 +27,21 @@
 //!
 //! [`Tree::wait`] returns once the first process has ended *and* the rest
 //! of the tree is gone (ended if needed), so the caller may then remove
-//! the run's folder knowing nothing writes there any more.
+//! the run's folder knowing nothing writes there any more. On macOS and
+//! Linux "gone" means no process of this user carries the run's token any
+//! more (one that left the process group, by `setsid` for instance, is
+//! found and ended that way too).
+//!
+//! **Process ids are never used once free.** On macOS and Linux the first
+//! process is reaped only after the rest of its group is ended: until then
+//! its zombie keeps the group's id ours, so a signal to the group never
+//! reaches another program's group that took the id. After the reap,
+//! [`Killer::kill`] sends nothing to the group. So the first process is
+//! not handed out: its pipes are ([`Tree::take_stdout`]…), and
+//! [`Tree::try_wait`] and [`Tree::wait`] reap it in that order.
+//!
+//! Everything here blocks (waits, process scans): async code calls it from
+//! a blocking task.
 
 use std::io;
 use std::process::{Child, Command, ExitStatus};
@@ -37,10 +51,14 @@ pub struct Tree {
     child: Child,
     imp: std::sync::Arc<imp::Group>,
     record: Record,
+    /// How the first process ended, once it is reaped: then nothing of the
+    /// tree is left, and its id is no longer ours.
+    status: Option<ExitStatus>,
 }
 
 /// Ends a [`Tree`] from another thread or task (a stopped download) while
-/// its owner reads its output. Ending a tree that already ended is fine.
+/// its owner reads its output. Ending a tree that already ended is fine,
+/// and reaches nothing else. Blocking.
 #[derive(Clone)]
 pub struct Killer(std::sync::Arc<imp::Group>);
 
@@ -93,18 +111,29 @@ pub fn spawn(mut command: Command) -> io::Result<Tree> {
         token: u64::from_le_bytes(bytes).max(1),
     };
     command.env(TOKEN_VAR, format!("{:016x}", record.token));
-    let (child, imp) = imp::spawn(command)?;
+    let (child, imp) = imp::spawn(command, record)?;
     Ok(Tree {
         child,
         imp: std::sync::Arc::new(imp),
         record,
+        status: None,
     })
 }
 
 impl Tree {
-    /// The first process, for its pipes.
-    pub fn child(&mut self) -> &mut Child {
-        &mut self.child
+    /// The first process's standard output, if it was piped (once).
+    pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.child.stdout.take()
+    }
+
+    /// The first process's standard error, if it was piped (once).
+    pub fn take_stderr(&mut self) -> Option<std::process::ChildStderr> {
+        self.child.stderr.take()
+    }
+
+    /// The first process's standard input, if it was piped (once).
+    pub fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.child.stdin.take()
     }
 
     /// Something that ends this tree from elsewhere.
@@ -117,22 +146,39 @@ impl Tree {
         self.record
     }
 
-    /// Ends every process of the tree now.
+    /// Ends every process of the tree now, and waits until they are gone.
     pub fn kill(&mut self) -> io::Result<()> {
+        if self.status.is_some() {
+            return Ok(());
+        }
         self.imp.kill()?;
-        // Reaps the first process; the others are gone with the group or
-        // job. An already reaped child is fine.
-        let _ = self.child.wait();
-        Ok(())
+        self.wait().map(|_| ())
     }
 
     /// Waits for the first process to end, then for the rest of the tree,
     /// ending whatever it left behind. Blocking.
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        if let Some(status) = self.status {
+            return Ok(status);
+        }
+        // Ended, but not reaped: its id stays ours while the rest is ended.
+        imp::wait_ended(&mut self.child)?;
+        self.imp.finish()?;
         let status = self.child.wait()?;
-        self.imp.kill()?;
-        self.imp.wait_empty()?;
+        self.status = Some(status);
         Ok(status)
+    }
+
+    /// Whether the first process has ended: if so, the rest of the tree is
+    /// ended as by [`Tree::wait`], and its status returned.
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.status {
+            return Ok(Some(status));
+        }
+        if !imp::has_ended(&mut self.child)? {
+            return Ok(None);
+        }
+        self.wait().map(Some)
     }
 }
 
@@ -161,29 +207,91 @@ mod imp {
 
     pub struct Group {
         pgid: libc::pid_t,
+        record: Record,
+        /// The first process was reaped: the group's id is no longer ours,
+        /// so nothing is sent to it any more. Held while a signal is sent,
+        /// and set before the reap.
+        reaped: std::sync::Mutex<bool>,
     }
 
     impl Group {
+        /// Ends the group, and every process that carries the run's token
+        /// (one that left the group too), until none is left.
         pub fn kill(&self) -> io::Result<()> {
-            // SAFETY: killpg only sends a signal to the group we created.
-            if unsafe { libc::killpg(self.pgid, libc::SIGKILL) } != 0 {
-                let err = io::Error::last_os_error();
-                if err.raw_os_error() != Some(libc::ESRCH) {
-                    return Err(err);
+            {
+                let reaped = self.reaped.lock().unwrap_or_else(|e| e.into_inner());
+                // SAFETY: killpg sends a signal to the group we created,
+                // whose leader is not reaped yet (`reaped` is held), so the
+                // id is still that group's.
+                if !*reaped && unsafe { libc::killpg(self.pgid, libc::SIGKILL) } != 0 {
+                    let err = io::Error::last_os_error();
+                    if err.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(err);
+                    }
                 }
             }
-            Ok(())
+            end_leftover(self.record)
         }
 
-        /// The group's processes were sent SIGKILL; they are reaped by
-        /// their parents (all in the group) or by init, so there is nothing
-        /// to wait for beyond the signal on macOS and Linux.
-        pub fn wait_empty(&self) -> io::Result<()> {
+        /// The first process has ended (not reaped): ends the rest, then
+        /// marks it reaped, so the caller may reap it.
+        pub fn finish(&self) -> io::Result<()> {
+            self.kill()?;
+            *self.reaped.lock().unwrap_or_else(|e| e.into_inner()) = true;
             Ok(())
         }
     }
 
-    pub fn spawn(mut command: Command) -> io::Result<(Child, Group)> {
+    /// Waits until `child` has ended, without reaping it.
+    pub fn wait_ended(child: &mut Child) -> io::Result<()> {
+        loop {
+            match waitid(child, 0) {
+                Ok(_) => return Ok(()),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    /// Whether `child` has ended, without reaping it.
+    pub fn has_ended(child: &mut Child) -> io::Result<bool> {
+        waitid(child, libc::WNOHANG)
+    }
+
+    /// `waitid` for `child`'s end, never reaping it (`WNOWAIT`). `true`
+    /// when it has ended.
+    fn waitid(child: &mut Child, flags: libc::c_int) -> io::Result<bool> {
+        // SAFETY: a zeroed siginfo_t is a valid buffer for waitid.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: waits for our own child (not reaped: the Tree reaps it
+        // only after this), into `info`.
+        let done = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id() as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT | flags,
+            )
+        };
+        if done != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // With WNOHANG and nothing ended, the pid stays 0.
+        Ok(pid_of(&info) != 0)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pid_of(info: &libc::siginfo_t) -> libc::pid_t {
+        // SAFETY: waitid filled the SIGCHLD fields, or left them zeroed.
+        unsafe { info.si_pid() }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn pid_of(info: &libc::siginfo_t) -> libc::pid_t {
+        info.si_pid
+    }
+
+    pub fn spawn(mut command: Command, record: Record) -> io::Result<(Child, Group)> {
         command.process_group(0);
         #[cfg(target_os = "linux")]
         // SAFETY: the closure runs in the child between fork and exec and
@@ -197,8 +305,10 @@ mod imp {
                 }
                 // Zajil may have died between fork and prctl: then nobody
                 // will send the signal, so do not start at all.
+                // (An error from a code: building a message would allocate,
+                // which is not safe between fork and exec.)
                 if libc::getppid() != parent {
-                    return Err(io::Error::other("Zajil ended while starting a tool"));
+                    return Err(io::Error::from_raw_os_error(libc::ESRCH));
                 }
                 Ok(())
             });
@@ -213,7 +323,14 @@ mod imp {
         }
         let child = spawner::spawn(command)?;
         let pgid = child.id() as libc::pid_t;
-        Ok((child, Group { pgid }))
+        Ok((
+            child,
+            Group {
+                pgid,
+                record,
+                reaped: std::sync::Mutex::new(false),
+            },
+        ))
     }
 
     /// The thread every tool starts from (see the module): on Linux the
@@ -339,9 +456,11 @@ mod imp {
         let needle = format!("\0{}\0", record.entry()).into_bytes();
         // SAFETY: getpid has no preconditions.
         let me = unsafe { libc::getpid() };
-        // A process may start another while we end it: look again until a
-        // pass finds none (a few passes at most).
-        for _ in 0..5 {
+        // A process may start another while we end it, and one that was
+        // sent SIGKILL may take a moment to go: look again until a pass
+        // finds none, for 5 seconds at most.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             let mut found = false;
             for pid in pids()? {
                 if pid == me || pid <= 1 {
@@ -362,9 +481,14 @@ mod imp {
             if !found {
                 return Ok(());
             }
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the tool's processes did not end within 5 seconds",
+                ));
+            }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        Ok(())
     }
 }
 
@@ -412,18 +536,26 @@ mod imp {
     }
 
     impl Group {
+        /// Ends every process of the job, and waits until they are gone
+        /// (they end asynchronously).
         pub fn kill(&self) -> io::Result<()> {
             // SAFETY: the job handle is ours and open.
             if unsafe { TerminateJobObject(self.job.0, 1) } == 0 {
                 return Err(io::Error::last_os_error());
             }
-            Ok(())
+            self.wait_empty()
+        }
+
+        /// The first process has ended: ends the rest of the job.
+        pub fn finish(&self) -> io::Result<()> {
+            self.kill()
         }
 
         /// Waits until no process is left in the job (they end
         /// asynchronously after TerminateJobObject).
-        pub fn wait_empty(&self) -> io::Result<()> {
+        fn wait_empty(&self) -> io::Result<()> {
             for _ in 0..500 {
+                // SAFETY: a plain C struct, valid when zeroed.
                 let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION =
                     unsafe { std::mem::zeroed() };
                 // SAFETY: the buffer is the size the call is told.
@@ -458,6 +590,7 @@ mod imp {
             return Err(io::Error::last_os_error());
         }
         let job = Handle(job);
+        // SAFETY: a plain C struct, valid when zeroed.
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: the buffer is the size the call is told.
@@ -514,7 +647,17 @@ mod imp {
         Ok(())
     }
 
-    pub fn spawn(mut command: Command) -> io::Result<(Child, Group)> {
+    /// Waits until `child` has ended. Its handle, held by `Child` until
+    /// the tree is dropped, keeps its id ours: nothing to keep apart.
+    pub fn wait_ended(child: &mut Child) -> io::Result<()> {
+        child.wait().map(|_| ())
+    }
+
+    pub fn has_ended(child: &mut Child) -> io::Result<bool> {
+        Ok(child.try_wait()?.is_some())
+    }
+
+    pub fn spawn(mut command: Command, _record: Record) -> io::Result<(Child, Group)> {
         let job = new_job()?;
         command.creation_flags(CREATE_SUSPENDED);
         let mut child = command.spawn()?;

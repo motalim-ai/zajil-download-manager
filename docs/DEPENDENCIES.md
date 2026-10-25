@@ -33,8 +33,8 @@
 | `ring` | 0.17.14 | Apache-2.0 و ISC | عبر `rustls` و`rcgen` | مزوّد التشفير. اخترناه بدل `aws-lc-rs` لأن ترخيص `aws-lc-sys` يتضمن رخصة OpenSSL غير المتوافقة مع GPL-3.0 | M1 |
 | `tokio-rustls` | 0.26.6 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | سيرفر HTTPS للاختبار | M1 |
 | `rcgen` | 0.14.10 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | ينشئ في كل تشغيل للاختبارات جهة إصدار (CA) مؤقتة في الذاكرة، ويوقّع بها شهادات السيرفر التجريبي (صالحة، ومنتهية)، وشهادة موقّعة ذاتيًا. **لا توجد أي شهادة أو مفتاح في المستودع**. بمزوّد `ring` فقط | M1 |
-| `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`). ومنذ M2: حجز المساحة (`fallocate` و`F_PREALLOCATE`)، والمساحة الحرة (`statvfs` و`statfs`) | M1 |
-| `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة. ومنذ M2 (الميزتان `Win32_System_IO` و`Win32_System_Ioctl`): الملف المتناثر (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`GetDiskFreeSpaceExW`) | M1 |
+| `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`). ومنذ M2: حجز المساحة (`fallocate` و`F_PREALLOCATE`)، والمساحة الحرة (`statvfs` و`statfs`). ومنذ M6: شجرة عمليات أداة الفيديو (`umask` و`kill` لمجموعة العمليات، و`PR_SET_PDEATHSIG` في لينكس، و`sysctl` و`proc_listallpids` في ماك لإيجاد عمليات الشجرة) | M1 |
+| `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة. ومنذ M2 (الميزتان `Win32_System_IO` و`Win32_System_Ioctl`): الملف المتناثر (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`GetDiskFreeSpaceExW`). ومنذ M6 (الميزتان `Win32_System_JobObjects` و`Win32_System_Diagnostics_ToolHelp`): شجرة عمليات أداة الفيديو في Job Object تنتهي بانتهاء زاجِل، وقائمة عمليات الشجرة | M1 |
 | `dunce` | 1.0.5 | CC0-1.0 أو MIT-0 أو Apache-2.0 | `zajil-core` | مسار مجلد التحميل الحقيقي دون بادئة `\\?\` في ويندوز حين لا تلزم، حتى تبقى المسارات المعروضة للمستخدم مقروءة | M1 |
 | `icu_properties` | 2.4.0 | Unicode-3.0 | `zajil-core` | بيانات يونيكود (Joining_Type وCanonical_Combining_Class) لقواعد ContextJ في RFC 5892: متى يبقى ZWNJ وZWJ في اسم الملف. موجودة أصلًا في البرنامج عبر `reqwest` ← `url` ← `idna`، فلا تضيف كودًا جديدًا إلى النسخة النهائية | M1 |
 | `thiserror` | 2.0.21 | MIT أو Apache-2.0 | كل المكتبات | تعريف أنواع الأخطاء | M1 |
@@ -48,6 +48,7 @@
 | `tauri-plugin-autostart` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | التشغيل مع بدء النظام (استثناء من ADR-0006 في تطبيق سطح المكتب): LaunchAgent في ماك، ومفتاح الريجستري في ويندوز، وملف autostart في لينكس | M4 |
 | `tauri-plugin-notification` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | إشعارات النظام عند اكتمال تحميل أو فشله (استثناء من ADR-0006 في تطبيق سطح المكتب، انظر ARCHITECTURE). **ثلاثة استثناءات في `deny.toml`** (RUSTSEC-2026-0370 و0371 و0372)، وهي «غير مصونة» لا ثغرات: `zbus_names` و`zvariant` و`zvariant_derive` دُمجت في `zbus` نفسها فلن تصدر لها نسخ، و`zbus` 5 (D-Bus في لينكس) ما زال يستخدمها عبر هذه الإضافة. ولا ترقية متاحة بعد | M4 |
 | `tauri-plugin-dialog` | 2.8.3 | Apache-2.0 أو MIT | `zajil-desktop` | نوافذ الفتح والحفظ التي يعرضها النظام نفسه: اختيار مجلد التحميل، وملف الاستيراد والتصدير. الصفحة لا تقرأ ولا تكتب ملفات بنفسها، بل تمرر المسار المختار إلى أوامر زاجِل | M4 |
+| `tauri-plugin-opener` | 2.7.0 | Apache-2.0 أو MIT | `zajil-desktop` | «فتح» التحميل المكتمل بالبرنامج الافتراضي و«فتح المجلد» مع تحديد الملف (M5.5). يستدعيه Rust وحده على مسار التحميل نفسه؛ الصفحة لا تملك صلاحيات هذه الإضافة. ومعه `open` و`is-wsl` و`is-docker` (MIT) | M5.5 |
 | `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 
@@ -67,7 +68,7 @@
 
 | الأداة | الترخيص | ملاحظات | الحالة |
 |---|---|---|---|
-| ffmpeg | LGPL أو GPL حسب طريقة البناء | **تُراجع قبل M6** | لم تُعتمد |
+| ffmpeg وffprobe | LGPL 2.1 أو أحدث (بناؤنا من المصدر الرسمي، بلا `--enable-gpl` ولا `--enable-nonfree` ولا أي مكتبة خارجية) | يُبنيان في الـ CI من المصدر الرسمي الموقّع (`tools/ffmpeg`)، ويُنشران مع مصدرهما في إصدار `tools-ffmpeg-*` من هذا المستودع ([ADR-0009](adr/0009-video-tools.md)). وسينزّلهما زاجِل عند أول تحميل فيديو بموافقة المستخدم (في PR أدوات الفيديو) | معتمدة (M6) |
 | yt-dlp | Unlicense (يحتاج تحقق عند المراجعة) | **تُراجع قبل M6، مع شروط استخدام المواقع** | لم تُعتمد |
 
 ## الخطوط والأيقونات والصور
@@ -84,6 +85,11 @@
 | actions/checkout (v7.0.1) | MIT | سحب الكود في الـ CI |
 | Swatinem/rust-cache (v2.9.3) | LGPL-3.0 | تخزين مؤقت لبناء Rust في الـ CI |
 | EmbarkStudios/cargo-deny-action (v2.1.1) | Apache-2.0 | تشغيل cargo-deny في الـ CI |
+| actions/upload-artifact (v7.0.2) وactions/download-artifact (v8.0.2) | MIT | نقل الملفات بين مهام الـ CI (بناء FFmpeg، M6) |
+| actions/cache (v6.1.0) | MIT | تخزين `ffmpeg-testgen` المؤقت في الـ CI (M6) |
+| msys2/setup-msys2 (v2.33.0) | MIT | بيئة بناء FFmpeg في ويندوز (M6) |
+| GnuPG | GPL-3.0 أو أحدث | التحقق من توقيع مصدر FFmpeg في الـ CI (موجود على أجهزة الـ CI) |
+| مُترجما FFmpeg في ويندوز (MSYS2: gcc لـ x64، وclang لـ arm64) | GPL-3.0 مع استثناء مكتبات التشغيل (libgcc)، وApache-2.0 مع استثناء LLVM (compiler-rt)، والملكية العامة/ZPL لكود بدء التشغيل في MinGW-w64 | الربط الثابت يضع في `ffmpeg.exe` كود بدء التشغيل وlibgcc (x64) أو compiler-rt (arm64). والاستثناءات تعفي الملف الناتج من شروط تلك التراخيص ومن إلزام نشر إشعاراتها. أما winpthreads (ترخيصها يطلب إشعارًا) فلا تدخل: `build.sh` يفرض خيوط ويندوز (`HAVE_W32THREADS 1` و`HAVE_PTHREADS 0`) |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>
@@ -100,6 +106,7 @@
 | `@fluent/bundle` | 0.19.1 | Apache-2.0 | نعم | تنسيق رسائل Fluent في الواجهة، مع الدالة `PLURAL` |
 | `@tauri-apps/api` | 2.12.4 | Apache-2.0 أو MIT | نعم | أوامر المحرّك وأحداثه، وعنوان النافذة |
 | `@fontsource/ibm-plex-sans-arabic` | 5.3.0 | OFL-1.1 (الخط)، MIT (الحزمة) | نعم (ملفات الخط) | خط الواجهة داخل البرنامج، لا يُحمَّل من الإنترنت |
+| أيقونات Lucide (`lucide-static` 1.61.0) | 1.61.0 | ISC، وما جاء منها من Feather بترخيص MIT | نعم (منسوخة في `src/lib/lucide.ts`) | أيقونات تصميم M5.5 (#83). **ليست حزمة npm**: 41 أيقونة منسوخة كما هي، ونص ترخيص الحزمة في رأس الملف وفي `public/lucide-LICENSE.txt`، الذي يُنسخ كما هو إلى البناء فيصل مع البرنامج (مراجعة #96: تعليق الترخيص وحده يحذفه البناء). تُضاف الأيقونات بنسخها من الحزمة نفسها لا من مكان آخر |
 | `vite` | 8.3.5 | MIT | لا (بناء) | بناء الواجهة |
 | `@sveltejs/vite-plugin-svelte` | 7.3.1 | MIT | لا | ربط Svelte بـ Vite |
 | `typescript` | 6.0.3 | Apache-2.0 | لا | الأنواع (الإصدار 7 لا يدعمه `svelte-check` بعد) |

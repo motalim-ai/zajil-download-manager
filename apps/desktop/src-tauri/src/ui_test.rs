@@ -46,15 +46,27 @@ impl UiTest {
 /// Fits the window inside the screen's work area (without the taskbar or
 /// the Dock): the 1024 x 768 screens of the CI machines are smaller than
 /// the window, and a capture would take the taskbar over the footer
-/// (review of #47, Windows).
-pub fn fit_to_screen(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+/// (review of #47, Windows). `wanted`: the inner size in logical pixels to
+/// give it first (an add window's scene); it is not read back, since the
+/// resize is not done at once on Linux and Windows (review of #104).
+pub fn fit_to_screen(
+    window: &tauri::WebviewWindow,
+    wanted: Option<(f64, f64)>,
+) -> tauri::Result<()> {
     let Some(monitor) = window.current_monitor()? else {
         return Ok(());
     };
     let area = *monitor.work_area();
-    let (outer, inner) = (window.outer_size()?, window.inner_size()?);
-    let frame_w = outer.width.saturating_sub(inner.width);
-    let frame_h = outer.height.saturating_sub(inner.height);
+    let (outer, mut inner) = (window.outer_size()?, window.inner_size()?);
+    let frame = (
+        outer.width.saturating_sub(inner.width),
+        outer.height.saturating_sub(inner.height),
+    );
+    if let Some((width, height)) = wanted {
+        window.set_min_size(None::<tauri::LogicalSize<f64>>)?;
+        inner = tauri::LogicalSize::new(width, height).to_physical(window.scale_factor()?);
+    }
+    let (frame_w, frame_h) = frame;
     let width = inner.width.min(area.size.width.saturating_sub(frame_w));
     let height = inner.height.min(area.size.height.saturating_sub(frame_h));
     window.set_size(tauri::PhysicalSize::new(width, height))?;
