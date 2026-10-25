@@ -175,6 +175,34 @@ pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
     imp::only_user_or_root_can_change(path)
 }
 
+/// Makes `dir` a folder that no other user can change, creating it (and
+/// its missing parents) if needed: mode `0700` on macOS and Linux; on
+/// Windows the access list the folder inherits from the user's own data
+/// folder. An existing `dir` must already be one (checked with
+/// [`only_user_or_root_can_change`], never through a link). For the video
+/// tools, which Zajil runs (ADR-0009), and the folders of each run.
+pub fn private_dir(dir: &Path) -> io::Result<()> {
+    imp::create_private_dir(dir)?;
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.is_dir() || !only_user_or_root_can_change(dir)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{} is not a folder only this user can change (it must be a folder, not a link)",
+                dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Lets the owner run `file` (mode `0700` on macOS and Linux; nothing to do
+/// on Windows, where a `.exe` runs by its name). For a tool Zajil checked
+/// before saving it (ADR-0009).
+pub fn make_executable(file: &File) -> io::Result<()> {
+    imp::make_executable(file)
+}
+
 /// Creates a symbolic link `link` pointing to the file `target`. Used by
 /// tests that check symbolic links are refused. On Windows this needs
 /// Developer Mode or administrator rights.
@@ -298,6 +326,22 @@ mod imp {
 
     pub fn is_transient(_err: &io::Error) -> bool {
         false
+    }
+
+    pub fn create_private_dir(dir: &Path) -> io::Result<()> {
+        use std::os::unix::fs::DirBuilderExt;
+        if let Some(parent) = dir.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+            Err(err) if err.kind() != io::ErrorKind::AlreadyExists => Err(err),
+            _ => Ok(()),
+        }
+    }
+
+    pub fn make_executable(file: &File) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o700))
     }
 
     pub fn open_regular_nofollow(path: &Path, write: bool) -> io::Result<File> {
@@ -674,6 +718,15 @@ mod imp {
 
     pub fn sync_dir(dir: &Path) -> io::Result<()> {
         std::fs::metadata(dir).map(|_| ())
+    }
+
+    pub fn create_private_dir(dir: &Path) -> io::Result<()> {
+        // The access list comes from the parent: the user's own data folder.
+        std::fs::create_dir_all(dir)
+    }
+
+    pub fn make_executable(_file: &File) -> io::Result<()> {
+        Ok(())
     }
 
     pub fn replace_file(from: &Path, to: &Path) -> io::Result<()> {

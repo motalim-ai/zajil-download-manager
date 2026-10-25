@@ -8,6 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+getrandom.workspace = true
 percent-encoding.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

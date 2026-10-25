@@ -30,5 +30,6 @@ mod paths;
 pub mod power;
 pub mod session;
 pub mod shell;
+pub mod target;
 
 pub use paths::{AppPaths, PathsError, SystemPaths, linux, macos, windows};

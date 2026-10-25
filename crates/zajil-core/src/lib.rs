@@ -18,6 +18,7 @@ pub mod sanitize;
 mod segmented;
 pub mod settings;
 pub mod state;
+pub mod tools;
 
 pub use browser::FromBrowser;
 pub use engine::{Engine, Error, Event, Finished, Mismatch, Options, Probe, RestartReason, Stop};
