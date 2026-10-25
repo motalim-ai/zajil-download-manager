@@ -713,6 +713,11 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A version, a column's name and the app's name: no number to count.
+    ("about-text", &["version"]),
+    ("col-resize", &["column"]),
+    ("sys-hide", &["app"]),
+    ("open-code-question", &["name"]),
     // The engine's own words (English), and two sizes formatted beforehand.
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
@@ -883,6 +888,32 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "st-error",
         ar: (&[("code", "CODE")], "خطأ CODE"),
         en: (&[("code", "CODE")], "Error CODE"),
+    },
+    Whole {
+        key: "about-text",
+        ar: (&[("version", "VERSION")], "زاجِل، الإصدار VERSION"),
+        en: (&[("version", "VERSION")], "Zajil, version VERSION"),
+    },
+    Whole {
+        key: "col-resize",
+        ar: (&[("column", "COLUMN")], "عرض عمود COLUMN"),
+        en: (&[("column", "COLUMN")], "COLUMN column width"),
+    },
+    Whole {
+        key: "open-code-question",
+        ar: (
+            &[("name", "NAME")],
+            "«NAME» برنامج أو ملف يمكنه تشغيل أوامر على جهازك. هل تفتحه؟",
+        ),
+        en: (
+            &[("name", "NAME")],
+            "“NAME” is a program, or a file that can run commands on your computer. Open it?",
+        ),
+    },
+    Whole {
+        key: "sys-hide",
+        ar: (&[("app", "APP")], "إخفاء APP"),
+        en: (&[("app", "APP")], "Hide APP"),
     },
     Whole {
         key: "footer-selected",
