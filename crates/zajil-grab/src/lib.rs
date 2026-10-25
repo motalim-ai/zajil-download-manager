@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod crawl;
 pub mod links;
 pub mod local;
 pub mod pattern;

@@ -165,11 +165,15 @@ impl Scope {
 
     /// Whether `url` may be requested, as a page (`as_page`) or as a file.
     /// `redirected_from` is the URL that redirected to it, if any.
+    /// `any_origin_file`: a file that may be on another origin without
+    /// `--files-anywhere`: the target of a page's redirect (owner's decision
+    /// 3 on ADR-0010: downloads through a CDN work) and robots.txt.
     pub fn check(
         &self,
         url: &Url,
         as_page: bool,
         redirected_from: Option<&Url>,
+        any_origin_file: bool,
     ) -> Result<Place, Refusal> {
         if redirected_from.is_some_and(|from| from.scheme() == "https") && url.scheme() != "https" {
             return Err(Refusal::Downgrade);
@@ -183,7 +187,7 @@ impl Scope {
         }
         if inside {
             Ok(Place::Site)
-        } else if !as_page && self.files_anywhere {
+        } else if !as_page && (self.files_anywhere || any_origin_file) {
             Ok(Place::FileElsewhere)
         } else {
             Err(Refusal::OtherSite)
@@ -226,11 +230,11 @@ mod tests {
     fn the_site_is_the_start_origin() {
         let s = scope("https://Example.com/start/", &[], false);
         assert_eq!(
-            s.check(&url("https://example.com/x.zip"), true, None),
+            s.check(&url("https://example.com/x.zip"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("https://example.com:443/x"), true, None),
+            s.check(&url("https://example.com:443/x"), true, None, false),
             Ok(Place::Site)
         );
         for other in [
@@ -240,12 +244,12 @@ mod tests {
             "https://cdn.test/x.zip",
         ] {
             assert_eq!(
-                s.check(&url(other), true, None),
+                s.check(&url(other), true, None, false),
                 Err(Refusal::OtherSite),
                 "{other}"
             );
             assert_eq!(
-                s.check(&url(other), false, None),
+                s.check(&url(other), false, None, false),
                 Err(Refusal::OtherSite),
                 "{other}"
             );
@@ -258,16 +262,16 @@ mod tests {
     fn http_start_includes_its_https_twin() {
         let s = scope("http://example.com/", &[], false);
         assert_eq!(
-            s.check(&url("https://example.com/a"), true, None),
+            s.check(&url("https://example.com/a"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("https://example.com:8443/a"), true, None),
+            s.check(&url("https://example.com:8443/a"), true, None, false),
             Err(Refusal::OtherSite)
         );
         let s = scope("https://example.com/", &[], false);
         assert_eq!(
-            s.check(&url("http://example.com/a"), true, None),
+            s.check(&url("http://example.com/a"), true, None, false),
             Err(Refusal::OtherSite)
         );
     }
@@ -280,23 +284,23 @@ mod tests {
             false,
         );
         assert_eq!(
-            s.check(&url("https://www.example.com/p"), true, None),
+            s.check(&url("https://www.example.com/p"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("http://www.example.com/p"), true, None),
+            s.check(&url("http://www.example.com/p"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("https://www.example.com:444/p"), true, None),
+            s.check(&url("https://www.example.com:444/p"), true, None, false),
             Err(Refusal::OtherSite)
         );
         assert_eq!(
-            s.check(&url("http://cdn.test:8080/p"), true, None),
+            s.check(&url("http://cdn.test:8080/p"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("http://cdn.test/p"), true, None),
+            s.check(&url("http://cdn.test/p"), true, None, false),
             Err(Refusal::OtherSite)
         );
     }
@@ -323,11 +327,11 @@ mod tests {
     fn files_anywhere_allows_files_only() {
         let s = scope("https://example.com/", &[], true);
         assert_eq!(
-            s.check(&url("https://cdn.test/a.zip"), false, None),
+            s.check(&url("https://cdn.test/a.zip"), false, None, false),
             Ok(Place::FileElsewhere)
         );
         assert_eq!(
-            s.check(&url("https://cdn.test/page"), true, None),
+            s.check(&url("https://cdn.test/page"), true, None, false),
             Err(Refusal::OtherSite)
         );
     }
@@ -347,7 +351,7 @@ mod tests {
             "http://169.254.169.254/latest",
         ] {
             assert_eq!(
-                s.check(&url(local), false, None),
+                s.check(&url(local), false, None, false),
                 Err(Refusal::LocalAddress),
                 "{local}"
             );
@@ -360,15 +364,15 @@ mod tests {
     fn the_local_exception_is_the_site_or_a_named_host() {
         let s = scope("http://192.168.1.10/", &["192.168.1.20:8080"], true);
         assert_eq!(
-            s.check(&url("http://192.168.1.10/a.zip"), true, None),
+            s.check(&url("http://192.168.1.10/a.zip"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("https://192.168.1.10/a.zip"), true, None),
+            s.check(&url("https://192.168.1.10/a.zip"), true, None, false),
             Ok(Place::Site)
         );
         assert_eq!(
-            s.check(&url("http://192.168.1.20:8080/a"), true, None),
+            s.check(&url("http://192.168.1.20:8080/a"), true, None, false),
             Ok(Place::Site)
         );
         for refused in [
@@ -377,7 +381,7 @@ mod tests {
             "http://192.168.1.20/x.zip",
         ] {
             assert_eq!(
-                s.check(&url(refused), false, None),
+                s.check(&url(refused), false, None, false),
                 Err(Refusal::LocalAddress),
                 "{refused}"
             );
@@ -389,11 +393,11 @@ mod tests {
         let s = scope("http://example.com/", &[], true);
         let from = url("https://example.com/a");
         assert_eq!(
-            s.check(&url("http://example.com/b"), true, Some(&from)),
+            s.check(&url("http://example.com/b"), true, Some(&from), false),
             Err(Refusal::Downgrade)
         );
         assert_eq!(
-            s.check(&url("https://example.com/b"), true, Some(&from)),
+            s.check(&url("https://example.com/b"), true, Some(&from), false),
             Ok(Place::Site)
         );
     }
@@ -402,18 +406,26 @@ mod tests {
     fn path_traps_are_refused() {
         let s = scope("https://example.com/", &[], false);
         assert_eq!(
-            s.check(&url("https://example.com/a/b/a/b/a/b/a/b"), true, None),
+            s.check(
+                &url("https://example.com/a/b/a/b/a/b/a/b"),
+                true,
+                None,
+                false
+            ),
             Err(Refusal::PathTrap)
         );
         assert_eq!(
-            s.check(&url("https://example.com/a/b/a/b/a/b"), true, None),
+            s.check(&url("https://example.com/a/b/a/b/a/b"), true, None, false),
             Ok(Place::Site)
         );
         let deep = format!(
             "https://example.com/{}",
             (0..33).map(|i| format!("d{i}/")).collect::<String>()
         );
-        assert_eq!(s.check(&url(&deep), true, None), Err(Refusal::PathTrap));
+        assert_eq!(
+            s.check(&url(&deep), true, None, false),
+            Err(Refusal::PathTrap)
+        );
     }
 
     #[test]

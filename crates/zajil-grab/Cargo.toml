@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 html5ever.workspace = true
+tokio.workspace = true
 zajil-core.workspace = true
 
 [features]
@@ -21,4 +22,3 @@ test-support = ["zajil-core/test-support"]
 zajil-grab = { path = ".", features = ["test-support"] }
 zajil-testserver.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
