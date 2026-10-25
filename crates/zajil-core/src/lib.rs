@@ -19,6 +19,7 @@ mod segmented;
 pub mod settings;
 pub mod state;
 pub mod tools;
+pub mod video;
 
 pub use browser::FromBrowser;
 pub use engine::{Engine, Error, Event, Finished, Mismatch, Options, Probe, RestartReason, Stop};

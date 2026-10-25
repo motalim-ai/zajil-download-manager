@@ -27,6 +27,15 @@ zajil-platform.workspace = true
 # by the dev-dependency below; never by a shipped binary (checked in CI).
 test-support = []
 
+# A stand-in for yt-dlp for the tests of `video` (tests/video.rs). Built
+# only with test-support, which no shipped binary enables (checked in CI).
+[[bin]]
+name = "fake-yt-dlp"
+path = "tests/support/fake_yt_dlp.rs"
+required-features = ["test-support"]
+test = false
+doctest = false
+
 [dev-dependencies]
 zajil-core = { path = ".", features = ["test-support"] }
 zajil-testserver.workspace = true
