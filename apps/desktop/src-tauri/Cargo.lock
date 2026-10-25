@@ -6000,7 +6000,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dunce",
  "icu_properties",
@@ -6043,7 +6043,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6054,7 +6054,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "fluent-bundle",
  "icu_locale_core",
@@ -6064,7 +6064,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "dirs 7.0.0",
@@ -6077,7 +6077,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-testserver"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "http-body-util",
