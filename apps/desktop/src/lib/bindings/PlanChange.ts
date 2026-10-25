@@ -3,4 +3,13 @@
 /**
  * What the window saves for a queue.
  */
-export type PlanChange = { max_active: number, start: string | null, stop: string | null, days: Array<string>, };
+export type PlanChange = { max_active: number, start: string | null, stop: string | null, days: Array<string>, 
+/**
+ * Tries for each download, 1 to `MAX_TRIES` (#142).
+ */
+max_tries: number, 
+/**
+ * The file or program to open when the queue is done (#142): chosen
+ * in the system's picker and confirmed by the user in the window.
+ */
+after_open: string | null, };

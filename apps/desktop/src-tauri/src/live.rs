@@ -123,7 +123,9 @@ impl Live {
                 inner.urgent = true;
             }
             // The app decides, once it has asked the browser.
-            QueueEvent::Waiting { .. } | QueueEvent::NeedsBrowser { .. } => {}
+            QueueEvent::Waiting { .. }
+            | QueueEvent::NeedsBrowser { .. }
+            | QueueEvent::QueueDone { .. } => {}
         }
     }
 

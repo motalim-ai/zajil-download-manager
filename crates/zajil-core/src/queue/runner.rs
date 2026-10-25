@@ -55,6 +55,11 @@ pub enum QueueEvent {
     Stopped {
         item: u64,
     },
+    /// Every download of `queue` is done, the last of them in this run
+    /// (#142): said once, until the queue has work again.
+    QueueDone {
+        queue: String,
+    },
     /// `queue` has downloads but is outside its window until `until`
     /// (local time).
     Waiting {
@@ -112,7 +117,14 @@ pub struct Runner {
     /// The browser's headers of downloads the extension sent, by item
     /// (M5): in memory only, gone when the download finishes.
     from_browser: Option<FromBrowserById>,
+    /// Queues started now, outside their window (#125).
+    run_now: Option<RunNow>,
 }
+
+/// Queues the user started now (#125, «Start now»): each runs as if its
+/// window were open until it has nothing waiting or running; its saved
+/// schedule does not change. Shared with the interface, in memory only.
+pub type RunNow = Arc<std::sync::Mutex<HashSet<String>>>;
 
 /// The browser's headers (cookies, page) of each download the extension
 /// sent, by item id: kept in memory only (owner's decision on #7).
@@ -147,7 +159,15 @@ impl Runner {
             categories: None,
             connections: None,
             from_browser: None,
+            run_now: None,
         }
+    }
+
+    /// A queue in `queues` runs as if its window were open, until it has
+    /// nothing waiting or running, when it leaves the set (#125).
+    pub fn run_now(mut self, queues: RunNow) -> Self {
+        self.run_now = Some(queues);
+        self
     }
 
     /// Each download whose item is in `headers` sends them (the browser's
@@ -236,6 +256,8 @@ impl Runner {
         let mut announced: HashMap<String, Timestamp> = HashMap::new();
         // Items whose download finished in this run.
         let mut finished_now: HashSet<u64> = HashSet::new();
+        // Queues said to be done (#142), until they have work again.
+        let mut done_said: HashSet<String> = HashSet::new();
         loop {
             if look {
                 look = false;
@@ -288,6 +310,22 @@ impl Runner {
                             run.by_runner = true;
                             run.stop.request();
                         }
+                    }
+                }
+                for queue in &queues.queues {
+                    let all_done = !queue.items.is_empty()
+                        && queue
+                            .items
+                            .iter()
+                            .all(|i| i.status == Status::Done && !running.contains_key(&i.id));
+                    if !all_done {
+                        done_said.remove(&queue.name);
+                    } else if queue.items.iter().any(|i| finished_now.contains(&i.id))
+                        && done_said.insert(queue.name.clone())
+                    {
+                        on_event(QueueEvent::QueueDone {
+                            queue: queue.name.clone(),
+                        });
                     }
                 }
                 let windows = self.windows(&queues, &mut announced, on_event);
@@ -368,6 +406,20 @@ impl Runner {
                 .iter()
                 .any(|i| matches!(i.status, Status::Waiting | Status::Active));
             if !has_work {
+                announced.remove(&queue.name);
+                if let Some(set) = &self.run_now {
+                    set.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&queue.name);
+                }
+                continue;
+            }
+            let started_now = self.run_now.as_ref().is_some_and(|set| {
+                set.lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&queue.name)
+            });
+            if started_now {
                 announced.remove(&queue.name);
                 continue;
             }
@@ -744,6 +796,14 @@ impl Runner {
         }
         ignore_removed(
             self.update(move |queues| {
+                // Its queue's tries for each download (#142).
+                let max_tries = queues
+                    .queues
+                    .iter()
+                    .find(|q| q.items.iter().any(|i| i.id == id))
+                    .and_then(|q| q.max_tries)
+                    .unwrap_or(1);
+                let mut again = false;
                 let item = queues.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
                 // A private window's download, done: nothing of it stays in
                 // the queues, only its file (security review #84).
@@ -757,6 +817,7 @@ impl Runner {
                         item.file = Some(done.file);
                         item.state_file = None;
                         item.error = None;
+                        item.failed_tries = 0;
                         // Where it came from is no longer needed.
                         item.browser = None;
                     }
@@ -777,7 +838,6 @@ impl Runner {
                         item.error = None;
                     }
                     Err(err) => {
-                        item.status = Status::Failed;
                         match &err {
                             Error::Interrupted { state_file, .. } => {
                                 item.state_file = Some(state_file.clone());
@@ -787,7 +847,26 @@ impl Runner {
                             _ => {}
                         }
                         item.error = Some(err.to_string());
+                        // With tries left in its queue, it waits again at
+                        // the end of the queue (#142); else it failed.
+                        item.failed_tries = item.failed_tries.saturating_add(1);
+                        again = item.failed_tries < max_tries;
+                        item.status = if again {
+                            Status::Waiting
+                        } else {
+                            Status::Failed
+                        };
                     }
+                }
+                if again
+                    && let Some(queue) = queues
+                        .queues
+                        .iter_mut()
+                        .find(|q| q.items.iter().any(|i| i.id == id))
+                    && let Some(at) = queue.items.iter().position(|i| i.id == id)
+                {
+                    let item = queue.items.remove(at);
+                    queue.items.push(item);
                 }
                 Ok(())
             })

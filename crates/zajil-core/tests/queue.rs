@@ -62,7 +62,8 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             | QueueEvent::Stopped { .. } => now -= 1,
             QueueEvent::Download { .. }
             | QueueEvent::Waiting { .. }
-            | QueueEvent::NeedsBrowser { .. } => {}
+            | QueueEvent::NeedsBrowser { .. }
+            | QueueEvent::QueueDone { .. } => {}
         })
         .await
         .unwrap();
@@ -1090,4 +1091,80 @@ async fn a_private_window_s_download_that_fails_or_is_taken_out_leaves_nothing()
     files.sort();
     assert_eq!(files, [dir.path().join("kept.bin.zajil-part"), state]);
     assert!(store.load().unwrap().item(id).is_none());
+}
+
+/// #142: a download that fails, in a queue with tries left, waits again
+/// at the end of its queue (the others go first), until its tries run out;
+/// then it failed. Without a number of its own, one try, as before.
+#[tokio::test]
+async fn a_failed_download_tries_again_at_the_end_of_its_queue() {
+    let server = TestServer::http();
+    server.put("/ok.bin", FileSpec::new(random_bytes(10_000, 401)));
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    set_max_active(&store, "main", 1);
+    // Nothing is served there: the server answers 404.
+    let gone = add(&store, "main", &server.url("/gone.bin"), downloads.path());
+    let ok = add(&store, "main", &server.url("/ok.bin"), downloads.path());
+    store
+        .update(|q| {
+            q.queue_mut("main").unwrap().max_tries = Some(3);
+            Ok(())
+        })
+        .unwrap();
+
+    let mut order = Vec::new();
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            if let QueueEvent::Started { item, .. } | QueueEvent::Failed { item, .. } = &event {
+                order.push((matches!(event, QueueEvent::Started { .. }), *item));
+            }
+        })
+        .await
+        .unwrap();
+
+    // Tried, failed, and the other one went first.
+    assert_eq!(
+        order[..3],
+        [(true, gone), (false, gone), (true, ok)],
+        "{order:?}"
+    );
+    let queues = store.load().unwrap();
+    let item = queues.item(gone).unwrap();
+    assert_eq!(item.status, Status::Failed);
+    assert_eq!(item.failed_tries, 3);
+    assert_eq!(order.iter().filter(|(s, i)| *s && *i == gone).count(), 3);
+    assert_eq!(queues.item(ok).unwrap().status, Status::Done);
+    assert_eq!(queues.item(ok).unwrap().failed_tries, 0);
+
+    // Without a number of its own: one try.
+    let once = add(&store, "other", &server.url("/gone.bin"), downloads.path());
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(once).unwrap().clone();
+    assert_eq!((item.status, item.failed_tries), (Status::Failed, 1));
+}
+
+/// #142: a queue whose downloads are all done, the last of them in this
+/// run, is said to be done once; a queue with one failed is not.
+#[tokio::test]
+async fn a_queue_is_said_done_once_when_all_of_it_is_done() {
+    let server = TestServer::http();
+    server.put("/a.bin", FileSpec::new(random_bytes(10_000, 402)));
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    add(&store, "main", &server.url("/a.bin"), downloads.path());
+    add(&store, "main", &server.url("/a.bin"), downloads.path());
+    add(&store, "broken", &server.url("/gone.bin"), downloads.path());
+    let mut done = Vec::new();
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            if let QueueEvent::QueueDone { queue } = event {
+                done.push(queue);
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(done, ["main"]);
 }

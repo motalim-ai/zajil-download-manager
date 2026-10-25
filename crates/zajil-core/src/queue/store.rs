@@ -34,6 +34,8 @@ pub const DEFAULT_QUEUE: &str = "main";
 pub const DEFAULT_MAX_ACTIVE: u32 = 3;
 /// The most downloads one queue may run at once.
 pub const MAX_ACTIVE: u32 = 32;
+/// The most tries a queue may give each download (#142).
+pub const MAX_TRIES: u32 = 100;
 /// The longest queue name, in characters.
 pub const MAX_NAME_CHARS: usize = 64;
 /// The longest description of a download, in characters (#95).
@@ -83,6 +85,16 @@ pub struct Queue {
     /// When it may run; `None`: always.
     #[serde(default)]
     pub schedule: Option<Schedule>,
+    /// Tries for each of its downloads, from 1 (no new try) to
+    /// [`MAX_TRIES`] (#142): a download that fails with tries left goes to
+    /// the end of the queue and waits again. `None`: 1, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tries: Option<u32>,
+    /// A file or program the app opens when the queue is done (#142),
+    /// absolute: chosen by the user in the system's picker and confirmed.
+    /// Never taken from an import or the network, never exported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_open: Option<PathBuf>,
     pub items: Vec<Item>,
 }
 
@@ -160,6 +172,14 @@ pub struct Item {
     /// by the runner when it marks it active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_try: Option<String>,
+    /// Tries of it that failed in a row in its queue (#142); 0 again when
+    /// it finishes or the user starts it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failed_tries: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Where a download from the browser extension came from.
@@ -361,6 +381,7 @@ impl QueuesFile {
             category: None,
             description: None,
             last_try: None,
+            failed_tries: 0,
         };
         self.queue_or_new(queue)?.items.push(item);
         self.next_id = id.checked_add(1).ok_or_else(|| StoreError::Corrupt {
@@ -490,6 +511,15 @@ impl QueuesFile {
             if !(1..=MAX_ACTIVE).contains(&queue.max_active) {
                 return Err(format!("impossible max_active {}", queue.max_active));
             }
+            if queue
+                .max_tries
+                .is_some_and(|n| !(1..=MAX_TRIES).contains(&n))
+            {
+                return Err(format!("impossible max_tries for queue {:?}", queue.name));
+            }
+            if queue.after_open.as_ref().is_some_and(|p| !p.is_absolute()) {
+                return Err(format!("a relative after_open for queue {:?}", queue.name));
+            }
             for item in &queue.items {
                 if item.id >= self.next_id || !ids.insert(item.id) {
                     return Err(format!("impossible or repeated id {}", item.id));
@@ -510,6 +540,8 @@ impl Queue {
             name: name.to_owned(),
             max_active: DEFAULT_MAX_ACTIVE,
             schedule: None,
+            max_tries: None,
+            after_open: None,
             items: Vec::new(),
         }
     }

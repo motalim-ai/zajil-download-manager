@@ -419,6 +419,10 @@ fn set_status(
             };
             if allowed {
                 item.status = status;
+                // Started by the user: its queue's tries count from 0 (#142).
+                if status == Status::Waiting {
+                    item.failed_tries = 0;
+                }
             }
         }
         Ok(())
@@ -653,6 +657,7 @@ fn show(event: QueueEvent) {
         QueueEvent::NeedsBrowser { item, .. } => {
             eprintln!("[{item}] waiting for the browser's cookies (open the browser)")
         }
+        QueueEvent::QueueDone { queue } => eprintln!("queue {queue} is done"),
         QueueEvent::Waiting { queue, until } => eprintln!(
             "queue {queue} waits for its schedule until {} (local time)",
             until.strftime("%Y-%m-%d %H:%M:%S")

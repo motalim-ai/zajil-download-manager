@@ -237,6 +237,9 @@ impl QueuesFile {
                         name: eq.name.clone(),
                         max_active: eq.max_active,
                         schedule: eq.schedule.clone(),
+                        // Never from an import (#142).
+                        max_tries: None,
+                        after_open: None,
                         items: Vec::new(),
                     });
                     summary.queues_created += 1;
@@ -293,6 +296,7 @@ impl QueuesFile {
                     name: ei.name.clone(),
                     category: ei.category.clone(),
                     description: ei.description.clone(),
+                    failed_tries: 0,
                     last_try: None,
                 };
                 self.queues[index[&eq.name]].items.push(item);

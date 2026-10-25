@@ -637,7 +637,10 @@ async fn run_queues(handle: tauri::AppHandle) {
         if stop.is_requested() {
             return;
         }
-        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser);
+        // Queues started now, outside their window (#125, the schedule window).
+        let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
+        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser)
+            .run_now(run_now);
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 let changed = {
@@ -1683,6 +1686,9 @@ fn set_status(queues: &mut QueuesFile, ids: &[u64], status: Status) -> Result<()
             item.status = status;
             if status == Status::Waiting {
                 item.error = None;
+                // Started by the user: its queue's tries count from 0
+                // (#142).
+                item.failed_tries = 0;
             }
         }
     }
