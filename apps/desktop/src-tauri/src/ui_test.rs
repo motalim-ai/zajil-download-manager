@@ -115,6 +115,9 @@ fn d(
         // A demo row's segments are its feathers.
         segments: parts.len().max(1) as u32,
         error: (status == StatusView::Failed).then(|| "the server answered 404 Not Found".into()),
+        // The night queue's waiting archive came from a browser that is
+        // not open (M5).
+        waits_for_browser: id == 5,
     }
 }
 

@@ -40,6 +40,9 @@
       <p class="from">
         {locale.t("details-from-to", { site: d.host ?? "", folder: d.folder })}
       </p>
+      {#if d.waits_for_browser}
+        <p class="browser" role="status"><Icon name="link" /><span>{locale.t("details-open-browser")}</span></p>
+      {/if}
       {#if d.status === "failed" && d.error}
         <p class="failed" role="status"><Icon name="alert" /><span>{locale.t("details-failed", { error: d.error })}</span></p>
       {/if}
@@ -124,6 +127,17 @@
   .from {
     color: var(--muted);
     margin: 2px 0 0;
+    font-size: 13px;
+  }
+  .browser {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 12px 0 0;
+    padding: 8px 12px;
+    border-radius: 9px;
+    background: var(--amber-bg);
+    color: var(--amber);
     font-size: 13px;
   }
   .failed {

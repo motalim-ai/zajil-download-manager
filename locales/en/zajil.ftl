@@ -60,6 +60,7 @@ status-active = Downloading
 status-paused = Paused
 status-done = Done
 status-failed = Failed
+status-open-browser = Open the browser to go on
 status-scheduled = Scheduled { $time }
 
 ## Sidebar
@@ -170,6 +171,7 @@ details-speed-chart = Speed over the last minute
 details-chart-then = A minute ago
 details-chart-now = Now
 details-failed = The download stopped: { $error }
+details-open-browser = This download came from the browser with its cookies, and Zajil does not keep cookies. Open the browser it came from: Zajil takes them from it and goes on by itself.
 
 ## Refresh the download link
 

@@ -60,7 +60,9 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             QueueEvent::Finished { .. }
             | QueueEvent::Failed { .. }
             | QueueEvent::Stopped { .. } => now -= 1,
-            QueueEvent::Download { .. } | QueueEvent::Waiting { .. } => {}
+            QueueEvent::Download { .. }
+            | QueueEvent::Waiting { .. }
+            | QueueEvent::NeedsBrowser { .. } => {}
         })
         .await
         .unwrap();
@@ -696,4 +698,125 @@ async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
     store.update(|q| q.remove(failed).map(drop)).unwrap();
     run().run(&Stop::new(), &mut |_| {}).await.unwrap();
     assert_eq!(kept(), [next], "kept after the item was removed");
+}
+
+fn from_browser(cookies: bool, referrer: Option<&str>) -> zajil_core::queue::BrowserSource {
+    zajil_core::queue::BrowserSource {
+        instance: "3f2b8c1e-0000-4000-8000-000000000001".into(),
+        store: Some("firefox-container-1".into()),
+        cookies,
+        referrer: referrer.map(str::to_owned),
+    }
+}
+
+/// After a restart (M5): a download that came from the browser with its
+/// cookies, and has none in memory, waits for that browser and takes no
+/// room in its queue; once the cookies are given again it goes, with them;
+/// and when it is done, where it came from is forgotten.
+#[tokio::test]
+async fn a_download_waits_for_the_browser_s_cookies_after_a_restart() {
+    let server = TestServer::http();
+    server.put("/signed.bin", FileSpec::new(random_bytes(200_000, 93)));
+    server.put("/plain.bin", FileSpec::new(random_bytes(200_000, 94)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let signed = add(&store, "main", &server.url("/signed.bin"), dir.path());
+    let plain = add(&store, "main", &server.url("/plain.bin"), dir.path());
+    let page = server.url("/page");
+    // One at a time: the waiting one must leave its room to the other.
+    store
+        .update(|q| {
+            q.queue_mut("main").unwrap().max_active = 1;
+            q.item_mut(signed).unwrap().browser = Some(from_browser(true, Some(&page)));
+            Ok(())
+        })
+        .unwrap();
+    // Nothing in memory: as after a restart.
+    let headers = zajil_core::queue::FromBrowserById::default();
+    let stop = Stop::new();
+    let mut asked = Vec::new();
+    {
+        let (store, stop) = (store.clone(), stop.clone());
+        runner(&store)
+            .from_browser(headers.clone())
+            .run(&stop.clone(), &mut |event| {
+                if let QueueEvent::NeedsBrowser { item, url, source } = event {
+                    assert_eq!(url, server.url("/signed.bin"));
+                    asked.push((item, source));
+                    if store.load().unwrap().item(plain).unwrap().status == Status::Done {
+                        stop.request();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+    }
+    let queues = store.load().unwrap();
+    assert_eq!(
+        queues.item(plain).unwrap().status,
+        Status::Done,
+        "it took the room"
+    );
+    assert_eq!(queues.item(signed).unwrap().status, Status::Waiting);
+    assert!(
+        server.gets("/signed.bin").is_empty(),
+        "went without its cookies"
+    );
+    assert_eq!(asked[0], (signed, from_browser(true, Some(&page))));
+
+    // The browser gives them again.
+    headers.lock().unwrap().insert(
+        signed,
+        zajil_core::FromBrowser::new(&server.url("/signed.bin"), Some("sid=AGAIN"), Some(&page)),
+    );
+    runner(&store)
+        .from_browser(headers.clone())
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    let item = store.load().unwrap().item(signed).unwrap().clone();
+    assert_eq!(item.status, Status::Done);
+    assert_eq!(item.browser, None, "kept after it was done");
+    for get in server.gets("/signed.bin") {
+        assert_eq!(get.cookie.as_deref(), Some("sid=AGAIN"), "{get:?}");
+        assert_eq!(get.referer.as_deref(), Some(page.as_str()));
+    }
+}
+
+/// A download from the browser without cookies does not wait: after a
+/// restart it goes at once, with its page from the queues file. And the
+/// file never holds cookies.
+#[tokio::test]
+async fn a_download_from_the_browser_without_cookies_goes_with_its_page() {
+    let server = TestServer::http();
+    server.put("/f.bin", FileSpec::new(random_bytes(200_000, 95)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/f.bin"), dir.path());
+    let page = server.url("/page");
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().browser = Some(from_browser(false, Some(&page)));
+            Ok(())
+        })
+        .unwrap();
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert!(
+        text.contains("\"instance\"") && !text.to_lowercase().contains("cookie\":\""),
+        "{text}"
+    );
+    runner(&store)
+        .from_browser(Default::default())
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(store.load().unwrap().item(id).unwrap().status, Status::Done);
+    for get in server.gets("/f.bin") {
+        assert_eq!(
+            (get.cookie.as_deref(), get.referer.as_deref()),
+            (None, Some(page.as_str()))
+        );
+    }
 }

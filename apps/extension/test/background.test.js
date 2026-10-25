@@ -8,7 +8,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [] };
   const local = {};
   const chrome = {
     i18n: { getMessage: (key) => key },
@@ -16,6 +16,17 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
       id: "zajil",
       getURL: (path) => `chrome-extension://zajil/${path}`,
       onInstalled: on("installed"),
+      // The link to Zajil (M5): its port, recorded.
+      connectNative: vi.fn(() => {
+        const port = {
+          sent: /** @type {any[]} */ ([]),
+          onMessage: on("portMessage"),
+          onDisconnect: on("portDisconnect"),
+          postMessage: (m) => port.sent.push(m),
+        };
+        done.ports.push(port);
+        return port;
+      }),
       openOptionsPage: async () => {},
       sendNativeMessage: vi.fn(async (_host, message) => {
         done.sent.push(message);
@@ -147,6 +158,11 @@ describe("the background", () => {
     fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/b.zip" }, { cookieStoreId: "firefox-container-2" });
     await flush();
     expect(fake.done.sent[1].cookies).toBe("who=firefox-container-2");
+    // Where they came from goes too, for after a restart (M5).
+    expect(fake.done.sent[0].store).toBe("firefox-container-1");
+    expect(fake.done.sent[1].store).toBe("firefox-container-2");
+    expect(fake.done.sent[0].instance).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fake.done.sent[1].instance).toBe(fake.done.sent[0].instance);
     // Only the download link's cookies are read, not the page's.
     expect(fake.done.cookieReads.map((q) => q.url)).toEqual(["https://example.com/a.zip", "https://example.com/b.zip"]);
   });

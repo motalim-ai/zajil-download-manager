@@ -9,6 +9,10 @@
 //! app is running, the host starts the one next to it, unless
 //! `ZAJIL_NO_LAUNCH` is set (tests), and waits for it to open its channel.
 //!
+//! A `link` message (M5, `runtime.connectNative`) turns the host into the
+//! extension's link to the app for the rest of its life ([`link`]): Zajil
+//! asks that browser for cookies on it. The link never starts the app.
+//!
 //! Nothing is written to stderr that the browser would need: Chrome keeps
 //! it in its log, Firefox in the browser console.
 
@@ -18,13 +22,15 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
 use zajil_host::{
-    CHANNEL_TIMEOUT, FrameError, MAX_REQUEST, MAX_RESPONSE, Request, Response, parse, read_frame,
-    write_frame, write_json,
+    CHANNEL_TIMEOUT, FrameError, FromLink, LINK_ANSWER, MAX_REQUEST, MAX_RESPONSE,
+    PROTOCOL_VERSION, Request, Response, ToExtension, parse, read_frame, write_frame, write_json,
 };
 use zajil_platform::AppPaths;
 
 /// How long to wait for an app that is being started.
 const START_PATIENCE: Duration = Duration::from_secs(20);
+/// How often the link looks for the app while it is not running.
+const LINK_RETRY: Duration = Duration::from_secs(2);
 
 fn main() -> ExitCode {
     let data_dir = match data_dir() {
@@ -54,6 +60,13 @@ fn main() -> ExitCode {
         let answer = match parse(&message) {
             Err(why) => write_json(&mut output, &Response::refused(why)),
             Ok(Request::Ping { .. }) => write_json(&mut output, &Response::ok()),
+            Ok(Request::Link { .. }) => {
+                drop(input);
+                return link(&data_dir, &message, output);
+            }
+            Ok(Request::Cookies { .. }) => {
+                write_json(&mut output, &Response::refused("not on a link"))
+            }
             Ok(request) => match forward(&data_dir, &request) {
                 Ok(app_answer) => write_frame(&mut output, &app_answer),
                 Err(err) => write_json(&mut output, &Response::refused(err)),
@@ -63,6 +76,85 @@ fn main() -> ExitCode {
             eprintln!("zajil-host: cannot answer the browser: {err}");
             return ExitCode::FAILURE;
         }
+    }
+}
+
+/// The extension's link to the app (M5): connects to the app (waiting
+/// for it while it is not running, again whenever it goes away), sends it
+/// `hello` (the `link` message), then passes each of its questions to the
+/// extension and the extension's answer back, one at a time; a question
+/// the extension does not answer within LINK_ANSWER is answered
+/// `no_answer`. Ends with the browser's connection.
+fn link(data_dir: &Path, hello: &[u8], mut output: io::StdoutLock<'static>) -> ExitCode {
+    // The extension's answers, read on their own thread.
+    let (answers, answered) = std::sync::mpsc::channel::<(u64, Option<String>)>();
+    std::thread::spawn(move || {
+        let mut input = io::stdin().lock();
+        loop {
+            match read_frame(&mut input, MAX_REQUEST) {
+                Ok(Some(message)) => match parse(&message) {
+                    Ok(Request::Cookies { ask, cookies, .. }) => {
+                        let _ = answers.send((ask, cookies));
+                    }
+                    Ok(_) => eprintln!("zajil-host: only answers go on the link"),
+                    Err(why) => eprintln!("zajil-host: {why}"),
+                },
+                // The browser closed the link, or broke it: the host ends.
+                Ok(None) => std::process::exit(0),
+                Err(_) => std::process::exit(1),
+            }
+        }
+    });
+    loop {
+        let mut app = match zajil_platform::ipc::connect(data_dir, Duration::ZERO) {
+            Ok(app) => app,
+            Err(_) => {
+                std::thread::sleep(LINK_RETRY);
+                continue;
+            }
+        };
+        if write_frame(&mut app, hello).is_err() {
+            std::thread::sleep(LINK_RETRY);
+            continue;
+        }
+        while let Ok(Some(question)) = read_frame(&mut app, MAX_REQUEST) {
+            let ToExtension::CookiesWanted { ask, .. } = match ToExtension::parse(&question) {
+                Ok(question) => question,
+                Err(why) => {
+                    eprintln!("zajil-host: {why}");
+                    break;
+                }
+            };
+            // Answers to earlier questions that came too late are dropped.
+            while answered.try_recv().is_ok() {}
+            if write_frame(&mut output, &question).is_err() {
+                return ExitCode::FAILURE;
+            }
+            let deadline = std::time::Instant::now() + LINK_ANSWER;
+            let answer = loop {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                match answered.recv_timeout(left) {
+                    Ok((got, cookies)) if got == ask => {
+                        break FromLink::Cookies {
+                            protocol_version: PROTOCOL_VERSION,
+                            ask,
+                            cookies,
+                        };
+                    }
+                    Ok(_) => continue,
+                    Err(_) => {
+                        break FromLink::NoAnswer {
+                            protocol_version: PROTOCOL_VERSION,
+                            ask,
+                        };
+                    }
+                }
+            };
+            if write_json(&mut app, &answer).is_err() {
+                break;
+            }
+        }
+        std::thread::sleep(LINK_RETRY);
     }
 }
 

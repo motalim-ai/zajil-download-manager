@@ -14,6 +14,7 @@ mod tray;
 mod ui_test;
 pub mod view;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -57,6 +58,11 @@ pub struct App {
     /// The browser's cookies and page of each download the extension sent,
     /// by item: in memory only (owner's decision on #7).
     from_browser: zajil_core::queue::FromBrowserById,
+    /// The browsers' extensions linked to this window, which it asks for
+    /// cookies again after a restart (M5).
+    links: zajil_host::Links,
+    /// The downloads whose browser is being asked, or was asked lately.
+    asks: Arc<BrowserAsks>,
     /// How the last browser registration went (at the start, or the
     /// settings button), for the settings page.
     integration: Arc<std::sync::Mutex<Option<view::IntegrationView>>>,
@@ -116,6 +122,8 @@ pub fn run() {
         clipboard: Arc::new(AtomicBool::new(clipboard)),
         data_dir: data.clone(),
         from_browser: Arc::default(),
+        links: zajil_host::Links::default(),
+        asks: Arc::default(),
         integration: Arc::default(),
         live: Arc::new(Live::default()),
         stop: Stop::new(),
@@ -414,6 +422,10 @@ async fn run_queues(handle: tauri::AppHandle) {
             app.from_browser.clone(),
         )
     };
+    let (links, asks) = {
+        let app = handle.state::<App>();
+        (app.links.clone(), app.asks.clone())
+    };
     loop {
         if stop.is_requested() {
             return;
@@ -421,7 +433,13 @@ async fn run_queues(handle: tauri::AppHandle) {
         let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser);
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
-                live.record(&event);
+                let changed = {
+                    let handle = handle.clone();
+                    move || {
+                        let _ = handle.emit("downloads-changed", ());
+                    }
+                };
+                on_queue_event(&event, &live, &links, &asks, &from_browser, changed);
                 notify(&handle, &live);
             })
             .await;
@@ -562,7 +580,7 @@ async fn add<R: tauri::Runtime>(
     let id = tokio::task::spawn_blocking(move || {
         let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
             .map_err(StoreError::Refused)?;
-        add_blocking(&store, &request, &given)
+        add_blocking(&store, &request, &given, None)
     })
     .await
     .map_err(blocking_err)?
@@ -597,22 +615,149 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
             return;
         }
     };
+    let (links, asks) = {
+        let app = handle.state::<App>();
+        (app.links.clone(), app.asks.clone())
+    };
+    // A browser that links is asked at the next look, whatever it said
+    // before.
+    links.on_link(move |_| asks.forget_tries());
     std::thread::spawn(move || {
-        zajil_host::serve(listener, move |request| {
-            // In a ui-test scene, nothing reaches the queues.
-            if in_scene(&handle) {
-                return zajil_host::Response::refused("a ui-test scene adds nothing");
+        zajil_host::serve(
+            listener,
+            move |request| {
+                // In a ui-test scene, nothing reaches the queues.
+                if in_scene(&handle) {
+                    return zajil_host::Response::refused("a ui-test scene adds nothing");
+                }
+                let app = handle.state::<App>();
+                let given = download_dir(&app.settings, &app.system_download_dir);
+                let reach = extension_reach(&app.engine);
+                let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
+                if answer.ok {
+                    let _ = handle.emit("downloads-changed", ());
+                    tray::show_window(&handle);
+                }
+                answer
+            },
+            links,
+        );
+    });
+}
+
+/// What the window does with an event of its queue runner: records it for
+/// the page, and asks the browser of a download that waits for it.
+fn on_queue_event(
+    event: &QueueEvent,
+    live: &Arc<Live>,
+    links: &zajil_host::Links,
+    asks: &Arc<BrowserAsks>,
+    from_browser: &zajil_core::queue::FromBrowserById,
+    changed: impl Fn() + Send + 'static,
+) {
+    live.record(event);
+    if let QueueEvent::NeedsBrowser { item, url, source } = event {
+        ask_browser(links, asks, live, from_browser, *item, url, source, changed);
+    }
+}
+
+/// How long a browser that did not answer is left before it is asked
+/// again (unless it links again meanwhile).
+const ASK_AGAIN: Duration = Duration::from_secs(5);
+/// How long Zajil waits for a browser's answer.
+const ASK_PATIENCE: Duration = Duration::from_secs(15);
+
+/// The downloads whose browser is being asked for cookies, or was lately.
+#[derive(Default)]
+struct BrowserAsks(std::sync::Mutex<HashMap<u64, Asked>>);
+
+#[derive(Clone, Copy)]
+enum Asked {
+    Now,
+    Tried(Instant),
+}
+
+impl BrowserAsks {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Asked>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A browser linked: every download is asked again at once.
+    fn forget_tries(&self) {
+        self.lock().retain(|_, asked| matches!(asked, Asked::Now));
+    }
+}
+
+/// A download that came from the browser with its cookies, after a restart
+/// (the runner's `NeedsBrowser`): its browser (the same extension
+/// instance) is asked for the cookies of its link again, in the
+/// background, if it is linked; what it answers goes into memory, and the
+/// runner starts the download at its next look (without cookies if the
+/// browser has none to give, as when the permission was taken back,
+/// owner's decision). A browser that is not open, or does not answer:
+/// the download waits, marked «افتح المتصفح ليكمل», and is asked again
+/// when the browser links. `changed` runs when what the page shows
+/// changed.
+#[allow(clippy::too_many_arguments)]
+fn ask_browser(
+    links: &zajil_host::Links,
+    asks: &Arc<BrowserAsks>,
+    live: &Arc<Live>,
+    from_browser: &zajil_core::queue::FromBrowserById,
+    id: u64,
+    url: &str,
+    source: &zajil_core::queue::BrowserSource,
+    changed: impl Fn() + Send + 'static,
+) {
+    let mut asked = asks.lock();
+    match asked.get(&id) {
+        Some(Asked::Now) => return,
+        Some(Asked::Tried(at)) if at.elapsed() < ASK_AGAIN => return,
+        _ => {}
+    }
+    if !links.is_linked(&source.instance) {
+        asked.insert(id, Asked::Tried(Instant::now()));
+        if live.set_waiting_for_browser(id, true) {
+            changed();
+        }
+        return;
+    }
+    asked.insert(id, Asked::Now);
+    drop(asked);
+    let (links, asks, live, from_browser) = (
+        links.clone(),
+        asks.clone(),
+        live.clone(),
+        from_browser.clone(),
+    );
+    let (url, source) = (url.to_owned(), source.clone());
+    std::thread::spawn(move || {
+        let answer = links.ask(
+            &source.instance,
+            &url,
+            source.store.as_deref(),
+            ASK_PATIENCE,
+        );
+        match answer {
+            Some(cookies) => {
+                let from = zajil_core::FromBrowser::new(
+                    &url,
+                    cookies.as_deref(),
+                    source.referrer.as_deref(),
+                );
+                from_browser
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, from);
+                asks.lock().remove(&id);
+                live.set_waiting_for_browser(id, false);
             }
-            let app = handle.state::<App>();
-            let given = download_dir(&app.settings, &app.system_download_dir);
-            let reach = extension_reach(&app.engine);
-            let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
-            if answer.ok {
-                let _ = handle.emit("downloads-changed", ());
-                tray::show_window(&handle);
+            None => {
+                asks.lock().insert(id, Asked::Tried(Instant::now()));
+                live.set_waiting_for_browser(id, true);
             }
-            answer
-        });
+        }
+        changed();
     });
 }
 
@@ -1020,11 +1165,17 @@ fn from_extension(
 ) -> zajil_host::Response {
     match request {
         zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
+        // The link is served apart (`Links`); an answer comes only on it.
+        zajil_host::Request::Link { .. } | zajil_host::Request::Cookies { .. } => {
+            zajil_host::Response::refused("not here")
+        }
         zajil_host::Request::Download {
             url,
             filename,
             referrer,
             cookies,
+            instance,
+            store: cookie_store,
             ..
         } => {
             if let Err(err) = zajil_core::queue::check_url(url) {
@@ -1047,7 +1198,18 @@ fn from_extension(
                 start: true,
                 limit: None,
             };
-            match add_blocking(store, &add, given) {
+            // Where it came from, so that browser can be asked for the
+            // cookies again after a restart: never the cookies themselves
+            // (owner's decision on #7).
+            let source = instance
+                .as_ref()
+                .map(|instance| zajil_core::queue::BrowserSource {
+                    instance: instance.clone(),
+                    store: cookie_store.clone(),
+                    cookies: cookies.is_some(),
+                    referrer: referrer.clone(),
+                });
+            match add_blocking(store, &add, given, source) {
                 Ok(id) => {
                     headers
                         .lock()
@@ -1063,7 +1225,12 @@ fn from_extension(
 
 /// Nothing is created here: the download makes its folder when it starts,
 /// so a refused add leaves nothing behind (review of #48).
-fn add_blocking(store: &QueueStore, request: &AddRequest, given: &Path) -> Result<u64, StoreError> {
+fn add_blocking(
+    store: &QueueStore,
+    request: &AddRequest,
+    given: &Path,
+    browser: Option<zajil_core::queue::BrowserSource>,
+) -> Result<u64, StoreError> {
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
         let id = queues.add(queue, &request.url, given)?;
@@ -1071,6 +1238,7 @@ fn add_blocking(store: &QueueStore, request: &AddRequest, given: &Path) -> Resul
         // Without a folder of its own, a download goes by its category.
         item.categorize = request.folder.is_none();
         item.limit = request.limit.filter(|l| *l > 0);
+        item.browser = browser;
         if !request.start {
             item.status = Status::Paused;
         }
@@ -1672,11 +1840,15 @@ mod tests {
         let listener = zajil_platform::ipc::Listener::bind(data.path()).unwrap();
         let (served, given) = (store.clone(), data.path().to_path_buf());
         std::thread::spawn(move || {
-            zajil_host::serve(listener, move |request| {
-                from_extension(&served, &request, &given, &Default::default(), |_, _| {
-                    Ok(probe_of("b.iso", None))
-                })
-            });
+            zajil_host::serve(
+                listener,
+                move |request| {
+                    from_extension(&served, &request, &given, &Default::default(), |_, _| {
+                        Ok(probe_of("b.iso", None))
+                    })
+                },
+                Default::default(),
+            );
         });
         let mut stream =
             zajil_platform::ipc::connect(data.path(), std::time::Duration::from_secs(5)).unwrap();
@@ -2065,6 +2237,174 @@ mod tests {
         let item = store.load().unwrap().item(id).unwrap().clone();
         assert_eq!(item.url, "https://example.com/new.iso");
         assert_eq!(item.status, Status::Waiting);
+    }
+
+    /// M5: a download from the extension keeps where it came from (the
+    /// extension instance, its container, that cookies went, the page),
+    /// but never the cookies themselves.
+    #[test]
+    fn a_download_from_the_browser_keeps_where_it_came_from_but_never_its_cookies() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.iso","referrer":"https://example.com/page","cookies":"sid=SECRET","instance":"inst-1","store":"firefox-container-2"}"#,
+        )
+        .unwrap();
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &Default::default(),
+            |_, _| Ok(probe_of("b.iso", None)),
+        );
+        assert!(answer.ok, "{answer:?}");
+        let item = store.load().unwrap().queues[0].items[0].clone();
+        assert_eq!(
+            item.browser,
+            Some(zajil_core::queue::BrowserSource {
+                instance: "inst-1".into(),
+                store: Some("firefox-container-2".into()),
+                cookies: true,
+                referrer: Some("https://example.com/page".into()),
+            })
+        );
+        let text = std::fs::read_to_string(data.path().join("queues.json")).unwrap();
+        assert!(!text.contains("SECRET"), "{text}");
+    }
+
+    /// M5, after a restart: a download that came from the browser with its
+    /// cookies waits while its browser is not open, marked for the page;
+    /// when that browser links, it is asked for the cookies of the link,
+    /// and the download goes with them; then nothing waits any more.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn after_a_restart_the_browser_is_asked_again_and_the_download_waits_for_it() {
+        use zajil_testserver::{FileSpec, TestServer, random_bytes};
+        let server = TestServer::http();
+        let data = random_bytes(300_000, 98);
+        server.put("/signed.zip", FileSpec::new(data.clone()));
+        let url = server.url("/signed.zip");
+        let base = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(base.path());
+        let dir = base.path().join("out");
+        let id = store
+            .update(|q| {
+                let id = q.add(DEFAULT_QUEUE, &url, &dir)?;
+                q.item_mut(id).unwrap().browser = Some(zajil_core::queue::BrowserSource {
+                    instance: "inst-1".into(),
+                    store: Some("firefox-container-2".into()),
+                    cookies: true,
+                    referrer: None,
+                });
+                Ok(id)
+            })
+            .unwrap();
+        let engine = Engine::new(Options::default()).unwrap();
+        let live = Arc::new(Live::default());
+        let links = zajil_host::Links::default();
+        let asks = Arc::<BrowserAsks>::default();
+        let from_browser = zajil_core::queue::FromBrowserById::default();
+        {
+            let asks = asks.clone();
+            links.on_link(move |_| asks.forget_tries());
+        }
+        // The window's channel, as `serve_extension` opens it.
+        let listener = zajil_platform::ipc::Listener::bind(base.path()).unwrap();
+        {
+            let links = links.clone();
+            std::thread::spawn(move || {
+                zajil_host::serve(listener, |_| zajil_host::Response::ok(), links)
+            });
+        }
+        let stop = Stop::new();
+        let categories = CategoryStore::new(base.path());
+        let runner = {
+            let (live, links, asks, from_browser, stop, store) = (
+                live.clone(),
+                links.clone(),
+                asks.clone(),
+                from_browser.clone(),
+                stop.clone(),
+                store.clone(),
+            );
+            tokio::spawn(async move {
+                let runner = queue_runner(
+                    &engine,
+                    &store,
+                    &categories,
+                    &Arc::new(AtomicUsize::new(1)),
+                    &from_browser,
+                );
+                runner
+                    .poll(Duration::from_millis(20))
+                    .run(&stop.clone(), &mut |event| {
+                        if matches!(event, QueueEvent::Finished { .. }) {
+                            stop.request();
+                        }
+                        on_queue_event(&event, &live, &links, &asks, &from_browser, || {});
+                    })
+                    .await
+            })
+        };
+        // The browser is not open: it waits, marked.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !live.waiting_for_browser(id) {
+            assert!(Instant::now() < deadline, "not marked");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            store.load().unwrap().item(id).unwrap().status,
+            Status::Waiting
+        );
+        assert!(
+            server.gets("/signed.zip").is_empty(),
+            "went without its cookies"
+        );
+
+        // The browser opens: its host links, and answers with the cookies.
+        let host = {
+            let path = base.path().to_path_buf();
+            std::thread::spawn(move || {
+                let mut app = zajil_platform::ipc::connect(&path, Duration::from_secs(5)).unwrap();
+                zajil_host::write_frame(
+                    &mut app,
+                    br#"{"type":"link","protocol_version":1,"instance":"inst-1"}"#,
+                )
+                .unwrap();
+                let question = zajil_host::read_frame(&mut app, zajil_host::MAX_REQUEST)
+                    .unwrap()
+                    .unwrap();
+                let zajil_host::ToExtension::CookiesWanted {
+                    ask, url, store, ..
+                } = zajil_host::ToExtension::parse(&question).unwrap();
+                zajil_host::write_json(
+                    &mut app,
+                    &zajil_host::FromLink::Cookies {
+                        protocol_version: 1,
+                        ask,
+                        cookies: Some("sid=BACK".into()),
+                    },
+                )
+                .unwrap();
+                (url, store, app)
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(20), runner)
+            .await
+            .expect("it did not go")
+            .unwrap()
+            .unwrap();
+        let (asked_url, asked_store, _app) = host.join().unwrap();
+        assert_eq!(asked_url, url);
+        assert_eq!(asked_store.as_deref(), Some("firefox-container-2"));
+        let item = store.load().unwrap().item(id).unwrap().clone();
+        assert_eq!(item.status, Status::Done, "{item:?}");
+        assert_eq!(item.browser, None);
+        assert!(!live.waiting_for_browser(id));
+        let gets = server.gets("/signed.zip");
+        assert!(!gets.is_empty());
+        for get in gets {
+            assert_eq!(get.cookie.as_deref(), Some("sid=BACK"), "{get:?}");
+        }
     }
 
     /// The glue in the app (review of #76): the check of a download from

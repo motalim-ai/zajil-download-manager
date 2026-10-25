@@ -61,6 +61,15 @@ pub enum QueueEvent {
         queue: String,
         until: jiff::Zoned,
     },
+    /// Item `item` came from the browser with its cookies, and has none in
+    /// memory (Zajil was restarted): it waits for that browser to give
+    /// them again (M5). Said at every look while it waits.
+    NeedsBrowser {
+        item: u64,
+        /// Its link, whose cookies are wanted.
+        url: String,
+        source: crate::queue::BrowserSource,
+    },
 }
 
 /// What the schedules say at one look.
@@ -419,10 +428,34 @@ impl Runner {
                 .filter(|i| running.contains_key(&i.id))
                 .count();
             let room = (queue.max_active as usize).saturating_sub(busy);
+            // A download that needs the browser's cookies again waits for
+            // them, taking no room in its queue (M5).
+            let kept = self.from_browser.as_ref().map(|map| {
+                map.lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .keys()
+                    .copied()
+                    .collect::<HashSet<u64>>()
+            });
+            let needs_browser = |i: &crate::queue::Item| match (&kept, &i.browser) {
+                (Some(kept), Some(source)) => source.cookies && !kept.contains(&i.id),
+                _ => false,
+            };
+            for item in queue.items.iter().filter(|i| {
+                i.status == Status::Waiting && !running.contains_key(&i.id) && needs_browser(i)
+            }) {
+                on_event(QueueEvent::NeedsBrowser {
+                    item: item.id,
+                    url: item.url.clone(),
+                    source: item.browser.clone().expect("checked"),
+                });
+            }
             let next: Vec<_> = queue
                 .items
                 .iter()
-                .filter(|i| i.status == Status::Waiting && !running.contains_key(&i.id))
+                .filter(|i| {
+                    i.status == Status::Waiting && !running.contains_key(&i.id) && !needs_browser(i)
+                })
                 .take(room)
                 .map(|i| i.id)
                 .collect();
@@ -454,12 +487,21 @@ impl Runner {
                 if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
                 }
-                if let Some(from) = self.from_browser.as_ref().and_then(|map| {
+                // The browser's headers kept in memory; else, after a
+                // restart, its page alone, from the queues file (the
+                // cookies were never written there).
+                let kept = self.from_browser.as_ref().and_then(|map| {
                     map.lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .get(&id)
                         .cloned()
-                }) {
+                });
+                let from = kept.or_else(|| {
+                    let source = item.browser.as_ref()?;
+                    let referrer = source.referrer.as_deref()?;
+                    Some(crate::FromBrowser::new(&item.url, None, Some(referrer)))
+                });
+                if let Some(from) = from {
                     engine = engine.with_browser(from);
                 }
                 let categories = self.categories.clone().filter(|_| item.categorize);
@@ -611,6 +653,8 @@ impl Runner {
                         item.file = Some(done.file);
                         item.state_file = None;
                         item.error = None;
+                        // Where it came from is no longer needed.
+                        item.browser = None;
                     }
                     Err(Error::Stopped { state_file }) => {
                         // The user's own change (paused) stays; a stop by

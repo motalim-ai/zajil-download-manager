@@ -90,6 +90,7 @@ status-active = يعمل
 status-paused = متوقف مؤقتًا
 status-done = اكتمل
 status-failed = فشل
+status-open-browser = افتح المتصفح ليكمل
 status-scheduled = مجدول { $time }
 
 ## الشريط الجانبي
@@ -212,6 +213,7 @@ details-speed-chart = السرعة في آخر دقيقة
 details-chart-then = قبل دقيقة
 details-chart-now = الآن
 details-failed = توقف التحميل: { $error }
+details-open-browser = جاء هذا التحميل من المتصفح بكوكيزه، وزاجِل لا يحفظ الكوكيز. افتح المتصفح الذي جاء منه، فيأخذها زاجِل منه ويكمل وحده.
 
 ## تحديث رابط التحميل
 

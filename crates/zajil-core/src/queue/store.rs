@@ -113,6 +113,30 @@ pub struct Item {
     pub categorize: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
+    /// It came from the browser extension (M5): what Zajil needs to ask
+    /// that browser for its cookies again after a restart. Never the
+    /// cookies themselves, which stay in memory (owner's decision on #7).
+    /// Forgotten once the download is done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<BrowserSource>,
+}
+
+/// Where a download from the browser extension came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserSource {
+    /// The extension's own random id: one per browser profile, so the
+    /// cookies come from the same browser and profile again.
+    pub instance: String,
+    /// Its cookie store (a Firefox container), when not the default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// Cookies went with it: after a restart it waits for that browser
+    /// («افتح المتصفح ليكمل») instead of going without them.
+    pub cookies: bool,
+    /// The page it came from, sent as the browser would (`FromBrowser`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referrer: Option<String>,
 }
 
 /// Where an item stands.
@@ -259,6 +283,7 @@ impl QueuesFile {
             limit: None,
             categorize: false,
             added_at: now_rfc3339(),
+            browser: None,
         };
         self.queue_or_new(queue)?.items.push(item);
         self.next_id = id.checked_add(1).ok_or_else(|| StoreError::Corrupt {

@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use zajil_host::{MAX_REQUEST, Request, Response, read_frame, write_frame};
+use zajil_host::{Links, MAX_REQUEST, Request, Response, ToExtension, read_frame, write_frame};
 
 /// The host, killed and waited for even when the test fails first.
 struct Host(Child);
@@ -88,6 +88,8 @@ fn a_correct_message_reaches_the_app_and_wrong_ones_never_do() {
             referrer: Some("https://example.com/".into()),
             filename: Some("a.zip".into()),
             cookies: Some("sid=1".into()),
+            instance: None,
+            store: None,
         }
     );
 
@@ -203,4 +205,104 @@ fn an_app_that_never_answers_does_not_hold_the_browser() {
     );
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
     assert_eq!(answer(&mut host), Response::ok());
+}
+
+/// M5, after a restart: the extension's link (`runtime.connectNative`).
+/// The host waits for an app that is not running yet, and never starts
+/// one; then the app's questions reach the extension and its answers come
+/// back; an answer the host refuses, or none, comes back as no answer
+/// within LINK_ANSWER; and when the browser closes the link, the app
+/// knows it is gone.
+#[test]
+fn the_link_carries_zajil_s_questions_and_the_extension_s_answers() {
+    let data = tempfile::tempdir().unwrap();
+    let mut host = start_host(data.path());
+    send(
+        &mut host,
+        br#"{"type":"link","protocol_version":1,"instance":"3f2b8c1e-aaaa"}"#,
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    // The app opens after the browser.
+    let listener = zajil_platform::ipc::Listener::bind(data.path()).unwrap();
+    let links = Links::default();
+    let (linked_tx, linked) = mpsc::channel();
+    links.on_link(move |instance| {
+        let _ = linked_tx.send(instance.to_owned());
+    });
+    {
+        let links = links.clone();
+        std::thread::spawn(move || zajil_host::serve(listener, |_| Response::ok(), links));
+    }
+    assert_eq!(
+        linked.recv_timeout(Duration::from_secs(10)).unwrap(),
+        "3f2b8c1e-aaaa"
+    );
+    assert!(links.is_linked("3f2b8c1e-aaaa"));
+
+    let ask = |links: &Links| {
+        let links = links.clone();
+        std::thread::spawn(move || {
+            links.ask(
+                "3f2b8c1e-aaaa",
+                "https://example.com/a.zip",
+                Some("firefox-container-1"),
+                Duration::from_secs(20),
+            )
+        })
+    };
+    let question = |host: &mut Host| {
+        let stdout = host.0.stdout.as_mut().unwrap();
+        let message = read_frame(stdout, 1 << 20).unwrap().expect("a question");
+        ToExtension::parse(&message).unwrap()
+    };
+
+    let asking = ask(&links);
+    let ToExtension::CookiesWanted {
+        ask: id,
+        url,
+        store,
+        ..
+    } = question(&mut host);
+    assert_eq!(url, "https://example.com/a.zip");
+    assert_eq!(store.as_deref(), Some("firefox-container-1"));
+    send(
+        &mut host,
+        format!(r#"{{"type":"cookies","protocol_version":1,"ask":{id},"cookies":"sid=2"}}"#)
+            .as_bytes(),
+    );
+    assert_eq!(asking.join().unwrap(), Some(Some("sid=2".into())));
+
+    // No permission: answered, without cookies.
+    let asking = ask(&links);
+    let ToExtension::CookiesWanted { ask: id, .. } = question(&mut host);
+    send(
+        &mut host,
+        format!(r#"{{"type":"cookies","protocol_version":1,"ask":{id},"cookies":null}}"#)
+            .as_bytes(),
+    );
+    assert_eq!(asking.join().unwrap(), Some(None));
+
+    // An answer with a line break is refused by the host: no answer.
+    let asking = ask(&links);
+    let ToExtension::CookiesWanted { ask: id, .. } = question(&mut host);
+    send(
+        &mut host,
+        format!(
+            r#"{{"type":"cookies","protocol_version":1,"ask":{id},"cookies":"a=1\r\nHost: x"}}"#
+        )
+        .as_bytes(),
+    );
+    let started = std::time::Instant::now();
+    assert_eq!(asking.join().unwrap(), None);
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+
+    // The browser closes the link: the host ends, and the app knows.
+    drop(host.0.stdin.take());
+    let _ = host.0.wait();
+    assert_eq!(ask(&links).join().unwrap(), None);
+    assert!(!links.is_linked("3f2b8c1e-aaaa"));
 }

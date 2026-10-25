@@ -70,6 +70,9 @@ pub struct DownloadView {
     /// then more as they split.
     pub segments: u32,
     pub error: Option<String>,
+    /// It waits for its browser's cookies after a restart, and that
+    /// browser is not open (M5): «افتح المتصفح ليكمل».
+    pub waits_for_browser: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -558,6 +561,7 @@ pub fn download(
             u32::try_from(s.segments.len().max(1)).unwrap_or(u32::MAX)
         }),
         error: item.error.clone(),
+        waits_for_browser: item.status == Status::Waiting && live.waiting_for_browser(item.id),
     }
 }
 

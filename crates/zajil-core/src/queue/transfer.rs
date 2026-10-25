@@ -268,6 +268,8 @@ impl QueuesFile {
                     limit: ei.limit,
                     categorize,
                     added_at: ei.added_at.clone(),
+                    // An export says nothing about a browser.
+                    browser: None,
                 };
                 self.queues[index[&eq.name]].items.push(item);
                 summary.items_added += 1;
