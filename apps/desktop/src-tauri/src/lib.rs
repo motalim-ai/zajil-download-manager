@@ -16,6 +16,7 @@ mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
+mod video;
 pub mod view;
 mod windows;
 
@@ -172,6 +173,7 @@ pub fn run() {
         ))
         .manage(app)
         .manage(windows::Shared::default())
+        .manage(video::VideoState::default())
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
@@ -234,6 +236,12 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            // What a video run or a tools install left when Zajil stopped
+            // (#149).
+            {
+                let app = tauri_app.state::<App>();
+                video::clean_leftovers(&app);
+            }
             // The close button hides the window into the tray (`closing.rs`).
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
@@ -336,6 +344,15 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        video::video_pending,
+        video::video_tools_status,
+        video::video_tools_install,
+        video::video_tools_cancel,
+        video::video_tools_remove,
+        video::video_probe,
+        video::video_probe_cancel,
+        video::video_download,
+        video::video_cancel,
         quit_heard,
         settings,
         save_settings,
@@ -395,6 +412,15 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        video::video_pending,
+        video::video_tools_status,
+        video::video_tools_install,
+        video::video_tools_cancel,
+        video::video_tools_remove,
+        video::video_probe,
+        video::video_probe_cancel,
+        video::video_download,
+        video::video_cancel,
         quit_heard,
         settings,
         save_settings,
