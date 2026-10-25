@@ -170,7 +170,10 @@ pub fn run() {
         ))
         .manage(app)
         .manage(windows::Shared::default())
-        .manage(closing::Closing::new(&data));
+        .manage(closing::Closing::new(
+            &data,
+            args.iter().any(|a| a == "--close-quits"),
+        ));
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder

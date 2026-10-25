@@ -55,6 +55,8 @@ fn start(data: &Path) -> App {
     let mut child = Command::new(app)
         .arg("--data-dir")
         .arg(data)
+        // On Windows the window's close asks it to quit (#109).
+        .arg("--close-quits")
         .stderr(Stdio::piped())
         .spawn()
         .expect("the app starts");

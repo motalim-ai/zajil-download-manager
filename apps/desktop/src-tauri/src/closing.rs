@@ -45,6 +45,8 @@ pub struct Closing {
     tray: std::sync::Arc<AtomicU8>,
     /// The page answered the «quit» a close sent it.
     heard: AtomicBool,
+    /// `--close-quits`.
+    forced: bool,
 }
 
 /// How long the page has to answer a close's «quit» before Zajil quits
@@ -54,7 +56,10 @@ const PAGE_ANSWER: Duration = Duration::from_secs(3);
 const FILE: &str = "window.json";
 
 impl Closing {
-    pub fn new(data_dir: &Path) -> Self {
+    /// `close_quits`: `--close-quits` was given (the tests, which close
+    /// the window to quit it on Windows): closing quits whatever the
+    /// setting says, and nothing is saved.
+    pub fn new(data_dir: &Path, close_quits: bool) -> Self {
         let path = data_dir.join(FILE);
         let tray = std::sync::Arc::new(AtomicU8::new(0));
         let found = tray.clone();
@@ -62,6 +67,7 @@ impl Closing {
         Closing {
             prefs: Mutex::new(load(&path)),
             path,
+            forced: close_quits,
             notice: Mutex::default(),
             tray,
             heard: AtomicBool::new(false),
@@ -86,7 +92,9 @@ impl Closing {
     }
 
     pub fn prefs(&self) -> WindowPrefs {
-        self.prefs.lock().unwrap().clone()
+        let mut prefs = self.prefs.lock().unwrap().clone();
+        prefs.close_quits |= self.forced;
+        prefs
     }
 
     /// Changes the preferences and keeps them; nothing changes if they
@@ -240,19 +248,26 @@ mod tests {
     #[test]
     fn the_preferences_are_kept_and_a_damaged_file_gives_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let closing = Closing::new(dir.path());
+        let closing = Closing::new(dir.path(), false);
         assert_eq!(closing.prefs(), WindowPrefs::default());
         closing.change(|p| p.close_quits = true).unwrap();
-        assert!(Closing::new(dir.path()).prefs().close_quits);
+        assert!(Closing::new(dir.path(), false).prefs().close_quits);
         std::fs::write(dir.path().join(FILE), b"{not json").unwrap();
-        assert_eq!(Closing::new(dir.path()).prefs(), WindowPrefs::default());
+        assert_eq!(
+            Closing::new(dir.path(), false).prefs(),
+            WindowPrefs::default()
+        );
+        // `--close-quits`: closing quits, and nothing is written.
+        let forced = Closing::new(dir.path(), true);
+        assert!(forced.prefs().close_quits);
+        assert_eq!(std::fs::read(dir.path().join(FILE)).unwrap(), b"{not json");
     }
 
     /// A change that cannot be kept changes nothing.
     #[test]
     fn a_change_that_cannot_be_kept_is_not_made() {
         let dir = tempfile::tempdir().unwrap();
-        let closing = Closing::new(&dir.path().join("missing"));
+        let closing = Closing::new(&dir.path().join("missing"), false);
         assert!(closing.change(|p| p.close_quits = true).is_err());
         assert!(!closing.prefs().close_quits);
     }
