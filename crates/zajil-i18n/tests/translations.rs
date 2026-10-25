@@ -171,6 +171,28 @@ const ARABIC: &[(&str, [&str; 6])] = &[
         ],
     ),
     (
+        "delete-unfinished",
+        [
+            "لا تحميلات لم تكتمل.",
+            "هذا التحميل لم يكتمل بعد. هل تحذفه؟",
+            "هذان التحميلان لم يكتملا بعد. هل تحذفهما؟",
+            "هذه 3 تحميلات لم تكتمل بعد. هل تحذفها؟",
+            "هذه 11 تحميلًا لم تكتمل بعد. هل تحذفها؟",
+            "هذه 100 تحميل لم تكتمل بعد. هل تحذفها؟",
+        ],
+    ),
+    (
+        "delete-also-finished",
+        [
+            "لا تحميلات مكتملة معها.",
+            "ومعها تحميل مكتمل واحد، يبقى ملفه في مكانه.",
+            "ومعها تحميلان مكتملان، يبقى ملفاهما في مكانهما.",
+            "ومعها 3 تحميلات مكتملة، تبقى ملفاتها في مكانها.",
+            "ومعها 11 تحميلًا مكتملًا، تبقى ملفاتها في مكانها.",
+            "ومعها 100 تحميل مكتمل، تبقى ملفاتها في مكانها.",
+        ],
+    ),
+    (
         "connections-count",
         [
             "لا اتصالات",
@@ -295,6 +317,20 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
     ("downloads-count", ["1 download", "2 downloads"]),
+    (
+        "delete-unfinished",
+        [
+            "This download has not finished. Delete it?",
+            "These 2 downloads have not finished. Delete them?",
+        ],
+    ),
+    (
+        "delete-also-finished",
+        [
+            "With them, 1 finished download, whose file stays where it is.",
+            "With them, 2 finished downloads, whose files stay where they are.",
+        ],
+    ),
     (
         "quit-question",
         [
@@ -751,6 +787,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
+    ("delete-unfinished", &["count"]),
+    ("delete-also-finished", &["count"]),
     ("quit-question", &["count"]),
     ("import-done", &["count"]),
     ("import-kept", &["names"]),

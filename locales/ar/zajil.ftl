@@ -426,7 +426,7 @@ cmd-progress = نافذة التقدّم
 cmd-refresh-link = تحديث الرابط…
 cmd-properties = الخصائص
 cmd-about = عن زاجِل
-cmd-move-to-queue = نقل إلى طابور
+cmd-move-to-queue = أضف إلى طابور
 about-text = زاجِل، الإصدار { $version }
 table-label = التحميلات
 col-resize = عرض عمود { $column }
@@ -581,3 +581,26 @@ add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، �
 add-description = الوصف
 add-description-hint = اختياري
 last-try-yesterday = أمس { $time }
+
+## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
+col-queue = الطابور
+cmd-remove-from-queue = إزالة من الطابور
+delete-unfinished =
+    { PLURAL($count) ->
+        [zero] لا تحميلات لم تكتمل.
+        [one] هذا التحميل لم يكتمل بعد. هل تحذفه؟
+        [two] هذان التحميلان لم يكتملا بعد. هل تحذفهما؟
+        [few] هذه { $count } تحميلات لم تكتمل بعد. هل تحذفها؟
+        [many] هذه { $count } تحميلًا لم تكتمل بعد. هل تحذفها؟
+       *[other] هذه { $count } تحميل لم تكتمل بعد. هل تحذفها؟
+    }
+delete-also-finished =
+    { PLURAL($count) ->
+        [zero] لا تحميلات مكتملة معها.
+        [one] ومعها تحميل مكتمل واحد، يبقى ملفه في مكانه.
+        [two] ومعها تحميلان مكتملان، يبقى ملفاهما في مكانهما.
+        [few] ومعها { $count } تحميلات مكتملة، تبقى ملفاتها في مكانها.
+        [many] ومعها { $count } تحميلًا مكتملًا، تبقى ملفاتها في مكانها.
+       *[other] ومعها { $count } تحميل مكتمل، تبقى ملفاتها في مكانها.
+    }
+delete-unfinished-files = واحذف الملفات الناقصة أيضًا

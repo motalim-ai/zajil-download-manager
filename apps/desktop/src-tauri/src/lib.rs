@@ -11,6 +11,7 @@
 mod closing;
 mod live;
 mod menu;
+mod removal;
 mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
@@ -328,6 +329,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pause,
         resume,
         remove,
+        remove_with_files,
         details,
         set_tray_texts,
         close_quits,
@@ -383,6 +385,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pause,
         resume,
         remove,
+        remove_with_files,
         details,
         set_tray_texts,
         close_quits,
@@ -2048,6 +2051,29 @@ async fn copy_links<R: tauri::Runtime>(
     .map_err(blocking_err)?
     .map_err(|e| e.to_string())?;
     Ok(links.len())
+}
+
+/// Takes downloads off the list and deletes their unfinished files (the
+/// part and state files; a finished file stays): deleting downloads that
+/// have not finished, when the user asks for their files too.
+#[tauri::command]
+async fn remove_with_files<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let store = app.store.clone();
+    let files = {
+        let ids = ids.clone();
+        tokio::task::spawn_blocking(move || store.load().map(|q| removal::files_of(&q, &ids)))
+            .await
+            .map_err(blocking_err)?
+            .map_err(|e| e.to_string())?
+    };
+    change(&app, &handle, move |q| remove_items(q, &ids)).await?;
+    send_keep(&app.links, &app.store, None);
+    removal::delete_soon(files);
+    Ok(())
 }
 
 #[tauri::command]

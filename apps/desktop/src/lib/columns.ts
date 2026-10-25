@@ -2,7 +2,7 @@
 // width and their order, as the user leaves them. Kept per viewer in
 // `localStorage` (a convenience: without it, the defaults).
 
-export type ColumnId = "name" | "size" | "status" | "left" | "speed" | "last" | "desc";
+export type ColumnId = "name" | "size" | "status" | "left" | "speed" | "last" | "desc" | "queue";
 
 /** Every column, in the design's order, with its name's key and its width
  * (`null`: the rest of the table). The name cannot be hidden. */
@@ -14,6 +14,8 @@ export const COLUMNS: { id: ColumnId; key: string; width: number | null }[] = [
   { id: "speed", key: "col-speed", width: 112 },
   { id: "last", key: "col-last-try", width: 88 },
   { id: "desc", key: "col-description", width: 88 },
+  // An IDM touch: the queue each download is in.
+  { id: "queue", key: "col-queue", width: 120 },
 ];
 
 export const MIN_WIDTH = 56;

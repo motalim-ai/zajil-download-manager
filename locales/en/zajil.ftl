@@ -372,7 +372,7 @@ cmd-progress = Progress window
 cmd-refresh-link = Refresh link…
 cmd-properties = Properties
 cmd-about = About Zajil
-cmd-move-to-queue = Move to queue
+cmd-move-to-queue = Add to queue
 about-text = Zajil, version { $version }
 table-label = Downloads
 col-resize = { $column } column width
@@ -523,3 +523,18 @@ add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way 
 add-description = Description
 add-description-hint = Optional
 last-try-yesterday = Yesterday { $time }
+
+## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
+col-queue = Queue
+cmd-remove-from-queue = Remove from queue
+delete-unfinished =
+    { PLURAL($count) ->
+        [one] This download has not finished. Delete it?
+       *[other] These { $count } downloads have not finished. Delete them?
+    }
+delete-also-finished =
+    { PLURAL($count) ->
+        [one] With them, { $count } finished download, whose file stays where it is.
+       *[other] With them, { $count } finished downloads, whose files stay where they are.
+    }
+delete-unfinished-files = Delete the unfinished files too
