@@ -8,6 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+getrandom.workspace = true
 percent-encoding.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
@@ -25,6 +26,15 @@ zajil-platform.workspace = true
 # Lets tests trust their temporary CA (`Engine::with_test_root`). Enabled only
 # by the dev-dependency below; never by a shipped binary (checked in CI).
 test-support = []
+
+# A stand-in for yt-dlp for the tests of `video` (tests/video.rs). Built
+# only with test-support, which no shipped binary enables (checked in CI).
+[[bin]]
+name = "fake-yt-dlp"
+path = "tests/support/fake_yt_dlp.rs"
+required-features = ["test-support"]
+test = false
+doctest = false
 
 [dev-dependencies]
 zajil-core = { path = ".", features = ["test-support"] }

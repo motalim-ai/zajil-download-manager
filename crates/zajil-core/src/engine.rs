@@ -737,6 +737,39 @@ impl Engine {
         .await
     }
 
+    /// A small text resource at `url` (an HLS playlist), at most `limit`
+    /// bytes, with the same TLS, redirects and browser headers as a
+    /// download, and not saved anywhere. For the video module's own DRM
+    /// check (ADR-0009, section 6). A larger answer is an error, never
+    /// read past the limit.
+    pub async fn fetch_text(&self, url: &str, limit: usize, stop: &Stop) -> Result<String, Error> {
+        let url = parse_url(url)?;
+        let fetch = async {
+            let mut response = self.get(url, None).await?;
+            if response.status() != StatusCode::OK {
+                return Err(Error::Status(response.status()));
+            }
+            let mut body = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|err| Error::Http(without_secrets(err)))?
+            {
+                if body.len().saturating_add(chunk.len()) > limit {
+                    return Err(Error::Io(io::Error::other(format!(
+                        "the answer is larger than {limit} bytes"
+                    ))));
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(String::from_utf8_lossy(&body).into_owned())
+        };
+        tokio::select! {
+            result = fetch => result,
+            () = stop.requested() => Err(Error::Stopped { state_file: None }),
+        }
+    }
+
     /// What `url` holds, without downloading it: the name the file would
     /// get, its size, and whether it can be split and resumed (the server
     /// announces `Accept-Ranges: bytes`, a size and a strong validator).

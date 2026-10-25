@@ -2450,6 +2450,7 @@ name = "zajil-core"
 version = "0.1.0"
 dependencies = [
  "dunce",
+ "getrandom 0.4.3",
  "icu_properties",
  "jiff",
  "percent-encoding",
@@ -2505,6 +2506,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "objc2-app-kit",
+ "tempfile",
  "thiserror",
  "windows-sys 0.61.2",
 ]

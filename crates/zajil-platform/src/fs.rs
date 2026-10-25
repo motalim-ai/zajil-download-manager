@@ -175,11 +175,90 @@ pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
     imp::only_user_or_root_can_change(path)
 }
 
+/// Makes `dir` a folder that no other user can change, creating it and
+/// each missing parent as one: mode `0700` on macOS and Linux (whatever the
+/// umask, and on macOS without an inherited access list); on Windows an
+/// access list for the user alone, which what is created inside inherits.
+/// An existing `dir` must already be one ([`is_private_dir`], never through
+/// a link). For the video tools, which Zajil runs (ADR-0009), and the
+/// folders of each run.
+pub fn private_dir(dir: &Path) -> io::Result<()> {
+    imp::create_private_dir(dir)?;
+    if !is_private_dir(dir)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{} is not a folder only this user can change (it must be a folder, not a link)",
+                dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `dir` is a folder (not a link) that only this user, or the
+/// system, can change: [`only_user_or_root_can_change`], and on macOS no
+/// access list entry (which could let others change it whatever its mode).
+pub fn is_private_dir(dir: &Path) -> io::Result<bool> {
+    let meta = std::fs::symlink_metadata(dir)?;
+    Ok(meta.is_dir() && only_user_or_root_can_change(dir)? && !imp::dir_has_acl(dir)?)
+}
+
+/// Opens the program `path` to check it before it runs (ADR-0009): a
+/// regular file, never through a link, that only this user or the system
+/// can change, checked on the opened file. On Windows it stays locked
+/// while the handle is open: nobody can write, delete or rename it, or
+/// rename a folder above it, until it has started.
+pub fn open_private_tool(path: &Path) -> io::Result<File> {
+    imp::open_private_tool(path)
+}
+
+/// Lets the owner run `file` (mode `0700` on macOS and Linux; nothing to do
+/// on Windows, where a `.exe` runs by its name). For a tool Zajil checked
+/// before saving it (ADR-0009).
+pub fn make_executable(file: &File) -> io::Result<()> {
+    imp::make_executable(file)
+}
+
+/// Gives a finished download made by a tool under `umask 077` the mode of
+/// any other download (`0644` on macOS and Linux; nothing to do on
+/// Windows, where it took its folder's access list).
+pub fn make_ordinary(file: &File) -> io::Result<()> {
+    imp::make_ordinary(file)
+}
+
+/// Removes the file `path` (never what a link points to), again for about
+/// a second while another program (an antivirus) holds it. A missing file
+/// is fine.
+pub fn remove_file_retrying(path: &Path) -> io::Result<()> {
+    with_retry(|| match std::fs::remove_file(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
+}
+
+/// Removes the folder `dir` with what is in it (a link is removed, not
+/// followed), again for about a second while another program holds a file
+/// in it. A missing folder is fine.
+pub fn remove_dir_all_retrying(dir: &Path) -> io::Result<()> {
+    with_retry(|| match std::fs::remove_dir_all(dir) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
+}
+
 /// Creates a symbolic link `link` pointing to the file `target`. Used by
 /// tests that check symbolic links are refused. On Windows this needs
 /// Developer Mode or administrator rights.
 pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
     imp::symlink_file(target, link)
+}
+
+/// Creates a symbolic link `link` pointing to the folder `target`. Used by
+/// tests that check links in place of folders are refused. On Windows this
+/// needs Developer Mode or administrator rights.
+pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+    imp::symlink_dir(target, link)
 }
 
 /// For tests: opens `path` for reading the way an antivirus scanner or
@@ -300,6 +379,71 @@ mod imp {
         false
     }
 
+    pub fn create_private_dir(dir: &Path) -> io::Result<()> {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        // Each missing level, from the top: `create_dir_all` would give the
+        // parents the umask's mode (review: a group-writable `tools`).
+        let missing: Vec<&Path> = dir
+            .ancestors()
+            .take_while(|level| std::fs::symlink_metadata(level).is_err())
+            .collect();
+        for level in missing.into_iter().rev() {
+            match std::fs::DirBuilder::new().mode(0o700).create(level) {
+                Ok(()) => {
+                    let made = open_dir_nofollow(level)?;
+                    // The umask may have taken bits away, never added any;
+                    // and on macOS the folder inherited its parent's
+                    // inheritable access list.
+                    made.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+                    acl::remove(&made)?;
+                }
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
+
+    /// A folder, opened without following a link.
+    fn open_dir_nofollow(dir: &Path) -> io::Result<File> {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(dir)
+    }
+
+    pub fn dir_has_acl(dir: &Path) -> io::Result<bool> {
+        acl::has_entries(&open_dir_nofollow(dir)?)
+    }
+
+    #[allow(unsafe_code)]
+    pub fn open_private_tool(path: &Path) -> io::Result<File> {
+        let file = open_regular_nofollow(path, false)?;
+        let meta = file.metadata()?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let me = unsafe { libc::geteuid() };
+        let private = (meta.uid() == me || meta.uid() == 0)
+            && meta.mode() & 0o022 == 0
+            && !acl::has_entries(&file)?;
+        if !private {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} can be changed by another user", path.display()),
+            ));
+        }
+        Ok(file)
+    }
+
+    pub fn make_executable(file: &File) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o700))
+    }
+
+    pub fn make_ordinary(file: &File) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o644))
+    }
+
     pub fn open_regular_nofollow(path: &Path, write: bool) -> io::Result<File> {
         // O_NOFOLLOW refuses a symbolic link; O_NONBLOCK keeps a planted
         // FIFO from blocking the open.
@@ -323,6 +467,10 @@ mod imp {
     }
 
     pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
         std::os::unix::fs::symlink(target, link)
     }
 
@@ -656,10 +804,10 @@ mod imp {
         WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW, GetFileInformationByHandle,
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateDirectoryW, CreateFileW,
+        FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
+        GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
@@ -674,6 +822,68 @@ mod imp {
 
     pub fn sync_dir(dir: &Path) -> io::Result<()> {
         std::fs::metadata(dir).map(|_| ())
+    }
+
+    pub fn create_private_dir(dir: &Path) -> io::Result<()> {
+        // Each missing level, from the top, with an access list for the
+        // user alone that what is made inside inherits (review: inheriting
+        // the parent's list did not make the folder private).
+        let missing: Vec<&Path> = dir
+            .ancestors()
+            .take_while(|level| std::fs::symlink_metadata(level).is_err())
+            .collect();
+        for level in missing.into_iter().rev() {
+            let (attributes, _descriptor) = owner_only_inherited("FA")?;
+            let path_w = wide(&std::path::absolute(level)?);
+            // SAFETY: `path_w` is a NUL-terminated UTF-16 string and
+            // `attributes` points to a valid descriptor, both alive for
+            // the call.
+            if unsafe { CreateDirectoryW(path_w.as_ptr(), &attributes) } == 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn dir_has_acl(_dir: &Path) -> io::Result<bool> {
+        // The access list itself is what `only_user_or_root_can_change`
+        // reads on Windows.
+        Ok(false)
+    }
+
+    pub fn open_private_tool(path: &Path) -> io::Result<File> {
+        // Shared for reading only: while it is open, nobody can write,
+        // delete or rename it, nor rename a folder above it.
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        let meta = file.metadata()?;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || !meta.file_type().is_file()
+            || link_count(&file)? > 1
+        {
+            return Err(not_regular(path));
+        }
+        if !only_user_or_root_can_change(path)? {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} can be changed by another user", path.display()),
+            ));
+        }
+        Ok(file)
+    }
+
+    pub fn make_executable(_file: &File) -> io::Result<()> {
+        Ok(())
+    }
+
+    pub fn make_ordinary(_file: &File) -> io::Result<()> {
+        Ok(())
     }
 
     pub fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
@@ -715,13 +925,32 @@ mod imp {
         std::os::windows::fs::symlink_file(target, link)
     }
 
+    pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
+    }
+
     /// Security attributes that allow `access` (SDDL rights, such as `FA`
     /// for all file access or `GA` for all generic access) to the current
     /// user only: "D:P(A;;<access>;;;<sid>)", a protected DACL (P: nothing
     /// inherited) with one entry allowing (A) it. Kept alive by the
     /// returned guard, which must outlive every use of the attributes.
     pub(crate) fn owner_only(access: &str) -> io::Result<(SECURITY_ATTRIBUTES, LocalMemory)> {
-        let sddl = format!("D:P(A;;{access};;;{})", UserSid::current()?.to_text()?);
+        security_attributes(&format!(
+            "D:P(A;;{access};;;{})",
+            UserSid::current()?.to_text()?
+        ))
+    }
+
+    /// [`owner_only`] for a folder: what is created inside inherits it
+    /// (object and container inherit).
+    fn owner_only_inherited(access: &str) -> io::Result<(SECURITY_ATTRIBUTES, LocalMemory)> {
+        security_attributes(&format!(
+            "D:P(A;OICI;{access};;;{})",
+            UserSid::current()?.to_text()?
+        ))
+    }
+
+    fn security_attributes(sddl: &str) -> io::Result<(SECURITY_ATTRIBUTES, LocalMemory)> {
         let sddl: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
         let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         // SAFETY: `sddl` is a NUL-terminated UTF-16 string alive for the

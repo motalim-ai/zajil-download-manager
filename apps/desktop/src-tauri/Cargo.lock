@@ -6154,6 +6154,7 @@ name = "zajil-core"
 version = "0.1.0"
 dependencies = [
  "dunce",
+ "getrandom 0.4.3",
  "icu_properties",
  "jiff",
  "percent-encoding",
