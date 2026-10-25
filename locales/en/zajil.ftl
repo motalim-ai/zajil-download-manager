@@ -410,3 +410,7 @@ quit-question =
        *[other] { $count } downloads are running. Quit Zajil?
     }
 quit-ok = Quit Zajil
+
+## Video (M6)
+
+video-soon = Video downloads are coming soon.
