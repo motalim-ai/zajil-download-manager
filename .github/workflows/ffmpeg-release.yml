@@ -1,0 +1,107 @@
+name: FFmpeg release
+
+# A tag named tools-ffmpeg-<version>-<n> builds FFmpeg with ffmpeg.yml and
+# publishes a release with the binaries, the official source and its
+# signature, the source with the build notes in its root, and every build
+# file: the LGPL checklist of ADR-0009, section 1. Apart from ffmpeg.yml,
+# so that ci.yml can call the build without the release's write access.
+on:
+  push:
+    tags: ["tools-ffmpeg-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    uses: ./.github/workflows/ffmpeg.yml
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Only what was reviewed, under its own version: the tag is on main's
+      # history, and names the pinned version (tools-ffmpeg-<version>-<n>).
+      - name: The tag is a reviewed commit of the pinned version
+        run: |
+          set -euo pipefail
+          . tools/ffmpeg/source.env
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::$GITHUB_REF_NAME is not on main: only merged code is released"; exit 1
+          }
+          [[ "$GITHUB_REF_NAME" =~ ^tools-ffmpeg-${FFMPEG_VERSION//./\\.}-[0-9]+$ ]] || {
+            echo "::error::$GITHUB_REF_NAME does not name FFmpeg $FFMPEG_VERSION (tools-ffmpeg-$FFMPEG_VERSION-<n>)"; exit 1
+          }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/artifacts
+      - name: Assemble the release files
+        run: |
+          set -euo pipefail
+          . tools/ffmpeg/source.env
+          a="$RUNNER_TEMP/artifacts"
+          r="$RUNNER_TEMP/release"
+          mkdir -p "$r"
+          # The official source as it is, and its signature (items 3, 4, 7).
+          cp "$a/ffmpeg-source/$FFMPEG_TARBALL" "$a/ffmpeg-source/$FFMPEG_TARBALL.asc" "$r/"
+          # The binaries. FFmpeg's own names with the platform added, which
+          # the legal page allows (item 16); Zajil saves them as ffmpeg and
+          # ffprobe.
+          for dir in "$a"/ffmpeg-*/; do
+            platform="$(basename "$dir")"
+            platform="${platform#ffmpeg-}"
+            [ "$platform" = source ] && continue
+            for f in "$dir"*; do
+              name="$(basename "$f")"
+              case "$name" in
+                *testgen*) echo "::error::a test-only file reached the release: $name"; exit 1 ;;
+                ffmpeg-build.txt) cp "$f" "$r/ffmpeg-build-$platform.txt" ;;
+                *.exe) cp "$f" "$r/${name%.exe}-$platform.exe" ;;
+                *) cp "$f" "$r/$name-$platform" ;;
+              esac
+            done
+          done
+          # The source again, with every build file in its root (item 6).
+          work="$(mktemp -d)"
+          tar -xJf "$r/$FFMPEG_TARBALL" -C "$work"
+          cp "$r"/ffmpeg-build-*.txt "$work/ffmpeg-$FFMPEG_VERSION/"
+          # And the script and options that made it, so the source alone
+          # tells how (item 6).
+          mkdir "$work/ffmpeg-$FFMPEG_VERSION/zajil-build"
+          cp tools/ffmpeg/build.sh tools/ffmpeg/configure-dist.txt tools/ffmpeg/source.env \
+            .github/workflows/ffmpeg.yml .github/workflows/ffmpeg-release.yml \
+            "$work/ffmpeg-$FFMPEG_VERSION/zajil-build/"
+          tar -cJf "$r/ffmpeg-$FFMPEG_VERSION-zajil-source.tar.xz" -C "$work" "ffmpeg-$FFMPEG_VERSION"
+          # The LGPL, and FFmpeg's own notes on the licenses of its parts.
+          cp "$work/ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv2.1" "$work/ffmpeg-$FFMPEG_VERSION/LICENSE.md" "$r/"
+          (cd "$r" && sha256sum * > SHA256SUMS)
+          cat "$r/SHA256SUMS"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . tools/ffmpeg/source.env
+          {
+            echo "FFmpeg $FFMPEG_VERSION for Zajil: ffmpeg and ffprobe, LGPL 2.1 or later."
+            echo
+            echo "This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here: $FFMPEG_TARBALL (with its signature $FFMPEG_TARBALL.asc), and ffmpeg-$FFMPEG_VERSION-zajil-source.tar.xz, the same source with the build notes of every platform in its root."
+            echo
+            echo "Source SHA-256: $FFMPEG_SHA256 ($FFMPEG_TARBALL, signed by FFmpeg's key $FFMPEG_SIGNING_KEY)."
+            echo
+            echo "macOS: ad-hoc signed only, never signed or notarized by Apple (owner's decision). Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
+            echo
+            echo "No change to the FFmpeg source. Built by .github/workflows/ffmpeg.yml (released by ffmpeg-release.yml) from commit $GITHUB_SHA. FFmpeg belongs to its authors: https://ffmpeg.org"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --prerelease \
+            --title "FFmpeg $FFMPEG_VERSION for Zajil ($GITHUB_REF_NAME)" \
+            --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/release/*

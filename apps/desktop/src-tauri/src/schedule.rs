@@ -443,7 +443,7 @@ async fn count_down(handle: &tauri::AppHandle, after: &After, queue: String, act
         }
     }
     let title = after.title.lock().unwrap().clone();
-    let _ = crate::windows::open(handle, LABEL, &title, SIZE);
+    let _ = crate::windows::open_beside_main(handle, LABEL, LABEL, &title, SIZE);
     let _ = handle.emit_to(LABEL, "after-countdown", Some(shown.clone()));
     let store = handle.state::<App>().store.clone();
     // The run ended with this queue: every download in it is done, the
@@ -489,21 +489,6 @@ async fn count_down(handle: &tauri::AppHandle, after: &After, queue: String, act
         eprintln!("zajil: after queue {queue}: {problem}");
         let _ = handle.emit_to(LABEL, "after-failed", problem);
     }
-}
-
-/// The schedule window closes with the main one, as the add windows do.
-pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
-    let Some(main) = handle.get_webview_window("main") else {
-        return;
-    };
-    let app = handle.clone();
-    main.on_window_event(move |event| {
-        if let tauri::WindowEvent::Destroyed = event
-            && let Some(window) = app.get_webview_window(LABEL)
-        {
-            let _ = window.close();
-        }
-    });
 }
 
 #[cfg(test)]

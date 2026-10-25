@@ -768,6 +768,9 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A button's name.
+    ("tb-earlier", &["name"]),
+    ("tb-later", &["name"]),
     // A time already written for the user's language.
     ("last-try-yesterday", &["time"]),
     ("progress-working", &["number"]),
@@ -1041,6 +1044,16 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "last-try-yesterday",
         ar: (&[("time", "TIME")], "أمس TIME"),
         en: (&[("time", "TIME")], "Yesterday TIME"),
+    },
+    Whole {
+        key: "tb-earlier",
+        ar: (&[("name", "NAME")], "قدّم «NAME»"),
+        en: (&[("name", "NAME")], "Move “NAME” earlier"),
+    },
+    Whole {
+        key: "tb-later",
+        ar: (&[("name", "NAME")], "أخّر «NAME»"),
+        en: (&[("name", "NAME")], "Move “NAME” later"),
     },
     Whole {
         key: "footer-selected",

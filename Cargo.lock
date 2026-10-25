@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "jiff",
@@ -2447,9 +2447,10 @@ dependencies = [
 
 [[package]]
 name = "zajil-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dunce",
+ "getrandom 0.4.3",
  "icu_properties",
  "jiff",
  "percent-encoding",
@@ -2468,14 +2469,14 @@ dependencies = [
 
 [[package]]
 name = "zajil-grab"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "zajil-core",
 ]
 
 [[package]]
 name = "zajil-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2487,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -2498,20 +2499,21 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "dirs",
  "getrandom 0.4.3",
  "libc",
  "objc2-app-kit",
+ "tempfile",
  "thiserror",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "zajil-testserver"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "http-body-util",

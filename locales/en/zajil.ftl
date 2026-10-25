@@ -460,6 +460,25 @@ schedule-closed-now = The queue is outside its time now: its downloads wait for 
 schedule-save = Save
 schedule-saved = Saved.
 schedule-close = Close
+schedule-tries = Tries per file
+schedule-after-open = And open a file or program after it:
+schedule-after-open-pick = Choose a file…
+schedule-soon = Coming soon
+
+## الاكتمال
+
+complete-title = Download complete
+complete-name = Name
+complete-size = Size
+complete-folder = Saved in
+complete-url = Link
+complete-open = Open
+complete-open-folder = Open folder
+complete-close = Close
+complete-dont-show = Don't show this window again
+complete-setting = Show the «Download complete» window when a download finishes
+complete-drag = Drag it from here
+complete-drag-hint = Drag the file from here into any program or folder
 
 ## Video (M6)
 
@@ -523,6 +542,16 @@ add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way 
 add-description = Description
 add-description-hint = Optional
 last-try-yesterday = Yesterday { $time }
+
+## The toolbar as the user leaves it (M5.5, an IDM touch)
+tb-big = Big buttons
+tb-small = Small buttons
+tb-customize = Customize the toolbar…
+tb-customize-title = Customize the toolbar
+tb-earlier = Move “{ $name }” earlier
+tb-later = Move “{ $name }” later
+tb-reset = Reset
+tb-done = Done
 
 ## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
 col-queue = Queue
