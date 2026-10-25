@@ -441,3 +441,6 @@ sys-paste = لصق
 sys-window = نافذة
 sys-minimize = تصغير
 sys-zoom = تكبير
+row-menu = قائمة التحميل
+open-code-question = «{ $name }» برنامج أو ملف يمكنه تشغيل أوامر على جهازك. هل تفتحه؟
+open-code-ok = فتح

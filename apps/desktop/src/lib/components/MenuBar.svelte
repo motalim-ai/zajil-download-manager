@@ -17,9 +17,6 @@
   let open = $state<number | null>(null);
   let bar: HTMLDivElement | undefined = $state();
 
-  const commands = (index: number) =>
-    MENU_BAR[index]!.items.filter((i): i is { command: Command } => typeof i === "object" && "command" in i);
-
   async function show(index: number, focusItem: "first" | "none" = "first") {
     open = index;
     await tick();
@@ -138,7 +135,6 @@
       {/if}
     </div>
   {/each}
-  {#if open !== null}<span class="visually-hidden">{commands(open).length}</span>{/if}
 </div>
 
 <style>

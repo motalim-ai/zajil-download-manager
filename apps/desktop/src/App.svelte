@@ -39,9 +39,6 @@
   // The table's columns chooser, and the right-click menu where it opened.
   let chooser = $state(false);
   let rowMenu = $state<{ x: number; y: number } | null>(null);
-  // The selected downloads' links, ready for «Copy link»: the copy event
-  // cannot wait for an answer.
-  let links: string[] = [];
   // The small «add a link» dialog, and whether its link came from the
   // clipboard.
   let linking = $state<{ url: string; fromClipboard: boolean } | null>(null);
@@ -464,6 +461,10 @@
     const now = performance.now();
     if (last.command === command && now - last.at < 300) return;
     last = { command, at: now };
+    // In a text box, Select all is its text's, dialog or not (review of
+    // #101: ⌘A goes through the macOS menu).
+    const box = document.activeElement;
+    if (command === "select-all" && (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement)) return box.select();
     if (!canRun(command)) return;
     if (TOOL.includes(command)) return doAction(command as ToolAction);
     switch (command) {
@@ -478,15 +479,11 @@
         details = null;
         return document.getElementById("search")?.focus();
       // In a text box, its text; elsewhere, every download the table shows.
-      case "select-all": {
-        const box = document.activeElement;
-        if (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement) return box.select();
+      case "select-all":
         if (tableShown) selected = shown.map((d) => d.id);
         return;
-      }
       case "copy-link":
-        document.execCommand("copy");
-        return;
+        return void copyLinks();
       case "categories":
         details = null;
         view = "categories";
@@ -516,10 +513,28 @@
     if (d?.status === "done") await showIn(id, false);
     else await open(id);
   }
+  // A file that can run code opens once the user agrees (#84; review of
+  // #101: a double-click ran a program).
   async function showIn(id: number, folder: boolean) {
     failed = null;
     try {
-      await api.openDownload(id, folder);
+      if (await api.openDownload(id, folder)) return;
+      const name = snapshot.downloads.find((x) => x.id === id)?.name ?? "";
+      const yes = await ask(locale.t("open-code-question", { name }), {
+        title: locale.t("app-name"),
+        kind: "warning",
+        okLabel: locale.t("open-code-ok"),
+        cancelLabel: locale.t("confirm-cancel"),
+      }).catch(() => false);
+      if (yes) await api.openDownload(id, folder, true);
+    } catch (e) {
+      failed = String(e);
+    }
+  }
+  async function copyLinks() {
+    failed = null;
+    try {
+      await api.copyLinks(selected);
     } catch (e) {
       failed = String(e);
     }
@@ -538,19 +553,24 @@
     await message(locale.t("about-text", { version }), { title: locale.t("app-name"), kind: "info" }).catch(() => {});
   }
 
-  $effect(() => {
-    const ids = [...selected];
-    links = [];
-    if (ids.length > 0) void api.downloadLinks(ids).then((l) => ids.join() === selected.join() && (links = l)).catch(() => {});
-  });
-  // «Copy link»: the selected downloads' links, one a line, unless the
-  // copy is a text box's own.
+  // Copy (Ctrl+C, or the system's Copy on macOS) on the table is «Copy
+  // link», unless the copy is a text box's own or of selected text. The app
+  // writes the clipboard, so its monitoring does not offer the links back.
   function onCopy(event: ClipboardEvent) {
     const box = document.activeElement;
-    if (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || !tableShown || links.length === 0) return;
+    if (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || !canRun("copy-link")) return;
     if (window.getSelection()?.toString()) return;
     event.preventDefault();
-    event.clipboardData?.setData("text/plain", links.join("\n"));
+    void copyLinks();
+  }
+
+  /** A command from the macOS menu: in a text box, the keys a text box
+   * has (⌘⌫, ⌘O, ⌘I) do not act on the downloads (review of #101). */
+  function fromMenu(command: Command) {
+    const box = document.activeElement;
+    const typing = box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement || (box instanceof HTMLElement && box.isContentEditable);
+    if (typing && command !== "select-all" && TEXT_KEYS.includes(command)) return;
+    run(command);
   }
 
   // The shortcuts. In a text box, its own keys stay its own.
@@ -696,7 +716,7 @@
         linking = { url, fromClipboard: true };
         void api.showWindow().catch(() => {});
       });
-      unlistenMenu = await api.onMenuCommand((command) => run(command as Command));
+      unlistenMenu = await api.onMenuCommand((command) => fromMenu(command as Command));
       await refresh();
     })();
     return () => {
@@ -775,7 +795,10 @@
           can={canRun}
           onrun={run}
           onmove={(q) => void moveTo(q)}
-          onclose={() => (rowMenu = null)}
+          onclose={(refocus) => {
+            rowMenu = null;
+            if (refocus) document.querySelector<HTMLElement>('tr[tabindex="0"]')?.focus();
+          }}
         />
       {/if}
       {#if adding}

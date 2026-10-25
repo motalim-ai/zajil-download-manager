@@ -387,3 +387,6 @@ sys-paste = Paste
 sys-window = Window
 sys-minimize = Minimize
 sys-zoom = Zoom
+row-menu = Download menu
+open-code-question = “{ $name }” is a program, or a file that can run commands on your computer. Open it?
+open-code-ok = Open

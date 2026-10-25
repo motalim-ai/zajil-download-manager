@@ -111,6 +111,7 @@ fn build<R: Runtime>(
         Box::new(PredefinedMenuItem::separator(app)?),
     ];
     let mut rest = Vec::new();
+    let mut has_quit = false;
     for menu in menus {
         let mut list = items(&menu.items)?;
         if menu.edit {
@@ -132,11 +133,21 @@ fn build<R: Runtime>(
             .iter()
             .position(|i| i.id.as_deref() == Some("quit"))
         {
-            let quit = list.remove(list.len() - menu.items.len() + at);
+            let start = list.len() - menu.items.len();
+            let quit = list.remove(start + at);
             first.push(quit);
+            has_quit = true;
+            // No separator left at the menu's end.
+            if at + 1 == menu.items.len() && at > 0 && menu.items[at - 1].id.is_none() {
+                list.remove(start + at - 1);
+            }
         }
         let refs: Vec<&dyn IsMenuItem<R>> = list.iter().map(|b| b.as_ref()).collect();
         rest.push(Submenu::with_items(app, &menu.label, true, &refs)?);
+    }
+    // The page gave no Quit: the system's, so ⌘Q always quits.
+    if !has_quit {
+        first.push(Box::new(PredefinedMenuItem::quit(app, None)?));
     }
     let first_refs: Vec<&dyn IsMenuItem<R>> = first.iter().map(|b| b.as_ref()).collect();
     let app_menu = Submenu::with_items(app, app_name, true, &first_refs)?;

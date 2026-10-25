@@ -22,7 +22,9 @@
     can: (command: Command) => boolean;
     onrun: (command: Command) => void;
     onmove: (queue: string) => void;
-    onclose: () => void;
+    /** `refocus`: the focus goes back to the table (Escape, Tab, a
+     * command), not after a click elsewhere. */
+    onclose: (refocus: boolean) => void;
   } = $props();
 
   // The icon of each command, as in the design.
@@ -56,7 +58,7 @@
 
   function run(command: Command) {
     if (!can(command)) return;
-    onclose();
+    onclose(true);
     onrun(command);
   }
 
@@ -68,17 +70,52 @@
       items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
     } else if (event.key === "Escape" || event.key === "Tab") {
       event.preventDefault();
-      onclose();
+      if (sub && event.key === "Escape") return closeSub();
+      onclose(true);
+    }
+  }
+
+  // «Move to queue» opens with the arrow toward its submenu, Enter or
+  // Space; the other arrow or Escape goes back (review of #101).
+  let subButton: HTMLButtonElement | undefined = $state();
+  const inward = () => (locale.dir === "rtl" ? "ArrowLeft" : "ArrowRight");
+  async function openSub() {
+    sub = true;
+    await tick();
+    menu?.querySelector<HTMLButtonElement>('.sub [role="menuitem"]')?.focus();
+  }
+  function closeSub() {
+    sub = false;
+    subButton?.focus();
+  }
+  function onSubKey(event: KeyboardEvent) {
+    if (event.key === inward() || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      void openSub();
+    }
+  }
+  function onInSubKey(event: KeyboardEvent) {
+    if (event.key === (locale.dir === "rtl" ? "ArrowRight" : "ArrowLeft")) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSub();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      const items = [...(menu?.querySelectorAll<HTMLButtonElement>('.sub [role="menuitem"]') ?? [])];
+      const at = items.indexOf(document.activeElement as HTMLButtonElement);
+      items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
     }
   }
 </script>
 
-<svelte:document onpointerdown={(e) => !menu?.contains(e.target as Node) && onclose()} />
+<svelte:document onpointerdown={(e) => !menu?.contains(e.target as Node) && onclose(false)} />
 
 <div
   class="ctx"
   role="menu"
-  aria-label={locale.t("cmd-properties")}
+  aria-label={locale.t("row-menu")}
   tabindex="-1"
   bind:this={menu}
   style:left="{place.left}px"
@@ -90,14 +127,24 @@
       <hr />
     {:else if "queues" in item}
       <div class="slot">
-        <button class="it" role="menuitem" aria-haspopup="menu" aria-expanded={sub} tabindex="-1" onclick={() => (sub = !sub)} onpointerenter={() => (sub = true)}>
+        <button
+          bind:this={subButton}
+          class="it"
+          role="menuitem"
+          aria-haspopup="menu"
+          aria-expanded={sub}
+          tabindex="-1"
+          onclick={() => (sub ? closeSub() : void openSub())}
+          onpointerenter={() => (sub = true)}
+          onkeydown={onSubKey}
+        >
           <Icon name="list-ordered" size={15} /><span>{locale.t("cmd-move-to-queue")}</span>
           <span class="more flip"><Icon name="chevron-right" size={14} /></span>
         </button>
         {#if sub}
-          <div class="sub" role="menu" aria-label={locale.t("cmd-move-to-queue")}>
+          <div class="sub" role="menu" tabindex="-1" aria-label={locale.t("cmd-move-to-queue")} onkeydown={onInSubKey}>
             {#each queues as q (q.name)}
-              <button class="it" role="menuitem" tabindex="-1" onclick={() => (onclose(), onmove(q.name))}><bdi>{q.label}</bdi></button>
+              <button class="it" role="menuitem" tabindex="-1" onclick={() => (onclose(true), onmove(q.name))}><bdi>{q.label}</bdi></button>
             {/each}
           </div>
         {/if}

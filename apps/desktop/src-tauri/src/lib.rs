@@ -54,6 +54,9 @@ pub struct App {
     connections: Arc<AtomicUsize>,
     /// Clipboard monitoring is on (the settings, M5).
     clipboard: Arc<AtomicBool>,
+    /// What «Copy link» put on the clipboard: the monitoring does not offer
+    /// it back (M5.5).
+    copied: Arc<std::sync::Mutex<String>>,
     /// The data folder (`--data-dir` or the system's).
     data_dir: PathBuf,
     /// The browser's cookies and page of each download the extension sent,
@@ -121,6 +124,7 @@ pub fn run() {
         system_download_dir,
         connections: Arc::new(AtomicUsize::new(connections)),
         clipboard: Arc::new(AtomicBool::new(clipboard)),
+        copied: Arc::default(),
         data_dir: data.clone(),
         from_browser: Arc::default(),
         links: zajil_host::Links::default(),
@@ -271,7 +275,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_version,
         open_download,
         move_to_queue,
-        download_links
+        copy_links
     ]
 }
 
@@ -305,7 +309,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_version,
         open_download,
         move_to_queue,
-        download_links,
+        copy_links,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -938,7 +942,8 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
                 &app.categories,
                 std::time::Instant::now(),
             );
-            if let Some(link) = link {
+            let own = |link: &str| app.copied.lock().is_ok_and(|c| copied_here(&c, link));
+            if let Some(link) = link.filter(|l| !own(l)) {
                 let _ = handle.emit("clipboard-link", link);
             }
         }
@@ -1716,20 +1721,24 @@ fn app_version<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> String {
     handle.package_info().version.to_string()
 }
 
-/// Opens download `id`'s finished file (`folder` false) with the system's
-/// program for it, or shows its folder (`folder` true: the file selected
-/// when it is there). Only a download's own paths: the page names the
-/// download, never a path.
+/// Opens a finished download (`folder` false) with the system's program
+/// for it, or shows it in its folder (`folder` true; a download with no
+/// file yet shows its folder, selected in the one above, never opened: an
+/// imported folder could be a program, as a macOS `.app` is). Only a
+/// download's own paths: the page names the download, never a path. A file
+/// that can run code (#84) opens only once the user is `sure`: `false`
+/// comes back, and the page asks.
 #[tauri::command]
 async fn open_download<R: tauri::Runtime>(
     app: State<'_, App>,
     id: u64,
     folder: bool,
+    sure: bool,
     handle: tauri::AppHandle<R>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     use tauri_plugin_opener::OpenerExt;
     if in_scene(&handle) {
-        return Ok(());
+        return Ok(true);
     }
     let store = app.store.clone();
     let queues = tokio::task::spawn_blocking(move || store.load())
@@ -1740,15 +1749,33 @@ async fn open_download<R: tauri::Runtime>(
     let file = item.file.clone().filter(|f| f.is_file());
     let opener = handle.opener();
     match (folder, file) {
+        (false, Some(file)) if !sure && asks_before_opening(&file) => Ok(false),
         (false, Some(file)) => opener
             .open_path(file.to_string_lossy(), None::<&str>)
+            .map(|()| true)
             .map_err(|e| e.to_string()),
         (false, None) => Err(format!("download {id} has no finished file")),
-        (true, Some(file)) => opener.reveal_item_in_dir(&file).map_err(|e| e.to_string()),
-        (true, None) => opener
-            .open_path(item.dir.to_string_lossy(), None::<&str>)
+        (true, Some(file)) => opener
+            .reveal_item_in_dir(&file)
+            .map(|()| true)
             .map_err(|e| e.to_string()),
+        (true, None) if item.dir.is_dir() => opener
+            .reveal_item_in_dir(&item.dir)
+            .map(|()| true)
+            .map_err(|e| e.to_string()),
+        (true, None) => Err(format!("download {id} has no folder")),
     }
+}
+
+/// A file that can run code (#84): opening it runs it.
+fn asks_before_opening(file: &std::path::Path) -> bool {
+    file.file_name()
+        .is_some_and(|n| zajil_core::category::runs_code(&n.to_string_lossy()))
+}
+
+/// Whether `link` is one of the links «Copy link» put on the clipboard.
+fn copied_here(copied: &str, link: &str) -> bool {
+    copied.lines().any(|l| l.trim() == link.trim())
 }
 
 /// Moves downloads to queue `queue`, in their order, at its end.
@@ -1777,19 +1804,37 @@ fn move_items(queues: &mut QueuesFile, ids: &[u64], queue: &str) -> Result<(), S
     Ok(())
 }
 
-/// The links of downloads, for «Copy link» (the user's own action: a
-/// token in a link is copied with it).
+/// «Copy link»: the downloads' links on the clipboard, one a line, kept
+/// so the clipboard monitoring does not offer them back. How many went.
 #[tauri::command]
-async fn download_links(app: State<'_, App>, ids: Vec<u64>) -> Result<Vec<String>, String> {
+async fn copy_links<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<usize, String> {
     let store = app.store.clone();
     let queues = tokio::task::spawn_blocking(move || store.load())
         .await
         .map_err(blocking_err)?
         .map_err(|e| e.to_string())?;
-    Ok(ids
+    let links: Vec<String> = ids
         .iter()
         .filter_map(|id| queues.item(*id).map(|i| i.url.clone()))
-        .collect())
+        .collect();
+    if links.is_empty() || in_scene(&handle) {
+        return Ok(links.len());
+    }
+    let text = links.join("\n");
+    if let Ok(mut copied) = app.copied.lock() {
+        copied.clone_from(&text);
+    }
+    tokio::task::spawn_blocking(move || {
+        zajil_platform::clipboard::SystemClipboard::new()?.set_text(&text)
+    })
+    .await
+    .map_err(blocking_err)?
+    .map_err(|e| e.to_string())?;
+    Ok(links.len())
 }
 
 #[tauri::command]
@@ -1806,6 +1851,24 @@ async fn remove<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_link_copied_by_the_app_is_not_offered_back() {
+        let copied = "https://a.example/x.zip\nhttps://b.example/y.iso";
+        assert!(copied_here(copied, "https://b.example/y.iso"));
+        assert!(copied_here(copied, " https://a.example/x.zip "));
+        assert!(!copied_here(copied, "https://a.example/x"));
+        assert!(!copied_here("", "https://a.example/x.zip"));
+    }
+
+    #[test]
+    fn a_file_that_runs_code_is_not_opened_without_asking() {
+        use std::path::Path;
+        assert!(asks_before_opening(Path::new("/d/setup.EXE")));
+        assert!(asks_before_opening(Path::new("/d/run.sh")));
+        assert!(!asks_before_opening(Path::new("/d/film.mkv")));
+        assert!(!asks_before_opening(Path::new("/d/setup.exe.zip")));
+    }
     use super::*;
 
     fn three() -> QueuesFile {

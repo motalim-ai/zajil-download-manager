@@ -7,6 +7,7 @@
 </script>
 
 <script lang="ts">
+  import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
   import { categoryIcon } from "./Tree.svelte";
@@ -59,10 +60,25 @@
     const done = () => {
       grip.removeEventListener("pointermove", moved);
       grip.removeEventListener("pointerup", done);
+      grip.removeEventListener("lostpointercapture", done);
       save(columns);
     };
     grip.addEventListener("pointermove", moved);
     grip.addEventListener("pointerup", done);
+    // A drag the system cancels ends too.
+    grip.addEventListener("lostpointercapture", done);
+  }
+  // The chooser: its first box takes the focus when it opens; Escape, the
+  // button or a click elsewhere closes it, and the focus goes back to the
+  // button (review of #101).
+  let colButton: HTMLButtonElement | undefined = $state();
+  let chooserBox: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (chooser) void tick().then(() => chooserBox?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus());
+  });
+  function closeChooser(refocus: boolean) {
+    chooser = false;
+    if (refocus) colButton?.focus();
   }
   // From the keyboard: the grip is a slider, the arrows change the width.
   function resizeKey(event: KeyboardEvent, id: ColumnId, width: number) {
@@ -167,6 +183,8 @@
   }
 </script>
 
+<svelte:document onpointerdown={(e) => chooser && !chooserBox?.contains(e.target as Node) && !colButton?.contains(e.target as Node) && closeChooser(false)} />
+
 {#snippet cell(d: DownloadView, id: ColumnId)}
   {#if id === "name"}
     <td>
@@ -254,11 +272,25 @@
           </th>
         {/each}
         <th class="cols" scope="col">
-          <button class="colbtn" aria-label={locale.t("cmd-columns")} title={locale.t("cmd-columns")} aria-expanded={chooser} onclick={() => (chooser = !chooser)}>
+          <button bind:this={colButton} class="colbtn" aria-label={locale.t("cmd-columns")} title={locale.t("cmd-columns")} aria-expanded={chooser} onclick={() => (chooser ? closeChooser(true) : (chooser = true))}>
             <Icon name="columns-3" size={15} />
           </button>
           {#if chooser}
-            <div class="chooser" role="group" aria-label={locale.t("cmd-columns")}>
+            <!-- Escape from any of its boxes closes it. -->
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div
+              class="chooser"
+              role="group"
+              aria-label={locale.t("cmd-columns")}
+              bind:this={chooserBox}
+              onkeydown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeChooser(true);
+                }
+              }}
+            >
               {#each COLUMNS as c (c.id)}
                 <label class="choice">
                   <input type="checkbox" checked={!columns.hidden.includes(c.id)} disabled={c.id === "name"} onchange={() => keep(toggle(columns, c.id))} />

@@ -51,10 +51,12 @@ export const api = {
   quitApp: () => invoke<void>("quit_app"),
   appVersion: () => invoke<string>("app_version"),
   /** Opens a finished download (`folder` false) or shows its folder. */
-  openDownload: (id: number, folder: boolean) => invoke<void>("open_download", { id, folder }),
+  /** `false`: the file can run code, and opens only once the user is
+   * `sure`. */
+  openDownload: (id: number, folder: boolean, sure = false) => invoke<boolean>("open_download", { id, folder, sure }),
   moveToQueue: (ids: number[], queue: string) => invoke<void>("move_to_queue", { ids, queue }),
-  /** The downloads' links, for «Copy link». */
-  downloadLinks: (ids: number[]) => invoke<string[]>("download_links", { ids }),
+  /** «Copy link»: the downloads' links on the clipboard; how many went. */
+  copyLinks: (ids: number[]) => invoke<number>("copy_links", { ids }),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),
