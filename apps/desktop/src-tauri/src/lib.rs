@@ -11,6 +11,7 @@
 mod closing;
 mod live;
 mod menu;
+mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
@@ -173,7 +174,8 @@ pub fn run() {
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
-        ));
+        ))
+        .manage(schedule::SharedAfter::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -234,6 +236,9 @@ pub fn run() {
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
+            // The schedule window's, the same way (`schedule.rs`).
+            tauri_app.add_capability(schedule::CAPABILITY)?;
+            schedule::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -342,7 +347,17 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_version,
         open_download,
         move_to_queue,
-        copy_links
+        copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after
     ]
 }
 
@@ -388,6 +403,16 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         open_download,
         move_to_queue,
         copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -592,6 +617,7 @@ async fn run_queues(handle: tauri::AppHandle) {
                     }
                 };
                 on_queue_event(&event, &live, &links, &asks, &from_browser, &store, changed);
+                schedule::on_event(&handle, &event);
                 notify(&handle, &live);
             })
             .await;

@@ -59,7 +59,7 @@ pub type Shared = Mutex<Pending>;
 
 /// Opens window `label` (`win` in the page's address), or brings it to the
 /// front if it is open.
-fn open<R: tauri::Runtime>(
+pub(crate) fn open<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     label: &str,
     title: &str,

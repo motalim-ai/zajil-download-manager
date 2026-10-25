@@ -6020,6 +6020,7 @@ dependencies = [
 name = "zajil-desktop"
 version = "0.0.0"
 dependencies = [
+ "jiff",
  "serde",
  "serde_json",
  "tauri",

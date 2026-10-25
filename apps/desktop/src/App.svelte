@@ -20,6 +20,7 @@
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
+  import { scheduleApi } from "./lib/scheduleApi";
   import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
@@ -366,12 +367,13 @@
       case "halt-queue":
         void act("pause", idsOf((d) => d.queue === queueShown && (d.status === "active" || d.status === "waiting")));
         break;
-      // The queues' schedules are in the settings until the schedule
-      // window comes.
       case "settings":
-      case "schedule":
         details = null;
         view = "settings";
+        break;
+      // The schedule window (M5.5), a window of its own.
+      case "schedule":
+        void scheduleApi.open(locale.t("schedule-title")).catch((e) => (failed = String(e)));
         break;
     }
   }

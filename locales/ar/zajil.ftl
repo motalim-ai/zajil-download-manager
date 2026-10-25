@@ -469,6 +469,56 @@ quit-question =
     }
 quit-ok = إنهاء زاجِل
 
+## الجدولة
+
+schedule-title = الجدولة
+schedule-queues = الطوابير
+schedule-new = طابور جديد
+schedule-new-name = اسم الطابور الجديد
+schedule-new-hint = حروف وأرقام و - و _ فقط، بلا مسافات.
+schedule-create = إنشاء
+schedule-cancel = إلغاء
+schedule-delete = حذف
+schedule-delete-confirm = يُحذف هذا الطابور، وتنتقل تحميلاته إلى آخر الطابور الرئيسي. هل تحذفه؟
+schedule-main-stays = الطابور الرئيسي لا يُحذف.
+schedule-summary-none = بلا موعد
+schedule-start = البدء
+schedule-start-any = بلا موعد: يعمل متى كان فيه ما ينتظر
+schedule-start-at = ابدأ في
+schedule-days = الأيام
+schedule-days-hint = بلا أيام محددة: كل يوم.
+schedule-day-sat = السبت
+schedule-day-sun = الأحد
+schedule-day-mon = الإثنين
+schedule-day-tue = الثلاثاء
+schedule-day-wed = الأربعاء
+schedule-day-thu = الخميس
+schedule-day-fri = الجمعة
+schedule-stop = الإيقاف
+schedule-stop-at = أوقف في
+schedule-stop-hint = ما لم يكتمل يتوقف، ويُستكمل في الموعد التالي.
+schedule-max-active = عدد التحميلات في الوقت نفسه
+schedule-after = بعد انتهاء الطابور
+schedule-after-nothing = لا شيء
+schedule-after-shutdown = أغلق الجهاز
+schedule-after-sleep = السكون
+schedule-after-hint = لهذا التشغيل فقط، ولا يُحفظ. وقبله يعدّ زاجِل دقيقة يمكنك الإلغاء فيها.
+schedule-countdown-shutdown = انتهى الطابور، ويُغلق الجهاز بعد:
+schedule-countdown-sleep = انتهى الطابور، ويدخل الجهاز في السكون بعد:
+schedule-countdown-cancel = إلغاء
+schedule-after-failed = لم يتم ذلك:
+schedule-files = التحميلات في الطابور (بترتيب البدء)
+schedule-up = لأعلى
+schedule-down = لأسفل
+schedule-move = انقل إلى طابور…
+schedule-empty = لا تحميلات في هذا الطابور.
+schedule-start-now = ابدأ الآن
+schedule-started = بدأ الطابور.
+schedule-closed-now = الطابور خارج موعده الآن: تنتظر تحميلاته موعده التالي.
+schedule-save = حفظ
+schedule-saved = حُفظ.
+schedule-close = إغلاق
+
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.
