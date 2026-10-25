@@ -142,9 +142,13 @@ export function menuMessage(info, cookies = null, from = {}) {
  * too when it is http(s), for a page yt-dlp does not know; a `blob:` or
  * `data:` one, which only the page can read, does not.
  *
+ * Without an address of its own, the playlist the tab loaded for it goes
+ * instead (`streams.js`), when there is one.
+ *
  * @param {{ pageUrl?: string, frameUrl?: string, srcUrl?: string }} info
- * @param {{ cookies?: string | null, private?: boolean }} [extra] the
- *   page's `Cookie` header, if allowed; whether it is a private window's
+ * @param {{ cookies?: string | null, private?: boolean, stream?: string }} [extra]
+ *   the page's `Cookie` header, if allowed; whether it is a private
+ *   window's; the playlist noted for it
  */
 export function videoMessage(info, extra = {}) {
   const page = isWeb(info.frameUrl) ? info.frameUrl : info.pageUrl;
@@ -152,6 +156,7 @@ export function videoMessage(info, extra = {}) {
   /** @type {Record<string, unknown>} */
   const message = { type: "video", protocol_version: PROTOCOL_VERSION, page };
   if (isWeb(info.srcUrl)) message.media = info.srcUrl;
+  else if (!extra.private && isWeb(extra.stream)) message.media = extra.stream;
   // A private window's cookies never go (as for a link).
   if (extra.private) message.private = true;
   else if (extra.cookies) message.cookies = extra.cookies;

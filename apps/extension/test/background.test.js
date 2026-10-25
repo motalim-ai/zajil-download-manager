@@ -4,11 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * be fired, and what it does is recorded. `granted`: the cookie
  * permission; `buttons`: whether notifications take buttons (Firefox:
  * not); `answer`: what Zajil answers. */
-function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid", value: "abc" }], windows = [] }) {
+function fakeChrome({ granted, video = false, buttons = true, answer, jar = () => [{ name: "sid", value: "abc" }], windows = [], tabs = {} }) {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [], scripts: [], watched: [] };
+  // What "Allow Zajil on sites" gave: the cookies, the video features.
+  const have = new Set([...(granted ? ["cookies"] : []), ...(video ? ["scripting", "webRequest"] : [])]);
   const local = {};
   const chrome = {
     i18n: { getMessage: (key) => key },
@@ -29,12 +31,37 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
         return port;
       }),
       openOptionsPage: async () => {},
+      onMessage: on("message"),
       sendNativeMessage: vi.fn(async (_host, message) => {
         done.sent.push(message);
         return answer;
       }),
     },
-    permissions: { contains: async () => granted },
+    permissions: {
+      contains: async (p) => p.permissions.every((x) => have.has(x)),
+      onAdded: on("permissionsAdded"),
+      onRemoved: on("permissionsRemoved"),
+    },
+    // Only there with the permission, as in Chrome.
+    webRequest: video
+      ? {
+          onHeadersReceived: {
+            addListener: (fn, filter, extra) => {
+              listeners.headers = fn;
+              done.watched.push({ filter, extra });
+            },
+            hasListener: (fn) => listeners.headers === fn,
+            removeListener: () => delete listeners.headers,
+          },
+        }
+      : undefined,
+    scripting: video
+      ? {
+          getRegisteredContentScripts: async () => done.scripts,
+          registerContentScripts: async (list) => done.scripts.push(...list),
+          unregisterContentScripts: async () => done.scripts.splice(0),
+        }
+      : undefined,
     cookies: {
       getAll: async (query) => {
         done.cookieReads.push(query);
@@ -52,7 +79,11 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
         remove: async (key) => delete session[key],
       },
     },
-    tabs: { create: async (tab) => done.tabs.push(tab.url) },
+    tabs: {
+      create: async (tab) => done.tabs.push(tab.url),
+      get: async (id) => tabs[id] ?? { id, incognito: false },
+      onRemoved: on("tabRemoved"),
+    },
     windows: { onRemoved: on("windowRemoved"), getAll: async () => windows },
     action: { setBadgeText: async () => {}, onClicked: on("action") },
     contextMenus: { create: (item) => done.menus.push(item), onClicked: on("menu") },
@@ -79,7 +110,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
       onButtonClicked: buttons ? on("button") : undefined,
     },
   };
-  return { chrome, listeners, done, session, local };
+  return { chrome, listeners, done, session, local, have };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -315,6 +346,100 @@ describe("the background", () => {
     expect(fake.done.sent).toEqual([]);
     expect(fake.done.cookieReads).toEqual([]);
     expect(fake.done.notifications.at(-1).message).toBe("videoNotWeb");
+  });
+
+  it("without 'Allow Zajil on sites': no button's script, no request watched; the menu only", async () => {
+    const fake = fakeChrome({ granted: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    expect(fake.done.scripts).toEqual([]);
+    expect(fake.listeners.headers).toBeUndefined();
+  });
+
+  it("with it: the button's script on every site and frame, and playlists watched, never blocked", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    expect(fake.done.scripts).toEqual([
+      { id: "zajil-video-button", js: ["video-button.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_idle", persistAcrossSessions: true },
+    ]);
+    expect(fake.done.watched).toHaveLength(1);
+    expect(fake.done.watched[0].extra).toEqual(["responseHeaders"]);
+    // Taken back: the script goes, and nothing is watched any more.
+    fake.have.delete("webRequest");
+    fake.have.delete("scripting");
+    fake.listeners.permissionsRemoved({ permissions: ["scripting", "webRequest"] });
+    await flush();
+    expect(fake.done.scripts).toEqual([]);
+    expect(fake.listeners.headers).toBeUndefined();
+  });
+
+  it("the button sends the tab's page (the browser's word, not the page's) and, for a blob, the playlist the tab loaded", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    fake.listeners.headers({
+      url: "https://cdn.example/master.m3u8?sig=1",
+      tabId: 4,
+      frameId: 0,
+      type: "xmlhttprequest",
+      responseHeaders: [{ name: "Content-Type", value: "application/x-mpegURL" }],
+    });
+    await flush();
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/watch?v=1" }, frameId: 0, url: "https://example.com/watch?v=1" };
+    fake.listeners.message({ type: "video-button", src: "blob:https://example.com/5" }, sender);
+    await flush();
+    expect(fake.done.sent).toEqual([
+      { type: "video", protocol_version: 1, page: "https://example.com/watch?v=1", media: "https://cdn.example/master.m3u8?sig=1", cookies: "sid=abc" },
+    ]);
+    // The tab closed: its playlists are forgotten.
+    fake.listeners.tabRemoved(4);
+    await flush();
+    expect(fake.session["streams:4"]).toBeUndefined();
+  });
+
+  it("the button in an embedded player sends the frame's page; its own address wins over a playlist", async () => {
+    const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 2, url: "https://blog.example/post" }, frameId: 3, url: "https://player.example/embed/9" };
+    fake.listeners.message({ type: "video-button", src: "https://cdn.example/v.mp4" }, sender);
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://player.example/embed/9", media: "https://cdn.example/v.mp4" }]);
+  });
+
+  it("the button in a private window: no cookies, no playlist, marked private", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    fake.session["streams:6"] = [{ url: "https://cdn.example/a.m3u8", kind: "hls", frame: 0 }];
+    const sender = { id: "zajil", tab: { id: 6, url: "https://example.com/v", incognito: true }, frameId: 0, url: "https://example.com/v" };
+    fake.listeners.message({ type: "video-button", src: "blob:https://example.com/1" }, sender);
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/v", private: true }]);
+    expect(fake.done.cookieReads).toEqual([]);
+  });
+
+  it("a message not from the button's script, or not from a tab, is ignored", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const tab = { id: 1, url: "https://example.com/v" };
+    fake.listeners.message({ type: "video-button", src: "https://cdn.example/v.mp4" }, { id: "another-extension", tab });
+    fake.listeners.message({ type: "video-button", src: "https://cdn.example/v.mp4" }, { id: "zajil" });
+    fake.listeners.message({ type: "download", url: "https://cdn.example/v.mp4" }, { id: "zajil", tab });
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+  });
+
+  it("the menu on a blob video sends the playlist its tab loaded", async () => {
+    const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    fake.session["streams:8"] = [{ url: "https://cdn.example/m.mpd", kind: "dash", frame: 0 }];
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v", srcUrl: "blob:https://example.com/2", frameId: 0 }, { id: 8 });
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/v", media: "https://cdn.example/m.mpd" }]);
   });
 
   it("a link Zajil cannot download is refused before any cookie is read", async () => {

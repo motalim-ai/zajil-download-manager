@@ -69,13 +69,13 @@
     "message": "Welcome to Zajil"
   },
   "welcomeIntro": {
-    "message": "Downloads of the file types you choose in the settings now go to the Zajil download manager, to download them faster and resume them when they stop. And in the right-click menu on any link: “Download with Zajil”."
+    "message": "Downloads of the file types you choose in the settings now go to the Zajil download manager, to download them faster and resume them when they stop. And in the right-click menu on any link: “Download with Zajil”, and on any video: “Download video with Zajil”."
   },
   "cookiesTitle": {
-    "message": "Cookies (optional)"
+    "message": "Zajil on sites: cookies and video (optional)"
   },
   "cookiesWhy": {
-    "message": "Some sites give their files only to signed-in users. For Zajil to download those, the extension needs your permission to read the download link's cookies."
+    "message": "One permission for two things. Cookies: some sites give their files only to signed-in users, and for Zajil to download those the extension reads the download link's cookies. Video: a “Download video” button over a page's videos, and noting the addresses of the video playlists (HLS and DASH) the page loads."
   },
   "cookiesOnlyHere": {
     "message": "The cookies go to the Zajil program on this computer, and from it to their own site only, nowhere else."
@@ -87,19 +87,19 @@
     "message": "Zajil does not write them to disk: they stay in memory until the download finishes or is removed."
   },
   "cookiesOptional": {
-    "message": "Without the permission the extension works as it is, and files of sites that need a sign-in stay in the browser. You can take the permission back at any time in the settings."
+    "message": "Without the permission the extension works as it is: files of sites that need a sign-in stay in the browser, and for videos there is “Download video with Zajil” in the right-click menu. You can take the permission back at any time in the settings."
   },
   "cookiesAllow": {
-    "message": "Allow the cookies"
+    "message": "Allow Zajil on sites"
   },
   "cookiesDrop": {
     "message": "Take the permission back"
   },
   "cookiesAllowed": {
-    "message": "Allowed: a download link's cookies go to Zajil with its download."
+    "message": "Allowed: a download link's cookies go to Zajil with its download, and the “Download video” button shows over videos."
   },
   "cookiesNotAllowed": {
-    "message": "Not allowed: downloads go to Zajil without cookies."
+    "message": "Not allowed: downloads go to Zajil without cookies, and videos have the right-click menu only."
   },
   "signInNeedsCookies": {
     "message": "This site needs a sign-in, so the browser went on with the download. For Zajil to take downloads like this, allow the cookie permission."
@@ -117,7 +117,7 @@
     "message": "Download with the browser"
   },
   "cookiesPrompt": {
-    "message": "The browser will say the extension asks to “Read and change all your data on all websites” or to “Access your data for all websites”: that is what it calls the cookie permission, as each site's cookies need that site's permission. The extension reads only the download link's cookies, and never the pages."
+    "message": "The browser will say the extension asks to “Read and change all your data on all websites” or to “Access your data for all websites”: that is what it calls this permission, as each site's cookies and videos need that site's permission. The extension reads only the download link's cookies, where the videos are and their addresses, and their playlists' addresses; never the pages' text or what you type in them."
   },
   "signInNoCookies": {
     "message": "This site needs a sign-in, and no cookies went (the browser gave none for this link), so the browser went on with the download."
@@ -136,5 +136,11 @@
   },
   "videoNotWeb": {
     "message": "Zajil cannot read this page: it is not an http or https page."
+  },
+  "sitesVideo": {
+    "message": "Video: of a page, the extension learns only where its videos are and their addresses. Playlist addresses stay in memory, for each tab, are forgotten when it closes or opens another page, and go to Zajil only when you press. The extension watches requests and never stops or changes them, and notes nothing from a private window."
+  },
+  "videoButton": {
+    "message": "Download video"
   }
 }

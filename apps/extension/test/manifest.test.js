@@ -43,7 +43,7 @@ describe("the manifests", () => {
       expect(m.host_permissions).toBeUndefined();
       // The cookie permission only, asked for with a button, never at
       // install (owner's decision on #7); nothing else.
-      expect(m.optional_permissions).toEqual(["cookies"]);
+      expect(m.optional_permissions).toEqual(["cookies", "scripting", "webRequest"]);
       expect(m.optional_host_permissions).toEqual(["<all_urls>"]);
       expect(m.content_scripts).toBeUndefined();
     }
@@ -59,12 +59,12 @@ describe("the manifests", () => {
     const en = JSON.parse(read("../src/_locales/en/messages.json"));
     expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort());
     const used = new Set();
-    for (const file of ["background.js", "options.html", "options.js", "page.js", "welcome.html", "welcome.js", "manifest.chrome.json"]) {
-      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|\bt\("(\w+)"\)|getMessage\("(\w+)"\)|"((?:not|menu|signIn|cookies|video)[A-Z]\w+)")/g)) {
+    for (const file of ["background.js", "options.html", "options.js", "page.js", "welcome.html", "welcome.js", "video-button.js", "manifest.chrome.json"]) {
+      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|\bt\("(\w+)"\)|getMessage\("(\w+)"\)|"((?:not|menu|signIn|cookies|video|sites)[A-Z]\w+)")/g)) {
         used.add(m[1] || m[2] || m[3] || m[4] || m[5]);
       }
     }
-    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang", "signInNeedsCookies", "signInEvenWithCookies", "menuSignInNeedsCookies", "menuSignInEvenWithCookies", "downloadWithBrowser", "cookiesAllow", "cookiesDrop", "cookiesAllowed", "cookiesNotAllowed", "cookiesOnlyHere", "cookiesOnlyThisSite", "cookiesNotKept", "cookiesPrompt", "signInNoCookies", "menuSignInNoCookies", "menuDownloadVideo", "videoRefused", "videoNotAnswered", "videoNotWeb"]) {
+    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang", "signInNeedsCookies", "signInEvenWithCookies", "menuSignInNeedsCookies", "menuSignInEvenWithCookies", "downloadWithBrowser", "cookiesAllow", "cookiesDrop", "cookiesAllowed", "cookiesNotAllowed", "cookiesOnlyHere", "cookiesOnlyThisSite", "cookiesNotKept", "cookiesPrompt", "signInNoCookies", "menuSignInNoCookies", "menuDownloadVideo", "videoRefused", "videoNotAnswered", "videoNotWeb", "videoButton", "sitesVideo"]) {
       expect(used.has(key), key).toBe(true);
     }
     expect(ar.lang.message).toBe("ar");

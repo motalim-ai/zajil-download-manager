@@ -2,7 +2,7 @@
 // The settings page: capture on or off, the file types, the excluded sites.
 
 import { api } from "./compat.js";
-import { askForCookies, cookiesAllowed, dropCookies } from "./cookies.js";
+import { askForSites, dropSites, sitesAllowed } from "./cookies.js";
 import { localize } from "./page.js";
 import { defaults, load, save } from "./settings.js";
 
@@ -11,19 +11,19 @@ const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
 localize(api, document);
 
-/** The cookie permission: what it is now, and the button that changes it. */
+/** "Allow Zajil on sites": what it is now, and the button that changes it. */
 async function showCookies() {
-  const allowed = await cookiesAllowed(api);
+  const allowed = await sitesAllowed(api);
   $("cookies-state").textContent = api.i18n.getMessage(allowed ? "cookiesAllowed" : "cookiesNotAllowed");
   $("allow").hidden = allowed;
   $("drop").hidden = !allowed;
 }
 $("allow").addEventListener("click", async () => {
-  await askForCookies(api);
+  await askForSites(api);
   await showCookies();
 });
 $("drop").addEventListener("click", async () => {
-  await dropCookies(api);
+  await dropSites(api);
   await showCookies();
 });
 await showCookies();
