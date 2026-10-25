@@ -4,11 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * be fired, and what it does is recorded. `granted`: the cookie
  * permission; `buttons`: whether notifications take buttons (Firefox:
  * not); `answer`: what Zajil answers. */
-function fakeChrome({ granted, buttons = true, answer }) {
+function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid", value: "abc" }] }) {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [] };
+  const local = {};
   const chrome = {
     i18n: { getMessage: (key) => key },
     runtime: {
@@ -22,9 +23,17 @@ function fakeChrome({ granted, buttons = true, answer }) {
       }),
     },
     permissions: { contains: async () => granted },
-    cookies: { getAll: async () => [{ name: "sid", value: "abc" }] },
+    cookies: {
+      getAll: async (query) => {
+        done.cookieReads.push(query);
+        return jar(query);
+      },
+    },
     storage: {
-      local: { get: async () => ({}) },
+      local: {
+        get: async (key) => (typeof key === "string" ? { [key]: local[key] } : { ...local }),
+        set: async (value) => Object.assign(local, value),
+      },
       session: {
         get: async (key) => ({ [key]: session[key] }),
         set: async (value) => Object.assign(session, value),
@@ -50,10 +59,11 @@ function fakeChrome({ granted, buttons = true, answer }) {
       },
       clear: async (id) => done.cleared.push(id),
       onClicked: on("clicked"),
+      onClosed: on("closed"),
       onButtonClicked: buttons ? on("button") : undefined,
     },
   };
-  return { chrome, listeners, done };
+  return { chrome, listeners, done, session, local };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
@@ -76,6 +86,9 @@ describe("the background", () => {
     await load(fake);
     fake.listeners.installed({ reason: "install" });
     fake.listeners.installed({ reason: "update" });
+    await flush();
+    // An unpacked extension is "installed" again at each start: not again.
+    fake.listeners.installed({ reason: "install" });
     await flush();
     expect(fake.done.tabs).toEqual(["chrome-extension://zajil/welcome.html"]);
   });
@@ -119,6 +132,62 @@ describe("the background", () => {
     fake.listeners.button("n1", 0);
     await flush();
     expect(fake.done.tabs).toEqual(["chrome-extension://zajil/welcome.html"]);
+  });
+
+  it("reads the cookies of the download's own identity (a Firefox container), never the default", async () => {
+    const jar = ({ storeId }) => [{ name: "who", value: storeId ?? "default" }];
+    const fake = fakeChrome({ granted: true, answer: { ok: true }, jar });
+    await load(fake);
+    fake.listeners.filename(
+      { id: 4, url: "https://example.com/a.zip", finalUrl: "https://example.com/a.zip", state: "in_progress", cookieStoreId: "firefox-container-1" },
+      () => {},
+    );
+    await flush();
+    expect(fake.done.sent[0].cookies).toBe("who=firefox-container-1");
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/b.zip" }, { cookieStoreId: "firefox-container-2" });
+    await flush();
+    expect(fake.done.sent[1].cookies).toBe("who=firefox-container-2");
+    // Only the download link's cookies are read, not the page's.
+    expect(fake.done.cookieReads.map((q) => q.url)).toEqual(["https://example.com/a.zip", "https://example.com/b.zip"]);
+  });
+
+  it("from a private window, the menu sends no cookies and reads none", async () => {
+    const fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" }, { incognito: true });
+    await flush();
+    expect(fake.done.sent[0].cookies).toBeUndefined();
+    expect(fake.done.cookieReads).toEqual([]);
+  });
+
+  it("a link Zajil cannot download is refused before any cookie is read", async () => {
+    const fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://user:pw@example.com/a.zip" });
+    await flush();
+    expect(fake.done.cookieReads).toEqual([]);
+    expect(fake.done.sent).toEqual([]);
+    expect(fake.done.notifications.at(-1).message).toBe("menuNotALink");
+  });
+
+  it("with the permission but no cookie sent, it does not say 'even with the cookies'", async () => {
+    const fake = fakeChrome({ granted: true, answer: forbidden, jar: () => [] });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" });
+    await flush();
+    expect(fake.done.sent[0].cookies).toBeUndefined();
+    expect(fake.done.notifications.at(-1).message).toBe("menuSignInNoCookies");
+  });
+
+  it("a notice closed without a choice is forgotten", async () => {
+    const fake = fakeChrome({ granted: false, answer: forbidden });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" });
+    await flush();
+    expect(Object.keys(fake.session)).toEqual(["notice:n1"]);
+    fake.listeners.closed("n1");
+    await flush();
+    expect(Object.keys(fake.session)).toEqual([]);
   });
 
   it("in Firefox (no notification buttons): the notice is shown without them, and clicking it opens the page", async () => {

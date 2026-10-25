@@ -411,10 +411,7 @@ async fn run_queues(handle: tauri::AppHandle) {
         if stop.is_requested() {
             return;
         }
-        let runner = Runner::new(engine.clone(), store.clone())
-            .categories(categories.clone())
-            .connections(connections.clone())
-            .from_browser(from_browser.clone());
+        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser);
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 live.record(&event);
@@ -601,9 +598,7 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
             }
             let app = handle.state::<App>();
             let given = download_dir(&app.settings, &app.system_download_dir);
-            let reach = |url: &str, from: &zajil_core::FromBrowser| {
-                reach_file(&app.engine.with_browser(from.clone()), url)
-            };
+            let reach = extension_reach(&app.engine);
             let answer = from_extension(&app.store, &request, &given, &app.from_browser, reach);
             if answer.ok {
                 let _ = handle.emit("downloads-changed", ());
@@ -935,6 +930,29 @@ impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
 /// extension: within `zajil_host::CHANNEL_TIMEOUT` (10 s), so the host
 /// still has the answer.
 const EXTENSION_REACH: Duration = Duration::from_secs(7);
+
+/// The check of a download from the extension: the engine, with the
+/// browser's cookies and page for this download.
+fn extension_reach(
+    engine: &Engine,
+) -> impl Fn(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String> + '_ {
+    move |url, from| reach_file(&engine.with_browser(from.clone()), url)
+}
+
+/// The window's queue runner: categories, the settings' connections, and
+/// the browser's headers of each download the extension sent.
+fn queue_runner(
+    engine: &Engine,
+    store: &QueueStore,
+    categories: &CategoryStore,
+    connections: &Arc<AtomicUsize>,
+    from_browser: &zajil_core::queue::FromBrowserById,
+) -> Runner {
+    Runner::new(engine.clone(), store.clone())
+        .categories(categories.clone())
+        .connections(connections.clone())
+        .from_browser(from_browser.clone())
+}
 
 /// What the engine reaches at `url` now, as the add dialog does (the first
 /// response's headers only), within [`EXTENSION_REACH`].
@@ -1644,6 +1662,55 @@ mod tests {
         assert!(answer.ok);
         let second = store.load().unwrap().queues[0].items[1].id;
         assert!(!headers.lock().unwrap()[&second].has_cookies());
+    }
+
+    /// The glue in the app (review of #76): the check of a download from
+    /// the extension sends its cookies and page, and the window's runner
+    /// sends them with the download.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_check_and_the_window_s_runner_send_the_browser_s_headers() {
+        use zajil_testserver::{FileSpec, TestServer, random_bytes};
+        let server = TestServer::http();
+        let data = random_bytes(300_000, 93);
+        server.put("/a.zip", FileSpec::new(data.clone()));
+        let url = server.url("/a.zip");
+        let page = server.url("/page");
+        let from = zajil_core::FromBrowser::new(&url, Some("sid=GLUE"), Some(&page));
+        let engine = Engine::new(Options::default()).unwrap();
+
+        let found = tokio::task::spawn_blocking({
+            let (url, from, engine) = (url.clone(), from.clone(), engine.clone());
+            move || extension_reach(&engine)(&url, &from)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(found.name, "a.zip");
+        assert_eq!(server.gets("/a.zip")[0].cookie.as_deref(), Some("sid=GLUE"));
+
+        let base = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(base.path());
+        let dir = base.path().join("out");
+        let id = store.update(|q| q.add(DEFAULT_QUEUE, &url, &dir)).unwrap();
+        let headers = zajil_core::queue::FromBrowserById::default();
+        headers.lock().unwrap().insert(id, from);
+        let runner = queue_runner(
+            &engine,
+            &store,
+            &CategoryStore::new(base.path()),
+            &Arc::new(AtomicUsize::new(1)),
+            &headers,
+        );
+        runner
+            .poll(Duration::from_millis(20))
+            .run(&Stop::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(dir.join("a.zip")).unwrap(), data);
+        for get in server.gets("/a.zip").iter().skip(1) {
+            assert_eq!(get.cookie.as_deref(), Some("sid=GLUE"), "{get:?}");
+            assert_eq!(get.referer.as_deref(), Some(page.as_str()));
+        }
     }
 
     /// A file Zajil cannot reach itself (behind a login, a referrer check,

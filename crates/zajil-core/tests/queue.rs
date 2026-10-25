@@ -648,3 +648,44 @@ async fn a_queued_download_sends_the_browser_s_headers_kept_for_it() {
     }
     assert!(headers.lock().unwrap().is_empty(), "kept after it finished");
 }
+
+/// The headers of a failed download are kept for a retry, and those of a
+/// download removed from the queues are forgotten (review of #76).
+#[tokio::test]
+async fn the_browser_s_headers_are_kept_on_failure_and_forgotten_on_removal() {
+    let server = TestServer::http();
+    server.put("/gone.bin", FileSpec::new(Vec::new()).forbid_after(0));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let failed = add(&store, "main", &server.url("/gone.bin"), dir.path());
+    let headers = zajil_core::queue::FromBrowserById::default();
+    let from = || zajil_core::FromBrowser::new(&server.url("/gone.bin"), Some("sid=Q"), None);
+    headers.lock().unwrap().insert(failed, from());
+    // An entry for an item that is not in the queues at all.
+    headers.lock().unwrap().insert(9999, from());
+    let once = Engine::new(Options {
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    let run = || {
+        Runner::new(once.clone(), store.clone())
+            .poll(Duration::from_millis(20))
+            .from_browser(headers.clone())
+    };
+    let summary = run().run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert_eq!(summary.failed, 1);
+    let kept = headers.lock().unwrap().keys().copied().collect::<Vec<_>>();
+    assert_eq!(
+        kept,
+        [failed],
+        "the failed item's entry stays, the stray one goes"
+    );
+    store.update(|q| q.remove(failed).map(drop)).unwrap();
+    run().run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert!(
+        headers.lock().unwrap().is_empty(),
+        "kept after the item was removed"
+    );
+}

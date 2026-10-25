@@ -42,22 +42,26 @@ export async function dropCookies(browserApi) {
 }
 
 /**
- * The `Cookie` header the browser would send to `url`, or null: no
- * permission, no cookies, or a header `zajil-host` would refuse (over 16 KiB,
- * or anything but visible ASCII and spaces: a line break would add a
- * header). Then the download goes without cookies, as without permission.
+ * The `Cookie` header the browser would send to `url` from the cookie
+ * store `storeId` (a Firefox container's, given by the download or the
+ * tab; the default store when none), or null: no permission, no cookies, or
+ * a header `zajil-host` would refuse (over 16 KiB, or anything but visible
+ * ASCII and spaces: a line break would add a header). Then the download
+ * goes without cookies, as without permission.
  *
  * @param {any} browserApi
  * @param {string} url
+ * @param {string} [storeId]
  * @returns {Promise<string | null>}
  */
-export async function cookieHeader(browserApi, url) {
+export async function cookieHeader(browserApi, url, storeId) {
   if (!(await cookiesAllowed(browserApi))) return null;
   let cookies;
   try {
     // The cookies a request to `url` carries: its domain, path and
-    // `Secure` rules applied by the browser itself.
-    cookies = await browserApi.cookies.getAll({ url });
+    // `Secure` rules applied by the browser itself, from the identity the
+    // download came from (review of #76: a container's, not the default).
+    cookies = await browserApi.cookies.getAll(storeId ? { url, storeId } : { url });
   } catch {
     // Firefox with first-party isolation asks for more; go without.
     return null;

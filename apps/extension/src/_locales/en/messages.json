@@ -78,19 +78,19 @@
     "message": "Some sites give their files only to signed-in users. For Zajil to download those, the extension needs your permission to read the download link's cookies."
   },
   "cookiesOnlyHere": {
-    "message": "The cookies go to the Zajil program on this computer only, and nowhere else."
+    "message": "The cookies go to the Zajil program on this computer, and from it to their own site only, nowhere else."
   },
   "cookiesOnlyThisSite": {
-    "message": "Only this download site's cookies, for this download link only, and only when the download goes to Zajil."
+    "message": "For each download: only its link's site cookies, for its link only, and only when it goes to Zajil. No cookies from a private window."
   },
   "cookiesNotKept": {
-    "message": "Zajil does not keep them: they stay in memory while the download runs."
+    "message": "Zajil does not write them to disk: they stay in memory until the download finishes or is removed."
   },
   "cookiesOptional": {
     "message": "Without the permission the extension works as it is, and files of sites that need a sign-in stay in the browser. You can take the permission back at any time in the settings."
   },
   "cookiesAllow": {
-    "message": "Allow"
+    "message": "Allow the cookies"
   },
   "cookiesDrop": {
     "message": "Take the permission back"
@@ -115,5 +115,14 @@
   },
   "downloadWithBrowser": {
     "message": "Download with the browser"
+  },
+  "cookiesPrompt": {
+    "message": "The browser will say the extension asks to “Read and change all your data on all websites” or to “Access your data for all websites”: that is what it calls the cookie permission, as each site's cookies need that site's permission. The extension reads only the download link's cookies, and never the pages."
+  },
+  "signInNoCookies": {
+    "message": "This site needs a sign-in, and no cookies went (the browser gave none for this link), so the browser went on with the download."
+  },
+  "menuSignInNoCookies": {
+    "message": "This site needs a sign-in, and no cookies went (the browser gave none for this link). Download it with the browser."
   }
 }

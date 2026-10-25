@@ -31,9 +31,11 @@ const TEXTS = {
  *
  * @param {import("./capture.js").Result | null} result
  * @param {keyof typeof TEXTS} where
- * @param {string} [url] the link, for "Download with the browser"
+ * @param {{ url?: string, sentCookies?: boolean }} [about] the link, for
+ *   "Download with the browser"; whether cookies went with it
  */
-async function report(result, where, url) {
+async function report(result, where, about = {}) {
+  const { url, sentCookies = false } = about;
   if (result?.alsoInBrowser) {
     await notify(t("takenAlsoInBrowser"));
     return;
@@ -44,9 +46,17 @@ async function report(result, where, url) {
   }
   await api.action.setBadgeText({ text: result.outcome === "unknown" ? "?" : "!" });
   if (needsSignIn(result)) {
+    // "Even with the cookies" only when cookies went (review of #76: with
+    // the permission, a store that gave none, or a header left out, sent
+    // nothing).
     const allowed = await cookiesAllowed(api);
     const menu = where === "menu";
-    const text = t(menu ? (allowed ? "menuSignInEvenWithCookies" : "menuSignInNeedsCookies") : allowed ? "signInEvenWithCookies" : "signInNeedsCookies");
+    const keys = sentCookies
+      ? ["menuSignInEvenWithCookies", "signInEvenWithCookies"]
+      : allowed
+        ? ["menuSignInNoCookies", "signInNoCookies"]
+        : ["menuSignInNeedsCookies", "signInNeedsCookies"];
+    const text = t(menu ? keys[0] : keys[1]);
     /** @type {{ action: string, title: string }[]} */
     const actions = [];
     if (!allowed) actions.push({ action: "allow", title: t("cookiesAllow") });
@@ -97,34 +107,50 @@ async function act(id, index) {
 
 api.notifications.onButtonClicked?.addListener((/** @type {string} */ id, /** @type {number} */ index) => void act(id, index));
 api.notifications.onClicked.addListener((/** @type {string} */ id) => void act(id, null));
+// A notice closed without a choice: what it would have done is forgotten.
+api.notifications.onClosed?.addListener((/** @type {string} */ id) => {
+  void api.storage.session.remove(`notice:${id}`).catch(() => {});
+});
 
 onNewDownload(api, (item) => {
   void (async () => {
     const settings = await load(api);
     if (!shouldCapture(item, settings, api.runtime.id)) return;
     const pause = pausesSafely(api);
-    const cookies = await cookieHeader(api, item.finalUrl || item.url);
-    await report(await takeOver(api, item, { pause, cookies }), pause ? "paused" : "running");
+    const cookies = await cookieHeader(api, item.finalUrl || item.url, item.cookieStoreId);
+    await report(await takeOver(api, item, { pause, cookies }), pause ? "paused" : "running", {
+      sentCookies: Boolean(cookies),
+    });
   })();
 });
 
 api.runtime.onInstalled.addListener((/** @type {any} */ details) => {
   api.contextMenus.create({ id: MENU, title: t("menuDownloadLink"), contexts: ["link"] });
   // Once, at install: what the extension does, and the cookie permission
-  // behind a button (Chrome wants the user's click to ask for it).
-  if (details?.reason === "install") void api.tabs.create({ url: api.runtime.getURL("welcome.html") });
+  // behind a button (Chrome wants the user's click to ask for it). A flag,
+  // since an extension loaded unpacked is "installed" at every start.
+  if (details?.reason === "install") {
+    void (async () => {
+      const { welcomed } = await api.storage.local.get("welcomed").catch(() => ({}));
+      if (welcomed) return;
+      await api.storage.local.set({ welcomed: true }).catch(() => {});
+      await api.tabs.create({ url: api.runtime.getURL("welcome.html") });
+    })();
+  }
 });
 
-api.contextMenus.onClicked.addListener((/** @type {any} */ info) => {
+api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any} */ tab) => {
   if (info.menuItemId !== MENU) return;
   void (async () => {
-    const cookies = info.linkUrl ? await cookieHeader(api, info.linkUrl) : null;
-    const message = menuMessage(info, cookies);
-    if (!message) {
+    // The link is checked before any cookie is read (review of #76).
+    if (!menuMessage(info)) {
       await notify(t("menuNotALink"));
       return;
     }
-    await report(await send(api, message), "menu", info.linkUrl);
+    // A private window's cookies are never sent: the link goes without.
+    const cookies = tab?.incognito ? null : await cookieHeader(api, info.linkUrl, tab?.cookieStoreId);
+    const message = /** @type {Record<string, unknown>} */ (menuMessage(info, cookies));
+    await report(await send(api, message), "menu", { url: info.linkUrl, sentCookies: Boolean(cookies) });
   })();
 });
 

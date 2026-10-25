@@ -136,8 +136,9 @@ impl Runner {
     }
 
     /// Each download whose item is in `headers` sends them (the browser's
-    /// cookies for its origin, and its page); the item's entry is removed
-    /// once it has finished.
+    /// cookies for its origin, and its page). An item's entry is removed
+    /// once it has finished, or is no longer in the queues; a failed item
+    /// keeps it, for a retry.
     pub fn from_browser(mut self, headers: FromBrowserById) -> Self {
         self.from_browser = Some(headers);
         self
@@ -226,6 +227,20 @@ impl Runner {
                 let store = self.store.clone();
                 let queues = blocking(move || store.load()).await?;
                 speed_limit.set_rate(queues.settings.speed_limit);
+                // The browser's headers of downloads that are done or gone
+                // are forgotten; a failed one keeps them for a retry.
+                if let Some(map) = &self.from_browser {
+                    let keep: HashSet<u64> = queues
+                        .queues
+                        .iter()
+                        .flat_map(|q| q.items.iter())
+                        .filter(|i| i.status != Status::Done)
+                        .map(|i| i.id)
+                        .collect();
+                    map.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .retain(|id, _| keep.contains(id));
+                }
                 if let Some(until) = &self.until
                     && !summary.stopped
                     && !summary.queue_ended
