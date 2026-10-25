@@ -68,7 +68,7 @@
 
 | الأداة | الترخيص | ملاحظات | الحالة |
 |---|---|---|---|
-| ffmpeg | LGPL أو GPL حسب طريقة البناء | **تُراجع قبل M6** | لم تُعتمد |
+| ffmpeg وffprobe | LGPL 2.1 أو أحدث (بناؤنا من المصدر الرسمي، بلا `--enable-gpl` ولا `--enable-nonfree` ولا أي مكتبة خارجية) | يُبنيان في الـ CI من المصدر الرسمي الموقّع (`tools/ffmpeg`)، ويُنشران مع مصدرهما في إصدار `tools-ffmpeg-*` من هذا المستودع ([ADR-0009](adr/0009-video-tools.md)). وسينزّلهما زاجِل عند أول تحميل فيديو بموافقة المستخدم (في PR أدوات الفيديو) | معتمدة (M6) |
 | yt-dlp | Unlicense (يحتاج تحقق عند المراجعة) | **تُراجع قبل M6، مع شروط استخدام المواقع** | لم تُعتمد |
 
 ## الخطوط والأيقونات والصور
@@ -85,6 +85,11 @@
 | actions/checkout (v7.0.1) | MIT | سحب الكود في الـ CI |
 | Swatinem/rust-cache (v2.9.3) | LGPL-3.0 | تخزين مؤقت لبناء Rust في الـ CI |
 | EmbarkStudios/cargo-deny-action (v2.1.1) | Apache-2.0 | تشغيل cargo-deny في الـ CI |
+| actions/upload-artifact (v7.0.2) وactions/download-artifact (v8.0.2) | MIT | نقل الملفات بين مهام الـ CI (بناء FFmpeg، M6) |
+| actions/cache (v6.1.0) | MIT | تخزين `ffmpeg-testgen` المؤقت في الـ CI (M6) |
+| msys2/setup-msys2 (v2.33.0) | MIT | بيئة بناء FFmpeg في ويندوز (M6) |
+| GnuPG | GPL-3.0 أو أحدث | التحقق من توقيع مصدر FFmpeg في الـ CI (موجود على أجهزة الـ CI) |
+| مُترجما FFmpeg في ويندوز (MSYS2: gcc لـ x64، وclang لـ arm64) | GPL-3.0 مع استثناء مكتبات التشغيل (libgcc)، وApache-2.0 مع استثناء LLVM (compiler-rt)، والملكية العامة/ZPL لكود بدء التشغيل في MinGW-w64 | الربط الثابت يضع في `ffmpeg.exe` كود بدء التشغيل وlibgcc (x64) أو compiler-rt (arm64). والاستثناءات تعفي الملف الناتج من شروط تلك التراخيص ومن إلزام نشر إشعاراتها. أما winpthreads (ترخيصها يطلب إشعارًا) فلا تدخل: `build.sh` يفرض خيوط ويندوز (`HAVE_W32THREADS 1` و`HAVE_PTHREADS 0`) |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>
