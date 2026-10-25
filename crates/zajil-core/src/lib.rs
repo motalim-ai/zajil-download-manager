@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod browser;
 pub mod category;
 pub mod clipboard;
 mod engine;
@@ -18,6 +19,7 @@ mod segmented;
 pub mod settings;
 pub mod state;
 
+pub use browser::FromBrowser;
 pub use engine::{Engine, Error, Event, Finished, Options, Probe, RestartReason, Stop};
 /// URLs as the engine parses them (for [`Engine::download_choosing_until`]).
 pub use reqwest::Url;

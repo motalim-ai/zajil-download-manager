@@ -360,6 +360,9 @@ pub enum Error {
     },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
+    /// "Refresh the link": the new link is not the same file (M5).
+    #[error("the new link is not the same file: {0}")]
+    NotTheSameFile(String),
     #[error(
         "refusing to use {}: it is a symbolic link, a hard link or not a regular file",
         .0.display()
@@ -380,12 +383,18 @@ pub enum Error {
 pub struct Engine {
     client: Client,
     options: Options,
+    /// The browser's headers for downloads from this engine (M5).
+    browser: Arc<crate::browser::FromBrowser>,
 }
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
         let client = build_client(&options, &[])?;
-        Ok(Engine { client, options })
+        Ok(Engine {
+            client,
+            options,
+            browser: Arc::default(),
+        })
     }
 
     /// **Test builds only.** Like [`Engine::new`], but also trusts the
@@ -397,7 +406,11 @@ impl Engine {
     #[cfg(feature = "test-support")]
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
         let client = build_client(&options, &[ca_der.to_vec()])?;
-        Ok(Engine { client, options })
+        Ok(Engine {
+            client,
+            options,
+            browser: Arc::default(),
+        })
     }
 
     /// This engine, with `limit` shared by all its downloads (and those of
@@ -405,6 +418,16 @@ impl Engine {
     pub fn with_speed_limit(&self, limit: Option<SpeedLimit>) -> Engine {
         let mut engine = self.clone();
         engine.options.speed_limit = limit;
+        engine
+    }
+
+    /// This engine, sending `from` (the browser's cookies for one origin
+    /// and the page the link was on) with every request of its downloads.
+    /// Kept in memory only: the state file never holds them (owner's
+    /// decision on #7).
+    pub fn with_browser(&self, from: crate::browser::FromBrowser) -> Engine {
+        let mut engine = self.clone();
+        engine.browser = Arc::new(from);
         engine
     }
 
@@ -613,41 +636,7 @@ impl Engine {
         on_event: &mut (dyn FnMut(Event) + Send),
     ) -> Result<Finished, Error> {
         let limits = self.limits();
-        // The state file and everything next to it are untrusted: they may
-        // come from another machine. Work with an absolute path inside the
-        // real folder, with a name that sanitizing leaves unchanged, and
-        // never follow a link (`.zajil-state`, `.zajil-part` and the
-        // temporary file are all opened without following links).
-        let state_file = std::path::absolute(state_file)?;
-        let final_path =
-            final_path_for_state(&state_file).ok_or(Error::State(StateError::NotAStateFile))?;
-        let name = final_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        let sanitized = sanitize_file_name(name);
-        if sanitized != name {
-            let reason = if name.len() > MAX_NAME_BYTES {
-                format!(
-                    "the name is {} bytes long, more than the {MAX_NAME_BYTES}-byte limit",
-                    name.len()
-                )
-            } else if sanitized == format!("_{name}") {
-                // Windows reads the part before the first dot, without
-                // trailing spaces, as the device name.
-                let device = name.split('.').next().unwrap_or(name).trim_end();
-                format!(
-                    "`{device}` is a device name Windows reserves, so Zajil never uses it for a file"
-                )
-            } else {
-                format!("it is not a name Zajil would create (Zajil would write {sanitized:?})")
-            };
-            return Err(Error::UnsafeName {
-                name: name.to_owned(),
-                reason,
-            });
-        }
-        let final_path = confine(parent_dir(&final_path), name)?;
+        let final_path = checked_final_path(state_file)?;
         let state_file = state_path(&final_path);
         let state = DownloadState::load(&state_file)?;
         let part_file = part_path(&final_path);
@@ -788,6 +777,78 @@ impl Engine {
         }
     }
 
+    /// Gives the download of `state_file` a new link (`new_url`): the same
+    /// file from another address, as when a signed link expired (M5,
+    /// "refresh the download link"). The server must show it is the same
+    /// file: the same size and the same strong validator (an `ETag`, or a
+    /// strong `Last-Modified`) as the state file. Otherwise
+    /// [`Error::NotTheSameFile`], and the state file is left as it was. Only
+    /// the first response's headers are read; the download then goes on
+    /// with [`Engine::resume_until`], asking only for what is missing.
+    ///
+    /// The download must not be running ([`Error::Locked`] otherwise), and
+    /// `new_url` must be an http or https URL without a user name or
+    /// password.
+    pub async fn refresh_link(&self, state_file: &Path, new_url: &str) -> Result<(), Error> {
+        let final_path = checked_final_path(state_file)?;
+        let state_file = state_path(&final_path);
+        let mut state = DownloadState::load(&state_file)?;
+        let url = parse_url(new_url)?;
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(Error::NotTheSameFile(
+                "a link with a user name or password is not accepted".into(),
+            ));
+        }
+        // Held while the state file changes: a running download holds it.
+        let part_file = part_path(&final_path);
+        let part = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {
+            Ok(part) => Some(part),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+            Err(err) if zajil_platform::fs::is_not_regular_file(&err) => {
+                return Err(Error::NotRegularFile(part_file));
+            }
+            Err(err) => return Err(err.into()),
+        };
+        if let Some(part) = &part {
+            lock(part, &final_path)?;
+        }
+        let Some(ours) = if_range_value(&state.validator) else {
+            return Err(Error::NotTheSameFile(
+                "the server gave this download no strong validator (ETag or Last-Modified), \
+                 so Zajil cannot tell that another link is the same file"
+                    .into(),
+            ));
+        };
+        let limits = self.limits();
+        let mut attempt = Attempt::new(None, &Stop::new(), &limits);
+        let response = self
+            .retrying(&mut attempt, &mut |_| {}, || self.get(url.clone(), None))
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(Error::Status(response.status()));
+        }
+        let theirs = state_from_response(new_url.to_owned(), false, &response);
+        let size = |n: Option<u64>| n.map_or("unknown".to_owned(), |n| n.to_string());
+        if state.content_length.is_none() || theirs.content_length != state.content_length {
+            return Err(Error::NotTheSameFile(format!(
+                "its size is {} bytes, the download's {}",
+                size(theirs.content_length),
+                size(state.content_length)
+            )));
+        }
+        if if_range_value(&theirs.validator).as_deref() != Some(ours.as_str()) {
+            return Err(Error::NotTheSameFile(
+                "the server says it is another version of the file (its validator differs)".into(),
+            ));
+        }
+        state.url = new_url.to_owned();
+        state.final_url = response.url().to_string();
+        state.had_credentials = false;
+        drop(response);
+        state.save(&state_file)?;
+        Ok(())
+    }
+
     /// Resumes a download made of several segments: the first missing range
     /// is checked like a single-connection resume (with a fallback to the
     /// original URL), then every missing range gets a connection.
@@ -839,6 +900,7 @@ impl Engine {
                 }
                 let job = Job {
                     client: self.client.clone(),
+                    browser: self.browser.clone(),
                     connections: self.options.connections,
                     min_segment: self.options.min_segment_size,
                     save_interval: self.options.save_interval,
@@ -1011,6 +1073,7 @@ impl Engine {
             let if_range = if_range_value(&state.validator).expect("checked by split");
             let job = Job {
                 client: self.client.clone(),
+                browser: self.browser.clone(),
                 connections: self.options.connections,
                 min_segment: self.options.min_segment_size,
                 save_interval: self.options.save_interval,
@@ -1319,7 +1382,7 @@ impl Engine {
         url: Url,
         range: Option<(u64, Option<u64>, String)>,
     ) -> Result<Response, Error> {
-        let mut request = self.client.get(url);
+        let mut request = self.browser.apply(&url, self.client.get(url.clone()));
         if let Some((from, to, if_range)) = range {
             let to = to.map(|to| to.to_string()).unwrap_or_default();
             request = request
@@ -1828,6 +1891,48 @@ fn without_userinfo(raw: &str) -> String {
         None => 0,
     };
     format!("{}***{}", &raw[..keep], &raw[at..])
+}
+
+/// The download's final path from its state file's path, once the path is
+/// one Zajil would make: the state file and everything next to it are
+/// untrusted (they may come from another machine).
+fn checked_final_path(state_file: &Path) -> Result<PathBuf, Error> {
+    // The state file and everything next to it are untrusted: they may
+    // come from another machine. Work with an absolute path inside the
+    // real folder, with a name that sanitizing leaves unchanged, and
+    // never follow a link (`.zajil-state`, `.zajil-part` and the
+    // temporary file are all opened without following links).
+    let state_file = std::path::absolute(state_file)?;
+    let final_path =
+        final_path_for_state(&state_file).ok_or(Error::State(StateError::NotAStateFile))?;
+    let name = final_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    let sanitized = sanitize_file_name(name);
+    if sanitized != name {
+        let reason = if name.len() > MAX_NAME_BYTES {
+            format!(
+                "the name is {} bytes long, more than the {MAX_NAME_BYTES}-byte limit",
+                name.len()
+            )
+        } else if sanitized == format!("_{name}") {
+            // Windows reads the part before the first dot, without
+            // trailing spaces, as the device name.
+            let device = name.split('.').next().unwrap_or(name).trim_end();
+            format!(
+                "`{device}` is a device name Windows reserves, so Zajil never uses it for a file"
+            )
+        } else {
+            format!("it is not a name Zajil would create (Zajil would write {sanitized:?})")
+        };
+        return Err(Error::UnsafeName {
+            name: name.to_owned(),
+            reason,
+        });
+    }
+    let final_path = confine(parent_dir(&final_path), name)?;
+    Ok(final_path)
 }
 
 fn lock(file: &File, final_path: &Path) -> Result<(), Error> {

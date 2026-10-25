@@ -274,6 +274,47 @@ fn resume_works_with_a_relative_path() {
     assert!(!dir.path().join("f.bin.zajil-state").exists());
 }
 
+/// M5: `zajil resume --link` goes on from a new link to the same file,
+/// and refuses a link to another file, saying why and changing nothing.
+#[test]
+fn resume_goes_on_from_a_new_link_to_the_same_file() {
+    let server = TestServer::http();
+    let data = random_bytes(2_000_000, 6);
+    let spec = || FileSpec::new(data.clone()).etag(Some("\"v1\""));
+    server.put("/old/f.bin", spec().cut_after(500_000, 1));
+    let dir = tempfile::tempdir().unwrap();
+    let out = zajil(&[
+        "get",
+        &server.url("/old/f.bin"),
+        "--tries",
+        "1",
+        "--dir",
+        dir.path().to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let state_file = dir.path().join("f.bin.zajil-state");
+    let state = state_file.to_str().unwrap();
+
+    server.put(
+        "/other.bin",
+        FileSpec::new(random_bytes(2_000_000, 7)).etag(Some("\"v2\"")),
+    );
+    let out = zajil(&["resume", state, "--link", &server.url("/other.bin")]);
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("not the same file"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert!(state_file.exists());
+
+    server.put("/old/f.bin", FileSpec::new(Vec::new()).forbid_after(0));
+    server.put("/new/f.bin", spec());
+    let out = zajil(&["resume", state, "--link", &server.url("/new/f.bin")]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(fs::read(dir.path().join("f.bin")).unwrap(), data);
+}
+
 #[test]
 fn a_killed_download_resumes_from_the_state_file() {
     let server = TestServer::http();

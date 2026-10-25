@@ -123,6 +123,8 @@ pub(crate) enum Outcome {
 /// What the engine hands over to download segments.
 pub(crate) struct Job {
     pub client: Client,
+    /// The browser's headers for this download (M5): kept in memory only.
+    pub browser: Arc<crate::browser::FromBrowser>,
     pub connections: usize,
     /// No split leaves a segment smaller than this.
     pub min_segment: u64,
@@ -157,6 +159,7 @@ pub(crate) async fn run(
 ) -> Result<Outcome, Error> {
     let Job {
         client,
+        browser,
         connections,
         min_segment,
         save_interval,
@@ -189,6 +192,7 @@ pub(crate) async fn run(
     let ctx = Arc::new(Ctx {
         limits,
         client,
+        browser,
         url,
         if_range,
         total,
@@ -380,6 +384,7 @@ async fn checkpoint(
 struct Ctx {
     limits: Limits,
     client: Client,
+    browser: Arc<crate::browser::FromBrowser>,
     url: Url,
     if_range: String,
     total: u64,
@@ -871,8 +876,8 @@ async fn request_range(
     to: u64,
 ) -> Option<Stream> {
     let request = ctx
-        .client
-        .get(ctx.url.clone())
+        .browser
+        .apply(&ctx.url, ctx.client.get(ctx.url.clone()))
         .header(header::RANGE, format!("bytes={from}-{to}"))
         .header(header::IF_RANGE, &ctx.if_range)
         .send();

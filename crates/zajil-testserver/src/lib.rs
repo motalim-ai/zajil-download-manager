@@ -312,6 +312,10 @@ pub struct RequestRecord {
     pub tls_version: Option<String>,
     /// The `Authorization` header, if any.
     pub authorization: Option<String>,
+    /// The `Cookie` header, if any.
+    pub cookie: Option<String>,
+    /// The `Referer` header, if any.
+    pub referer: Option<String>,
     /// Number of the TCP connection, counted from 1 in the order the server
     /// accepted them. Requests on the same connection share it (keep-alive).
     pub connection: u64,
@@ -772,6 +776,8 @@ fn handle(
         range: header(header::RANGE),
         if_range: header(header::IF_RANGE),
         authorization: header(header::AUTHORIZATION),
+        cookie: header(header::COOKIE),
+        referer: header(header::REFERER),
         status: 0,
         bytes_sent: 0,
         tls_version,

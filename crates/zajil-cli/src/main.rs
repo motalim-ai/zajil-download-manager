@@ -93,6 +93,10 @@ enum Command {
         /// Speed limit, like `zajil get --limit`.
         #[arg(long, value_name = "RATE", value_parser = rate)]
         limit: Option<u64>,
+        /// A new link to the same file, when the old one expired: used only
+        /// if the server shows the same size and validator.
+        #[arg(long, value_name = "URL")]
+        link: Option<String>,
     },
     /// Manage and run download queues.
     Queue {
@@ -231,11 +235,23 @@ async fn run(
                     .await
                     .map_err(Failure::Engine)
             }
-            Command::Resume { state_file, limit } => engine
-                .with_download_limit(*limit)
-                .resume(state_file, &mut |e| progress.show(e))
-                .await
-                .map_err(Failure::Engine),
+            Command::Resume {
+                state_file,
+                limit,
+                link,
+            } => {
+                if let Some(link) = link {
+                    engine
+                        .refresh_link(state_file, link)
+                        .await
+                        .map_err(Failure::Engine)?;
+                }
+                engine
+                    .with_download_limit(*limit)
+                    .resume(state_file, &mut |e| progress.show(e))
+                    .await
+                    .map_err(Failure::Engine)
+            }
             Command::Queue { .. } | Command::Category { .. } => unreachable!("handled in main"),
         }
     };
