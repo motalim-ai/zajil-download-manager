@@ -77,6 +77,55 @@ pub fn clean_leftovers(app: &crate::App) {
     }
 }
 
+/// «Video quality»'s window, and its capability: events, its own title,
+/// and the folder picker.
+pub const LABEL: &str = "video";
+pub const SIZE: (f64, f64) = (640.0, 520.0);
+pub const CAPABILITY: &str = include_str!("../runtime-capabilities/video.json");
+
+/// A video from the extension: its cookies kept here, and «Video quality»
+/// opened for its link.
+pub fn receive<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    url: String,
+    cookies: Option<String>,
+) {
+    let state = handle.state::<VideoState>();
+    if let Some(cookies) = cookies {
+        state.cookies.lock().unwrap().insert(url.clone(), cookies);
+    }
+    *state.pending.lock().unwrap() = Some(url);
+    let _ = open_window(handle);
+}
+
+/// Opens «Video quality» (or brings it to the front), titled in the
+/// page's language by the page itself.
+pub fn open_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    crate::windows::open(handle, LABEL, "Zajil", SIZE)
+}
+
+/// «Download a video…»: «Video quality» for a link the user gives there.
+#[tauri::command]
+pub fn open_video<R: tauri::Runtime>(
+    state: State<'_, VideoState>,
+    url: Option<String>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if crate::in_scene(&handle) {
+        return Ok(());
+    }
+    *state.pending.lock().unwrap() = url;
+    open_window(&handle).map_err(|e| e.to_string())
+}
+
+/// Where a video goes at first: the downloads folder.
+#[tauri::command]
+pub fn video_folder(app: State<'_, crate::App>) -> String {
+    crate::download_dir(&app.settings, &app.system_download_dir)
+        .display()
+        .to_string()
+}
+
 /// The link the extension sent, once (the page opens «Video quality»).
 #[tauri::command]
 pub fn video_pending(state: State<'_, VideoState>) -> Option<String> {

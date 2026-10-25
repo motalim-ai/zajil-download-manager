@@ -7,6 +7,7 @@ import ProgressWindow from "./windows/ProgressWindow.svelte";
 import ScheduleWindow from "./windows/ScheduleWindow.svelte";
 import CompleteWindow from "./windows/CompleteWindow.svelte";
 import DropBox from "./windows/DropBox.svelte";
+import VideoWindow from "./windows/VideoWindow.svelte";
 import { completeApi, loadShow } from "./lib/completeApi";
 
 // One page for every window (M5.5): `?win=` says which one this is.
@@ -20,6 +21,6 @@ const progress = /^progress-(\d+)$/.exec(win ?? "");
 export default progress
   ? mount(ProgressWindow, { target, props: { id: Number(progress[1]) } })
   : mount(
-      win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : App,
+      win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : win === "video" ? VideoWindow : App,
       { target },
     );

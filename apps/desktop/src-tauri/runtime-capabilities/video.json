@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "video",
+  "description": "Added from Rust when the app starts (video.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the «Video quality» window (M6) may do: Zajil's own commands and events, set its own title, and the system's folder picker (the user picks where the video goes). Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "video"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-set-title",
+    "dialog:allow-open"
+  ]
+}

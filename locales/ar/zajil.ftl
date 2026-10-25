@@ -641,3 +641,33 @@ delete-also-finished =
        *[other] ومعها { $count } تحميل مكتمل، تبقى ملفاتها في مكانها.
     }
 delete-unfinished-files = واحذف الملفات الناقصة أيضًا
+
+## Video downloads (M6, #149)
+cmd-video = تحميل فيديو…
+video-title = جودة الفيديو
+video-page = رابط صفحة الفيديو
+video-consent-title = أدوات الفيديو
+video-consent-why = لتحميل الفيديو يحتاج زاجِل إلى أدوات مجانية مفتوحة المصدر (QuickJS-NG منها لفيديوهات يوتيوب). لن يُنزَّل شيء قبل أن توافق.
+video-tool = الأداة
+video-version = النسخة
+video-source = المصدر
+video-license = الترخيص
+video-consent-note = تُحفظ في مجلد بيانات زاجِل، ويُتحقق من بصمة كل ملف قبل تشغيله. يمكنك حذفها من الإعدادات.
+video-consent-ok = موافق، نزّل الأدوات
+video-installing = تنزيل أدوات الفيديو…
+video-probing = جارٍ سؤال الصفحة عن الفيديو…
+video-quality = الجودة
+video-audio-only = صوت فقط ({ $format })
+video-playlist =
+    { PLURAL($count) ->
+        [zero] قائمة تشغيل فارغة.
+        [one] قائمة تشغيل فيها فيديو واحد.
+        [two] قائمة تشغيل فيها فيديوهان.
+        [few] قائمة تشغيل فيها { $count } فيديوهات.
+        [many] قائمة تشغيل فيها { $count } فيديو.
+       *[other] قائمة تشغيل فيها { $count } فيديو.
+    }
+video-download-chosen = نزّل المحدد
+video-done = اكتمل تحميل الفيديو.
+video-drm = هذا الفيديو محمي، وزاجِل لا يحمّل المحتوى المحمي.
+video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّرت. افتح النافذة من جديد لتنزيلها.

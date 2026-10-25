@@ -575,3 +575,29 @@ delete-also-finished =
        *[other] With them, { $count } finished downloads, whose files stay where they are.
     }
 delete-unfinished-files = Delete the unfinished files too
+
+## Video downloads (M6, #149)
+cmd-video = Download a video…
+video-title = Video quality
+video-page = The video page's link
+video-consent-title = Video tools
+video-consent-why = To download videos, Zajil needs a few free, open-source tools (QuickJS-NG is for YouTube's videos). Nothing is downloaded before you agree.
+video-tool = Tool
+video-version = Version
+video-source = Source
+video-license = License
+video-consent-note = They are kept in Zajil's data folder, and each file's fingerprint is checked before it runs. You can delete them from the settings.
+video-consent-ok = OK, download the tools
+video-installing = Downloading the video tools…
+video-probing = Asking the page about the video…
+video-quality = Quality
+video-audio-only = Sound only ({ $format })
+video-playlist =
+    { PLURAL($count) ->
+        [one] A playlist with { $count } video.
+       *[other] A playlist with { $count } videos.
+    }
+video-download-chosen = Download the chosen ones
+video-done = The video has downloaded.
+video-drm = This video is protected, and Zajil does not download protected content.
+video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.

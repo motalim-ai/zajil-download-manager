@@ -5,6 +5,7 @@ import { onMac } from "./keys";
 
 export type Command =
   | "add"
+  | "video"
   | "import"
   | "export"
   | "quit"

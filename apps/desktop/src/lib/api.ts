@@ -8,6 +8,10 @@ import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
 import type { PendingLink } from "./bindings/PendingLink";
 import type { ProbeView } from "./bindings/ProbeView";
+import type { ToolView } from "./bindings/ToolView";
+import type { VideoInfoView } from "./bindings/VideoInfoView";
+import type { VideoErrorView } from "./bindings/VideoErrorView";
+import type { ChoiceView } from "./bindings/ChoiceView";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { SettingsView } from "./bindings/SettingsView";
 import type { SettingsChange } from "./bindings/SettingsChange";
@@ -93,6 +97,27 @@ export const api = {
   showMainView: (view: string) => invoke<void>("show_main_view", { view }),
   onMainView: (handler: (view: string) => void): Promise<UnlistenFn> =>
     listen<string>("main-view", (event) => handler(event.payload)),
+  /** Video downloads (M6, #149). */
+  openVideo: (url: string | null) => invoke<void>("open_video", { url }),
+  videoPending: () => invoke<string | null>("video_pending"),
+  videoFolder: () => invoke<string>("video_folder"),
+  videoToolsStatus: () => invoke<ToolView[]>("video_tools_status"),
+  videoToolsInstall: () => invoke<void>("video_tools_install"),
+  videoToolsCancel: () => invoke<void>("video_tools_cancel"),
+  videoToolsRemove: () => invoke<void>("video_tools_remove"),
+  videoProbe: (url: string) => invoke<VideoInfoView>("video_probe", { url }),
+  videoProbeCancel: () => invoke<void>("video_probe_cancel"),
+  videoDownload: (url: string, choice: ChoiceView, dest: string, name: string) =>
+    invoke<number>("video_download", { url, choice, dest, name }),
+  videoCancel: (id: number) => invoke<void>("video_cancel", { id }),
+  onVideoToolsProgress: (handler: (p: { tool: string; done: number; total: number | null }) => void): Promise<UnlistenFn> =>
+    listen<{ tool: string; done: number; total: number | null }>("video-tools-progress", (e) => handler(e.payload)),
+  onVideoProgress: (handler: (p: { id: number; done: number; total: number | null; speed: number | null }) => void): Promise<UnlistenFn> =>
+    listen<{ id: number; done: number; total: number | null; speed: number | null }>("video-progress", (e) => handler(e.payload)),
+  onVideoFinished: (handler: (p: { id: number; file: string }) => void): Promise<UnlistenFn> =>
+    listen<{ id: number; file: string }>("video-finished", (e) => handler(e.payload)),
+  onVideoFailed: (handler: (p: { id: number; error: VideoErrorView }) => void): Promise<UnlistenFn> =>
+    listen<{ id: number; error: VideoErrorView }>("video-failed", (e) => handler(e.payload)),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),

@@ -17,6 +17,7 @@
   import AddDialog from "./lib/components/AddDialog.svelte";
   import AddLink from "./lib/components/AddLink.svelte";
   import ProgressWindow from "./windows/ProgressWindow.svelte";
+  import VideoWindow from "./windows/VideoWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
@@ -53,6 +54,8 @@
   let progressScene = $state(false);
   // The «link» scene: «Add a link» with a link from the clipboard.
   let linkScene = $state(false);
+  // The «tools» and «quality» scenes: «Video quality» at that step.
+  let videoScene = $state<"tools" | "quality" | null>(null);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -468,6 +471,9 @@
     if (!canRun(command)) return;
     if (TOOL.includes(command)) return doAction(command as ToolAction);
     switch (command) {
+      // «Download a video…» (M6): «Video quality» asks for the page.
+      case "video":
+        return void api.openVideo(null).catch((e) => (failed = String(e)));
       case "import":
         return void importQueues();
       case "export":
@@ -725,6 +731,7 @@
       };
     if (screen === "progress") progressScene = true;
     if (screen === "link") linkScene = true;
+    if (screen === "tools" || screen === "quality") videoScene = screen;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
       await tick();
@@ -804,6 +811,8 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if videoScene}
+  <div class="scene" class:mac={onMac()}><VideoWindow scene={videoScene} /></div>
 {:else if linkScene}
   <div class="scene" class:mac={onMac()}><AddLink url="https://cdn.example.org/courses/rust/part-2.mp4" fromClipboard={true} onok={() => {}} oncancel={() => {}} /></div>
 {:else if progressScene}

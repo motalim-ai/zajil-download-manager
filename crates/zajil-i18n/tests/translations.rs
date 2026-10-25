@@ -193,6 +193,17 @@ const ARABIC: &[(&str, [&str; 6])] = &[
         ],
     ),
     (
+        "video-playlist",
+        [
+            "قائمة تشغيل فارغة.",
+            "قائمة تشغيل فيها فيديو واحد.",
+            "قائمة تشغيل فيها فيديوهان.",
+            "قائمة تشغيل فيها 3 فيديوهات.",
+            "قائمة تشغيل فيها 11 فيديو.",
+            "قائمة تشغيل فيها 100 فيديو.",
+        ],
+    ),
+    (
         "connections-count",
         [
             "لا اتصالات",
@@ -330,6 +341,10 @@ const ENGLISH: &[(&str, [&str; 2])] = &[
             "With them, 1 finished download, whose file stays where it is.",
             "With them, 2 finished downloads, whose files stay where they are.",
         ],
+    ),
+    (
+        "video-playlist",
+        ["A playlist with 1 video.", "A playlist with 2 videos."],
     ),
     (
         "quit-question",
@@ -768,6 +783,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    // A file format's name (m4a).
+    ("video-audio-only", &["format"]),
     // A button's name.
     ("tb-earlier", &["name"]),
     ("tb-later", &["name"]),
@@ -792,6 +809,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("downloads-count", &["count"]),
     ("delete-unfinished", &["count"]),
     ("delete-also-finished", &["count"]),
+    ("video-playlist", &["count"]),
     ("quit-question", &["count"]),
     ("import-done", &["count"]),
     ("import-kept", &["names"]),
@@ -1054,6 +1072,11 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "tb-later",
         ar: (&[("name", "NAME")], "أخّر «NAME»"),
         en: (&[("name", "NAME")], "Move “NAME” later"),
+    },
+    Whole {
+        key: "video-audio-only",
+        ar: (&[("format", "m4a")], "صوت فقط (m4a)"),
+        en: (&[("format", "m4a")], "Sound only (m4a)"),
     },
     Whole {
         key: "footer-selected",
