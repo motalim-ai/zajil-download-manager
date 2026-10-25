@@ -2,6 +2,9 @@
   import Icon from "./Icon.svelte";
   import { locale } from "../i18n.svelte";
 
+  // «Add a link» (M5.5, the design of #83, window 2): a window of its own,
+  // its box filled from the clipboard when a link was copied, and saying
+  // so.
   let {
     url: given,
     fromClipboard,
@@ -17,86 +20,80 @@
   } = $props();
 
   let url = $state("");
-  let dialog: HTMLDivElement | undefined = $state();
+  let box: HTMLInputElement | undefined = $state();
   $effect(() => {
     url = given;
-  });
-  $effect(() => {
-    dialog?.querySelector<HTMLInputElement>("input")?.select();
+    // A new link (from the clipboard while open) is selected, ready to
+    // replace.
+    void given;
+    queueMicrotask(() => box?.select());
   });
   function submit(event: SubmitEvent) {
     event.preventDefault();
     const link = url.trim();
     if (link) onok(link);
   }
-  // Escape closes it; Tab stays inside it.
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.preventDefault();
       oncancel();
-    } else if (event.key === "Tab" && dialog) {
-      const inside = [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input")];
-      const [first, last] = [inside[0], inside[inside.length - 1]];
-      const at = document.activeElement;
-      if (event.shiftKey && (at === first || at === dialog)) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && (at === last || !dialog.contains(at))) {
-        event.preventDefault();
-        first?.focus();
-      }
     }
   }
 </script>
 
 <svelte:window {onkeydown} />
 
-<div class="scrim">
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="addlink-title" tabindex="-1" bind:this={dialog}>
-    <h2 id="addlink-title">{locale.t("addlink-title")}</h2>
-    <form onsubmit={submit}>
+<main class="link" aria-labelledby="addlink-title">
+  <h1 id="addlink-title" class="visually-hidden">{locale.t("addlink-title")}</h1>
+  <form onsubmit={submit}>
+    <div class="row">
       <label class="label" for="addlink-url">{locale.t("addlink-url")}</label>
       <div class="value">
+        <input
+          id="addlink-url"
+          type="url"
+          dir="ltr"
+          autocomplete="off"
+          spellcheck="false"
+          bind:this={box}
+          bind:value={url}
+          aria-describedby={fromClipboard ? "addlink-clip" : undefined}
+        />
         <Icon name="link-2" size={16} />
-        <input id="addlink-url" type="url" dir="ltr" autocomplete="off" spellcheck="false" bind:value={url} aria-describedby={fromClipboard ? "addlink-clip" : undefined} />
       </div>
       {#if fromClipboard}
+        <span></span>
         <p id="addlink-clip" class="note"><Icon name="clipboard-paste" size={15} />{locale.t("addlink-from-clipboard")}</p>
       {/if}
-      <div class="actions">
-        <button type="submit" class="btn primary" disabled={!url.trim()}>{locale.t("addlink-ok")}</button>
-        <button type="button" class="btn" onclick={oncancel}>{locale.t("addlink-cancel")}</button>
-      </div>
-    </form>
-  </div>
-</div>
+    </div>
+    <div class="actions">
+      <button type="submit" class="btn primary" disabled={!url.trim()}>{locale.t("addlink-ok")}</button>
+      <button type="button" class="btn" onclick={oncancel}>{locale.t("addlink-cancel")}</button>
+    </div>
+  </form>
+</main>
 
 <style>
-  .scrim {
-    position: absolute;
-    inset: 0;
-    background: var(--scrim);
-    display: grid;
-    place-items: center;
-    z-index: 10;
-  }
-  .dialog {
-    width: min(520px, calc(100% - 32px));
+  .link {
+    height: 100%;
+    padding: 22px 24px 18px;
     background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    box-shadow: var(--shadow);
-    padding: 20px 22px 18px;
+    box-sizing: border-box;
   }
-  h2 {
-    margin: 0 0 12px;
-    font-size: 17px;
+  form {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px 18px;
+    align-items: center;
   }
   .label {
-    display: block;
     font-size: 13px;
     color: var(--muted);
-    margin-bottom: 4px;
   }
   .value {
     display: flex;
@@ -130,11 +127,12 @@
     align-items: center;
     font-size: 12.5px;
     color: var(--muted);
-    margin: 8px 0 0;
+    margin: 0;
   }
   .actions {
     display: flex;
     gap: 8px;
-    margin-top: 16px;
+    margin-top: auto;
+    padding-top: 16px;
   }
 </style>

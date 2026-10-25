@@ -713,6 +713,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-starts", &["time"]),
     ("st-error", &["code"]),
     ("footer-selected", &["number"]),
+    ("add-remember", &["category"]),
     // A version, a column's name and the app's name: no number to count.
     ("about-text", &["version"]),
     ("col-resize", &["column"]),
@@ -914,6 +915,11 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "sys-hide",
         ar: (&[("app", "APP")], "إخفاء APP"),
         en: (&[("app", "APP")], "Hide APP"),
+    },
+    Whole {
+        key: "add-remember",
+        ar: (&[("category", "CAT")], "تذكّر هذا المجلد لفئة «CAT»"),
+        en: (&[("category", "CAT")], "Remember this folder for “CAT”"),
     },
     Whole {
         key: "footer-selected",

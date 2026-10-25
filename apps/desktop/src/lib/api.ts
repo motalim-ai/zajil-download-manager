@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { IntegrationView } from "./bindings/IntegrationView";
 import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
+import type { PendingLink } from "./bindings/PendingLink";
 import type { ProbeView } from "./bindings/ProbeView";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { SettingsView } from "./bindings/SettingsView";
@@ -57,6 +58,23 @@ export const api = {
   moveToQueue: (ids: number[], queue: string) => invoke<void>("move_to_queue", { ids, queue }),
   /** «Copy link»: the downloads' links on the clipboard; how many went. */
   copyLinks: (ids: number[]) => invoke<number>("copy_links", { ids }),
+  /** The add windows (M5.5): «Add a link», with a link or none, titled in
+   * the page's language. */
+  openAddLink: (url: string | null, fromClipboard: boolean, title: string) =>
+    invoke<void>("open_add_link", { url, fromClipboard, title }),
+  pendingLink: () => invoke<PendingLink | null>("pending_link"),
+  /** A link copied while «Add a link» is open. */
+  onPendingLink: (handler: (link: PendingLink) => void): Promise<UnlistenFn> =>
+    listen<PendingLink>("pending-link", (event) => handler(event.payload)),
+  /** «Download file info» for `url`; «Add a link» closes. */
+  openAddInfo: (url: string, title: string) => invoke<void>("open_add_info", { url, title }),
+  pendingInfo: () => invoke<string | null>("pending_info"),
+  /** Closes the window that asks. */
+  closeWindow: () => invoke<void>("close_window"),
+  /** The main window, on `view` («New category»: the categories). */
+  showMainView: (view: string) => invoke<void>("show_main_view", { view }),
+  onMainView: (handler: (view: string) => void): Promise<UnlistenFn> =>
+    listen<string>("main-view", (event) => handler(event.payload)),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),

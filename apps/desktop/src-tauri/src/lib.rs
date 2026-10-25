@@ -14,6 +14,7 @@ mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
 pub mod view;
+mod windows;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -154,14 +155,25 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .manage(app);
+        .manage(app)
+        .manage(windows::Shared::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
         // The macOS menu bar's commands go to the page (`menu.rs`).
         .on_menu_event(|handle, event| {
+            // To the window in front: in an add window, Select all is its
+            // text box's, not the main window's rows (M5.5).
             if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
-                let _ = handle.emit("menu-command", command.to_owned());
+                let front = [windows::LINK, windows::INFO]
+                    .into_iter()
+                    .find(|l| {
+                        handle
+                            .get_webview_window(l)
+                            .is_some_and(|w| w.is_focused().unwrap_or(false))
+                    })
+                    .unwrap_or("main");
+                let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
         .invoke_handler(handlers())
@@ -194,11 +206,25 @@ pub fn run() {
                     *kept.lock().unwrap_or_else(|e| e.into_inner()) = Some(integration);
                 });
             }
+            // The add windows' own permissions (`windows.rs`).
+            tauri_app.add_capability(windows::CAPABILITY)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
                 tauri_app.state::<App>().stopped.send_replace(true);
                 if let Some(window) = tauri_app.get_webview_window("main") {
+                    // The add windows' scenes draw that window in the main
+                    // one, at its own size.
+                    let scenario = tauri_app.state::<ui_test::UiTest>().scenario.clone();
+                    let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
+                        Some("add") => Some(windows::INFO_SIZE),
+                        Some("link") => Some(windows::LINK_SIZE),
+                        _ => None,
+                    };
+                    if let Some((width, height)) = size {
+                        window.set_min_size(None::<tauri::LogicalSize<f64>>)?;
+                        window.set_size(tauri::LogicalSize::new(width, height))?;
+                    }
                     ui_test::fit_to_screen(&window)?;
                 }
                 return Ok(());
@@ -274,6 +300,12 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         refresh_link,
         cancel_refresh,
         go_without_cookies,
+        windows::open_add_link,
+        windows::pending_link,
+        windows::open_add_info,
+        windows::pending_info,
+        windows::close_window,
+        windows::show_main_view,
         menu::set_menu,
         quit_app,
         app_version,
@@ -308,6 +340,12 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         refresh_link,
         cancel_refresh,
         go_without_cookies,
+        windows::open_add_link,
+        windows::pending_link,
+        windows::open_add_info,
+        windows::pending_info,
+        windows::close_window,
+        windows::show_main_view,
         menu::set_menu,
         quit_app,
         app_version,
