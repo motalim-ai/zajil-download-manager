@@ -285,3 +285,51 @@ async fn an_unscheduled_queue_runs_while_another_waits() {
     );
     assert_eq!(run.task.await.unwrap().finished, 2);
 }
+
+/// #125: «Start now» runs a queue outside its window at once, and its saved
+/// schedule does not change; once it has nothing left, it leaves the set
+/// and the schedule rules it again.
+#[tokio::test]
+async fn start_now_runs_a_queue_outside_its_window_and_keeps_its_schedule() {
+    let server = TestServer::http();
+    server.put("/f.bin", FileSpec::new(random_bytes(100_000, 801)));
+    // 02:00 to 07:00, and it is 13:00: outside its window.
+    let night = schedule("02:00", "07:00", vec![]);
+    let (store, _dir, id) = set_up(&server, night.clone());
+    let clock = ManualClock::frozen(FRIDAY_1300.parse().unwrap());
+    let engine = Engine::new(Options {
+        clock: clock.clone(),
+        ..Options::default()
+    })
+    .unwrap();
+    let now: zajil_core::queue::RunNow = Default::default();
+    // And a queue that is not there: it leaves the set at the first look.
+    now.lock()
+        .unwrap()
+        .extend(["main".to_owned(), "gone".to_owned()]);
+    let mut started = 0;
+    let summary = tokio::time::timeout(
+        Duration::from_secs(30),
+        Runner::new(engine, store.clone())
+            .poll(Duration::from_millis(20))
+            .time_zone(riyadh())
+            .run_now(now.clone())
+            .run(&Stop::new(), &mut |event| {
+                if matches!(event, QueueEvent::Started { .. }) {
+                    started += 1;
+                }
+                assert!(
+                    !matches!(event, QueueEvent::Waiting { .. }),
+                    "started now, it waits for nothing"
+                );
+            }),
+    )
+    .await
+    .expect("it ran at once")
+    .unwrap();
+    assert_eq!((started, summary.finished), (1, 1));
+    let queues = store.load().unwrap();
+    assert_eq!(queues.item(id).unwrap().status, Status::Done);
+    assert_eq!(queues.queue("main").unwrap().schedule, Some(night));
+    assert!(now.lock().unwrap().is_empty(), "done: it left the set");
+}

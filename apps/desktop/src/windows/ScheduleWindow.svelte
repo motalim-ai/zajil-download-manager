@@ -34,6 +34,7 @@
   let stop = $state("");
   let days = $state<string[]>([]);
   let maxActive = $state(3);
+  let maxTries = $state(1);
 
   const plan = $derived(plans.find((p) => p.name === chosen));
   const rows = $derived(downloads.filter((d) => d.queue === chosen));
@@ -48,7 +49,8 @@
         (timed && (start !== (plan.start ?? "") || [...days].sort().join() !== [...plan.days].sort().join())) ||
         stopOn !== (plan.stop !== null) ||
         (stopOn && stop !== (plan.stop ?? "")) ||
-        maxActive !== plan.max_active),
+        maxActive !== plan.max_active ||
+        maxTries !== plan.max_tries),
   );
 
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
@@ -61,6 +63,7 @@
     stop = p.stop ?? "";
     days = [...p.days];
     maxActive = p.max_active;
+    maxTries = p.max_tries;
   }
 
   async function load(keepForm: boolean) {
@@ -132,6 +135,7 @@
     await run(async () => {
       await scheduleApi.saveQueue(chosen, {
         max_active: maxActive,
+        max_tries: maxTries,
         start: timed && start ? start : null,
         stop: stopOn && stop ? stop : null,
         days: timed ? days : [],
@@ -145,13 +149,27 @@
       if (dirty) await save();
       await scheduleApi.startQueue(chosen);
       await load(true);
-    }, plan?.closed_now ? locale.t("schedule-closed-now") : locale.t("schedule-started"));
+    }, locale.t("schedule-started"));
   }
 
   async function setAfter(choice: AfterChoice) {
     await run(async () => {
       await scheduleApi.setAfter(chosen, choice);
       await load(true);
+    });
+  }
+
+  /** The file or program to open after the queue (#142): Rust shows the
+   * system's picker and asks to confirm it with its path, then saves it. */
+  async function chooseAfterOpen() {
+    await run(async () => {
+      await scheduleApi.chooseAfterOpen(chosen, {
+        title: locale.t("schedule-title"),
+        question: locale.t("schedule-after-open-confirm"),
+        ok: locale.t("schedule-after-open-ok"),
+        cancel: locale.t("schedule-cancel"),
+      });
+      await load(dirty);
     });
   }
 
@@ -273,11 +291,9 @@
       <label class="label" for="max-active">{locale.t("schedule-max-active")}</label>
       <div class="field inline">
         <input id="max-active" class="number" type="number" min="1" max="32" bind:value={maxActive} />
-        <!-- Ready for the engine (#142): disabled until it keeps the number. -->
-        <label class="check soon-row">
+        <label class="check tries">
           {locale.t("schedule-tries")}
-          <input class="number" type="number" min="1" max="100" value="5" disabled />
-          <span class="soon">{locale.t("schedule-soon")}</span>
+          <input class="number" type="number" min="1" max="100" bind:value={maxTries} />
         </label>
       </div>
 
@@ -289,12 +305,18 @@
           <option value="sleep">{locale.t("schedule-after-sleep")}</option>
         </select>
         <p class="hint">{locale.t("schedule-after-hint")}</p>
-        <!-- Ready for the engine (#142): the user picks a file or program in
-             the system's picker and confirms it before it is saved. -->
-        <div class="check soon-row">
+        <!-- #142: picked and confirmed in Rust, saved at once. -->
+        <div class="check after-open">
           <span>{locale.t("schedule-after-open")}</span>
-          <button class="btn" disabled><Icon name="file" />{locale.t("schedule-after-open-pick")}</button>
-          <span class="soon">{locale.t("schedule-soon")}</span>
+          {#if plan?.after_open}
+            <bdi dir="ltr" class="path" title={plan.after_open}>{plan.after_open}</bdi>
+            <button class="btn quiet" onclick={() => void run(async () => (await scheduleApi.clearAfterOpen(chosen), await load(dirty)))}
+              >{locale.t("schedule-after-open-clear")}</button
+            >
+          {:else}
+            <span class="none">{locale.t("schedule-after-nothing")}</span>
+          {/if}
+          <button class="btn" onclick={() => void chooseAfterOpen()}><Icon name="file" />{locale.t("schedule-after-open-pick")}</button>
         </div>
       </div>
     </div>
@@ -545,16 +567,23 @@
   #after {
     max-width: 260px;
   }
-  .soon-row {
-    color: var(--muted);
+  .tries {
     font-size: 13px;
+    color: var(--muted);
   }
-  .soon {
-    font-size: 11.5px;
-    border: 1px solid var(--line);
-    border-radius: 99px;
-    padding: 0 8px;
-    background: var(--sunken);
+  .after-open {
+    flex-wrap: wrap;
+    font-size: 13px;
+    min-width: 0;
+  }
+  .after-open .path {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .after-open .none {
+    color: var(--muted);
   }
   .countdown {
     display: flex;

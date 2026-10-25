@@ -514,14 +514,15 @@ schedule-move = انقل إلى طابور…
 schedule-empty = لا تحميلات في هذا الطابور.
 schedule-start-now = ابدأ الآن
 schedule-started = بدأ الطابور.
-schedule-closed-now = الطابور خارج موعده الآن: تنتظر تحميلاته موعده التالي.
 schedule-save = حفظ
 schedule-saved = حُفظ.
 schedule-close = إغلاق
 schedule-tries = المحاولات لكل ملف
 schedule-after-open = وافتح بعده ملفًا أو برنامجًا:
 schedule-after-open-pick = اختر ملفًا…
-schedule-soon = قريبًا
+schedule-after-open-clear = إزالة
+schedule-after-open-confirm = سيفتح زاجِل هذا الملف أو البرنامج كلما انتهت كل تحميلات هذا الطابور. احفظه فقط إن كنت تثق به.
+schedule-after-open-ok = احفظه
 
 ## الاكتمال
 

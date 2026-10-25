@@ -382,6 +382,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::set_after,
         schedule::countdown,
         schedule::cancel_after,
+        schedule::choose_after_open,
+        schedule::clear_after_open,
         complete::set_show_complete,
         complete::complete_info,
         complete::drag_out
@@ -443,6 +445,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::set_after,
         schedule::countdown,
         schedule::cancel_after,
+        schedule::choose_after_open,
+        schedule::clear_after_open,
         complete::set_show_complete,
         complete::complete_info,
         complete::drag_out,
@@ -648,7 +652,10 @@ async fn run_queues(handle: tauri::AppHandle) {
         if stop.is_requested() {
             return;
         }
-        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser);
+        // Queues started now, outside their window (#125, the schedule window).
+        let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
+        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser)
+            .run_now(run_now);
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 let changed = {
@@ -677,8 +684,12 @@ async fn run_queues(handle: tauri::AppHandle) {
                 () = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
             let store = store.clone();
+            let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
             let waiting = tokio::task::spawn_blocking(move || {
                 store.load().map_err(|e| e.to_string()).map(|q| {
+                    // No runner looks meanwhile: a queue started now and
+                    // paused at once leaves the set here (review of #125).
+                    schedule::prune_run_now(&run_now, &q);
                     q.queues
                         .iter()
                         .flat_map(|q| &q.items)
@@ -1694,6 +1705,9 @@ fn set_status(queues: &mut QueuesFile, ids: &[u64], status: Status) -> Result<()
             item.status = status;
             if status == Status::Waiting {
                 item.error = None;
+                // Started by the user: its queue's tries count from 0
+                // (#142).
+                item.failed_tries = 0;
             }
         }
     }

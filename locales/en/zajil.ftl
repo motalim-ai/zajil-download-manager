@@ -456,14 +456,15 @@ schedule-move = Move to queue…
 schedule-empty = No downloads in this queue.
 schedule-start-now = Start now
 schedule-started = The queue has started.
-schedule-closed-now = The queue is outside its time now: its downloads wait for its next start.
 schedule-save = Save
 schedule-saved = Saved.
 schedule-close = Close
 schedule-tries = Tries per file
 schedule-after-open = And open a file or program after it:
 schedule-after-open-pick = Choose a file…
-schedule-soon = Coming soon
+schedule-after-open-clear = Remove
+schedule-after-open-confirm = Zajil will open this file or program each time every download of this queue is done. Save it only if you trust it.
+schedule-after-open-ok = Save it
 
 ## الاكتمال
 
