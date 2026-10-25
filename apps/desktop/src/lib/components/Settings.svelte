@@ -9,6 +9,7 @@
   import { api } from "../api";
   import { play } from "../sounds";
   import type { Sounds } from "../bindings/Sounds";
+  import type { AddPrefs } from "../bindings/AddPrefs";
   import type { IntegrationView } from "../bindings/IntegrationView";
   import CompleteSetting from "./CompleteSetting.svelte";
   import UpdateSetting from "./UpdateSetting.svelte";
@@ -105,6 +106,25 @@
     dropBox = shown;
     await api.setDropBox(shown).catch(() => (dropBox = before));
   }
+  // How a new download shows (M5.5).
+  const PROGRESS = [
+    ["shown", "settings-progress-shown"],
+    ["minimized", "settings-progress-minimized"],
+    ["hidden", "settings-progress-hidden"],
+  ] as const;
+  let addPrefs = $state<AddPrefs>({ progress_window: "shown", start_while_open: false });
+  onMount(() => {
+    api.addPrefs().then(
+      (p) => (addPrefs = p),
+      () => {},
+    );
+  });
+  async function setAddPrefs(next: AddPrefs) {
+    const before = addPrefs;
+    addPrefs = next;
+    await api.setAddPrefs(next).catch(() => (addPrefs = before));
+  }
+
   // The sounds (M5.5): at first only the finished download's.
   const SOUNDS = [
     ["done", "settings-sound-done"],
@@ -333,6 +353,22 @@
   </fieldset>
 
   <fieldset>
+    <legend>{locale.t("settings-new-download")}</legend>
+    <span class="sub">{locale.t("settings-progress-window")}</span>
+    {#each PROGRESS as [value, text] (value)}
+      <label class="choice">
+        <input type="radio" name="progress-window" checked={addPrefs.progress_window === value} onchange={() => void setAddPrefs({ ...addPrefs, progress_window: value })} />
+        <span>{locale.t(text)}</span>
+      </label>
+    {/each}
+    <label class="choice">
+      <input type="checkbox" checked={addPrefs.start_while_open} onchange={(e) => void setAddPrefs({ ...addPrefs, start_while_open: e.currentTarget.checked })} />
+      <span>{locale.t("settings-start-while-open")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-start-while-open-hint")}</p>
+  </fieldset>
+
+  <fieldset>
     <legend>{locale.t("settings-sounds")}</legend>
     {#each SOUNDS as [key, text] (key)}
       <label class="choice">
@@ -441,6 +477,10 @@
 </section>
 
 <style>
+  .sub {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
   .hear {
     margin-inline-start: 4px;
     padding: 2px 6px;

@@ -8,6 +8,7 @@ import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
 import type { PendingLink } from "./bindings/PendingLink";
 import type { Sounds } from "./bindings/Sounds";
+import type { AddPrefs } from "./bindings/AddPrefs";
 import type { ProbeView } from "./bindings/ProbeView";
 import type { ToolView } from "./bindings/ToolView";
 import type { VideoInfoView } from "./bindings/VideoInfoView";
@@ -34,6 +35,13 @@ export const api = {
   closeQuits: () => invoke<[boolean, boolean]>("close_quits"),
   /** Which sounds play (M5.5). */
   soundPrefs: () => invoke<Sounds>("sound_prefs"),
+  /** How a new download shows (M5.5): its progress window, and starting
+   * while «Download file info» is open. */
+  addPrefs: () => invoke<AddPrefs>("add_prefs"),
+  setAddPrefs: (prefs: AddPrefs) => invoke<void>("set_add_prefs", { prefs }),
+  openStartedProgress: (id: number, title: string) => invoke<void>("open_started_progress", { id, title }),
+  setItemDetails: (id: number, category: string | null, description: string | null) =>
+    invoke<void>("set_item_details", { id, category, description }),
   setSoundPrefs: (sounds: Sounds) => invoke<void>("set_sound_prefs", { sounds }),
   setCloseQuits: (quits: boolean) => invoke<void>("set_close_quits", { quits }),
   /** The page heard the «quit» a close sent: Zajil waits for its answer. */

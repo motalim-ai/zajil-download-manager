@@ -35,6 +35,9 @@ pub struct WindowPrefs {
     /// Which sounds play (`sounds.rs`).
     #[serde(default)]
     pub sounds: crate::sounds::Sounds,
+    /// How a new download shows (`addprefs.rs`).
+    #[serde(default)]
+    pub add: crate::addprefs::AddPrefs,
 }
 
 /// The texts of that notification, in the page's language.

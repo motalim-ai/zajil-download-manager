@@ -20,6 +20,9 @@
   // Added: the buttons stay off, whatever comes next (review of #104: a
   // failed «remember» let a second click add it again).
   let added = false;
+  // Started in the background (the setting «Start downloading while the
+  // window is open»): its id, so the buttons act on it.
+  let started = $state<number | null>(null);
   let queues = $state<QueueView[]>([]);
   let categories = $state<CategoryView[]>([]);
 
@@ -38,6 +41,16 @@
         probe = await api.probe(url);
       } catch (e) {
         error = String(e);
+        return;
+      }
+      const prefs = await api.addPrefs().catch(() => null);
+      if (prefs?.start_while_open && !probe.page) {
+        try {
+          started = await api.add({ url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null });
+          void api.openStartedProgress(started, probe.name).catch(() => {});
+        } catch {
+          started = null;
+        }
       }
     })();
   });
@@ -47,10 +60,21 @@
     busy = true;
     error = null;
     try {
-      const id = await api.add(request);
-      added = true;
-      // A download that starts shows its progress, as in IDM.
-      if (request.start) void api.openProgress(id, probe?.name ?? "").catch(() => {});
+      if (started !== null) {
+        // Running already: «Start download» keeps it as the user leaves
+        // the category and description; «Download later» pauses it and
+        // moves it to the chosen queue.
+        await api.setItemDetails(started, request.category, request.description);
+        if (!request.start) await api.pause([started]);
+        if (request.queue && request.queue !== "main") await api.moveToQueue([started], request.queue);
+        added = true;
+      } else {
+        const id = await api.add(request);
+        added = true;
+        // A download that starts shows its progress, as in IDM (as the
+        // settings say: shown, minimized, or not).
+        if (request.start) void api.openStartedProgress(id, probe?.name ?? "").catch(() => {});
+      }
     } catch (e) {
       busy = false;
       error = String(e);
@@ -73,6 +97,13 @@
     await api.closeWindow();
   }
 
+  // «Cancel»: a download started in the background is taken off the list
+  // and its unfinished files are deleted.
+  async function cancel() {
+    if (started !== null) await api.removeWithFiles([started]).catch(() => {});
+    await api.closeWindow();
+  }
+
   async function chooseFolder(): Promise<string | null> {
     const chosen = await openDialog({ directory: true, multiple: false }).catch(() => null);
     return typeof chosen === "string" ? chosen : null;
@@ -87,7 +118,8 @@
   {queues}
   {categories}
   onadd={(r, remember) => void add(r, remember)}
-  oncancel={() => void api.closeWindow()}
+  oncancel={() => void cancel()}
   onchoosefolder={chooseFolder}
   onnewcategory={() => void api.showMainView("categories")}
+  started={started !== null}
 />

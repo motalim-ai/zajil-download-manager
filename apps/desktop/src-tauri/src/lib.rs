@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod addprefs;
 mod closing;
 mod complete;
 mod dropbox;
@@ -362,6 +363,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_close_quits,
         sounds::sound_prefs,
         sounds::set_sound_prefs,
+        addprefs::add_prefs,
+        addprefs::set_add_prefs,
+        addprefs::open_started_progress,
+        set_item_details,
         video::video_pending,
         video::open_video,
         video::video_folder,
@@ -441,6 +446,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_close_quits,
         sounds::sound_prefs,
         sounds::set_sound_prefs,
+        addprefs::add_prefs,
+        addprefs::set_add_prefs,
+        addprefs::open_started_progress,
+        set_item_details,
         video::video_pending,
         video::open_video,
         video::video_folder,
@@ -2262,6 +2271,31 @@ async fn remove_with_files<R: tauri::Runtime>(
     send_keep(&app.links, &app.store, None);
     removal::delete_soon(files);
     Ok(())
+}
+
+/// A download's category and description, set after it was added (a
+/// download started while «Download file info» was open).
+#[tauri::command]
+async fn set_item_details<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    category: Option<String>,
+    description: Option<String>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| {
+        if category.is_some() {
+            q.set_category(id, category.as_deref())?;
+        }
+        q.set_description(
+            id,
+            description
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty()),
+        )
+    })
+    .await
 }
 
 #[tauri::command]

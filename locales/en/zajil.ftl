@@ -641,3 +641,13 @@ settings-sound-done = A sound when a download finishes
 settings-sound-failed = A sound when a download fails
 settings-sound-queue = A sound when a queue finishes
 settings-sound-try = Play the sound
+
+## How a new download shows (M5.5, IDM touches)
+settings-new-download = New downloads
+settings-progress-window = The progress window when a download starts from “Download file info”:
+settings-progress-shown = Shown
+settings-progress-minimized = Shown minimized
+settings-progress-hidden = Not shown
+settings-start-while-open = Start downloading while the window is open
+settings-start-while-open-hint = The download starts in the background as soon as the server answers, while you are still in “Download file info”. “Cancel” removes it and deletes its unfinished file.
+add-started-note = The download has started in the background, so its name and folder can no longer change. The category and description can.

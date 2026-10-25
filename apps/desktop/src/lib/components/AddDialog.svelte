@@ -26,6 +26,7 @@
     oncancel,
     onchoosefolder,
     onnewcategory,
+    started = false,
   }: {
     url: string;
     probe: ProbeView | null;
@@ -40,6 +41,10 @@
     oncancel: () => void;
     onchoosefolder: () => Promise<string | null>;
     onnewcategory: () => void;
+    /// The download started already, in the background (the setting
+    /// «Start downloading while the window is open»): its name and folder
+    /// are taken; its category and description can still change.
+    started?: boolean;
   } = $props();
 
   // A folder the user chose by hand; `null`: the picked category's.
@@ -172,13 +177,17 @@
         <label class="label" for="add-name">{locale.t("add-file-name")}</label>
         <!-- The name it is saved under: the server's, or the user's own
              (#103); never empty (an emptied box means the server's). -->
-        <input id="add-name" class="value name" dir="auto" autocomplete="off" spellcheck="false" bind:value={name} />
+        <input id="add-name" class="value name" dir="auto" autocomplete="off" spellcheck="false" bind:value={name} readonly={started} />
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
           <div class="value"><Icon name="folder" /><bdi dir="ltr" class="text">{where.shown}</bdi></div>
-          <button class="btn" onclick={() => void change()}>{locale.t("add-change")}</button>
+          <button class="btn" disabled={started} onclick={() => void change()}>{locale.t("add-change")}</button>
         </div>
+        {#if started}
+          <span></span>
+          <p class="started" role="status">{locale.t("add-started-note")}</p>
+        {/if}
 
         {#if category}
           <span></span>
@@ -347,6 +356,11 @@
   }
   .pick:focus-within {
     border-color: var(--accent);
+  }
+  .started {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
   }
   .square {
     padding-inline: 8px;

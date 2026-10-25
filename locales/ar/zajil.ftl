@@ -711,3 +711,13 @@ settings-sound-done = صوت عند اكتمال تحميل
 settings-sound-failed = صوت عند فشل تحميل
 settings-sound-queue = صوت عند انتهاء طابور
 settings-sound-try = جرّب الصوت
+
+## How a new download shows (M5.5, IDM touches)
+settings-new-download = التحميل الجديد
+settings-progress-window = نافذة التقدم حين يبدأ تحميل من «معلومات ملف التحميل»:
+settings-progress-shown = تظهر
+settings-progress-minimized = تظهر مصغّرة
+settings-progress-hidden = لا تظهر
+settings-start-while-open = ابدأ التحميل والنافذة مفتوحة
+settings-start-while-open-hint = يبدأ التحميل في الخلفية بمجرد أن يرد السيرفر، وأنت ما زلت في «معلومات ملف التحميل». و«إلغاء» يحذفه ويحذف ملفه الناقص.
+add-started-note = بدأ التحميل في الخلفية، فاسمه ومجلده لم يعودا يتغيّران. الفئة والوصف يتغيّران.
