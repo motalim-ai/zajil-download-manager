@@ -16,6 +16,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
       id: "zajil",
       getURL: (path) => `chrome-extension://zajil/${path}`,
       onInstalled: on("installed"),
+      onStartup: on("startup"),
       // The link to Zajil (M5): its port, recorded.
       connectNative: vi.fn(() => {
         const port = {
@@ -92,6 +93,48 @@ afterEach(() => {
 const forbidden = { protocol_version: 1, ok: false, error: "Zajil cannot download it: the server answered 403 Forbidden" };
 
 describe("the background", () => {
+  it("starts with the browser, and opens its link to Zajil at once (review of #80)", async () => {
+    const fake = fakeChrome({ granted: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    expect(fake.listeners.startup).toBeTypeOf("function");
+    expect(fake.done.ports).toHaveLength(1);
+    expect(fake.done.ports[0].sent[0]).toMatchObject({ type: "link", protocol_version: 1 });
+  });
+
+  it("keeps a ticket only for a download Zajil took with cookies, with its store", async () => {
+    const tickets = (fake) => Object.keys(fake.local.linkTickets ?? {});
+    // Taken with cookies, from a container: its ticket, as it was sent.
+    let fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.filename(
+      { id: 5, url: "https://example.com/a.zip", finalUrl: "https://example.com/a.zip", state: "in_progress", cookieStoreId: "firefox-container-1" },
+      () => {},
+    );
+    await flush();
+    expect(tickets(fake)).toEqual([fake.done.sent[0].ticket]);
+    const { openTicket } = await import("../src/link.js");
+    expect(await openTicket(fake.chrome, fake.done.sent[0].ticket, "https://example.com/b.zip", "firefox-container-1")).toBe(true);
+    expect(await openTicket(fake.chrome, fake.done.sent[0].ticket, "https://example.com/b.zip", undefined)).toBe(false);
+    // From the menu, in a container: the same.
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/c.zip" }, { cookieStoreId: "firefox-container-2" });
+    await flush();
+    expect(tickets(fake)).toContain(fake.done.sent[1].ticket);
+    expect(await openTicket(fake.chrome, fake.done.sent[1].ticket, "https://example.com/c.zip", "firefox-container-2")).toBe(true);
+    // Refused by Zajil, or sent without cookies: no ticket kept.
+    fake = fakeChrome({ granted: true, answer: forbidden });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" });
+    await flush();
+    expect(tickets(fake)).toEqual([]);
+    fake = fakeChrome({ granted: false, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/a.zip" });
+    await flush();
+    expect(fake.done.sent[0].ticket).toMatch(/^[0-9a-f-]{36}$/);
+    expect(tickets(fake)).toEqual([]);
+  });
+
   it("opens the welcome page once, at install", async () => {
     const fake = fakeChrome({ granted: false, answer: { ok: true } });
     await load(fake);

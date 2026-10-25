@@ -5,18 +5,24 @@
 // (`runtime.connectNative`); the host passes Zajil's questions on it, one
 // at a time, and the answers back.
 //
-// The extension answers only for a site it sent to Zajil with cookies
-// itself, in the same cookie store, in the last 30 days: anything else
-// that opened Zajil's channel cannot ask it for other sites' cookies. Of
-// those sites only a hash is kept (`storage.local`), never the cookies.
+// The extension answers only for a download it sent to Zajil with cookies
+// itself and that is still open (owner's decision on #80): each such
+// download has a random ticket, kept with a hash of its site and its cookie
+// store (`storage.local`, never the cookies). Zajil asks by ticket, and
+// tells the extension which tickets are still open (`keep`): the others,
+// done or removed, are forgotten at once. 30 days is the most a ticket of
+// a download that never ends is kept.
 
 import { HOST, PROTOCOL_VERSION, isWeb } from "./capture.js";
 import { cookieHeader } from "./cookies.js";
 
-/** How long a site stays one Zajil may ask about. */
-export const SITE_DAYS = 30;
-/** At most this many sites are kept (the oldest go first). */
-export const MAX_SITES = 500;
+/** The most days a ticket is kept, for a download that never ends. */
+export const TICKET_DAYS = 30;
+/** At most this many tickets are kept (the oldest go first). */
+export const MAX_TICKETS = 2000;
+/** A ticket this young is kept even if a `keep` does not list it: Zajil
+ * may have listed the open tickets just before this download reached it. */
+export const NEW_TICKET_MS = 60_000;
 /** The longest wait between two tries to link (Zajil's host missing, or
  * the browser closed it). */
 export const MAX_RETRY_MS = 60_000;
@@ -43,6 +49,9 @@ export function plainStore(store) {
   return typeof store === "string" && ID.test(store) && store !== "firefox-private" ? store : undefined;
 }
 
+/** A new download's random ticket. */
+export const newTicket = () => crypto.randomUUID();
+
 /** @param {string} url @param {string | undefined} store */
 async function siteKey(url, store) {
   const text = `${new URL(url).origin}|${store ?? ""}`;
@@ -50,51 +59,74 @@ async function siteKey(url, store) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** @param {Record<string, number>} sites @param {number} now */
-function fresh(sites, now) {
-  const limit = now - SITE_DAYS * 24 * 3600 * 1000;
-  const kept = Object.entries(sites).filter(([, at]) => typeof at === "number" && at >= limit);
-  kept.sort((a, b) => b[1] - a[1]);
-  return Object.fromEntries(kept.slice(0, MAX_SITES));
+/** @typedef {Record<string, { site: string, at: number }>} Tickets */
+
+/** @param {any} browserApi @returns {Promise<Tickets>} */
+async function tickets(browserApi) {
+  const { linkTickets } = await browserApi.storage.local.get("linkTickets").catch(() => ({}));
+  return linkTickets && typeof linkTickets === "object" ? linkTickets : {};
 }
 
-/** Remembers that the cookies of `url`'s site (from `store`) went to
- * Zajil, so it may ask for them again after a restart.
- * @param {any} browserApi @param {string} url @param {string | undefined} store
- * @param {number} [now] */
-export async function rememberSite(browserApi, url, store, now = Date.now()) {
-  const key = await siteKey(url, store);
-  const { linkSites } = await browserApi.storage.local.get("linkSites").catch(() => ({}));
-  const sites = fresh({ ...(linkSites ?? {}), [key]: now }, now);
-  await browserApi.storage.local.set({ linkSites: sites }).catch(() => {});
+/** @param {Tickets} all @param {number} now */
+function fresh(all, now) {
+  const limit = now - TICKET_DAYS * 24 * 3600 * 1000;
+  const kept = Object.entries(all).filter(([, t]) => typeof t?.at === "number" && t.at >= limit && typeof t.site === "string");
+  kept.sort((a, b) => b[1].at - a[1].at);
+  return Object.fromEntries(kept.slice(0, MAX_TICKETS));
 }
 
-/** @param {any} browserApi @param {string} url @param {string | undefined} store
- * @param {number} [now] */
-export async function knownSite(browserApi, url, store, now = Date.now()) {
-  const { linkSites } = await browserApi.storage.local.get("linkSites").catch(() => ({}));
-  return Object.hasOwn(fresh(linkSites ?? {}, now), await siteKey(url, store));
+/** Remembers that download `ticket` went to Zajil with the cookies of
+ * `url`'s site from `store`: Zajil may ask for them again while it is open.
+ * @param {any} browserApi @param {string} ticket @param {string} url
+ * @param {string | undefined} store @param {number} [now] */
+export async function rememberTicket(browserApi, ticket, url, store, now = Date.now()) {
+  const all = { ...(await tickets(browserApi)), [ticket]: { site: await siteKey(url, store), at: now } };
+  await browserApi.storage.local.set({ linkTickets: fresh(all, now) }).catch(() => {});
+}
+
+/** Whether `ticket` is open, for `url`'s site and `store`.
+ * @param {any} browserApi @param {string} ticket @param {string} url
+ * @param {string | undefined} store @param {number} [now] */
+export async function openTicket(browserApi, ticket, url, store, now = Date.now()) {
+  const found = fresh(await tickets(browserApi), now)[ticket];
+  return Boolean(found) && found.site === (await siteKey(url, store));
+}
+
+/** Keeps only the tickets Zajil says are open (and the newest ones).
+ * @param {any} browserApi @param {string[]} open @param {number} [now] */
+export async function keepTickets(browserApi, open, now = Date.now()) {
+  const listed = new Set(open);
+  const kept = Object.fromEntries(
+    Object.entries(fresh(await tickets(browserApi), now)).filter(([id, t]) => listed.has(id) || now - t.at < NEW_TICKET_MS),
+  );
+  await browserApi.storage.local.set({ linkTickets: kept }).catch(() => {});
 }
 
 /**
  * The answer to one of Zajil's messages on the link, or null for a message
  * that is not a question. The cookies are given only with the permission
- * (`cookieHeader`), and only for a site this extension sent to Zajil with
- * cookies; else the answer has none, and Zajil goes on without them.
+ * (`cookieHeader`), and only for an open download's ticket whose site and
+ * store are the ones asked about; else the answer has none, and Zajil goes
+ * on without them. A `keep` is applied, and answered without cookies.
  *
  * @param {any} browserApi
  * @param {any} message
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function answer(browserApi, message) {
-  if (message?.type !== "cookies_wanted" || !Number.isSafeInteger(message.ask) || message.ask < 0) return null;
+  if (!Number.isSafeInteger(message?.ask) || message.ask < 0) return null;
+  const reply = (/** @type {string | null} */ cookies) => ({ type: "cookies", protocol_version: PROTOCOL_VERSION, ask: message.ask, cookies });
+  if (message.type === "keep") {
+    if (!Array.isArray(message.tickets) || !message.tickets.every((/** @type {unknown} */ t) => typeof t === "string")) return reply(null);
+    await keepTickets(browserApi, message.tickets);
+    return reply(null);
+  }
+  if (message.type !== "cookies_wanted") return null;
   const store = plainStore(message.store);
   const wrongStore = message.store !== undefined && message.store !== null && store === undefined;
-  let cookies = null;
-  if (isWeb(message.url) && !wrongStore && (await knownSite(browserApi, message.url, store))) {
-    cookies = await cookieHeader(browserApi, message.url, store);
-  }
-  return { type: "cookies", protocol_version: PROTOCOL_VERSION, ask: message.ask, cookies };
+  if (!isWeb(message.url) || wrongStore || typeof message.ticket !== "string" || !ID.test(message.ticket)) return reply(null);
+  if (!(await openTicket(browserApi, message.ticket, message.url, store))) return reply(null);
+  return reply(await cookieHeader(browserApi, message.url, store));
 }
 
 /**

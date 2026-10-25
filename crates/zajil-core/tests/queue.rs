@@ -706,6 +706,7 @@ fn from_browser(cookies: bool, referrer: Option<&str>) -> zajil_core::queue::Bro
         store: Some("firefox-container-1".into()),
         cookies,
         referrer: referrer.map(str::to_owned),
+        ticket: Some("ticket-1".into()),
     }
 }
 
@@ -819,4 +820,16 @@ async fn a_download_from_the_browser_without_cookies_goes_with_its_page() {
             (None, Some(page.as_str()))
         );
     }
+}
+
+/// The page a download came from is never printed (owner's decision on
+/// #80), not even in a debug message.
+#[test]
+fn the_browser_s_page_is_never_printed() {
+    let source = from_browser(true, Some("https://example.com/secret-page?token=T"));
+    let shown = format!("{source:?}");
+    assert!(
+        !shown.contains("secret-page") && !shown.contains("token"),
+        "{shown}"
+    );
 }

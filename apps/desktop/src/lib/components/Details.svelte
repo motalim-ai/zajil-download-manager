@@ -6,13 +6,15 @@
   import { left, num, percent, size, speed } from "../format";
   import type { DetailsView } from "../bindings/DetailsView";
 
-  let { details, onback, onpause, onresume, onrefresh }: {
+  let { details, onback, onpause, onresume, onrefresh, onwithoutcookies }: {
     details: DetailsView;
     onback: () => void;
     onpause: () => void;
     onresume: () => void;
     /** "Refresh the download link" (M5), for a paused or failed download. */
     onrefresh: () => void;
+    /** A download that waits for its browser goes on without its cookies. */
+    onwithoutcookies: () => void;
   } = $props();
 
   const d = $derived(details.download);
@@ -41,7 +43,11 @@
         {locale.t("details-from-to", { site: d.host ?? "", folder: d.folder })}
       </p>
       {#if d.waits_for_browser}
-        <p class="browser" role="status"><Icon name="link" /><span>{locale.t("details-open-browser")}</span></p>
+        <div class="browser" role="status">
+          <Icon name="link" />
+          <span>{locale.t("details-open-browser")}</span>
+          <button class="btn quiet" onclick={onwithoutcookies}>{locale.t("details-without-cookies")}</button>
+        </div>
       {/if}
       {#if d.status === "failed" && d.error}
         <p class="failed" role="status"><Icon name="alert" /><span>{locale.t("details-failed", { error: d.error })}</span></p>
@@ -131,8 +137,9 @@
   }
   .browser {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    align-items: flex-start;
+    align-items: center;
     margin: 12px 0 0;
     padding: 8px 12px;
     border-radius: 9px;

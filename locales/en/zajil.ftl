@@ -171,7 +171,8 @@ details-speed-chart = Speed over the last minute
 details-chart-then = A minute ago
 details-chart-now = Now
 details-failed = The download stopped: { $error }
-details-open-browser = This download came from the browser with its cookies, and Zajil does not keep cookies. Open the browser it came from: Zajil takes them from it and goes on by itself.
+details-open-browser = This download came from the browser with its cookies, and Zajil does not keep cookies. Open the browser (and the same profile) it came from: Zajil takes them from it and goes on by itself. If that browser is gone, go on without the cookies.
+details-without-cookies = Go on without cookies
 
 ## Refresh the download link
 

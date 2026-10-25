@@ -102,7 +102,7 @@ export function shouldCapture(item, settings, ownId) {
  * so Zajil can ask it for the cookies again after a restart (M5).
  *
  * @param {string} url
- * @param {{ referrer?: string, filename?: string, cookies?: string | null, instance?: string, store?: string }} [extra]
+ * @param {{ referrer?: string, filename?: string, cookies?: string | null, instance?: string, store?: string, ticket?: string }} [extra]
  */
 export function downloadMessage(url, extra = {}) {
   /** @type {Record<string, unknown>} */
@@ -116,6 +116,7 @@ export function downloadMessage(url, extra = {}) {
   const id = /^[A-Za-z0-9_-]{1,64}$/;
   if (extra.instance && id.test(extra.instance)) message.instance = extra.instance;
   if (extra.store && id.test(extra.store) && extra.store !== "firefox-private") message.store = extra.store;
+  if (extra.ticket && id.test(extra.ticket)) message.ticket = extra.ticket;
   return message;
 }
 
@@ -125,7 +126,7 @@ export function downloadMessage(url, extra = {}) {
  *
  * @param {{ linkUrl?: string, pageUrl?: string }} info
  * @param {string | null} [cookies] the link's `Cookie` header, if allowed
- * @param {{ instance?: string, store?: string }} [from] where it comes from
+ * @param {{ instance?: string, store?: string, ticket?: string }} [from] where it comes from
  */
 export function menuMessage(info, cookies = null, from = {}) {
   return isWeb(info.linkUrl)
@@ -183,7 +184,7 @@ export async function send(browserApi, message) {
  *
  * @param {any} browserApi
  * @param {any} item
- * @param {{ pause: boolean, cookies?: string | null, instance?: string }} how
+ * @param {{ pause: boolean, cookies?: string | null, instance?: string, ticket?: string }} how
  *   `pause`: the browser keeps a paused download's data
  *   (`compat.pausesSafely`); `cookies`: the link's `Cookie` header, if the
  *   user allowed it; `instance`: this extension's id (`link.instanceId`)
@@ -206,6 +207,7 @@ export async function takeOver(browserApi, item, how) {
       cookies: how.cookies,
       instance: how.instance,
       store: item.cookieStoreId,
+      ticket: how.ticket,
     }),
   );
   if (result.outcome === "taken") {

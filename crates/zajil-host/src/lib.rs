@@ -53,6 +53,8 @@ pub const MAX_NAME: usize = 255;
 pub const MAX_COOKIES: usize = 16 * 1024;
 /// The longest extension instance id and cookie store id, in bytes.
 pub const MAX_ID: usize = 64;
+/// The most tickets a `keep` message lists.
+pub const MAX_TICKETS: usize = 10_000;
 /// How long the host waits for the extension to answer a question from
 /// the app on the link; it always answers the app within it.
 pub const LINK_ANSWER: Duration = Duration::from_secs(10);
@@ -84,6 +86,11 @@ pub enum Request {
         /// The cookie store the cookies came from (a Firefox container).
         #[serde(default)]
         store: Option<String>,
+        /// This download's random ticket: the extension gives its cookies
+        /// again only for an open download's ticket (owner's decision on
+        /// #80).
+        #[serde(default)]
+        ticket: Option<String>,
     },
     /// Keep this connection open (`runtime.connectNative`): the link on
     /// which Zajil asks this browser for cookies again (M5). Only the
@@ -92,8 +99,10 @@ pub enum Request {
         protocol_version: u32,
         instance: String,
     },
-    /// The extension's answer on the link to [`ToExtension::CookiesWanted`]:
-    /// the `Cookie` header, or `null` (no permission, or none).
+    /// The extension's answer on the link to a [`ToExtension`] question:
+    /// for [`ToExtension::CookiesWanted`], the `Cookie` header, or `null`
+    /// (no permission, no open download with that ticket, or none); for
+    /// [`ToExtension::Keep`], always `null`.
     Cookies {
         protocol_version: u32,
         ask: u64,
@@ -114,6 +123,15 @@ pub enum ToExtension {
         url: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         store: Option<String>,
+        /// The download's ticket, as the extension gave it.
+        ticket: String,
+    },
+    /// Only these downloads' tickets are still open (not done, not
+    /// removed): the extension forgets every other one at once.
+    Keep {
+        protocol_version: u32,
+        ask: u64,
+        tickets: Vec<String>,
     },
 }
 
@@ -139,18 +157,43 @@ impl ToExtension {
     pub fn parse(message: &[u8]) -> Result<Self, String> {
         let question: ToExtension =
             serde_json::from_slice(message).map_err(|e| format!("not a Zajil question: {e}"))?;
-        let ToExtension::CookiesWanted {
-            protocol_version,
-            url,
-            store,
-            ..
-        } = &question;
-        check_version(*protocol_version)?;
-        check_url(url, "URL")?;
-        if let Some(store) = store {
-            check_id(store, "cookie store")?;
+        match &question {
+            ToExtension::CookiesWanted {
+                protocol_version,
+                url,
+                store,
+                ticket,
+                ..
+            } => {
+                check_version(*protocol_version)?;
+                check_url(url, "URL")?;
+                if let Some(store) = store {
+                    check_id(store, "cookie store")?;
+                }
+                check_id(ticket, "ticket")?;
+            }
+            ToExtension::Keep {
+                protocol_version,
+                tickets,
+                ..
+            } => {
+                check_version(*protocol_version)?;
+                if tickets.len() > MAX_TICKETS {
+                    return Err(format!("more than {MAX_TICKETS} tickets"));
+                }
+                for ticket in tickets {
+                    check_id(ticket, "ticket")?;
+                }
+            }
         }
         Ok(question)
+    }
+
+    /// The question's number, which its answer carries.
+    pub fn ask(&self) -> u64 {
+        match self {
+            ToExtension::CookiesWanted { ask, .. } | ToExtension::Keep { ask, .. } => *ask,
+        }
     }
 }
 
@@ -331,11 +374,15 @@ fn check(request: &Request) -> Result<(), String> {
         cookies,
         instance,
         store,
+        ticket,
         ..
     } = request
     {
         if let Some(instance) = instance {
             check_id(instance, "instance")?;
+        }
+        if let Some(ticket) = ticket {
+            check_id(ticket, "ticket")?;
         }
         if let Some(store) = store {
             check_id(store, "cookie store")?;
@@ -423,9 +470,17 @@ pub fn serve(
 
 /// A question for one extension, and where its answer goes.
 struct Question {
-    url: String,
-    store: Option<String>,
+    asked: Asked,
     reply: mpsc::Sender<Option<Option<String>>>,
+}
+
+enum Asked {
+    Cookies {
+        url: String,
+        store: Option<String>,
+        ticket: String,
+    },
+    Keep(Vec<String>),
 }
 
 type Registry = HashMap<String, (u64, mpsc::Sender<Question>)>;
@@ -476,11 +531,19 @@ impl Links {
         // Ends when this link is replaced (its sender dropped).
         while let Ok(question) = questions.recv() {
             let ask = self.next.fetch_add(1, Ordering::SeqCst);
-            let wanted = ToExtension::CookiesWanted {
-                protocol_version: PROTOCOL_VERSION,
-                ask,
-                url: question.url,
-                store: question.store,
+            let wanted = match question.asked {
+                Asked::Cookies { url, store, ticket } => ToExtension::CookiesWanted {
+                    protocol_version: PROTOCOL_VERSION,
+                    ask,
+                    url,
+                    store,
+                    ticket,
+                },
+                Asked::Keep(tickets) => ToExtension::Keep {
+                    protocol_version: PROTOCOL_VERSION,
+                    ask,
+                    tickets,
+                },
             };
             let answer = write_json(&mut stream, &wanted)
                 .ok()
@@ -504,17 +567,44 @@ impl Links {
         }
     }
 
-    /// Asks extension `instance` for the cookies of `url` (from `store`):
-    /// `Some(cookies)` when it answered (`None` cookies: it has no
-    /// permission, or none for that site), `None` when it is not linked,
-    /// went away, or did not answer within `patience`. Blocking.
+    /// Asks extension `instance` for the cookies of `url` (from `store`)
+    /// for the download with `ticket`: `Some(cookies)` when it answered
+    /// (`None` cookies: no permission, no open download with that ticket,
+    /// or none for that site), `None` when it is not linked, went away, or
+    /// did not answer within `patience`. Blocking.
     pub fn ask(
         &self,
         instance: &str,
         url: &str,
         store: Option<&str>,
+        ticket: &str,
         patience: Duration,
     ) -> Option<Option<String>> {
+        let asked = Asked::Cookies {
+            url: url.to_owned(),
+            store: store.map(str::to_owned),
+            ticket: ticket.to_owned(),
+        };
+        self.put(instance, asked, patience)
+    }
+
+    /// Tells extension `instance` which of its downloads' tickets are still
+    /// open: it forgets the others. Whether it answered. Blocking.
+    pub fn keep(&self, instance: &str, tickets: Vec<String>, patience: Duration) -> bool {
+        self.put(instance, Asked::Keep(tickets), patience).is_some()
+    }
+
+    /// The instances linked now.
+    pub fn instances(&self) -> Vec<String> {
+        self.links
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn put(&self, instance: &str, asked: Asked, patience: Duration) -> Option<Option<String>> {
         let link = self
             .links
             .lock()
@@ -522,12 +612,7 @@ impl Links {
             .get(instance)
             .map(|(_, send)| send.clone())?;
         let (reply, answer) = mpsc::channel();
-        link.send(Question {
-            url: url.to_owned(),
-            store: store.map(str::to_owned),
-            reply,
-        })
-        .ok()?;
+        link.send(Question { asked, reply }).ok()?;
         answer.recv_timeout(patience).ok().flatten()
     }
 }
@@ -598,6 +683,7 @@ mod tests {
                 cookies: Some("sid=1; theme=dark".into()),
                 instance: None,
                 store: None,
+                ticket: None,
             }
         );
     }

@@ -40,6 +40,8 @@ export const api = {
   refreshLink: (id: number, url: string) => invoke<void>("refresh_link", { id, url }),
   /** Gives up that refresh (its dialog was closed). */
   cancelRefresh: (id: number) => invoke<void>("cancel_refresh", { id }),
+  /** A download that waits for its browser goes on without its cookies. */
+  goWithoutCookies: (id: number) => invoke<void>("go_without_cookies", { id }),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),

@@ -246,6 +246,17 @@
     }
   }
 
+  async function withoutCookies(id: number | null) {
+    if (id === null) return;
+    failed = null;
+    try {
+      await api.goWithoutCookies(id);
+    } catch (e) {
+      failed = String(e);
+    }
+    await refresh();
+  }
+
   function startRefreshing() {
     const d = details?.download;
     if (d && !refreshing) refreshing = { id: d.id, name: d.name, problem: null, detail: null, busy: false };
@@ -445,6 +456,7 @@
           onpause={() => void act("pause", details?.download.id ?? null)}
           onresume={() => void act("resume", details?.download.id ?? null)}
           onrefresh={startRefreshing}
+          onwithoutcookies={() => void withoutCookies(details?.download.id ?? null)}
         />
       {:else}
         <PasteBar bind:value={pasted} onsubmit={(url) => void startAdding(url)} />

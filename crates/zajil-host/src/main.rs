@@ -118,8 +118,8 @@ fn link(data_dir: &Path, hello: &[u8], mut output: io::StdoutLock<'static>) -> E
             continue;
         }
         while let Ok(Some(question)) = read_frame(&mut app, MAX_REQUEST) {
-            let ToExtension::CookiesWanted { ask, .. } = match ToExtension::parse(&question) {
-                Ok(question) => question,
+            let ask = match ToExtension::parse(&question) {
+                Ok(question) => question.ask(),
                 Err(why) => {
                     eprintln!("zajil-host: {why}");
                     break;

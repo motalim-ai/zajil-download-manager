@@ -122,7 +122,7 @@ pub struct Item {
 }
 
 /// Where a download from the browser extension came from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BrowserSource {
     /// The extension's own random id: one per browser profile, so the
@@ -134,9 +134,28 @@ pub struct BrowserSource {
     /// Cookies went with it: after a restart it waits for that browser
     /// («افتح المتصفح ليكمل») instead of going without them.
     pub cookies: bool,
-    /// The page it came from, sent as the browser would (`FromBrowser`).
+    /// The page it came from, sent as the browser would (`FromBrowser`),
+    /// without its `#` part (owner's decision on #80); never printed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
+    /// The download's random ticket from the extension: it gives the
+    /// cookies again only for an open download's ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket: Option<String>,
+}
+
+/// Never the page itself (owner's decision on #80: it is not printed in
+/// any log or message); only whether there is one.
+impl std::fmt::Debug for BrowserSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserSource")
+            .field("instance", &self.instance)
+            .field("store", &self.store)
+            .field("cookies", &self.cookies)
+            .field("referrer", &self.referrer.as_ref().map(|_| "…"))
+            .field("ticket", &self.ticket)
+            .finish()
+    }
 }
 
 /// Where an item stands.
