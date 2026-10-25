@@ -1,25 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
-import { COOKIE_PERMISSIONS, askForCookies, cookieHeader, cookiesAllowed, dropCookies } from "../src/cookies.js";
+import { COOKIE_PERMISSIONS, SITE_PERMISSIONS, VIDEO_PERMISSIONS, askForSites, cookieHeader, cookiesAllowed, dropSites, permissionView, sitesAllowed, videoAllowed } from "../src/cookies.js";
 import { downloadMessage, menuMessage, needsSignIn, takeOver } from "../src/capture.js";
 
-/** A fake browser with the cookie permission `granted` or not, and these
- * cookies for every URL. */
+/** A fake browser with the cookie permission `granted` or not (as given
+ * before the video features came: the cookies alone), and these cookies
+ * for every URL. */
 function browserWith({ granted, cookies = [], getAllThrows = false }) {
   const asked = [];
+  const have = new Set(granted ? ["cookies"] : []);
   return {
     asked,
+    have,
     permissions: {
       contains: vi.fn(async (p) => {
-        expect(p).toEqual(COOKIE_PERMISSIONS);
-        return granted;
+        expect(p.origins).toEqual(["<all_urls>"]);
+        return p.permissions.every((/** @type {string} */ x) => have.has(x));
       }),
       request: vi.fn(async (p) => {
         asked.push(p);
-        granted = true;
+        for (const x of p.permissions) have.add(x);
         return true;
       }),
-      remove: vi.fn(async () => {
-        granted = false;
+      remove: vi.fn(async (p) => {
+        for (const x of p.permissions) have.delete(x);
         return true;
       }),
     },
@@ -38,14 +41,33 @@ describe("the cookie permission", () => {
     expect(COOKIE_PERMISSIONS).toEqual({ permissions: ["cookies"], origins: ["<all_urls>"] });
   });
 
-  it("can be asked for, then taken back", async () => {
+  it("the video permissions watch requests and add a script, nothing else (no blocking, no tabs, no history)", () => {
+    expect(VIDEO_PERMISSIONS).toEqual({ permissions: ["scripting", "webRequest"], origins: ["<all_urls>"] });
+    expect(SITE_PERMISSIONS).toEqual({ permissions: ["cookies", "scripting", "webRequest"], origins: ["<all_urls>"] });
+  });
+
+  it("'Allow Zajil on sites' asks for both at once, and takes both back", async () => {
     const api = browserWith({ granted: false });
-    expect(await cookiesAllowed(api)).toBe(false);
-    expect(await askForCookies(api)).toBe(true);
-    expect(api.asked).toEqual([COOKIE_PERMISSIONS]);
+    expect(await sitesAllowed(api)).toBe(false);
+    expect(await askForSites(api)).toBe(true);
+    expect(api.asked).toEqual([SITE_PERMISSIONS]);
     expect(await cookiesAllowed(api)).toBe(true);
-    await dropCookies(api);
+    expect(await videoAllowed(api)).toBe(true);
+    await dropSites(api);
     expect(await cookiesAllowed(api)).toBe(false);
+    expect(await videoAllowed(api)).toBe(false);
+  });
+
+  it("cookies given before the video features still go, and the pages say so, with both buttons (review)", async () => {
+    const api = browserWith({ granted: true });
+    expect(await cookiesAllowed(api)).toBe(true);
+    expect(await videoAllowed(api)).toBe(false);
+    expect(await sitesAllowed(api)).toBe(false);
+    expect(await permissionView(api)).toEqual({ text: "sitesPartly", allow: true, drop: true });
+    await dropSites(api);
+    expect(await permissionView(api)).toEqual({ text: "cookiesNotAllowed", allow: true, drop: false });
+    await askForSites(api);
+    expect(await permissionView(api)).toEqual({ text: "cookiesAllowed", allow: false, drop: true });
   });
 });
 

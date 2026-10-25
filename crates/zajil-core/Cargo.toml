@@ -36,6 +36,13 @@ required-features = ["test-support"]
 test = false
 doctest = false
 
+[[bin]]
+name = "fake-js-runtime"
+path = "tests/support/fake_js_runtime.rs"
+required-features = ["test-support"]
+test = false
+doctest = false
+
 [dev-dependencies]
 zajil-core = { path = ".", features = ["test-support"] }
 zajil-testserver.workspace = true

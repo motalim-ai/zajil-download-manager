@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "addons-linter": "10.14.0",
+    "playwright-core": "1.63.0",
     "typescript": "6.0.3",
     "vitest": "5.0.5"
   }
