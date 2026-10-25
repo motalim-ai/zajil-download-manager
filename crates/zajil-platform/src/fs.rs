@@ -164,6 +164,15 @@ pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {
     imp::only_owner_can_access(path)
 }
 
+/// Whether no other user can change `path` (a program a browser will be
+/// told to start, or its folder): on macOS and Linux it is owned by the
+/// current user or root, and not writable by its group or others. Read
+/// without following a link at `path`. On Windows not checked yet: `true`
+/// (an install folder is the system's, a per-user one the user's).
+pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
+    imp::only_user_or_root_can_change(path)
+}
+
 /// Creates a symbolic link `link` pointing to the file `target`. Used by
 /// tests that check symbolic links are refused. On Windows this needs
 /// Developer Mode or administrator rights.
@@ -332,6 +341,14 @@ mod imp {
             return Err(err);
         }
         Ok(file)
+    }
+
+    #[allow(unsafe_code)]
+    pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
+        let meta = std::fs::symlink_metadata(path)?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let me = unsafe { libc::geteuid() };
+        Ok((meta.uid() == me || meta.uid() == 0) && meta.mode() & 0o022 == 0)
     }
 
     pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {
@@ -765,6 +782,10 @@ mod imp {
         // SAFETY: `handle` is a valid file handle that nothing else owns;
         // the `File` closes it.
         Ok(unsafe { File::from_raw_handle(handle as RawHandle) })
+    }
+
+    pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
+        std::fs::symlink_metadata(path).map(|_| true)
     }
 
     pub fn only_owner_can_access(path: &Path) -> io::Result<bool> {

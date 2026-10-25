@@ -341,6 +341,19 @@ impl NativeHostRegistrar for SystemRegistrar {
                 Made::add(&mut made.keys, &level);
             }
         }
+        let path = self.manifest_path(browser);
+        let manifest = manifest_json(browser, host, allowed);
+        // Registered already, exactly so: nothing is written (the app
+        // registers at each start).
+        let same_file = path.symlink_metadata().is_ok_and(|m| m.is_file())
+            && std::fs::read(&path).is_ok_and(|bytes| bytes == manifest.as_bytes());
+        #[cfg(windows)]
+        let same_file = same_file
+            && imp::get_default(&self.registry_key(browser).expect("Windows"))?.as_deref()
+                == path.to_str();
+        if missing.is_empty() && same_file {
+            return Ok(());
+        }
         std::fs::create_dir_all(&self.manifests)?;
         if !made.folders.is_empty() || !made.keys.is_empty() {
             made.write(&self.record_path(browser))?;
@@ -348,8 +361,7 @@ impl NativeHostRegistrar for SystemRegistrar {
         for level in missing {
             make_private_dir(&at(&base, level))?;
         }
-        let path = self.manifest_path(browser);
-        write_new_then_replace(&path, manifest_json(browser, host, allowed).as_bytes())?;
+        write_new_then_replace(&path, manifest.as_bytes())?;
         #[cfg(windows)]
         imp::set_default(
             &self.registry_key(browser).expect("Windows"),
@@ -364,7 +376,8 @@ impl NativeHostRegistrar for SystemRegistrar {
         let path = self.manifest_path(browser);
         remove_if_there(&path)?;
         // Left by a registration that stopped before its rename.
-        remove_if_there(&tmp_path(&path))?;
+        remove_leftovers(&path)?;
+        remove_leftovers(&record)?;
         #[cfg(windows)]
         {
             imp::delete_key(&self.registry_key(browser).expect("Windows"))?;
@@ -423,10 +436,42 @@ fn at(base: &Path, level: &str) -> PathBuf {
 }
 
 /// `<name>.tmp` next to `path` (`chrome.json.tmp`, `chrome.made.tmp`).
+/// `<name>.<process>-<n>.tmp` next to `path`: its own for each write, so
+/// two registrations at once (two Zajil windows, or the start and the
+/// settings button) never take each other's temporary file.
 fn tmp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let mut name = path.file_name().expect("a file").to_os_string();
-    name.push(".tmp");
+    name.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     path.with_file_name(name)
+}
+
+/// Removes the temporary files of `path` that writes cut short left
+/// (`<name>.*.tmp`), links included and never followed.
+fn remove_leftovers(path: &Path) -> io::Result<()> {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
+        return Ok(());
+    };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    let prefix = format!("{name}.");
+    for entry in entries {
+        let entry = entry?;
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        if file.starts_with(&prefix) && file.ends_with(".tmp") {
+            remove_if_there(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 /// Writes `bytes` to a new private temporary file next to `path` (a link
@@ -975,14 +1020,78 @@ mod tests {
     fn a_leftover_temporary_file_is_removed() {
         let world = World::new();
         let r = &world.registrar;
-        let tmp = tmp_path(&r.manifest_path(Browser::Edge));
         r.register(Browser::Edge, &host(), &[CHROME_ID]).unwrap();
+        let tmp = leftover(&r.manifest_path(Browser::Edge));
+        let record_tmp = leftover(&r.record_path(Browser::Edge));
         std::fs::write(&tmp, "half").unwrap();
+        std::fs::write(&record_tmp, "half").unwrap();
+        // Another Zajil may be writing it: registering leaves it.
         r.register(Browser::Edge, &host(), &[CHROME_ID]).unwrap();
-        assert!(!tmp.exists());
-        std::fs::write(&tmp, "half").unwrap();
+        assert!(tmp.exists());
         r.unregister(Browser::Edge).unwrap();
         assert_eq!(world.added(), Vec::<PathBuf>::new(), "left behind");
+    }
+
+    /// A temporary file another registration (or one cut short) left.
+    fn leftover(path: &Path) -> PathBuf {
+        let mut name = path.file_name().unwrap().to_os_string();
+        name.push(".999999-0.tmp");
+        path.with_file_name(name)
+    }
+
+    /// Four registrations at once (two Zajil windows, the start and the
+    /// settings button) all succeed, and leave one valid manifest.
+    #[test]
+    fn registrations_at_once_do_not_take_each_other_s_files() {
+        let world = World::new();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for round in 0..50 {
+                        // A different host each round, so each one writes.
+                        let host = host().with_file_name(format!("zajil-host-{round}"));
+                        world
+                            .registrar
+                            .register(Browser::Chrome, &host, &[CHROME_ID])
+                            .unwrap();
+                    }
+                });
+            }
+        });
+        let manifest =
+            std::fs::read_to_string(world.registrar.manifest_path(Browser::Chrome)).unwrap();
+        assert!(manifest.contains("zajil-host-49"), "{manifest}");
+        for browser in Browser::ALL {
+            world.registrar.unregister(browser).unwrap();
+        }
+        assert_eq!(world.added(), Vec::<PathBuf>::new(), "left behind");
+    }
+
+    /// Registering again, unchanged, writes nothing; a change is written.
+    #[test]
+    fn an_unchanged_registration_is_not_written_again() {
+        let world = World::new();
+        let r = &world.registrar;
+        let manifest = r.manifest_path(Browser::Firefox);
+        r.register(Browser::Firefox, &host(), &[FIREFOX_ID])
+            .unwrap();
+        let before = std::fs::symlink_metadata(&manifest).unwrap();
+        r.register(Browser::Firefox, &host(), &[FIREFOX_ID])
+            .unwrap();
+        let after = std::fs::symlink_metadata(&manifest).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(before.ino(), after.ino(), "replaced");
+        }
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap());
+        let other = host().with_file_name("other-host");
+        r.register(Browser::Firefox, &other, &[FIREFOX_ID]).unwrap();
+        assert!(
+            std::fs::read_to_string(&manifest)
+                .unwrap()
+                .contains("other-host")
+        );
     }
 
     /// A symbolic or hard link in place of the manifest or its temporary
@@ -1006,7 +1115,7 @@ mod tests {
             }
         };
         for hard in [false, true] {
-            for at in [manifest.clone(), tmp_path(&manifest)] {
+            for at in [manifest.clone(), leftover(&manifest)] {
                 link(&at, hard);
                 r.register(Browser::Chrome, &host(), &[CHROME_ID]).unwrap();
                 assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep", "{at:?}");

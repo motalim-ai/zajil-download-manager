@@ -63,14 +63,22 @@
     else input.value = String(settings.connections);
   }
 
-  // Launching at login is the system's own setting (a login item, a
-  // registry value or an autostart file), read from it and changed in it.
-  // The browser integration: what the last "fix" said (M5).
+  // The browser integration (M5): how the last registration went, the one
+  // at the start until the button is pressed. The button stays focusable
+  // while it works (aria-disabled), and one live region says the result.
   const BROWSERS: Record<string, string> = { chrome: "Chrome", chromium: "Chromium", edge: "Microsoft Edge", firefox: "Firefox" };
+  const HOST_PROBLEMS = { missing: "settings-browser-missing", temporary: "settings-browser-temporary", unsafe: "settings-browser-unsafe" } as const;
   let integration = $state<IntegrationView | null>(null);
   let integrationProblem = $state<string | null>(null);
   let fixing = $state(false);
+  onMount(() => {
+    api.browserIntegration().then(
+      (last) => (integration ??= last),
+      () => {},
+    );
+  });
   async function fixIntegration() {
+    if (fixing) return;
     fixing = true;
     try {
       integration = await api.fixBrowserIntegration();
@@ -82,6 +90,8 @@
     }
   }
 
+  // Launching at login is the system's own setting (a login item, a
+  // registry value or an autostart file), read from it and changed in it.
   let autostart = $state<boolean | null>(null);
   let autostartProblem = $state<string | null>(null);
   onMount(() => {
@@ -229,23 +239,27 @@
     <legend>{locale.t("settings-browser")}</legend>
     <p class="hint">{locale.t("settings-browser-hint")}</p>
     <div class="row">
-      <button class="btn" disabled={fixing} onclick={() => void fixIntegration()}>{locale.t("settings-browser-fix")}</button>
+      <button class="btn" aria-disabled={fixing} onclick={() => void fixIntegration()}>{locale.t("settings-browser-fix")}</button>
     </div>
-    {#if integrationProblem}
-      <p class="problem" role="alert">{integrationProblem}</p>
-    {:else if integration?.host_missing}
-      <p class="problem" role="alert">{locale.t("settings-browser-missing")}</p>
-    {:else if integration}
-      <ul class="browsers" role="status">
-        {#each integration.browsers as b (b.browser)}
-          <li class={b.error ? "problem" : "done"}>
-            {b.error
-              ? locale.t("settings-browser-failed", { browser: BROWSERS[b.browser] ?? b.browser, error: b.error })
-              : locale.t("settings-browser-ok", { browser: BROWSERS[b.browser] ?? b.browser })}
-          </li>
-        {/each}
-      </ul>
-    {/if}
+    <div role="status" aria-live="polite" aria-busy={fixing}>
+      {#if fixing}
+        <p class="hint">{locale.t("settings-browser-working")}</p>
+      {:else if integrationProblem}
+        <p class="problem">{integrationProblem}</p>
+      {:else if integration?.host_problem}
+        <p class="problem">{locale.t(HOST_PROBLEMS[integration.host_problem])}</p>
+      {:else if integration}
+        <ul class="browsers">
+          {#each integration.browsers as b (b.browser)}
+            <li class={b.error ? "problem" : "done"}>
+              {b.error
+                ? locale.t("settings-browser-failed", { browser: BROWSERS[b.browser] ?? b.browser, error: b.error })
+                : locale.t("settings-browser-ok", { browser: BROWSERS[b.browser] ?? b.browser })}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
   </fieldset>
 
   <fieldset>

@@ -845,8 +845,8 @@ const WHOLE_TEXTS: &[Whole] = &[
     },
     Whole {
         key: "settings-browser-ok",
-        ar: (&[("browser", "Chrome")], "Chrome: جاهز"),
-        en: (&[("browser", "Chrome")], "Chrome: ready"),
+        ar: (&[("browser", "Chrome")], "Chrome: مسجَّل"),
+        en: (&[("browser", "Chrome")], "Chrome: registered"),
     },
     Whole {
         key: "queue-window",

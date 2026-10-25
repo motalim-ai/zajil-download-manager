@@ -35,6 +35,7 @@ export const api = {
   onChange: (handler: () => void): Promise<UnlistenFn> => listen("downloads-changed", handler),
   showWindow: () => invoke<void>("show_window"),
   fixBrowserIntegration: () => invoke<IntegrationView>("fix_browser_integration"),
+  browserIntegration: () => invoke<IntegrationView | null>("browser_integration"),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),
