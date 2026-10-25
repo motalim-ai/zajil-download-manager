@@ -46,10 +46,12 @@ src="$work/ffmpeg-$FFMPEG_VERSION"
 # The options, one per line, comments and blank lines left out.
 opts=()
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   case "$line" in ''|'#'*) continue ;; esac
   opts+=("$line")
 done < "$here/configure-$variant.txt"
 while IFS= read -r line; do
+  line="${line%$'\r'}"
   [ -n "$line" ] && opts+=("$line")
 done <<< "${ZAJIL_FFMPEG_EXTRA:-}"
 
@@ -61,7 +63,8 @@ for opt in "${opts[@]}"; do
   esac
 done
 
-(cd "$src" && ./configure "${opts[@]}" > "$work/configure.log") || {
+(cd "$src" && ./configure "${opts[@]}" > "$work/configure.log" 2>&1) || {
+  cat "$work/configure.log" >&2
   tail -n 40 "$src/ffbuild/config.log" >&2 || true
   exit 1
 }
