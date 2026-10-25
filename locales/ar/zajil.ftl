@@ -514,14 +514,15 @@ schedule-move = انقل إلى طابور…
 schedule-empty = لا تحميلات في هذا الطابور.
 schedule-start-now = ابدأ الآن
 schedule-started = بدأ الطابور.
-schedule-closed-now = الطابور خارج موعده الآن: تنتظر تحميلاته موعده التالي.
 schedule-save = حفظ
 schedule-saved = حُفظ.
 schedule-close = إغلاق
 schedule-tries = المحاولات لكل ملف
 schedule-after-open = وافتح بعده ملفًا أو برنامجًا:
 schedule-after-open-pick = اختر ملفًا…
-schedule-soon = قريبًا
+schedule-after-open-clear = إزالة
+schedule-after-open-confirm = سيفتح زاجِل هذا الملف أو البرنامج كلما انتهت كل تحميلات هذا الطابور. احفظه فقط إن كنت تثق به.
+schedule-after-open-ok = احفظه
 
 ## الاكتمال
 
@@ -610,3 +611,10 @@ tb-earlier = قدّم «{ $name }»
 tb-later = أخّر «{ $name }»
 tb-reset = كما كان
 tb-done = تم
+
+## The drop box (M5.5, an IDM touch)
+drop-box = سلة الإسقاط
+drop-hint = اسحب رابطًا هنا لتحميله. كليك يمين يخفيها.
+tray-drop-box = إظهار سلة الإسقاط
+settings-drop-box-label = إظهار سلة الإسقاط فوق كل النوافذ
+settings-drop-box-hint = مربع صغير بشعار زاجِل، تسحب عليه رابطًا من المتصفح فيفتح «معلومات ملف التحميل». تحرّكه بسحبه، وكليك يمين عليه يخفيه.

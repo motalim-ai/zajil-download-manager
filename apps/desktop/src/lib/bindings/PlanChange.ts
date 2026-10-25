@@ -3,4 +3,8 @@
 /**
  * What the window saves for a queue.
  */
-export type PlanChange = { max_active: number, start: string | null, stop: string | null, days: Array<string>, };
+export type PlanChange = { max_active: number, start: string | null, stop: string | null, days: Array<string>, 
+/**
+ * Tries for each download, 1 to `MAX_TRIES` (#142).
+ */
+max_tries: number, };

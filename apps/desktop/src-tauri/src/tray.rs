@@ -14,21 +14,29 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const ID: &str = "zajil";
 
-fn menu<R: Runtime, M: Manager<R>>(app: &M, show: &str, quit: &str) -> tauri::Result<Menu<R>> {
+fn menu<R: Runtime, M: Manager<R>>(
+    app: &M,
+    show: &str,
+    drop_box: &str,
+    quit: &str,
+) -> tauri::Result<Menu<R>> {
     let show = MenuItem::with_id(app, "show", show, true, None::<&str>)?;
+    // Shows or hides the drop box (`dropbox.rs`).
+    let drop_box = MenuItem::with_id(app, "drop", drop_box, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", quit, true, None::<&str>)?;
-    Menu::with_items(app, &[&show, &quit])
+    Menu::with_items(app, &[&show, &drop_box, &quit])
 }
 
 /// Puts the icon in the tray. Arabic until the page gives the texts of
 /// the chosen language.
 pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     let tray = TrayIconBuilder::with_id(ID)
-        .menu(&menu(app, "افتح زاجِل", "إنهاء زاجِل")?)
+        .menu(&menu(app, "افتح زاجِل", "إظهار سلة الإسقاط", "إنهاء زاجِل")?)
         .tooltip("Zajil")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_window(app),
+            "drop" => crate::dropbox::toggle(app),
             // The page's Quit, which asks first while downloads run (owner's
             // decision on #83), its window shown for the question; without
             // the window, the same path as closing it.
@@ -102,9 +110,14 @@ fn fit(text: &str) -> String {
 }
 
 /// The menu's texts in the interface's language.
-pub fn set_texts<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::Result<()> {
+pub fn set_texts<R: Runtime>(
+    app: &AppHandle<R>,
+    show: &str,
+    drop_box: &str,
+    quit: &str,
+) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(ID) {
-        tray.set_menu(Some(menu(app, show, quit)?))?;
+        tray.set_menu(Some(menu(app, show, drop_box, quit)?))?;
     }
     Ok(())
 }

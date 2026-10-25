@@ -555,6 +555,8 @@ fn many_queues_import_without_a_search_per_queue() {
             name: format!("q{n}"),
             max_active: 3,
             schedule: None,
+            max_tries: None,
+            after_open: None,
             items: Vec::new(),
         });
     }

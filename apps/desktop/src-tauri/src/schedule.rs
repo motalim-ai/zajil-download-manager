@@ -13,6 +13,7 @@
 //! cancel, shown in this window.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,15 +23,16 @@ use ts_rs::TS;
 use zajil_core::Stop;
 use zajil_core::limit::SystemClock;
 use zajil_core::queue::{
-    AfterQueue, DEFAULT_QUEUE, Day, MAX_ACTIVE, QueueEvent, QueuesFile, Schedule, Status,
-    StoreError, Summary, TimeOfDay, after_queue, check_name,
+    AfterQueue, DEFAULT_QUEUE, Day, MAX_ACTIVE, MAX_TRIES, QueueEvent, QueuesFile, Schedule,
+    Status, StoreError, Summary, TimeOfDay, after_queue, check_name,
 };
 use zajil_platform::power::{PowerAction, SystemPower};
 
 use crate::App;
 
 /// The schedule window's capability: listening to Zajil's events, nothing
-/// else. Added when the app starts, for this window only.
+/// else (the file to open after a queue is picked and confirmed from Rust,
+/// #142). Added when the app starts, for this window only.
 pub const CAPABILITY: &str = include_str!("../runtime-capabilities/schedule.json");
 
 pub const LABEL: &str = "schedule";
@@ -80,11 +82,15 @@ pub struct QueuePlan {
     pub stop: Option<String>,
     /// `mon` to `sun`; empty: every day.
     pub days: Vec<String>,
-    /// It has a schedule and is outside its window now: «Start now» makes
-    /// its downloads wait for the next window.
+    /// It has a schedule and is outside its window now («Start now» runs
+    /// it anyway, #125).
     pub closed_now: bool,
     /// What the user chose for after it, this run (never saved).
     pub after: AfterChoice,
+    /// Tries for each download (#142), 1 when it has none of its own.
+    pub max_tries: u32,
+    /// The file or program opened when it is done (#142).
+    pub after_open: Option<String>,
 }
 
 /// What the window saves for a queue.
@@ -95,6 +101,8 @@ pub struct PlanChange {
     pub start: Option<String>,
     pub stop: Option<String>,
     pub days: Vec<String>,
+    /// Tries for each download, 1 to `MAX_TRIES` (#142).
+    pub max_tries: u32,
 }
 
 /// The countdown after a queue, as the window shows it.
@@ -118,6 +126,9 @@ pub struct After {
     /// The window's title in the user's language, for opening it when a
     /// countdown starts.
     title: Mutex<String>,
+    /// Queues the user started now, outside their window (#125): the queue
+    /// runner treats them as open until they have nothing left.
+    pub run_now: zajil_core::queue::RunNow,
 }
 
 pub type SharedAfter = Arc<After>;
@@ -179,6 +190,11 @@ fn plans(
                 after: chosen
                     .get(&q.name)
                     .map_or(AfterChoice::Nothing, |a| AfterChoice::of(*a)),
+                max_tries: q.max_tries.unwrap_or(1),
+                after_open: q
+                    .after_open
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
             }
         })
         .collect()
@@ -255,14 +271,119 @@ pub async fn save_queue<R: tauri::Runtime>(
         if !(1..=MAX_ACTIVE).contains(&change.max_active) {
             return Err(StoreError::InvalidMaxActive(change.max_active));
         }
+        if !(1..=MAX_TRIES).contains(&change.max_tries) {
+            return Err(StoreError::Refused(format!(
+                "tries for each download must be from 1 to {MAX_TRIES}"
+            )));
+        }
         let queue = q
             .queue_mut(&name)
             .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?;
         queue.schedule = schedule;
         queue.max_active = change.max_active;
+        queue.max_tries = (change.max_tries > 1).then_some(change.max_tries);
         Ok(())
     })
     .await
+}
+
+/// The texts of the confirmation, in the page's language.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfirmTexts {
+    pub title: String,
+    pub question: String,
+    pub ok: String,
+    pub cancel: String,
+}
+
+/// «Choose a file…» for queue `name` (#142): Rust shows the system's
+/// picker, then asks the user to confirm the file or program with its path
+/// shown, and saves it. The page never sends a path (review of #142: any
+/// page of the app could otherwise set a program to run). `None`: nothing
+/// chosen or not confirmed.
+#[tauri::command]
+pub async fn choose_after_open<R: tauri::Runtime>(
+    app: State<'_, App>,
+    name: String,
+    texts: ConfirmTexts,
+    window: tauri::WebviewWindow<R>,
+    handle: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    if crate::in_scene(&handle) {
+        return Ok(None);
+    }
+    let dialogs = handle.clone();
+    let chosen = tokio::task::spawn_blocking(move || {
+        let picked = dialogs
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .blocking_pick_file()?
+            .into_path()
+            .ok()?;
+        let file = after_open_of(&picked).ok()?;
+        let sure = dialogs
+            .dialog()
+            .message(format!("{}\n\n{}", texts.question, file.display()))
+            .title(texts.title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(texts.ok, texts.cancel))
+            .parent(&window)
+            .blocking_show();
+        sure.then_some(file)
+    })
+    .await
+    .map_err(crate::blocking_err)?;
+    let Some(file) = chosen else {
+        return Ok(None);
+    };
+    let shown = file.to_string_lossy().into_owned();
+    crate::change(&app, &handle, move |q| {
+        q.queue_mut(&name)
+            .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
+            .after_open = Some(file);
+        Ok(())
+    })
+    .await?;
+    Ok(Some(shown))
+}
+
+/// «Remove»: queue `name` opens nothing when it is done.
+#[tauri::command]
+pub async fn clear_after_open<R: tauri::Runtime>(
+    app: State<'_, App>,
+    name: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    crate::change(&app, &handle, move |q| {
+        q.queue_mut(&name)
+            .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
+            .after_open = None;
+        Ok(())
+    })
+    .await
+}
+
+/// The file or program to open after a queue, as the user picked it: an
+/// absolute path to a file that is there, or a macOS application (`.app`,
+/// a folder the system opens as a program; review of #142). Blocking.
+fn after_open_of(path: &std::path::Path) -> Result<PathBuf, String> {
+    if openable(path) {
+        Ok(path.to_path_buf())
+    } else {
+        Err(format!("{} is not a file", path.display()))
+    }
+}
+
+fn openable(path: &std::path::Path) -> bool {
+    path.is_absolute()
+        && (path.is_file()
+            || (path.is_dir()
+                && path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("app"))))
 }
 
 fn schedule_of(change: &PlanChange) -> Result<Option<Schedule>, String> {
@@ -316,17 +437,19 @@ fn shift(queues: &mut QueuesFile, id: u64, up: bool) -> Result<(), StoreError> {
 }
 
 /// «Start now»: every paused or failed download of queue `name` waits to
-/// start, as «Resume» does. Not one held for the user's OK (#84): that one
-/// starts only when it is chosen. A queue outside its window starts them
-/// at its next window (the engine has no «now» outside it).
+/// start, as «Resume» does, and the queue runs now even outside its window
+/// until it has nothing left (#125); its schedule does not change. Not one
+/// held for the user's OK (#84): that one starts only when it is chosen.
 #[tauri::command]
 pub async fn start_queue<R: tauri::Runtime>(
     app: State<'_, App>,
+    after: State<'_, SharedAfter>,
     name: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let store = app.store.clone();
-    let ids = tokio::task::spawn_blocking(move || store.load().and_then(|q| startable(&q, &name)))
+    let asked = name.clone();
+    let ids = tokio::task::spawn_blocking(move || store.load().and_then(|q| startable(&q, &asked)))
         .await
         .map_err(crate::blocking_err)?
         .map_err(|e| e.to_string())?;
@@ -336,7 +459,52 @@ pub async fn start_queue<R: tauri::Runtime>(
     crate::change(&app, &handle, move |q| {
         crate::set_status(q, &ids, Status::Waiting)
     })
+    .await?;
+    // Only now, and only for a queue with a schedule and something to run:
+    // the runner would drop it at once otherwise, or keep it past a
+    // schedule set later (review of #125).
+    let store = app.store.clone();
+    let runs = tokio::task::spawn_blocking(move || {
+        store
+            .load()
+            .is_ok_and(|q| {
+                q.queue(&name).is_some_and(|queue| {
+                    queue.schedule.is_some()
+                        && queue
+                            .items
+                            .iter()
+                            .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+                })
+            })
+            .then_some(name)
+    })
     .await
+    .map_err(crate::blocking_err)?;
+    if let Some(name) = runs {
+        after
+            .run_now
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(name);
+    }
+    Ok(())
+}
+
+/// Keeps in `run_now` only the queues that are there, have a schedule and
+/// something waiting or running: the queue runner's own rule at each look
+/// (#125), for while no runner looks.
+pub fn prune_run_now(run_now: &zajil_core::queue::RunNow, queues: &QueuesFile) {
+    run_now
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|name| {
+            queues.queue(name).is_some_and(|q| {
+                q.schedule.is_some()
+                    && q.items
+                        .iter()
+                        .any(|i| matches!(i.status, Status::Waiting | Status::Active))
+            })
+        });
 }
 
 fn startable(queues: &QueuesFile, name: &str) -> Result<Vec<u64>, StoreError> {
@@ -403,6 +571,10 @@ fn due(
 /// What the queue runner's events mean here: a download finished, so its
 /// queue may be done, and the action the user chose for it is due.
 pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
+    if let QueueEvent::QueueDone { queue } = event {
+        open_after(handle, queue.clone());
+        return;
+    }
     let QueueEvent::Finished { item, .. } = event else {
         return;
     };
@@ -420,6 +592,35 @@ pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
             return;
         };
         count_down(&handle, &after, queue, action).await;
+    });
+}
+
+/// Queue `queue` is done (#142): the file or program the user chose for it
+/// opens, with the system's own way of opening it (no shell, no command
+/// line), if it is still a file.
+fn open_after(handle: &tauri::AppHandle, queue: String) {
+    use tauri_plugin_opener::OpenerExt;
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let store = handle.state::<App>().store.clone();
+        let file = tokio::task::spawn_blocking(move || {
+            let queues = store.load().ok()?;
+            queues
+                .queue(&queue)?
+                .after_open
+                .clone()
+                .filter(|p| openable(p))
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(file) = file
+            && let Err(err) = handle
+                .opener()
+                .open_path(file.to_string_lossy(), None::<&str>)
+        {
+            eprintln!("zajil: the file to open after the queue: {err}");
+        }
     });
 }
 
@@ -557,6 +758,7 @@ mod tests {
             start: start.map(str::to_owned),
             stop: stop.map(str::to_owned),
             days: days.iter().map(|d| (*d).to_owned()).collect(),
+            max_tries: 1,
         };
         assert_eq!(schedule_of(&change(None, Some(""), &[])), Ok(None));
         let s = schedule_of(&change(Some("02:00"), Some("07:30"), &["fri", "mon"]))
@@ -579,6 +781,44 @@ mod tests {
         assert!(!plan.closed_now);
         assert!(night("2026-10-26T09:00:00Z").closed_now);
         assert!(!plans(&q, &HashMap::new(), at("2026-10-26T09:00:00Z"), &tz)[0].closed_now);
+    }
+
+    /// #142: the file to open after a queue is an absolute path to a file
+    /// that is there: not a folder, not a relative or missing path.
+    #[test]
+    fn the_file_after_a_queue_is_a_file_that_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("done.txt");
+        std::fs::write(&file, b"done").unwrap();
+        assert_eq!(after_open_of(&file), Ok(file.clone()));
+        assert!(after_open_of(dir.path()).is_err(), "a folder");
+        assert!(after_open_of(std::path::Path::new("done.txt")).is_err());
+        assert!(after_open_of(&dir.path().join("missing")).is_err());
+        // A macOS application is a folder named .app: the system opens it.
+        let app = dir.path().join("Sync.app");
+        std::fs::create_dir(&app).unwrap();
+        assert_eq!(after_open_of(&app), Ok(app.clone()));
+    }
+
+    /// #125, review: a queue started now and paused before a runner looks
+    /// leaves the set; one with work and a schedule stays.
+    #[test]
+    fn a_queue_started_now_with_nothing_to_run_leaves_the_set() {
+        let mut q = queues();
+        q.queue_mut("night").unwrap().schedule =
+            Some(Schedule::new(Some("02:00".parse().unwrap()), None, vec![]).unwrap());
+        let run_now: zajil_core::queue::RunNow = Default::default();
+        run_now
+            .lock()
+            .unwrap()
+            .extend(["night".to_owned(), "main".to_owned(), "gone".to_owned()]);
+        prune_run_now(&run_now, &q);
+        // main has no schedule, gone is not there.
+        assert_eq!(*run_now.lock().unwrap(), ["night".to_owned()].into());
+        let night = ids(&q, "night")[0];
+        q.item_mut(night).unwrap().status = Status::Paused;
+        prune_run_now(&run_now, &q);
+        assert!(run_now.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -621,7 +861,8 @@ mod tests {
         assert_eq!(due(&q, night, &mut chosen), None);
     }
 
-    /// The schedule window may listen to Zajil's events, and nothing more.
+    /// The schedule window may listen to Zajil's events, and nothing more:
+    /// the file to open after a queue is picked and confirmed from Rust.
     #[test]
     fn the_schedule_window_has_only_its_own_permissions() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY).unwrap();

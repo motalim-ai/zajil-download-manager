@@ -118,12 +118,15 @@ impl Live {
             }
             QueueEvent::Finished { item, .. }
             | QueueEvent::Failed { item, .. }
+            | QueueEvent::Retrying { item, .. }
             | QueueEvent::Stopped { item } => {
                 inner.items.remove(item);
                 inner.urgent = true;
             }
             // The app decides, once it has asked the browser.
-            QueueEvent::Waiting { .. } | QueueEvent::NeedsBrowser { .. } => {}
+            QueueEvent::Waiting { .. }
+            | QueueEvent::NeedsBrowser { .. }
+            | QueueEvent::QueueDone { .. } => {}
         }
     }
 

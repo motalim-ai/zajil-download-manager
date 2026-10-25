@@ -115,7 +115,7 @@
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
     // The tray menu speaks the same language.
-    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-drop-box"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
@@ -796,8 +796,9 @@
   /></div>
 {:else}
   <div class="window">
-    <TitleBar />
     <header>
+      <!-- In the header landmark (axe «region», #118). -->
+      <TitleBar />
       <h1 class="visually-hidden">{locale.t("app-name")}</h1>
       {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}
       <Toolbar bind:search {can} {hint} onaction={doAction} />
