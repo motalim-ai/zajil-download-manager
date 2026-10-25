@@ -23,7 +23,7 @@ use zajil_core::video::{
     Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner,
 };
 
-const TOOLS: [Tool; 3] = [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe];
+const TOOLS: [Tool; 4] = Tool::ALL;
 
 /// What the app keeps for video downloads.
 #[derive(Default)]
@@ -45,9 +45,24 @@ fn folders(app: &crate::App) -> (PathBuf, PathBuf) {
     (app.data_dir.join("tools"), app.data_dir.join("run"))
 }
 
-fn runner(app: &crate::App) -> VideoRunner {
+/// A runner, with the runtime for YouTube's JavaScript as the CLI finds it:
+/// Deno or Node on `PATH`, else our QuickJS-NG once it is installed (#155).
+async fn runner(app: &crate::App) -> VideoRunner {
     let (tools, runs) = folders(app);
-    VideoRunner::new(Toolbox::new(tools), Runs::new(runs), app.engine.clone())
+    let toolbox = Toolbox::new(tools);
+    let has_qjs = toolbox.is_installed(Tool::QuickJs);
+    let js = tauri::async_runtime::spawn_blocking(move || {
+        let jsbox = std::env::current_exe()
+            .ok()
+            .and_then(|exe| zajil_core::video::jsbox_beside(&exe))
+            .filter(|_| has_qjs);
+        let path = std::env::var_os("PATH");
+        zajil_core::video::find_js_runtime(path.as_deref(), jsbox, false)
+    })
+    .await
+    .ok()
+    .flatten();
+    VideoRunner::new(toolbox, Runs::new(runs), app.engine.clone()).with_js(js)
 }
 
 /// At start: what an unfinished run or install left is swept away, with no
@@ -88,6 +103,7 @@ fn name(tool: Tool) -> &'static str {
         Tool::YtDlp => "yt-dlp",
         Tool::Ffmpeg => "ffmpeg",
         Tool::Ffprobe => "ffprobe",
+        Tool::QuickJs => "qjs",
     }
 }
 
@@ -107,10 +123,10 @@ pub fn video_tools_status(app: State<'_, crate::App>) -> Vec<ToolView> {
                     .as_ref()
                     .and_then(|p| zajil_core::Url::parse(&p.url).ok())
                     .and_then(|u| u.host_str().map(str::to_owned)),
-                license: if tool == Tool::YtDlp {
-                    "GPLv3+"
-                } else {
-                    "LGPL 2.1+"
+                license: match tool {
+                    Tool::YtDlp => "GPLv3+",
+                    Tool::QuickJs => "MIT",
+                    Tool::Ffmpeg | Tool::Ffprobe => "LGPL 2.1+",
                 }
                 .into(),
             }
@@ -305,7 +321,10 @@ pub async fn video_probe(
         old.request();
     }
     let cookies = state.cookies.lock().unwrap().get(&url).cloned();
-    let probed = runner(&app).probe(&url, cookies.as_deref(), &stop).await?;
+    let probed = runner(&app)
+        .await
+        .probe(&url, cookies.as_deref(), &stop)
+        .await?;
     state.probing.lock().unwrap().take();
     Ok(match probed {
         Probed::Video(video) => {
@@ -374,7 +393,7 @@ pub fn video_download<R: tauri::Runtime>(
         .unwrap_or_default();
     let cookies = state.cookies.lock().unwrap().get(&url).cloned();
     tauri::async_runtime::spawn(async move {
-        let runner = runner(&handle.state::<crate::App>());
+        let runner = runner(&handle.state::<crate::App>()).await;
         let choice = Choice::from(choice);
         let request = Download {
             url: &url,
