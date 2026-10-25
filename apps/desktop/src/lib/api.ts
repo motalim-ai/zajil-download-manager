@@ -32,4 +32,7 @@ export const api = {
   importQueues: (path: string, keepFolders: boolean) =>
     invoke<ImportView>("import_queues", { path, keepFolders }),
   onChange: (handler: () => void): Promise<UnlistenFn> => listen("downloads-changed", handler),
+  /** Clipboard monitoring (M5): a download link the user copied. */
+  onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
+    listen<string>("clipboard-link", (event) => handler(event.payload)),
 };

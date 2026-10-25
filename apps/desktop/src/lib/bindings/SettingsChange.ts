@@ -6,4 +6,4 @@ import type { ThemeView } from "./ThemeView";
 /**
  * What the settings screen saves.
  */
-export type SettingsChange = { language: LanguageView, theme: ThemeView, digits: DigitsView, download_dir: string | null, connections: number, notifications: boolean, speed_limit: number | null, };
+export type SettingsChange = { language: LanguageView, theme: ThemeView, digits: DigitsView, download_dir: string | null, connections: number, notifications: boolean, clipboard: boolean, speed_limit: number | null, };

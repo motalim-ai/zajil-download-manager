@@ -14,6 +14,13 @@ targets = [
     "x86_64-apple-darwin",
     "aarch64-apple-darwin",
 ]
+# arboard's Windows backend (BSL-1.0), never built: zajil-platform uses
+# arboard only on macOS and Linux (`cfg(unix)`), and the Win32 clipboard
+# itself on Windows. cargo-deny keeps arboard's Windows-only dependencies in
+# its graph anyway; `cargo tree --target <each target above> -i clipboard-win`
+# prints nothing. If arboard is ever used on Windows, remove this line and
+# decide BSL-1.0 with an update of ADR-0002.
+exclude = ["clipboard-win", "error-code"]
 
 [advisories]
 # Known vulnerabilities (RustSec) fail the build. Each ignored advisory has

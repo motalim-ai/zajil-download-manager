@@ -14,6 +14,9 @@ publish = false
 [workspace.dependencies]
 bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
+# The system clipboard on macOS and Linux, for clipboard monitoring (M5):
+# NSPasteboard, X11 or Wayland (data-control). No image support.
+arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
 dirs = "7.0.0"
 getrandom = "0.4.3"
 http-body-util = { version = "0.1.5", features = ["channel"] }
@@ -39,7 +42,7 @@ jiff = "0.2.38"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Shutdown", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Shutdown", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 tempfile = "3.27.0"
 # Translations (M4, ADR-0003): Fluent. The plural forms (the six Arabic
 # ones) come from icu_plurals through PLURAL(), not from the rules inside

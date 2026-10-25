@@ -20,6 +20,10 @@ system_download_dir: string, connections: number, max_connections: number,
  */
 notifications: boolean, 
 /**
+ * Clipboard monitoring: a copied download link opens the add dialog.
+ */
+clipboard: boolean, 
+/**
  * Bytes per second for all downloads together; `null`: no limit.
  */
 speed_limit: number | null, };

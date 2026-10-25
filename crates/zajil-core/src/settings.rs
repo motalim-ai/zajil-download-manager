@@ -75,6 +75,10 @@ pub struct SettingsFile {
     /// Absent in files written before it existed, which counts as on.
     #[serde(default = "on")]
     pub notifications: bool,
+    /// Clipboard monitoring (M5): a download link the user copies is
+    /// offered in the add dialog. Off by default, and when absent.
+    #[serde(default)]
+    pub clipboard: bool,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -123,6 +127,7 @@ impl Default for SettingsFile {
             download_dir: None,
             connections: crate::DEFAULT_CONNECTIONS as u32,
             notifications: true,
+            clipboard: false,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }

@@ -200,6 +200,8 @@ pub struct SettingsView {
     pub max_connections: u32,
     /// A notification when a download finishes or fails.
     pub notifications: bool,
+    /// Clipboard monitoring: a copied download link opens the add dialog.
+    pub clipboard: bool,
     /// Bytes per second for all downloads together; `null`: no limit.
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
@@ -215,6 +217,7 @@ pub struct SettingsChange {
     pub download_dir: Option<String>,
     pub connections: u32,
     pub notifications: bool,
+    pub clipboard: bool,
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
 }
@@ -262,6 +265,7 @@ pub fn settings(file: &SettingsFile, speed_limit: Option<u64>, system_dir: &Path
         connections: file.connections,
         max_connections: zajil_core::MAX_CONNECTIONS as u32,
         notifications: file.notifications,
+        clipboard: file.clipboard,
         speed_limit,
     }
 }
@@ -284,6 +288,7 @@ pub fn apply_settings(file: &mut SettingsFile, change: &SettingsChange) {
     file.download_dir = change.download_dir.as_ref().map(std::path::PathBuf::from);
     file.connections = change.connections;
     file.notifications = change.notifications;
+    file.clipboard = change.clipboard;
 }
 
 /// The categories as the page edits them, back into categories. Every

@@ -48,6 +48,7 @@
       download_dir: settings.download_dir,
       connections: settings.connections,
       notifications: settings.notifications,
+      clipboard: settings.clipboard,
       speed_limit: settings.speed_limit,
       ...patch,
     });
@@ -194,6 +195,15 @@
       <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
       <span>{locale.t("settings-notifications-label")}</span>
     </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("settings-clipboard")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={settings.clipboard} onchange={(e) => change({ clipboard: e.currentTarget.checked })} />
+      <span>{locale.t("settings-clipboard-label")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-clipboard-hint")}</p>
   </fieldset>
 
   <fieldset>

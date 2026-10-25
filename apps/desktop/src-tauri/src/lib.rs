@@ -49,6 +49,8 @@ pub struct App {
     system_download_dir: PathBuf,
     /// Connections for the next download (the settings, M4).
     connections: Arc<AtomicUsize>,
+    /// Clipboard monitoring is on (the settings, M5).
+    clipboard: Arc<AtomicBool>,
     live: Arc<Live>,
     stop: Stop,
     /// Set once the queues have stopped (their downloads recorded their
@@ -86,10 +88,13 @@ pub fn run() {
     let settings = SettingsStore::new(&data);
     // A damaged settings file is shown when the page asks for it; the
     // downloads run with the defaults meanwhile.
-    let connections = settings
-        .load()
+    let loaded = settings.load();
+    let connections = loaded
+        .as_ref()
         .map(|s| s.connections as usize)
         .unwrap_or(zajil_core::DEFAULT_CONNECTIONS);
+    // Off with a damaged settings file, as by default.
+    let clipboard = loaded.as_ref().is_ok_and(|s| s.clipboard);
     let app = App {
         engine: Engine::new(Options::default()).expect("the engine starts"),
         store: QueueStore::new(&data),
@@ -97,6 +102,7 @@ pub fn run() {
         settings,
         system_download_dir,
         connections: Arc::new(AtomicUsize::new(connections)),
+        clipboard: Arc::new(AtomicBool::new(clipboard)),
         live: Arc::new(Live::default()),
         stop: Stop::new(),
         stopped: tokio::sync::watch::Sender::new(false),
@@ -132,6 +138,7 @@ pub fn run() {
             }
             tray::build(tauri_app)?;
             serve_extension(tauri_app.handle().clone(), data.clone());
+            watch_clipboard(tauri_app.handle().clone());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -570,6 +577,98 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
     });
 }
 
+/// How often the clipboard is read while monitoring is on.
+const CLIPBOARD_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Clipboard monitoring (M5, off unless the user turns it on): while the
+/// setting is on, the clipboard is read twice a second, and a download link
+/// the user copies opens the add dialog with it (the page's
+/// `clipboard-link` event) and shows the window. Nothing is added without
+/// the user. While it is off the clipboard is not opened; in a ui-test
+/// scene it stays off.
+fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    std::thread::spawn(move || {
+        let mut watcher = ClipboardWatcher::default();
+        loop {
+            std::thread::sleep(CLIPBOARD_EVERY);
+            let app = handle.state::<App>();
+            let on = app.clipboard.load(Ordering::Relaxed) && !in_scene(&handle);
+            let link = watcher.tick(
+                on,
+                zajil_platform::clipboard::SystemClipboard::new,
+                &app.categories,
+            );
+            if let Some(link) = link {
+                let _ = handle.emit("clipboard-link", link);
+                tray::show_window(&handle);
+            }
+        }
+    });
+}
+
+/// Clipboard monitoring between two reads.
+struct ClipboardWatcher<C> {
+    /// Open while monitoring is on.
+    clipboard: Option<C>,
+    watch: zajil_core::clipboard::Watch,
+    /// The last problem said, so a clipboard that cannot be read is not
+    /// reported twice a second.
+    said: Option<String>,
+}
+
+impl<C> Default for ClipboardWatcher<C> {
+    fn default() -> Self {
+        ClipboardWatcher {
+            clipboard: None,
+            watch: Default::default(),
+            said: None,
+        }
+    }
+}
+
+impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
+    /// One read: the link to offer, if the user copied one since the last.
+    /// `on` false closes the clipboard and forgets what was seen, so what
+    /// is on the clipboard when monitoring is turned on again is not
+    /// offered. A clipboard that cannot be opened or read (another program
+    /// holding it, no display) is tried again at the next read.
+    fn tick(
+        &mut self,
+        on: bool,
+        open: impl FnOnce() -> std::io::Result<C>,
+        categories: &CategoryStore,
+    ) -> Option<String> {
+        if !on {
+            *self = ClipboardWatcher::default();
+            return None;
+        }
+        if self.clipboard.is_none() {
+            match open() {
+                Ok(clipboard) => self.clipboard = Some(clipboard),
+                Err(err) => return self.say(err),
+            }
+        }
+        let text = match self.clipboard.as_mut()?.text() {
+            Ok(text) => text,
+            Err(err) => {
+                self.clipboard = None;
+                return self.say(err);
+            }
+        };
+        self.said = None;
+        self.watch.seen(text.as_deref(), || categories.load().ok())
+    }
+
+    fn say(&mut self, err: std::io::Error) -> Option<String> {
+        let said = err.to_string();
+        if self.said.as_ref() != Some(&said) {
+            eprintln!("zajil: clipboard monitoring: {said}");
+            self.said = Some(said);
+        }
+        None
+    }
+}
+
 /// What a request from the extension does: a download goes into the
 /// default queue, by category, as the add dialog adds one. The referrer,
 /// the suggested name and the cookies are checked by `zajil_host::parse`
@@ -748,6 +847,91 @@ mod tests {
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+    }
+
+    /// A clipboard for tests: what each read returns, in turn.
+    struct FakeClipboard(std::collections::VecDeque<std::io::Result<Option<String>>>);
+
+    impl zajil_platform::clipboard::Clipboard for FakeClipboard {
+        fn text(&mut self) -> std::io::Result<Option<String>> {
+            self.0.pop_front().unwrap_or(Ok(None))
+        }
+    }
+
+    /// M5 clipboard monitoring: a copied download link is offered once;
+    /// what was there when monitoring started, other text and links to
+    /// pages are not; off, the clipboard is not even opened, and turned on
+    /// again what is there is not offered; a read that fails is tried again.
+    #[test]
+    fn clipboard_monitoring_offers_each_copied_download_link_once() {
+        let data = tempfile::tempdir().unwrap();
+        let categories = CategoryStore::new(data.path());
+        let a = "https://example.com/a.zip";
+        let b = "https://example.com/b.mp4";
+        let reads = |texts: &[Option<&str>]| {
+            FakeClipboard(texts.iter().map(|t| Ok(t.map(str::to_owned))).collect())
+        };
+        let mut watcher = ClipboardWatcher::default();
+        let mut opened = 0;
+        let mut open = || {
+            opened += 1;
+            Ok(reads(&[
+                Some(a),
+                Some(a),
+                Some("https://example.com/page.html"),
+                Some("hello"),
+                Some(b),
+                Some(b),
+                None,
+                Some(a),
+            ]))
+        };
+        let mut seen = Vec::new();
+        for _ in 0..8 {
+            seen.push(watcher.tick(true, &mut open, &categories));
+        }
+        assert_eq!(opened, 1);
+        assert_eq!(
+            seen,
+            [
+                None,
+                None,
+                None,
+                None,
+                Some(b.to_owned()),
+                None,
+                None,
+                Some(a.to_owned())
+            ]
+        );
+
+        // Off: not opened, nothing offered; on again, what is there is
+        // remembered only.
+        let never = || -> std::io::Result<FakeClipboard> { panic!("opened while off") };
+        assert_eq!(watcher.tick(false, never, &categories), None);
+        assert!(watcher.clipboard.is_none());
+        let mut watcher = ClipboardWatcher::default();
+        assert_eq!(
+            watcher.tick(true, || Ok(reads(&[Some(b), Some(b)])), &categories),
+            None
+        );
+        assert_eq!(watcher.tick(true, || unreachable!(), &categories), None);
+
+        // A clipboard that cannot be opened, then one whose read fails:
+        // both tried again, and the link copied meanwhile is offered.
+        let mut watcher = ClipboardWatcher::default();
+        let busy = || std::io::Error::other("the clipboard is held by another program");
+        assert_eq!(watcher.tick(true, || Err(busy()), &categories), None);
+        assert_eq!(watcher.tick(true, || Ok(reads(&[None])), &categories), None);
+        watcher.clipboard = Some(FakeClipboard([Err(busy())].into()));
+        assert_eq!(watcher.tick(true, || unreachable!(), &categories), None);
+        assert!(watcher.clipboard.is_none(), "closed to be opened again");
+        assert_eq!(
+            watcher
+                .tick(true, || Ok(reads(&[Some(a)])), &categories)
+                .as_deref(),
+            Some(a)
+        );
     }
 
     /// M5, end to end on the real channel: a download sent as `zajil-host`
@@ -1010,11 +1194,12 @@ async fn save_settings<R: tauri::Runtime>(
             &app.system_download_dir,
         ));
     }
-    let (settings, store, system, connections) = (
+    let (settings, store, system, connections, clipboard) = (
         app.settings.clone(),
         app.store.clone(),
         app.system_download_dir.clone(),
         app.connections.clone(),
+        app.clipboard.clone(),
     );
     let saved = tokio::task::spawn_blocking(move || {
         if change.speed_limit == Some(0) {
@@ -1033,6 +1218,7 @@ async fn save_settings<R: tauri::Runtime>(
             })
             .map_err(blocking_err)?;
         connections.store(file.connections as usize, Ordering::Relaxed);
+        clipboard.store(file.clipboard, Ordering::Relaxed);
         Ok(view::settings(&file, change.speed_limit, &system))
     })
     .await

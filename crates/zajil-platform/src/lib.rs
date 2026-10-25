@@ -6,7 +6,8 @@
 //!
 //! Phase M1 provides [`AppPaths`], the fixed identifiers from ADR-0001 and
 //! the [`fs`] helpers for the safe-write rules of ADR-0004. Phase M3 adds
-//! [`power`] (`PowerControl`).
+//! [`power`] (`PowerControl`); M5 [`clipboard`], [`ipc`] and
+//! [`native_host`].
 //!
 //! `unsafe` is denied everywhere except the small, commented system calls in
 //! [`fs`], [`console`] and, on Windows, [`power`] that the standard library
@@ -16,6 +17,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod clipboard;
 pub mod console;
 pub mod fs;
 pub mod ids;

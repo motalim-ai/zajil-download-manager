@@ -101,15 +101,16 @@ jobs:
           echo "ZAJIL_TEST_EXFAT=/mnt/zexfat" >> "$GITHUB_ENV"
       # The CLI tests run printed commands in sh, bash and zsh, and fail on
       # CI if one is missing instead of skipping it (owner's decision on
-      # #28). Ubuntu runners have no zsh.
-      - name: Install zsh (Linux)
+      # #28). Ubuntu runners have no zsh. Xvfb is the display for the real
+      # clipboard test below.
+      - name: Install zsh and Xvfb (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 10
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           set -euo pipefail
-          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends zsh
+          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends zsh xvfb xauth
           zsh -c 'echo "zsh $ZSH_VERSION"'
       - name: Mount FAT32 and exFAT test volumes (macOS)
         if: runner.os == 'macOS'
@@ -161,6 +162,15 @@ jobs:
         run: cargo build --workspace --all-targets --locked
       - name: Test
         run: cargo test --workspace --locked
+      # Clipboard monitoring (M5) reads the real clipboard: the test that
+      # puts text there and reads it back is ignored by default, because it
+      # replaces the clipboard of whoever runs it. Linux needs a display.
+      - name: The real clipboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test=(cargo test --locked -p zajil-platform --lib -- --ignored --exact clipboard::tests::text_put_on_the_clipboard_is_read_back)
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a "${test[@]}"; else "${test[@]}"; fi
       # Release builds have no overflow checks, so arithmetic on untrusted
       # input (HTTP dates, ranges, state files) is tested there too.
       - name: Test engine in release mode

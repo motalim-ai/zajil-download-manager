@@ -332,6 +332,7 @@
   onMount(() => {
     locale.set("ar");
     let unlisten: (() => void) | undefined;
+    let unlistenClipboard: (() => void) | undefined;
     void (async () => {
       if (await runUiTest()) return;
       try {
@@ -341,9 +342,14 @@
       }
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
+      // A copied download link opens the add dialog, unless one is open.
+      unlistenClipboard = await api.onClipboardLink((url) => void startAdding(url));
       await refresh();
     })();
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      unlistenClipboard?.();
+    };
   });
 </script>
 

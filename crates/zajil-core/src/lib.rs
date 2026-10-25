@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod category;
+pub mod clipboard;
 mod engine;
 mod http_date;
 pub mod limit;
