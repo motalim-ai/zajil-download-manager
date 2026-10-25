@@ -930,6 +930,8 @@ async fn a_download_from_a_page_is_held_by_the_name_the_download_itself_gets() {
     assert_eq!(item.status, Status::Done, "{item:?}");
     assert!(item.ok_given);
     assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+}
+
 /// Security review #84: a private window's download leaves nothing in the
 /// queues once it is done; only its file.
 #[tokio::test]
