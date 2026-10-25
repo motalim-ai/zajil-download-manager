@@ -8,7 +8,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [] };
   const local = {};
   const chrome = {
     i18n: { getMessage: (key) => key },
@@ -55,7 +55,7 @@ function fakeChrome({ granted, buttons = true, answer, jar = () => [{ name: "sid
     tabs: { create: async (tab) => done.tabs.push(tab.url) },
     windows: { onRemoved: on("windowRemoved"), getAll: async () => windows },
     action: { setBadgeText: async () => {}, onClicked: on("action") },
-    contextMenus: { create: () => {}, onClicked: on("menu") },
+    contextMenus: { create: (item) => done.menus.push(item), onClicked: on("menu") },
     downloads: {
       onDeterminingFilename: on("filename"),
       download: async (options) => {
@@ -272,6 +272,55 @@ describe("the background", () => {
     await flush();
     expect(fake.done.sent[0].cookies).toBeUndefined();
     expect(fake.done.cookieReads).toEqual([]);
+  });
+
+  it("offers 'Download video with Zajil' on a video or audio, and sends its page with the page's cookies (M6)", async () => {
+    const fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.installed({ reason: "update" });
+    expect(fake.done.menus).toContainEqual({ id: "zajil-download-video", title: "menuDownloadVideo", contexts: ["video", "audio"] });
+    fake.listeners.menu(
+      { menuItemId: "zajil-download-video", pageUrl: "https://example.com/watch?v=1", srcUrl: "blob:https://example.com/9" },
+      { cookieStoreId: "firefox-container-1" },
+    );
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/watch?v=1", cookies: "sid=abc" }]);
+    expect(fake.done.cookieReads.at(-1)).toMatchObject({ url: "https://example.com/watch?v=1", storeId: "firefox-container-1" });
+    // Nothing kept for a video: Zajil does not ask for its cookies again.
+    expect(fake.local.linkTickets).toBeUndefined();
+  });
+
+  it("a video from a private window goes without cookies, none read, and marked private", async () => {
+    const fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v", srcUrl: "https://cdn.example.com/v.mp4" }, { incognito: true });
+    await flush();
+    expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/v", media: "https://cdn.example.com/v.mp4", private: true }]);
+    expect(fake.done.cookieReads).toEqual([]);
+    expect(fake.session.privateSent).toBe(true);
+  });
+
+  it("a video Zajil does not take says Zajil's own reason, with no sign-in button: the browser cannot download a page's video", async () => {
+    let fake = fakeChrome({ granted: false, answer: forbidden });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v" });
+    await flush();
+    expect(fake.done.notifications.at(-1)).toMatchObject({ message: forbidden.error });
+    // «Coming soon», as the app says it (review of #99).
+    fake = fakeChrome({ granted: false, answer: { protocol_version: 1, ok: false, error: "تحميل الفيديو قادم قريبًا." } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v" });
+    await flush();
+    expect(fake.done.notifications.at(-1)).toMatchObject({ message: "تحميل الفيديو قادم قريبًا." });
+    expect(fake.done.notifications.at(-1).buttons).toBeUndefined();
+    // A page Zajil cannot read: refused before any cookie is read.
+    fake = fakeChrome({ granted: true, answer: { ok: true } });
+    await load(fake);
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "file:///home/me/v.html", srcUrl: "file:///home/me/v.mp4" });
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+    expect(fake.done.cookieReads).toEqual([]);
+    expect(fake.done.notifications.at(-1).message).toBe("videoNotWeb");
   });
 
   it("a link Zajil cannot download is refused before any cookie is read", async () => {

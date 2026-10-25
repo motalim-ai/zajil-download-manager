@@ -134,6 +134,30 @@ export function menuMessage(info, cookies = null, from = {}) {
     : null;
 }
 
+/**
+ * The message for "Download video with Zajil" on a video or audio element
+ * (M6, ADR-0009), or null when its page is not one Zajil can read. The
+ * page goes to yt-dlp: that of the frame the video is in when it is in
+ * one (an embedded player), else the tab's. The video's own address goes
+ * too when it is http(s), for a page yt-dlp does not know; a `blob:` or
+ * `data:` one, which only the page can read, does not.
+ *
+ * @param {{ pageUrl?: string, frameUrl?: string, srcUrl?: string }} info
+ * @param {{ cookies?: string | null, private?: boolean }} [extra] the
+ *   page's `Cookie` header, if allowed; whether it is a private window's
+ */
+export function videoMessage(info, extra = {}) {
+  const page = isWeb(info.frameUrl) ? info.frameUrl : info.pageUrl;
+  if (!isWeb(page)) return null;
+  /** @type {Record<string, unknown>} */
+  const message = { type: "video", protocol_version: PROTOCOL_VERSION, page };
+  if (isWeb(info.srcUrl)) message.media = info.srcUrl;
+  // A private window's cookies never go (as for a link).
+  if (extra.private) message.private = true;
+  else if (extra.cookies) message.cookies = extra.cookies;
+  return message;
+}
+
 /** Whether Zajil refused because the site wants a sign-in: the server
  * answered 401 or 403 to Zajil (`zajil_core::Error::Status`).
  * @param {Result | null} result */
