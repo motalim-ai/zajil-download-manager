@@ -113,6 +113,11 @@ enum Command {
     },
     /// Download the files a pattern stands for, one after the other, such
     /// as `img[001-100].jpg`.
+    #[command(
+        after_help = "Exit codes: 0 every file saved, 1 a file failed (a file that stopped but \
+                      can be resumed counts as failed; the resume command is printed), 2 a \
+                      wrong pattern, 3 stopped with Ctrl+C during a file that can be resumed."
+    )]
     Batch(batch::BatchArgs),
 }
 

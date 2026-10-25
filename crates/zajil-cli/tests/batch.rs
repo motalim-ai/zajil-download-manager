@@ -166,3 +166,32 @@ fn the_progress_lines_never_show_the_query() {
     let all = format!("{}{}", text(&out.stdout), text(&out.stderr));
     assert!(!all.contains("SECRET"), "{all}");
 }
+
+/// `--print` keeps the query the user wrote, never a password
+/// (AGENTS.md §10.3).
+#[test]
+fn print_keeps_the_query_but_never_a_password() {
+    let out = zajil(&[
+        "batch",
+        "https://user:secretpw@example.com/get?id=[1-2]",
+        "--print",
+    ]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "https://example.com/get?id=1\nhttps://example.com/get?id=2\n"
+    );
+}
+
+/// Review of #113: the host can never be reached by a pattern.
+#[test]
+fn a_pattern_in_the_host_is_refused() {
+    for pattern in [
+        "http:///[1-3].example.com/f",
+        "http://\t/[1-3].example.com/f",
+    ] {
+        let out = zajil(&["batch", pattern, "--print"]);
+        assert_eq!(out.status.code(), Some(2), "{pattern:?}");
+        assert!(out.stdout.is_empty(), "{pattern:?}");
+    }
+}
