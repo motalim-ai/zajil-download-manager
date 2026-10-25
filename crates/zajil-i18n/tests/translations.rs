@@ -173,12 +173,34 @@ const ARABIC: &[(&str, [&str; 6])] = &[
     (
         "queues-count",
         [
-            "لا قوائم",
-            "قائمة واحدة",
-            "قائمتان",
-            "3 قوائم",
-            "11 قائمةً",
-            "100 قائمة",
+            "لا طوابير",
+            "طابور واحد",
+            "طابوران",
+            "3 طوابير",
+            "11 طابورًا",
+            "100 طابور",
+        ],
+    ),
+    (
+        "confirm-delete-done",
+        [
+            "لا تحميلات مكتملة معروضة.",
+            "يُحذف من القائمة تحميل مكتمل واحد. الملف نفسه يبقى في مكانه.",
+            "يُحذف من القائمة تحميلان مكتملان. الملفان نفساهما يبقيان في مكانهما.",
+            "يُحذف من القائمة 3 تحميلات مكتملة. الملفات نفسها تبقى في مكانها.",
+            "يُحذف من القائمة 11 تحميلًا مكتملًا. الملفات نفسها تبقى في مكانها.",
+            "يُحذف من القائمة 100 تحميل مكتمل. الملفات نفسها تبقى في مكانها.",
+        ],
+    ),
+    (
+        "confirm-delete",
+        [
+            "لا شيء محدد.",
+            "يُحذف من القائمة تحميل واحد. ما نُزّل منه يبقى على القرص.",
+            "يُحذف من القائمة تحميلان. ما نُزّل منهما يبقى على القرص.",
+            "يُحذف من القائمة 3 تحميلات. ما نُزّل منها يبقى على القرص.",
+            "يُحذف من القائمة 11 تحميلًا. ما نُزّل منها يبقى على القرص.",
+            "يُحذف من القائمة 100 تحميل. ما نُزّل منها يبقى على القرص.",
         ],
     ),
     (
@@ -265,6 +287,20 @@ const ENGLISH: &[(&str, [&str; 2])] = &[
     ("import-done", ["1 download added.", "2 downloads added."]),
     ("connections-count", ["1 connection", "2 connections"]),
     ("queues-count", ["1 queue", "2 queues"]),
+    (
+        "confirm-delete-done",
+        [
+            "1 finished download shown is taken off the list. The file itself stays where it is.",
+            "2 finished downloads shown are taken off the list. The files themselves stay where they are.",
+        ],
+    ),
+    (
+        "confirm-delete",
+        [
+            "1 download is taken off the list. What was downloaded stays on the disk.",
+            "2 downloads are taken off the list. What was downloaded stays on the disk.",
+        ],
+    ),
     ("files-count", ["1 file", "2 files"]),
     ("seconds-left", ["1 second", "2 seconds"]),
     ("minutes-left", ["1 minute", "2 minutes"]),
@@ -672,6 +708,11 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-connections-value", &["active", "total"]),
     ("details-file-map", &["size"]),
     ("details-from-to", &["folder", "site"]),
+    // M5.5: a time already formatted, an HTTP status code, and a number
+    // shown alone (no noun after it).
+    ("queue-starts", &["time"]),
+    ("st-error", &["code"]),
+    ("footer-selected", &["number"]),
     // The engine's own words (English), and two sizes formatted beforehand.
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
@@ -690,6 +731,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("progress-label", &["count", "percent"]),
     ("queue-window", &["start", "stop"]),
     ("queues-count", &["count"]),
+    ("confirm-delete-done", &["count"]),
+    ("confirm-delete", &["count"]),
     ("seconds-left", &["count"]),
     ("settings-browser-failed", &["browser", "error"]),
     ("settings-browser-ok", &["browser"]),
@@ -798,7 +841,7 @@ const WHOLE_TEXTS: &[Whole] = &[
     },
     Whole {
         key: "import-kept",
-        ar: (&[("names", "NAMES")], "هذه القوائم أبقت إعداداتها: NAMES."),
+        ar: (&[("names", "NAMES")], "هذه الطوابير أبقت إعداداتها: NAMES."),
         en: (
             &[("names", "NAMES")],
             "These queues kept their own settings: NAMES.",
@@ -830,6 +873,21 @@ const WHOLE_TEXTS: &[Whole] = &[
             &[("theirs", "THEIRS"), ("ours", "OURS")],
             "The new link is to another file: its size is THEIRS, this download's OURS.",
         ),
+    },
+    Whole {
+        key: "queue-starts",
+        ar: (&[("time", "TIME")], "يبدأ TIME"),
+        en: (&[("time", "TIME")], "Starts TIME"),
+    },
+    Whole {
+        key: "st-error",
+        ar: (&[("code", "CODE")], "خطأ CODE"),
+        en: (&[("code", "CODE")], "Error CODE"),
+    },
+    Whole {
+        key: "footer-selected",
+        ar: (&[("number", "NUMBER")], "التحديد: NUMBER"),
+        en: (&[("number", "NUMBER")], "Selected: NUMBER"),
     },
     Whole {
         key: "footer-limit",

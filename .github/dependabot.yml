@@ -20,6 +20,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+    ignore:
+      # TypeScript 7 (the native compiler) has no JavaScript API, and
+      # svelte-check 4.7.7 accepts only ^5 || ^6 (#54). Remove this when
+      # svelte-check supports TypeScript 7.
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
     schedule:
