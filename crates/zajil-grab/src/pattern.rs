@@ -137,12 +137,19 @@ impl fmt::Display for PatternError {
                 f,
                 "character {at}: `\\` only goes before one of [ ] {{ }} * , (write %5C for a backslash)"
             ),
-            PaddedEnd { at, start, end } => write!(
-                f,
-                "character {at}: the end {end} starts with a zero but the start {start} does not: \
-                 write both with the same number of digits, such as [{}-{end}]",
-                format_args!("{:0>width$}", start, width = end.len())
-            ),
+            PaddedEnd { at, start, end } => {
+                write!(
+                    f,
+                    "character {at}: the end {end} starts with a zero but the start {start} \
+                     does not: write both with the same number of digits"
+                )?;
+                // A suggestion only for a short end: a width beyond 65535
+                // would make `format!` panic (review of #113).
+                if end.len() <= MAX_PADDED_WIDTH {
+                    write!(f, ", such as [{start:0>width$}-{end}]", width = end.len())?;
+                }
+                Ok(())
+            }
             WidthTooLarge { at, width, max } => write!(
                 f,
                 "character {at}: {width} digits with zeros on the left, more than {max}"
@@ -602,9 +609,29 @@ fn range(inner: &str, at: usize) -> Result<Part, PatternError> {
     })
 }
 
+/// A `--from` or `--to` as an error shows it: cut to 20 characters.
+fn shown_bound(text: &str) -> String {
+    if text.chars().count() > MAX_PADDED_WIDTH {
+        format!(
+            "{}…",
+            text.chars().take(MAX_PADDED_WIDTH).collect::<String>()
+        )
+    } else {
+        text.to_owned()
+    }
+}
+
 /// The `*` counter from `--from`, `--to` and `--width`; the `*` is
 /// character `at`.
 fn star_range(star: &Star, at: usize) -> Result<Part, PatternError> {
+    // `--from` and `--to` come from outside the pattern and its length cap:
+    // no number or letter needs more than a u64's 20 digits.
+    if star.from.len() > MAX_PADDED_WIDTH || star.to.len() > MAX_PADDED_WIDTH {
+        return Err(PatternError::BadCounter {
+            from: shown_bound(&star.from),
+            to: shown_bound(&star.to),
+        });
+    }
     if let Some(width) = star.width
         && !(1..=MAX_WIDTH).contains(&width)
     {
@@ -1263,10 +1290,9 @@ mod tests {
         let to = format!("{}3", "0".repeat(65_535));
         assert_eq!(
             expand("http://h/f*", Some(&star(&big, &to, None)), MAX_URLS).unwrap_err(),
-            PatternError::WidthTooLarge {
-                at: 11,
-                width: 65_536,
-                max: 10
+            PatternError::BadCounter {
+                from: format!("{}…", "0".repeat(20)),
+                to: format!("{}…", "0".repeat(20)),
             }
         );
         assert_eq!(
@@ -1373,5 +1399,22 @@ mod tests {
     fn the_same_url_is_made_once() {
         assert_eq!(urls("http://h/{a,a,b}"), ["http://h/a", "http://h/b"]);
         assert_eq!(urls("http://h/{..,b}/x"), ["http://h/x", "http://h/b/x"]);
+    }
+
+    /// Review of #113: a padded end too long to suggest a fix for, and a
+    /// `--to` longer than any number, are shown without panicking.
+    #[test]
+    fn long_bounds_are_shown_without_panicking() {
+        let to = format!("0{}3", "0".repeat(70_000));
+        let err = expand("http://h/f*", Some(&star("1", &to, None)), MAX_URLS).unwrap_err();
+        assert!(matches!(err, PatternError::BadCounter { .. }), "{err:?}");
+        let text = err.to_string();
+        assert!(text.len() < 300, "{}", text.len());
+        let err = PatternError::PaddedEnd {
+            at: 10,
+            start: "1".into(),
+            end: format!("0{}", "0".repeat(70_000)),
+        };
+        assert!(!err.to_string().contains("such as"));
     }
 }
