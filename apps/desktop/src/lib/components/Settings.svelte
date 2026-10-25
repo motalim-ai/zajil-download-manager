@@ -87,6 +87,20 @@
       () => {},
     );
   });
+  // The drop box (M5.5): off at first.
+  let dropBox = $state(false);
+  onMount(() => {
+    api.dropBoxShown().then(
+      (shown) => (dropBox = shown),
+      () => {},
+    );
+  });
+  async function setDropBox(shown: boolean) {
+    const before = dropBox;
+    dropBox = shown;
+    await api.setDropBox(shown).catch(() => (dropBox = before));
+  }
+
   async function setCloseQuits(quits: boolean) {
     const before = closeQuits;
     closeQuits = quits;
@@ -261,6 +275,15 @@
       <span>{locale.t("settings-closing-label")}</span>
     </label>
     <p class="hint">{locale.t(hasTray ? "settings-closing-hint" : "settings-closing-no-tray")}</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("drop-box")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={dropBox} onchange={(e) => void setDropBox(e.currentTarget.checked)} />
+      <span>{locale.t("settings-drop-box-label")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-drop-box-hint")}</p>
   </fieldset>
 
   <fieldset>

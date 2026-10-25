@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AfterChoice } from "./bindings/AfterChoice";
+import type { ConfirmTexts } from "./bindings/ConfirmTexts";
 import type { Countdown } from "./bindings/Countdown";
 import type { PlanChange } from "./bindings/PlanChange";
 import type { QueuePlan } from "./bindings/QueuePlan";
@@ -17,6 +18,11 @@ export const scheduleApi = {
   saveQueue: (name: string, change: PlanChange) => invoke<void>("save_queue", { name, change }),
   moveInQueue: (id: number, up: boolean) => invoke<void>("move_in_queue", { id, up }),
   startQueue: (name: string) => invoke<void>("start_queue", { name }),
+  /** «Choose a file…» (#142): Rust shows the picker and asks to confirm,
+   * then saves it; the chosen path, or null. The page sends no path. */
+  chooseAfterOpen: (name: string, texts: ConfirmTexts) =>
+    invoke<string | null>("choose_after_open", { name, texts }),
+  clearAfterOpen: (name: string) => invoke<void>("clear_after_open", { name }),
   /** This run only: never saved. */
   setAfter: (queue: string, choice: AfterChoice) => invoke<void>("set_after", { queue, choice }),
   countdown: () => invoke<Countdown | null>("countdown"),

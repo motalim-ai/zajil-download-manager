@@ -10,6 +10,7 @@
 
 mod closing;
 mod complete;
+mod dropbox;
 mod live;
 mod menu;
 mod schedule;
@@ -236,6 +237,11 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            tauri_app.add_capability(dropbox::CAPABILITY)?;
+            // The drop box, if the user left it shown.
+            if tauri_app.state::<closing::Closing>().prefs().drop_box {
+                let _ = dropbox::show(tauri_app.handle(), true);
+            }
             // The close button hides the window into the tray (`closing.rs`).
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
@@ -340,6 +346,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -378,6 +386,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::set_after,
         schedule::countdown,
         schedule::cancel_after,
+        schedule::choose_after_open,
+        schedule::clear_after_open,
         complete::set_show_complete,
         complete::complete_info,
         update::update_notice,
@@ -401,6 +411,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        dropbox::drop_box_shown,
+        dropbox::set_drop_box,
         quit_heard,
         settings,
         save_settings,
@@ -439,6 +451,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         schedule::set_after,
         schedule::countdown,
         schedule::cancel_after,
+        schedule::choose_after_open,
+        schedule::clear_after_open,
         complete::set_show_complete,
         complete::complete_info,
         update::update_notice,
@@ -553,6 +567,7 @@ fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
     closing: State<'_, closing::Closing>,
     show: String,
+    drop_box: String,
     quit: String,
     notice_title: String,
     notice: String,
@@ -561,7 +576,7 @@ fn set_tray_texts<R: tauri::Runtime>(
         title: notice_title,
         body: notice,
     });
-    tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+    tray::set_texts(&handle, &show, &drop_box, &quit).map_err(|e| e.to_string())
 }
 
 /// Whether closing the main window quits Zajil (the settings), and whether
@@ -645,7 +660,10 @@ async fn run_queues(handle: tauri::AppHandle) {
         if stop.is_requested() {
             return;
         }
-        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser);
+        // Queues started now, outside their window (#125, the schedule window).
+        let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
+        let runner = queue_runner(&engine, &store, &categories, &connections, &from_browser)
+            .run_now(run_now);
         let result = runner
             .run(&stop, &mut |event: QueueEvent| {
                 let changed = {
@@ -674,8 +692,12 @@ async fn run_queues(handle: tauri::AppHandle) {
                 () = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
             let store = store.clone();
+            let run_now = handle.state::<schedule::SharedAfter>().run_now.clone();
             let waiting = tokio::task::spawn_blocking(move || {
                 store.load().map_err(|e| e.to_string()).map(|q| {
+                    // No runner looks meanwhile: a queue started now and
+                    // paused at once leaves the set here (review of #125).
+                    schedule::prune_run_now(&run_now, &q);
                     q.queues
                         .iter()
                         .flat_map(|q| &q.items)
@@ -1691,6 +1713,9 @@ fn set_status(queues: &mut QueuesFile, ids: &[u64], status: Status) -> Result<()
             item.status = status;
             if status == Status::Waiting {
                 item.error = None;
+                // Started by the user: its queue's tries count from 0
+                // (#142).
+                item.failed_tries = 0;
             }
         }
     }

@@ -456,14 +456,15 @@ schedule-move = Move to queue…
 schedule-empty = No downloads in this queue.
 schedule-start-now = Start now
 schedule-started = The queue has started.
-schedule-closed-now = The queue is outside its time now: its downloads wait for its next start.
 schedule-save = Save
 schedule-saved = Saved.
 schedule-close = Close
 schedule-tries = Tries per file
 schedule-after-open = And open a file or program after it:
 schedule-after-open-pick = Choose a file…
-schedule-soon = Coming soon
+schedule-after-open-clear = Remove
+schedule-after-open-confirm = Zajil will open this file or program each time every download of this queue is done. Save it only if you trust it.
+schedule-after-open-ok = Save it
 
 ## الاكتمال
 
@@ -561,3 +562,10 @@ tb-earlier = Move “{ $name }” earlier
 tb-later = Move “{ $name }” later
 tb-reset = Reset
 tb-done = Done
+
+## The drop box (M5.5, an IDM touch)
+drop-box = Drop box
+drop-hint = Drag a link here to download it. A right-click hides it.
+tray-drop-box = Show the drop box
+settings-drop-box-label = Show the drop box above all windows
+settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; a right-click hides it.

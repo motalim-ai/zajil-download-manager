@@ -15,11 +15,19 @@ start: string | null, stop: string | null,
  */
 days: Array<string>, 
 /**
- * It has a schedule and is outside its window now: «Start now» makes
- * its downloads wait for the next window.
+ * It has a schedule and is outside its window now («Start now» runs
+ * it anyway, #125).
  */
 closed_now: boolean, 
 /**
  * What the user chose for after it, this run (never saved).
  */
-after: AfterChoice, };
+after: AfterChoice, 
+/**
+ * Tries for each download (#142), 1 when it has none of its own.
+ */
+max_tries: number, 
+/**
+ * The file or program opened when it is done (#142).
+ */
+after_open: string | null, };
