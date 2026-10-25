@@ -59,6 +59,11 @@ pub fn sanitize_file_name(raw: &str) -> String {
     }
     if is_windows_reserved(&name) {
         name.insert(0, '_');
+        // The `_` may take a name at the limit past it (found with the
+        // user's own names, #103): shortened again, it keeps the `_`.
+        if name.len() > MAX_NAME_BYTES {
+            name = tidy(shorten(&name));
+        }
     }
     name
 }
@@ -439,6 +444,44 @@ mod tests {
         assert!(safe.len() <= MAX_NAME_BYTES);
         assert!(safe.ends_with(".pdf"));
         assert!(safe.starts_with("ملف"));
+    }
+
+    /// Review of #103: a reserved name at the limit came out one byte
+    /// over it, and so was not clean by its own rule.
+    #[test]
+    fn a_reserved_name_at_the_limit_stays_within_it_and_clean() {
+        for total in 196..=MAX_NAME_BYTES + 2 {
+            for stem in ["CON", "nul ", "LPT1"] {
+                let raw = format!("{stem}.{}", "a".repeat(total - stem.len() - 1));
+                let safe = sanitize_file_name(&raw);
+                assert!(safe.len() <= MAX_NAME_BYTES, "{total}: {safe:?}");
+                assert!(safe.starts_with('_'), "{safe:?}");
+                assert_eq!(sanitize_file_name(&safe), safe, "{total}");
+            }
+        }
+    }
+
+    /// What it returns is clean by its own rule: names stored once cleaned
+    /// (the user's file name, #103) are cleaned to themselves.
+    #[test]
+    fn a_clean_name_is_cleaned_to_itself() {
+        let long_arabic = format!("{}.pdf", "ملف".repeat(200));
+        let long_dots = format!("{}.{}", "ع".repeat(99), "e".repeat(300));
+        for raw in [
+            "report.pdf",
+            "../../تقرير الربع.zip",
+            "  .hidden. ",
+            "setup\u{202E}fdp.exe",
+            "فیلم\u{200C}ها.mp4",
+            "a<b>c:d|e?f*g\"h",
+            "COM1.txt",
+            "",
+            long_arabic.as_str(),
+            long_dots.as_str(),
+        ] {
+            let once = sanitize_file_name(raw);
+            assert_eq!(sanitize_file_name(&once), once, "{raw:?}");
+        }
     }
 
     #[test]

@@ -480,6 +480,7 @@ impl Runner {
                             return Ok(None);
                         }
                         item.status = Status::Active;
+                        item.last_try = Some(crate::state::now_rfc3339());
                         // Started while held: that is the user's OK.
                         if item.needs_ok {
                             item.needs_ok = false;
@@ -500,12 +501,21 @@ impl Runner {
                 });
                 let stop = Stop::new();
                 let limit = SpeedLimit::new(item.limit, engine.clock());
-                let mut engine = engine.with_own_limit(limit.clone());
-                // From a page, not yet started by the user: a file that can
-                // run code is held by the name the download itself gets
-                // (review of #90: the probe's name could differ).
-                if item.from_page && !item.ok_given {
-                    engine = engine.holding(Arc::new(crate::category::runs_code));
+                let mut engine = engine
+                    .with_own_limit(limit.clone())
+                    .named(item.name.as_deref());
+                // Not yet started by the user, a file that can run code is
+                // held, by the names the download itself gets (review of
+                // #90: the probe's name could differ): from a page, by the
+                // name it is saved under; renamed by the user (#103), when
+                // that name can run code and the server's could not.
+                let from_page = item.from_page;
+                if !item.ok_given && (from_page || item.name.is_some()) {
+                    let hold: crate::HoldCheck = Arc::new(move |server: &str, saved: &str| {
+                        use crate::category::runs_code;
+                        runs_code(saved) && (from_page || !runs_code(server))
+                    });
+                    engine = engine.holding(hold);
                 }
                 if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
@@ -559,8 +569,24 @@ impl Runner {
                                 match tokio::task::spawn_blocking(move || store.load()).await {
                                     Ok(Ok(categories)) => {
                                         let given = item.dir.clone();
+                                        let chosen = item.category;
                                         let choose = move |name: &str, url: &reqwest::Url| {
-                                            categories.folder_for(name, url.host_str(), &given)
+                                            // The user's category first (#103);
+                                            // one removed since counts as none.
+                                            match chosen
+                                                .as_deref()
+                                                .and_then(|id| categories.get(id))
+                                            {
+                                                Some(category) => category
+                                                    .folder
+                                                    .clone()
+                                                    .unwrap_or_else(|| given.clone()),
+                                                None => categories.folder_for(
+                                                    name,
+                                                    url.host_str(),
+                                                    &given,
+                                                ),
+                                            }
                                         };
                                         engine
                                             .download_choosing_until(
