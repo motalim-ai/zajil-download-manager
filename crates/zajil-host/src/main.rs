@@ -156,27 +156,19 @@ fn start_app(data_dir: &Path) -> Result<(), String> {
         command
     };
     #[cfg(windows)]
-    {
+    let spawned = {
         use std::os::windows::process::CommandExt;
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         // Out of the browser's job if it allows that; inside it otherwise.
-        if command()
+        command()
             .creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP)
             .spawn()
-            .is_ok()
-        {
-            return Ok(());
-        }
-        return command()
-            .creation_flags(CREATE_NEW_PROCESS_GROUP)
-            .spawn()
-            .map(drop)
-            .map_err(|e| format!("cannot start Zajil: {e}"));
-    }
+            .or_else(|_| command().creation_flags(CREATE_NEW_PROCESS_GROUP).spawn())
+    };
     #[cfg(not(windows))]
-    command()
-        .spawn()
+    let spawned = command().spawn();
+    spawned
         .map(drop)
         .map_err(|e| format!("cannot start Zajil: {e}"))
 }
