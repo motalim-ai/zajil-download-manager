@@ -235,9 +235,13 @@ flowchart LR
 
 **`unsafe`**: ممنوع في كل المكتبات (`forbid`)، إلا في `zajil-platform` حيث هو `deny`، ومسموح فقط في وحدة `fs` لاستدعاءات نظام لا توفرها المكتبة القياسية: إعادة التسمية دون استبدال (`renameat2` في لينكس، و`renamex_np` في ماك، و`MoveFileExW` في ويندوز)، و`MOVEFILE_WRITE_THROUGH`، وعدد الروابط الصلبة في ويندوز. ومنذ M2: حجز المساحة (`fallocate` في لينكس، و`F_PREALLOCATE` في ماك)، والملف المتناثر في ويندوز (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`statvfs` و`statfs` و`GetDiskFreeSpaceExW`). ومنذ M3: حذف قائمة الصلاحيات الموروثة في ماك (`acl_set_fd_np`، وقراءتها بـ `acl_get_fd_np` للفحص)، وملف لا يقرؤه إلا صاحبه في ويندوز (`CreateFileW` مع قائمة صلاحيات محمية من `ConvertStringSecurityDescriptorToSecurityDescriptorW`، وقراءتها بـ `GetNamedSecurityInfoW` للفحص). ومنذ M3 أيضًا وحدة `power` في ويندوز: `AdjustTokenPrivileges` و`InitiateShutdownW` و`SetSuspendState`. ومنذ M4 وحدة `session` في ويندوز: `SetWindowSubclass` و`DefSubclassProc`، لالتقاط انتهاء الجلسة في نافذة التطبيق (#49). ومنذ M5 وحدة `native_host` في ويندوز: دوال الريجستري (`RegCreateKeyExW` و`RegSetValueExW` و`RegGetValueW` و`RegDeleteKeyW` و`RegQueryInfoKeyW`) تحت `HKCU` فقط، لتسجيل مضيف الإضافة. كل استدعاء معه تعليق `SAFETY`.
 
-**`NativeHostRegistrar` (M5، `native_host`)**:
+**`NativeHostRegistrar` (M5، `native_host`، وتنفيذه `SystemRegistrar`)**:
 - **للمستخدم الحالي وحده**، ولا شيء على مستوى الجهاز.
-- **يُسجَّل المتصفح المثبَّت فقط**: مجلده في ماك ولينكس، ومفتاح المورّد في ويندوز. ولا يُنشأ أبدًا شيء لمتصفح غير مثبَّت، فلا يبقى شيء بعد إلغاء التسجيل: يُحذف الـ manifest ومفتاح الريجستري، ومعهما مجلد أو مفتاح `NativeMessagingHosts` إن بقي فارغًا.
+- **يُسجَّل كل متصفح مدعوم، مثبَّتًا كان أو لا.** فمجلد المتصفح أو مفتاحه لا يظهر إلا بعد أول تشغيل له، ومعرفة «المثبَّت» من المجلدات تخطئ في الاتجاهين: Firefox في ماك ملفاته في `Firefox` لا في `Mozilla`، وFirefox الجديد في لينكس في `~/.config/mozilla`، وقد يوجد مجلد `NativeMessagingHosts` لمتصفح غير مثبَّت. والمتصفح الذي يُثبَّت لاحقًا يجد المضيف مباشرة.
+- **إلغاء التسجيل** يحذف الـ manifest، وملفًا مؤقتًا بقي من تسجيل انقطع، ومفتاح الريجستري، ثم كل مجلد أو مفتاح فوقها بقي فارغًا، حتى مجلد المتصفح (في ماك حتى `Application Support`، ولا يُحذف هو). فما أنشأه التسجيل يذهب، وما فيه شيء آخر يبقى.
+- **في لينكس** مجلد Chrome وChromium وEdge هو `$CHROME_CONFIG_HOME`، وإلا `$XDG_CONFIG_HOME`، وإلا `~/.config`، كما يقرؤه Chromium. وFirefox يبقى `~/.mozilla/native-messaging-hosts` حتى لو كانت ملفاته في `~/.config/mozilla`، كما في كوده.
+- **ما لا يغطيه** (ADR-0005 يذكر snap وflatpak خطرًا): متصفحات Flatpak، وChromium من snap، تعمل في عزل لا يشغّل برنامجًا خارجه، فلا يُسجَّل شيء داخلها. ومتصفح من متجر مايكروسوفت قد يحتفظ بنسخته الخاصة من `HKCU`، ولم يُفحص بعد. والتجربة مع متصفحات حقيقية تأتي مع الإضافة (PR 3).
+- **الـ manifest** يُكتب في ملف مؤقت جديد خاص بصاحبه (`create_private`، فرابط مكانه يُرفض)، ثم يحل محل القديم. ومسار مضيف ليس Unicode صالحًا يُرفض، لأن الـ manifest لا يحمله كما هو.
 - **معرّفات الإضافة تُفحص** قبل أن تدخل ملفًا يثق به المتصفح: 32 حرفًا من `a` إلى `p` في عائلة Chrome، و`name@domain` أو `{uuid}` في Firefox. ومسار المضيف يجب أن يكون مطلقًا.
 
 **`PowerControl` (M3)**:
@@ -253,7 +257,7 @@ flowchart LR
 
 | الواجهة | ويندوز | ماك | لينكس |
 |---|---|---|---|
-| تسجيل مضيف Native Messaging (`zajil_platform::native_host`، M5) | ملف manifest في `<مجلد البيانات>/native-messaging/<المتصفح>.json`، والقيمة الافتراضية لمفتاح `HKCU\Software\<المورّد>\NativeMessagingHosts\io.github.motalim_ai.zajil.host` تشير إليه | ملف manifest في `~/Library/Application Support/<المتصفح>/NativeMessagingHosts/` (Google/Chrome، وChromium، وMicrosoft Edge، وMozilla) | ملف manifest في `~/.config/<المتصفح>/NativeMessagingHosts/` لـ Chrome وChromium وEdge، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
+| تسجيل مضيف Native Messaging (`zajil_platform::native_host`، M5) | ملف manifest في `<مجلد البيانات>/native-messaging/<المتصفح>.json`، والقيمة الافتراضية لمفتاح `HKCU\Software\<المورّد>\NativeMessagingHosts\io.github.motalim_ai.zajil.host` تشير إليه | ملف manifest في `~/Library/Application Support/<المتصفح>/NativeMessagingHosts/` (Google/Chrome، وChromium، وMicrosoft Edge، وMozilla) | ملف manifest في `<config>/<المتصفح>/NativeMessagingHosts/` لـ Chrome وChromium وEdge (`<config>` هو `$CHROME_CONFIG_HOME` أو `$XDG_CONFIG_HOME` أو `~/.config`)، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
 | الحافظة | Win32 Clipboard | NSPasteboard | X11 أو Wayland |
 | الإشعارات | Windows notifications | Notification Center | freedesktop notifications (D-Bus) |
 | التشغيل مع بدء النظام | مفتاح `Run` في الريجستري | LaunchAgent (ملف plist في `~/Library/LaunchAgents`) | ملف `.desktop` في `~/.config/autostart` |

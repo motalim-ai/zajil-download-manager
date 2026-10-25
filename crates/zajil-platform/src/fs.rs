@@ -250,7 +250,7 @@ pub fn check_then_rename(from: &Path, to: &Path) -> io::Result<()> {
 
 /// Retries `op` while it fails with an error another program can cause for
 /// a moment (Windows sharing and access errors). About one second in total.
-fn with_retry(mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+pub(crate) fn with_retry(mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
     let mut delay = Duration::from_millis(10);
     for _ in 0..8 {
         match op() {
