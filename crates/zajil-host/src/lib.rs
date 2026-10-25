@@ -401,8 +401,14 @@ fn check(request: &Request) -> Result<(), String> {
             page,
             media,
             cookies,
+            private,
             ..
         } => {
+            // A private window's cookies never go (review: the extension
+            // never sends them; refused here too).
+            if *private && cookies.is_some() {
+                return Err("a private window's video comes without cookies".into());
+            }
             check_url(page, "page")?;
             if let Some(media) = media {
                 check_url(media, "video URL")?;
@@ -806,7 +812,7 @@ mod tests {
     fn a_video_is_read_with_its_page_and_checked_like_a_download() {
         assert_eq!(
             parse(
-                br#"{"type":"video","protocol_version":1,"page":"https://example.com/watch","media":"https://cdn.example.com/v.mp4","cookies":"a=1","private":true}"#
+                br#"{"type":"video","protocol_version":1,"page":"https://example.com/watch","media":"https://cdn.example.com/v.mp4","cookies":"a=1"}"#
             )
             .unwrap(),
             Request::Video {
@@ -814,7 +820,7 @@ mod tests {
                 page: "https://example.com/watch".into(),
                 media: Some("https://cdn.example.com/v.mp4".into()),
                 cookies: Some("a=1".into()),
-                private: true,
+                private: false,
             }
         );
         assert_eq!(
@@ -853,6 +859,10 @@ mod tests {
             (
                 r#"{"type":"video","protocol_version":1,"page":"https://example.com/","url":"https://example.com/"}"#,
                 "unknown field",
+            ),
+            (
+                r#"{"type":"video","protocol_version":1,"page":"https://example.com/","cookies":"a=1","private":true}"#,
+                "without cookies",
             ),
         ] {
             let err = parse(message.as_bytes()).expect_err(message);
