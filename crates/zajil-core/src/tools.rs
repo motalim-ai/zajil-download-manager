@@ -62,43 +62,50 @@ pub struct Pinned {
     pub sha256: String,
 }
 
-/// yt-dlp's stable release that Zajil runs. A newer one comes with a new
-/// Zajil release, after its tests pass (ADR-0009, section 7).
-pub const YT_DLP_VERSION: &str = "2026.10.21";
+/// The pinned yt-dlp (`tools/yt-dlp/pins.txt`): its stable version, then
+/// `<os>-<arch> <release file> <sha256>` lines. One file for the program
+/// and the CI, which downloads the same files for its tests. A newer
+/// version comes with a new Zajil release, after its tests pass (ADR-0009,
+/// section 7).
+const YT_DLP_PINS: &str = include_str!("../../../tools/yt-dlp/pins.txt");
 
-/// The pinned yt-dlp file for `target`: the official standalone program,
-/// with the SHA-256 from the release's signed `SHA2-256SUMS` (signature
-/// checked against yt-dlp's key `AC0CBBE6848D6A873464AF4E57CF65933B5A7581`
-/// when the version was pinned).
-fn yt_dlp(target: Target) -> Pinned {
-    let (file, sha256) = match (target.os, target.arch) {
-        (Os::Windows, Arch::X86_64) => (
-            "yt-dlp.exe",
-            "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555",
-        ),
-        (Os::Windows, Arch::Aarch64) => (
-            "yt-dlp_arm64.exe",
-            "1380a9f105302764e6a5d383c2f07238ae242f0f4fbf3414aea00e56619a79b3",
-        ),
-        // One file for Apple silicon and Intel.
-        (Os::Macos, _) => (
-            "yt-dlp_macos",
-            "7a6fe71d7d680f1fb0ac18d4949873d77db2859e90017c0f44bd94b23be4ee40",
-        ),
-        (Os::Linux, Arch::X86_64) => (
-            "yt-dlp_linux",
-            "d8bd33fca9d5b23bd5b9952b3fca36db5c46331933fda9f598a3da14ce2c243f",
-        ),
-        (Os::Linux, Arch::Aarch64) => (
-            "yt-dlp_linux_aarch64",
-            "e137c2171b0b8ef648e6136e86aa70c65923e93e434f01c93901d64744b190aa",
-        ),
+/// The pinned version of yt-dlp.
+pub fn yt_dlp_version() -> &'static str {
+    YT_DLP_PINS
+        .lines()
+        .find_map(|line| line.strip_prefix("version "))
+        .expect("pins.txt has a version line")
+        .trim()
+}
+
+/// The name of `target` in pins.txt.
+fn target_name(target: Target) -> String {
+    let os = match target.os {
+        Os::Windows => "windows",
+        Os::Macos => "macos",
+        Os::Linux => "linux",
     };
-    Pinned {
-        version: YT_DLP_VERSION.to_owned(),
-        url: format!("https://github.com/yt-dlp/yt-dlp/releases/download/{YT_DLP_VERSION}/{file}"),
-        sha256: sha256.to_owned(),
-    }
+    let arch = match target.arch {
+        Arch::X86_64 => "x86_64",
+        Arch::Aarch64 => "aarch64",
+    };
+    format!("{os}-{arch}")
+}
+
+/// The pinned yt-dlp file for `target`, if pins.txt has one.
+fn yt_dlp(target: Target) -> Option<Pinned> {
+    let wanted = target_name(target);
+    let version = yt_dlp_version();
+    YT_DLP_PINS.lines().find_map(|line| {
+        let mut words = line.split_whitespace();
+        (words.next()? == wanted).then_some(())?;
+        let (file, sha256) = (words.next()?, words.next()?);
+        Some(Pinned {
+            version: version.to_owned(),
+            url: format!("https://github.com/yt-dlp/yt-dlp/releases/download/{version}/{file}"),
+            sha256: sha256.to_owned(),
+        })
+    })
 }
 
 /// What a [`Toolbox`] downloads: a tool and a target to the pinned file,
@@ -108,7 +115,7 @@ pub type Pins = dyn Fn(Tool, Target) -> Option<Pinned> + Send + Sync;
 /// The files pinned in this build of Zajil.
 pub fn pinned(tool: Tool, target: Target) -> Option<Pinned> {
     match tool {
-        Tool::YtDlp => Some(yt_dlp(target)),
+        Tool::YtDlp => yt_dlp(target),
         // Pinned once the first tools-ffmpeg release is published by
         // .github/workflows/ffmpeg.yml.
         Tool::Ffmpeg | Tool::Ffprobe => None,
@@ -429,7 +436,7 @@ mod tests {
     fn every_target_has_a_pinned_yt_dlp_over_https() {
         for os in [Os::Windows, Os::Macos, Os::Linux] {
             for arch in [Arch::X86_64, Arch::Aarch64] {
-                let pin = yt_dlp(Target { os, arch });
+                let pin = yt_dlp(Target { os, arch }).expect("a pin for every target");
                 assert!(
                     pin.url
                         .starts_with("https://github.com/yt-dlp/yt-dlp/releases/download/")
@@ -440,7 +447,7 @@ mod tests {
                         .bytes()
                         .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
                 );
-                assert_eq!(pin.version, YT_DLP_VERSION);
+                assert_eq!(pin.version, yt_dlp_version());
             }
         }
     }
