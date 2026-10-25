@@ -14,6 +14,7 @@
   import Categories from "./lib/components/Categories.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
+  import AddLink from "./lib/components/AddLink.svelte";
   import ProgressWindow from "./windows/ProgressWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
@@ -48,6 +49,8 @@
   let addScene = $state<{ url: string; probe: ProbeView } | null>(null);
   // The «progress» scene: the first demo download's progress window.
   let progressScene = $state(false);
+  // The «link» scene: «Add a link» with a link from the clipboard.
+  let linkScene = $state(false);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -692,6 +695,7 @@
         },
       };
     if (screen === "progress") progressScene = true;
+    if (screen === "link") linkScene = true;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
       await tick();
@@ -771,10 +775,12 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if linkScene}
+  <div class="scene" class:mac={onMac()}><AddLink url="https://cdn.example.org/courses/rust/part-2.mp4" fromClipboard={true} onok={() => {}} oncancel={() => {}} /></div>
 {:else if progressScene}
-  <ProgressWindow id={1} />
+  <div class="scene" class:mac={onMac()}><ProgressWindow id={1} /></div>
 {:else if addScene}
-  <AddDialog
+  <div class="scene" class:mac={onMac()}><AddDialog
     url={addScene.url}
     probe={addScene.probe}
     error={null}
@@ -785,7 +791,7 @@
     oncancel={() => {}}
     onchoosefolder={async () => null}
     onnewcategory={() => {}}
-  />
+  /></div>
 {:else}
   <div class="window">
     <TitleBar />
@@ -882,6 +888,16 @@
 {/if}
 
 <style>
+  /* A window scene (the add, link and progress windows, drawn here for
+     the screenshots): on macOS the main window's own title bar is hidden
+     (#118), and the real windows have the system's above their content. */
+  .scene {
+    height: 100%;
+  }
+  .scene.mac {
+    box-sizing: border-box;
+    padding-top: 28px;
+  }
   .window {
     display: flex;
     flex-direction: column;

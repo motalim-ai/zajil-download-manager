@@ -253,6 +253,18 @@ pub fn run() {
                         Some("progress") => Some(windows::PROGRESS_SIZE),
                         _ => None,
                     };
+                    // macOS: the system's title bar is drawn by the page in
+                    // a scene (the main window's own is hidden, #118).
+                    let size = size.map(|(w, h)| {
+                        (
+                            w,
+                            if cfg!(target_os = "macos") {
+                                h + 28.0
+                            } else {
+                                h
+                            },
+                        )
+                    });
                     ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
