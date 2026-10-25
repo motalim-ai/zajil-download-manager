@@ -833,3 +833,34 @@ fn the_browser_s_page_is_never_printed() {
         "{shown}"
     );
 }
+
+/// Security review #84: a download held for the user's OK does not start
+/// while paused, and its hold is cleared once the user starts it.
+#[tokio::test]
+async fn a_held_download_starts_only_when_the_user_starts_it() {
+    let server = TestServer::http();
+    server.put("/setup.exe", FileSpec::new(random_bytes(50_000, 96)));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/setup.exe"), dir.path());
+    store
+        .update(|q| {
+            let item = q.item_mut(id).unwrap();
+            item.status = Status::Paused;
+            item.needs_ok = true;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    assert!(server.gets("/setup.exe").is_empty(), "it started by itself");
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!((item.status, item.needs_ok), (Status::Done, false));
+}

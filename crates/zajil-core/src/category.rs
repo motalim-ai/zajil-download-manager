@@ -302,6 +302,81 @@ impl CategoriesFile {
 
 /// `programs`, `my-books`: 1 to [`MAX_ID_CHARS`] lowercase ASCII letters,
 /// digits, `-` or `_`.
+/// File types that can run code when opened (security review #84):
+/// programs and installers, scripts, Java, macOS images and packages,
+/// shortcuts and system settings files, Office files that can hold macros,
+/// and disk images, which hand files inside them on without the mark of a
+/// file from the internet.
+pub const RUNS_CODE: &[&str] = &[
+    // Windows programs, installers and scripts
+    "exe",
+    "msi",
+    "msix",
+    "msixbundle",
+    "msp",
+    "appx",
+    "appxbundle",
+    "com",
+    "scr",
+    "cpl",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "hta",
+    "lnk",
+    "reg",
+    // Java, macOS and Unix
+    "jar",
+    "dmg",
+    "pkg",
+    "mpkg",
+    "app",
+    "command",
+    "sh",
+    "run",
+    // Office files that can hold macros
+    "doc",
+    "dot",
+    "docm",
+    "dotm",
+    "xls",
+    "xlt",
+    "xlsm",
+    "xltm",
+    "xlsb",
+    "xlam",
+    "ppt",
+    "pot",
+    "pps",
+    "pptm",
+    "potm",
+    "ppsm",
+    "ppam",
+    "sldm",
+    // Disk images
+    "iso",
+    "img",
+    "vhd",
+    "vhdx",
+];
+
+/// Whether a file named `name` can run code when opened (its extension is
+/// in [`RUNS_CODE`], whatever its case).
+pub fn runs_code(name: &str) -> bool {
+    // Windows drops trailing dots and spaces: `setup.exe.` is `setup.exe`.
+    name.trim_end_matches(['.', ' '])
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .is_some_and(|ext| RUNS_CODE.contains(&ext.as_str()))
+}
+
 pub fn check_id(id: &str) -> Result<(), CategoryError> {
     let ok = (1..=MAX_ID_CHARS).contains(&id.len())
         && id
@@ -631,6 +706,49 @@ impl CategoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Security review #84: what the owner listed, any case, and a name
+    /// that only looks like one (`setup.exe.zip`, a trailing dot or space,
+    /// which Windows drops) seen for what it is.
+    #[test]
+    fn files_that_can_run_code_are_known() {
+        for name in [
+            "setup.exe",
+            "Setup.EXE",
+            "a.msi",
+            "run.bat",
+            "run.cmd",
+            "x.ps1",
+            "s.scr",
+            "a.js",
+            "a.vbs",
+            "app.jar",
+            "Zajil.dmg",
+            "a.pkg",
+            "Zajil.app",
+            "install.sh",
+            "report.docm",
+            "sheet.xlsm",
+            "old.doc",
+            "slides.pptm",
+            "image.iso",
+            "setup.exe.",
+            "setup.exe ",
+        ] {
+            assert!(runs_code(name), "{name}");
+        }
+        for name in [
+            "a.zip",
+            "setup.exe.zip",
+            "film.mp4",
+            "notes.txt",
+            "report.docx",
+            "exe",
+            "",
+        ] {
+            assert!(!runs_code(name), "{name}");
+        }
+    }
 
     /// Review of #48: the add dialog says what matched, a site or the
     /// extension, and a site wins as in `classify`.

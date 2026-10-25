@@ -118,6 +118,7 @@ fn d(
         // The night queue's waiting archive came from a browser that is
         // not open (M5).
         waits_for_browser: id == 5,
+        needs_ok: false,
     }
 }
 

@@ -37,4 +37,9 @@ segments: number, error: string | null,
  * It waits for its browser's cookies after a restart, and that
  * browser is not open (M5): «افتح المتصفح ليكمل».
  */
-waits_for_browser: boolean, };
+waits_for_browser: boolean, 
+/**
+ * A file that can run code, from the browser: it waits for the user
+ * to start it (security review #84).
+ */
+needs_ok: boolean, };

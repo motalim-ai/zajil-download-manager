@@ -267,6 +267,7 @@ impl QueuesFile {
                     error: None,
                     limit: ei.limit,
                     categorize,
+                    needs_ok: false,
                     added_at: ei.added_at.clone(),
                     // An export says nothing about a browser.
                     browser: None,

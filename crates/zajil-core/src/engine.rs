@@ -1745,6 +1745,17 @@ impl Transfer {
 /// Completes a download whose bytes are all written to `part`: syncs it,
 /// records that everything is on disk, renames it to its final name (or a
 /// numbered one) and removes the state file.
+/// The origin (`scheme://host[:port]`) the download's bytes came from: its
+/// final address, else its link.
+fn origin_of(state: &DownloadState) -> Option<String> {
+    [&state.final_url, &state.url]
+        .into_iter()
+        .filter_map(|u| Url::parse(u).ok())
+        .map(|u| u.origin())
+        .find(|o| o.is_tuple())
+        .map(|o| o.ascii_serialization())
+}
+
 pub(crate) async fn finish_download(
     part: File,
     mut state: DownloadState,
@@ -1777,6 +1788,14 @@ pub(crate) async fn finish_download(
             });
         }
     };
+    // From the internet: the system warns before it runs, and Office opens
+    // it in Protected View (security review #84). The link's origin only:
+    // its path and query may hold a token. A file system that cannot keep
+    // the mark (FAT32, exFAT) keeps the file without it.
+    if let Some(origin) = origin_of(&state) {
+        let marked = file.clone();
+        let _ = blocking(move || zajil_platform::origin::mark(&marked, &origin)).await;
+    }
     // The download is complete. A state file that cannot be removed is
     // left behind rather than reported as a failed download.
     let _ = std::fs::remove_file(&state_file);

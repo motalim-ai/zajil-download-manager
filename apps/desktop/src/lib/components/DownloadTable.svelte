@@ -83,7 +83,7 @@
           </td>
           <td class="num">{speed(locale.lang, locale.digits, d.speed)}</td>
           <td class="num muted">{d.size === null ? "" : left(locale.lang, locale.digits, d.size - d.done, d.speed)}</td>
-          <td><StatusChip status={d.status} browser={d.waits_for_browser} /></td>
+          <td><StatusChip status={d.status} browser={d.waits_for_browser} held={d.needs_ok} /></td>
         </tr>
       {/each}
     </tbody>

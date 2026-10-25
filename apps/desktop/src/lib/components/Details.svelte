@@ -42,6 +42,13 @@
       <p class="from">
         {locale.t("details-from-to", { site: d.host ?? "", folder: d.folder })}
       </p>
+      {#if d.needs_ok}
+        <div class="held" role="status">
+          <Icon name="alert" />
+          <span>{locale.t("details-needs-ok")}</span>
+          <button class="btn" onclick={onresume}><Icon name="down" />{locale.t("add-start")}</button>
+        </div>
+      {/if}
       {#if d.waits_for_browser}
         <div class="browser" role="status">
           <Icon name="link" />
@@ -133,6 +140,18 @@
   .from {
     color: var(--muted);
     margin: 2px 0 0;
+    font-size: 13px;
+  }
+  .held {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 12px 0 0;
+    padding: 8px 12px;
+    border-radius: 9px;
+    background: var(--amber-bg);
+    color: var(--amber);
     font-size: 13px;
   }
   .browser {

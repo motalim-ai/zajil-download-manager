@@ -582,7 +582,7 @@ async fn add<R: tauri::Runtime>(
     let id = tokio::task::spawn_blocking(move || {
         let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
             .map_err(StoreError::Refused)?;
-        add_blocking(&store, &request, &given, None)
+        add_blocking(&store, &request, &given, None, false)
     })
     .await
     .map_err(blocking_err)?
@@ -1293,18 +1293,37 @@ fn from_extension(
             // The browser's cookies (when the user allowed them) and page,
             // for the check and then the download: in memory only.
             let from = zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
-            let why = match reach(url, &from) {
-                Ok(probe) => not_the_file(&probe, filename.as_deref()),
-                Err(why) => Some(why),
+            let probe = match reach(url, &from) {
+                Ok(probe) => probe,
+                Err(why) => {
+                    return zajil_host::Response::refused(format!(
+                        "Zajil cannot download it: {why}"
+                    ));
+                }
             };
-            if let Some(why) = why {
+            if let Some(why) = not_the_file(&probe, filename.as_deref()) {
                 return zajil_host::Response::refused(format!("Zajil cannot download it: {why}"));
             }
+            // A file that can run code, from a page: never started by
+            // itself, the user starts it (security review #84). By the
+            // server's name, the browser's, and the link's.
+            let from_link = zajil_core::Url::parse(url).ok().and_then(|u| {
+                u.path_segments()
+                    .and_then(|mut s| s.next_back().map(str::to_owned))
+            });
+            let runs_code = [
+                Some(probe.name.as_str()),
+                filename.as_deref(),
+                from_link.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(zajil_core::category::runs_code);
             let add = AddRequest {
                 url: url.clone(),
                 queue: None,
                 folder: None,
-                start: true,
+                start: !runs_code,
                 limit: None,
             };
             // Where it came from, so that browser can be asked for the
@@ -1325,7 +1344,7 @@ fn from_extension(
                     referrer: page,
                     ticket: ticket.clone(),
                 });
-            match add_blocking(store, &add, given, source) {
+            match add_blocking(store, &add, given, source, runs_code) {
                 Ok(id) => {
                     headers
                         .lock()
@@ -1346,6 +1365,7 @@ fn add_blocking(
     request: &AddRequest,
     given: &Path,
     browser: Option<zajil_core::queue::BrowserSource>,
+    needs_ok: bool,
 ) -> Result<u64, StoreError> {
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
@@ -1358,6 +1378,8 @@ fn add_blocking(
         if !request.start {
             item.status = Status::Paused;
         }
+        // In the same write: the queue never sees it waiting.
+        item.needs_ok = needs_ok;
         Ok(id)
     })
 }
@@ -2356,6 +2378,65 @@ mod tests {
         let item = store.load().unwrap().item(id).unwrap().clone();
         assert_eq!(item.url, "https://example.com/new.iso");
         assert_eq!(item.status, Status::Waiting);
+    }
+
+    /// Security review #84: a file that can run code, from the browser, is
+    /// never started by itself: it waits, paused, for the user (by the
+    /// server's name, or the browser's); any other file starts at once.
+    #[test]
+    fn a_file_that_can_run_code_from_the_browser_waits_for_the_user() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let add = |url: &str, filename: Option<&str>, served: &'static str| {
+            let request = zajil_host::Request::Download {
+                protocol_version: 1,
+                url: url.into(),
+                referrer: None,
+                filename: filename.map(str::to_owned),
+                cookies: None,
+                instance: None,
+                store: None,
+                ticket: None,
+            };
+            let answer = from_extension(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                |_, _| Ok(probe_of(served, None)),
+            );
+            assert!(answer.ok, "{answer:?}");
+        };
+        add("https://example.com/setup.exe", None, "setup.exe");
+        add(
+            "https://example.com/get?id=7",
+            Some("report.docm"),
+            "report.docm",
+        );
+        add("https://example.com/files/a.zip", None, "a.zip");
+        let queues = store.load().unwrap();
+        let items: Vec<_> = queues.queues[0]
+            .items
+            .iter()
+            .map(|i| (i.status, i.needs_ok))
+            .collect();
+        assert_eq!(
+            items,
+            [
+                (Status::Paused, true),
+                (Status::Paused, true),
+                (Status::Waiting, false)
+            ]
+        );
+        // The page says why it waits, while it does.
+        let item = &queues.queues[0].items[0];
+        let categories = zajil_core::category::CategoriesFile::built_in();
+        let live = Live::default();
+        let view = view::download(item, DEFAULT_QUEUE, &categories, &live);
+        assert!(view.needs_ok);
+        let mut started = item.clone();
+        started.status = Status::Waiting;
+        assert!(!view::download(&started, DEFAULT_QUEUE, &categories, &live).needs_ok);
     }
 
     /// M5: a download from the extension keeps where it came from (the

@@ -469,6 +469,8 @@ impl Runner {
                             return Ok(None);
                         }
                         item.status = Status::Active;
+                        // Started: the user's OK, if it waited for one.
+                        item.needs_ok = false;
                         item.error = None;
                         Ok(Some(item.clone()))
                     })

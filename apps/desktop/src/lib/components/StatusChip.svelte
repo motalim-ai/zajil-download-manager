@@ -3,7 +3,8 @@
   import { locale } from "../i18n.svelte";
   import type { StatusView } from "../bindings/StatusView";
   /// `browser`: it waits for its browser's cookies after a restart (M5).
-  let { status, browser = false }: { status: StatusView; browser?: boolean } = $props();
+  /// `held`: a file that can run code, waiting for the user (review #84).
+  let { status, browser = false, held = false }: { status: StatusView; browser?: boolean; held?: boolean } = $props();
   const icons: Record<StatusView, string> = {
     active: "down",
     waiting: "clock",
@@ -13,7 +14,9 @@
   };
 </script>
 
-{#if browser}
+{#if held}
+  <span class="chip paused"><Icon name="alert" size={14} />{locale.t("status-needs-ok")}</span>
+{:else if browser}
   <span class="chip paused"><Icon name="link" size={14} />{locale.t("status-open-browser")}</span>
 {:else}
   <span class="chip {status}"><Icon name={icons[status]} size={14} />{locale.t(`status-${status}`)}</span>

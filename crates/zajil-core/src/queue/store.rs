@@ -111,6 +111,10 @@ pub struct Item {
     /// absent.
     #[serde(default)]
     pub categorize: bool,
+    /// A file that can run code, from the browser: it waits for the user
+    /// to start it (security review #84). Cleared when it starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_ok: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
     /// It came from the browser extension (M5): what Zajil needs to ask
@@ -301,6 +305,7 @@ impl QueuesFile {
             error: None,
             limit: None,
             categorize: false,
+            needs_ok: false,
             added_at: now_rfc3339(),
             browser: None,
         };
