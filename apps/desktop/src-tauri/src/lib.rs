@@ -582,7 +582,7 @@ async fn add<R: tauri::Runtime>(
     let id = tokio::task::spawn_blocking(move || {
         let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
             .map_err(StoreError::Refused)?;
-        add_blocking(&store, &request, &given, None, false, false)
+        add_blocking(&store, &request, &given, None, false, false, false)
     })
     .await
     .map_err(blocking_err)?
@@ -1285,6 +1285,7 @@ fn from_extension(
             instance,
             store: cookie_store,
             ticket,
+            private,
             ..
         } => {
             if let Err(err) = zajil_core::queue::check_url(url) {
@@ -1335,16 +1336,18 @@ fn from_extension(
                 page.set_fragment(None);
                 Some(page.to_string())
             });
-            let source = instance
-                .as_ref()
-                .map(|instance| zajil_core::queue::BrowserSource {
+            // A private window's download keeps nothing of where it came
+            // from (security review #84).
+            let source = instance.as_ref().filter(|_| !*private).map(|instance| {
+                zajil_core::queue::BrowserSource {
                     instance: instance.clone(),
                     store: cookie_store.clone(),
                     cookies: cookies.is_some(),
                     referrer: page,
                     ticket: ticket.clone(),
-                });
-            match add_blocking(store, &add, given, source, runs_code, true) {
+                }
+            });
+            match add_blocking(store, &add, given, source, runs_code, true, *private) {
                 Ok(id) => {
                     headers
                         .lock()
@@ -1367,6 +1370,7 @@ fn add_blocking(
     browser: Option<zajil_core::queue::BrowserSource>,
     needs_ok: bool,
     from_page: bool,
+    private: bool,
 ) -> Result<u64, StoreError> {
     store.update(|queues| {
         let queue = request.queue.as_deref().unwrap_or(DEFAULT_QUEUE);
@@ -1376,6 +1380,7 @@ fn add_blocking(
         item.categorize = request.folder.is_none();
         item.limit = request.limit.filter(|l| *l > 0);
         item.browser = browser;
+        item.private = private;
         if !request.start {
             item.status = Status::Paused;
         }
@@ -2399,6 +2404,7 @@ mod tests {
                 instance: None,
                 store: None,
                 ticket: None,
+                private: false,
             };
             let answer = from_extension(
                 &store,
@@ -2439,6 +2445,35 @@ mod tests {
         let mut started = item.clone();
         started.status = Status::Waiting;
         assert!(!view::download(&started, DEFAULT_QUEUE, &categories, &live).needs_ok);
+    }
+
+    /// Security review #84: a download from a private window keeps
+    /// nothing of where it came from (no instance, page or ticket), and is
+    /// marked to leave the queues once done.
+    #[test]
+    fn a_private_window_s_download_keeps_nothing_of_where_it_came_from() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.iso","referrer":"https://example.com/private-page","instance":"inst-1","ticket":"t-1","private":true}"#,
+        )
+        .unwrap();
+        let answer = from_extension(
+            &store,
+            &request,
+            data.path(),
+            &Default::default(),
+            |_, _| Ok(probe_of("b.iso", None)),
+        );
+        assert!(answer.ok, "{answer:?}");
+        let item = store.load().unwrap().queues[0].items[0].clone();
+        assert!(item.private);
+        assert_eq!(item.browser, None);
+        let text = std::fs::read_to_string(data.path().join("queues.json")).unwrap();
+        assert!(
+            !text.contains("private-page") && !text.contains("inst-1"),
+            "{text}"
+        );
     }
 
     /// M5: a download from the extension keeps where it came from (the

@@ -32,11 +32,13 @@ const TEXTS = {
  *
  * @param {import("./capture.js").Result | null} result
  * @param {keyof typeof TEXTS} where
- * @param {{ url?: string, sentCookies?: boolean }} [about] the link, for
- *   "Download with the browser"; whether cookies went with it
+ * @param {{ url?: string, sentCookies?: boolean, inPrivate?: boolean, store?: string }} [about]
+ *   the link, for "Download with the browser"; whether cookies went with
+ *   it; whether it came from a private window; its tab's cookie store (a
+ *   Firefox container)
  */
 async function report(result, where, about = {}) {
-  const { url, sentCookies = false } = about;
+  const { url, sentCookies = false, inPrivate = false, store } = about;
   if (result?.alsoInBrowser) {
     await notify(t("takenAlsoInBrowser"));
     return;
@@ -60,9 +62,12 @@ async function report(result, where, about = {}) {
     const text = t(menu ? keys[0] : keys[1]);
     /** @type {{ action: string, title: string }[]} */
     const actions = [];
-    if (!allowed) actions.push({ action: "allow", title: t("cookiesAllow") });
-    if (menu && url) actions.push({ action: "browser", title: t("downloadWithBrowser") });
-    await notify(text, actions, url);
+    // From a private window, no button (security review #84): "Download
+    // with the browser" would download it in the normal profile, with its
+    // cookies, into its history; and nothing is kept for a button.
+    if (!inPrivate && !allowed) actions.push({ action: "allow", title: t("cookiesAllow") });
+    if (!inPrivate && menu && url) actions.push({ action: "browser", title: t("downloadWithBrowser") });
+    await notify(text, actions, url, store);
     return;
   }
   await notify(t(TEXTS[where][result.outcome]));
@@ -77,8 +82,10 @@ async function report(result, where, about = {}) {
  * @param {string} message
  * @param {{ action: string, title: string }[]} [actions]
  * @param {string} [url]
+ * @param {string} [store] the tab's cookie store, so the browser downloads
+ *   it in the same container
  */
-async function notify(message, actions = [], url) {
+async function notify(message, actions = [], url, store) {
   const base = { type: "basic", iconUrl: "icons/128.png", title: t("extensionName"), message };
   let id;
   try {
@@ -87,7 +94,7 @@ async function notify(message, actions = [], url) {
     id = await api.notifications.create(base);
   }
   if (actions.length && id) {
-    await api.storage.session.set({ [`notice:${id}`]: { actions: actions.map((a) => a.action), url } }).catch(() => {});
+    await api.storage.session.set({ [`notice:${id}`]: { actions: actions.map((a) => a.action), url, store } }).catch(() => {});
   }
 }
 
@@ -101,7 +108,10 @@ async function act(id, index) {
   if (!notice) return;
   const action = index === null ? notice.actions[0] : notice.actions[index];
   if (action === "allow") await api.tabs.create({ url: api.runtime.getURL("welcome.html") });
-  if (action === "browser" && notice.url) await api.downloads.download({ url: notice.url });
+  // In the tab's own container (Firefox), not the default one (review #84).
+  if (action === "browser" && notice.url) {
+    await api.downloads.download(notice.store ? { url: notice.url, cookieStoreId: notice.store } : { url: notice.url });
+  }
   await api.storage.session.remove(key).catch(() => {});
   await api.notifications.clear(id).catch(() => {});
 }
@@ -154,14 +164,22 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
     // A private window's cookies are never sent: the link goes without.
     const cookies = tab?.incognito ? null : await cookieHeader(api, info.linkUrl, tab?.cookieStoreId);
     const from = {
-      instance: await instanceId(api),
+      // Nothing that ties a private window's download to this browser.
+      instance: tab?.incognito ? undefined : await instanceId(api),
       store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
       ticket: newTicket(),
     };
     const message = /** @type {Record<string, unknown>} */ (menuMessage(info, cookies, from));
+    // Zajil keeps nothing of a private window's download once it is done.
+    if (tab?.incognito) message.private = true;
     const result = await send(api, message);
     if (cookies && result.outcome === "taken") await rememberTicket(api, from.ticket, info.linkUrl, from.store);
-    await report(result, "menu", { url: info.linkUrl, sentCookies: Boolean(cookies) });
+    await report(result, "menu", {
+      url: info.linkUrl,
+      sentCookies: Boolean(cookies),
+      inPrivate: Boolean(tab?.incognito),
+      store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
+    });
   })();
 });
 

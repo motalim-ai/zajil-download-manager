@@ -91,6 +91,10 @@ pub enum Request {
         /// #80).
         #[serde(default)]
         ticket: Option<String>,
+        /// From a private window: Zajil keeps nothing of it once it is
+        /// done (security review #84).
+        #[serde(default)]
+        private: bool,
     },
     /// Keep this connection open (`runtime.connectNative`): the link on
     /// which Zajil asks this browser for cookies again (M5). Only the
@@ -684,6 +688,7 @@ mod tests {
                 instance: None,
                 store: None,
                 ticket: None,
+                private: false,
             }
         );
     }

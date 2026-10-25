@@ -270,6 +270,7 @@ impl QueuesFile {
                     needs_ok: false,
                     from_page: false,
                     ok_given: false,
+                    private: false,
                     added_at: ei.added_at.clone(),
                     // An export says nothing about a browser.
                     browser: None,

@@ -930,4 +930,42 @@ async fn a_download_from_a_page_is_held_by_the_name_the_download_itself_gets() {
     assert_eq!(item.status, Status::Done, "{item:?}");
     assert!(item.ok_given);
     assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+/// Security review #84: a private window's download leaves nothing in the
+/// queues once it is done; only its file.
+#[tokio::test]
+async fn a_private_window_s_download_leaves_nothing_once_done() {
+    let server = TestServer::http();
+    let data_bytes = random_bytes(50_000, 97);
+    server.put("/private.bin", FileSpec::new(data_bytes.clone()));
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let id = add(&store, "main", &server.url("/private.bin"), dir.path());
+    let other = add(&store, "main", &server.url("/private.bin"), dir.path());
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().private = true;
+            Ok(())
+        })
+        .unwrap();
+    let mut finished = Vec::new();
+    runner(&store)
+        .run(&Stop::new(), &mut |event| {
+            if let QueueEvent::Finished { item, .. } = event {
+                finished.push(item);
+            }
+        })
+        .await
+        .unwrap();
+    finished.sort();
+    assert_eq!(finished, [id, other]);
+    let queues = store.load().unwrap();
+    assert!(queues.item(id).is_none(), "the private one stayed");
+    assert_eq!(queues.item(other).unwrap().status, Status::Done);
+    let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
+    assert_eq!(text.matches("private.bin").count(), 1, "{text}");
+    assert_eq!(
+        fs::read(dir.path().join("private.bin")).unwrap(),
+        data_bytes
+    );
 }

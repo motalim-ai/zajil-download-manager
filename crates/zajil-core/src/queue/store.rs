@@ -123,6 +123,10 @@ pub struct Item {
     /// The user started it while it was held: it is not held again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ok_given: bool,
+    /// From a private window (security review #84): taken out of the
+    /// queues once it is done, so nothing of it stays but the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
     /// RFC 3339 time in UTC.
     pub added_at: String,
     /// It came from the browser extension (M5): what Zajil needs to ask
@@ -316,6 +320,7 @@ impl QueuesFile {
             needs_ok: false,
             from_page: false,
             ok_given: false,
+            private: false,
             added_at: now_rfc3339(),
             browser: None,
         };

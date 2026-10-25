@@ -659,6 +659,12 @@ impl Runner {
         ignore_removed(
             self.update(move |queues| {
                 let item = queues.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+                // A private window's download, done: nothing of it stays in
+                // the queues, only its file (security review #84).
+                if item.private && result.is_ok() {
+                    queues.remove(id)?;
+                    return Ok(());
+                }
                 match result {
                     Ok(done) => {
                         item.status = Status::Done;

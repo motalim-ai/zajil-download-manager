@@ -91,6 +91,7 @@ fn a_correct_message_reaches_the_app_and_wrong_ones_never_do() {
             instance: None,
             store: None,
             ticket: None,
+            private: false,
         }
     );
 
