@@ -24,12 +24,21 @@
 //!   break would add a header of its own to the request).
 
 use std::io::{self, Read, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 /// The protocol's version: an extension and an app of different versions
 /// say so clearly instead of misreading each other.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// How long one side waits for the other on the private channel.
+pub const CHANNEL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many connections the app serves at once; more wait their turn by
+/// being refused (the host says so).
+pub const MAX_CONNECTIONS: usize = 8;
+
 /// The largest message the host reads from the browser.
 pub const MAX_REQUEST: u32 = 64 * 1024;
 /// The largest message the host may send to the browser (Chrome and
@@ -208,6 +217,46 @@ fn check_url(url: &str, what: &str) -> Result<(), String> {
         return Err(format!("the {what} is longer than {MAX_URL} bytes"));
     }
     zajil_core::queue::check_url(url).map_err(|e| format!("the {what} is refused: {e}"))
+}
+
+/// The app's side of the channel: answers each connection with
+/// `handle(request)`, until the process ends. An error on one connection,
+/// or from `accept` (too many open files, a client gone before it was
+/// accepted), never ends the loop; at most [`MAX_CONNECTIONS`] are served
+/// at once, each given [`CHANNEL_TIMEOUT`] where the system allows it.
+pub fn serve(
+    listener: zajil_platform::ipc::Listener,
+    handle: impl Fn(Request) -> Response + Send + Sync + 'static,
+) {
+    let handle = Arc::new(handle);
+    let busy = Arc::new(AtomicUsize::new(0));
+    loop {
+        let mut stream = match listener.accept() {
+            Ok(stream) => stream,
+            Err(err) => {
+                eprintln!("zajil: the browser extension's channel: {err}");
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+        };
+        if busy.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            busy.fetch_sub(1, Ordering::SeqCst);
+            let _ = write_json(&mut stream, &Response::refused("Zajil is busy; try again"));
+            continue;
+        }
+        let (handle, busy) = (handle.clone(), busy.clone());
+        std::thread::spawn(move || {
+            let _ = stream.set_timeout(CHANNEL_TIMEOUT);
+            if let Ok(Some(message)) = read_frame(&mut stream, MAX_REQUEST) {
+                let answer = match parse(&message) {
+                    Ok(request) => handle(request),
+                    Err(why) => Response::refused(why),
+                };
+                let _ = write_json(&mut stream, &answer);
+            }
+            busy.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
 }
 
 #[cfg(test)]

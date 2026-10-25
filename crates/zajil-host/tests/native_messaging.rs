@@ -172,3 +172,35 @@ fn the_host_ends_when_the_browser_closes() {
         .unwrap();
     assert!(rest.is_empty());
 }
+
+/// Review of #62: an app that takes the connection and never answers
+/// cannot hold the browser's call: the host answers for it within its
+/// time limit, and keeps answering.
+#[test]
+fn an_app_that_never_answers_does_not_hold_the_browser() {
+    let data = tempfile::tempdir().unwrap();
+    let listener = zajil_platform::ipc::Listener::bind(data.path()).unwrap();
+    let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep = held.clone();
+    std::thread::spawn(move || {
+        while let Ok(stream) = listener.accept() {
+            keep.lock().unwrap().push(stream); // taken, never answered
+        }
+    });
+    let mut host = start_host(data.path());
+    let started = std::time::Instant::now();
+    send(&mut host, GOOD.as_bytes());
+    let response = answer(&mut host);
+    let took = started.elapsed();
+    assert!(!response.ok);
+    assert!(
+        response.error.unwrap().contains("did not answer"),
+        "the reason is said"
+    );
+    assert!(
+        took < zajil_host::CHANNEL_TIMEOUT + Duration::from_secs(5),
+        "took {took:?}"
+    );
+    send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
+    assert_eq!(answer(&mut host), Response::ok());
+}

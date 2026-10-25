@@ -18,8 +18,8 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
 use zajil_host::{
-    FrameError, MAX_REQUEST, MAX_RESPONSE, Request, Response, parse, read_frame, write_frame,
-    write_json,
+    CHANNEL_TIMEOUT, FrameError, MAX_REQUEST, MAX_RESPONSE, Request, Response, parse, read_frame,
+    write_frame, write_json,
 };
 use zajil_platform::AppPaths;
 
@@ -78,25 +78,42 @@ fn data_dir() -> Result<PathBuf, String> {
 /// Hands `request` to the app and returns its answer, as the app wrote it
 /// (checked to be a [`Response`]).
 fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, String> {
-    let mut stream = match zajil_platform::ipc::connect(data_dir, Duration::ZERO) {
+    // A short wait: the app may be busy accepting another connection.
+    let mut stream = match zajil_platform::ipc::connect(data_dir, Duration::from_millis(500)) {
         Ok(stream) => stream,
         Err(err) if not_running(&err) => {
             if std::env::var_os("ZAJIL_NO_LAUNCH").is_some() {
                 return Err("Zajil is not running".into());
             }
-            start_app()?;
+            start_app(data_dir)?;
             zajil_platform::ipc::connect(data_dir, START_PATIENCE)
                 .map_err(|e| format!("Zajil was started but does not answer: {e}"))?
         }
         Err(err) => return Err(format!("cannot reach Zajil: {err}")),
     };
-    let talk = |stream: &mut zajil_platform::ipc::Stream| -> io::Result<Vec<u8>> {
-        write_json(stream, request)?;
-        read_frame(stream, MAX_RESPONSE)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-            .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
+    // The talk runs on its own thread, so an app that never answers
+    // cannot hold the browser's call: after CHANNEL_TIMEOUT the host
+    // answers for it (Windows' pipes have no read timeout of their own).
+    let request = request.clone();
+    let (done, wait) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut talk = || -> io::Result<Vec<u8>> {
+            write_json(&mut stream, &request)?;
+            read_frame(&mut stream, MAX_RESPONSE)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
+        };
+        let _ = done.send(talk());
+    });
+    let answer = match wait.recv_timeout(CHANNEL_TIMEOUT) {
+        Ok(answer) => answer.map_err(|e| format!("Zajil did not answer: {e}"))?,
+        Err(_) => {
+            return Err(format!(
+                "Zajil did not answer within {} s",
+                CHANNEL_TIMEOUT.as_secs()
+            ));
+        }
     };
-    let answer = talk(&mut stream).map_err(|e| format!("Zajil did not answer: {e}"))?;
     serde_json::from_slice::<Response>(&answer)
         .map_err(|e| format!("Zajil's answer is not valid: {e}"))?;
     Ok(answer)
@@ -109,9 +126,11 @@ fn not_running(err: &io::Error) -> bool {
     )
 }
 
-/// Starts the app installed next to this program, detached from the
-/// browser's pipes.
-fn start_app() -> Result<(), String> {
+/// Starts the app installed next to this program, on the same data
+/// folder, detached from the browser: no pipes of its, its own process
+/// group on macOS and Linux, and on Windows out of the browser's job when
+/// the job allows it (Firefox kills its hosts' job when it closes them).
+fn start_app(data_dir: &Path) -> Result<(), String> {
     let here = std::env::current_exe().map_err(|e| format!("cannot find myself: {e}"))?;
     let app = here.with_file_name(if cfg!(windows) {
         "zajil-desktop.exe"
@@ -124,10 +143,39 @@ fn start_app() -> Result<(), String> {
             app.display()
         ));
     }
-    Command::new(&app)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+    let command = || {
+        let mut command = Command::new(&app);
+        command
+            .arg("--data-dir")
+            .arg(data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        command
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        // Out of the browser's job if it allows that; inside it otherwise.
+        if command()
+            .creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        return command()
+            .creation_flags(CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .map(drop)
+            .map_err(|e| format!("cannot start Zajil: {e}"));
+    }
+    #[cfg(not(windows))]
+    command()
         .spawn()
         .map(drop)
         .map_err(|e| format!("cannot start Zajil: {e}"))

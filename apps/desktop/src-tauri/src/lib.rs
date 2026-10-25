@@ -541,10 +541,9 @@ fn chosen_folder(folder: Option<&str>, download_dir: &Path) -> Result<PathBuf, S
 }
 
 /// The browser extension's requests, handed over by `zajil-host` on the
-/// user's private channel (ADR-0005, M5). One thread waits for
-/// connections; each carries one request and its answer. A second app on
-/// the same data folder cannot open the channel: it says so and goes on
-/// without it.
+/// user's private channel (ADR-0005, M5), served by `zajil_host::serve`.
+/// A second app on the same data folder cannot open the channel: it says
+/// so and goes on without it.
 fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf) {
     let listener = match zajil_platform::ipc::Listener::bind(&data) {
         Ok(listener) => listener,
@@ -554,34 +553,20 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
         }
     };
     std::thread::spawn(move || {
-        while let Ok(mut stream) = listener.accept() {
-            let handle = handle.clone();
-            std::thread::spawn(move || {
-                let Ok(Some(message)) =
-                    zajil_host::read_frame(&mut stream, zajil_host::MAX_REQUEST)
-                else {
-                    return;
-                };
-                let answer = match zajil_host::parse(&message) {
-                    Err(why) => zajil_host::Response::refused(why),
-                    Ok(request) if in_scene(&handle) => {
-                        let _ = request;
-                        zajil_host::Response::refused("a ui-test scene adds nothing")
-                    }
-                    Ok(request) => {
-                        let app = handle.state::<App>();
-                        let given = download_dir(&app.settings, &app.system_download_dir);
-                        let answer = from_extension(&app.store, &request, &given);
-                        if answer.ok {
-                            let _ = handle.emit("downloads-changed", ());
-                            tray::show_window(&handle);
-                        }
-                        answer
-                    }
-                };
-                let _ = zajil_host::write_json(&mut stream, &answer);
-            });
-        }
+        zajil_host::serve(listener, move |request| {
+            // In a ui-test scene, nothing reaches the queues.
+            if in_scene(&handle) {
+                return zajil_host::Response::refused("a ui-test scene adds nothing");
+            }
+            let app = handle.state::<App>();
+            let given = download_dir(&app.settings, &app.system_download_dir);
+            let answer = from_extension(&app.store, &request, &given);
+            if answer.ok {
+                let _ = handle.emit("downloads-changed", ());
+                tray::show_window(&handle);
+            }
+            answer
+        });
     });
 }
 
@@ -763,6 +748,38 @@ mod tests {
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+    }
+
+    /// M5, end to end on the real channel: a download sent as `zajil-host`
+    /// sends it reaches the app's loop (`zajil_host::serve`) and lands in
+    /// the queues file, from where the queue runner downloads it.
+    #[test]
+    fn a_download_through_the_real_channel_lands_in_the_queue() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let listener = zajil_platform::ipc::Listener::bind(data.path()).unwrap();
+        let (served, given) = (store.clone(), data.path().to_path_buf());
+        std::thread::spawn(move || {
+            zajil_host::serve(listener, move |request| {
+                from_extension(&served, &request, &given)
+            });
+        });
+        let mut stream =
+            zajil_platform::ipc::connect(data.path(), std::time::Duration::from_secs(5)).unwrap();
+        zajil_host::write_frame(
+            &mut stream,
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/b.iso"}"#,
+        )
+        .unwrap();
+        let answer = zajil_host::read_frame(&mut stream, zajil_host::MAX_RESPONSE)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<zajil_host::Response>(&answer).unwrap(),
+            zajil_host::Response::ok()
+        );
+        let queues = store.load().unwrap();
+        assert_eq!(queues.queues[0].items[0].url, "https://example.com/b.iso");
     }
 
     /// M5: a download from the extension lands in the default queue, by

@@ -605,7 +605,7 @@ mod imp {
 }
 
 #[cfg(windows)]
-pub(crate) use imp::owner_only;
+pub(crate) use imp::{owner_only, runs_as_current_user};
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -643,7 +643,9 @@ mod imp {
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
     use windows_sys::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
 
     use super::not_regular;
 
@@ -719,6 +721,20 @@ mod imp {
             bInheritHandle: 0,
         };
         Ok((attributes, guard))
+    }
+
+    /// Whether the process `pid` runs as the current user (the other end
+    /// of a pipe, `zajil_platform::ipc`).
+    pub(crate) fn runs_as_current_user(pid: u32) -> io::Result<bool> {
+        // SAFETY: plain call; a null handle is checked below.
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let process = Handle(process);
+        let (ours, theirs) = (UserSid::current()?, UserSid::of_process(process.0)?);
+        // SAFETY: both are valid SIDs, alive for the call.
+        Ok(unsafe { EqualSid(ours.as_psid(), theirs.as_psid()) } != 0)
     }
 
     pub fn create_private(path: &Path) -> io::Result<File> {
@@ -842,10 +858,17 @@ mod imp {
 
     impl UserSid {
         fn current() -> io::Result<Self> {
+            // SAFETY: the pseudo-handle of this process needs no closing.
+            Self::of_process(unsafe { GetCurrentProcess() })
+        }
+
+        /// The user a process runs as; `process` must allow
+        /// PROCESS_QUERY_LIMITED_INFORMATION.
+        fn of_process(process: HANDLE) -> io::Result<Self> {
             let mut token: HANDLE = std::ptr::null_mut();
-            // SAFETY: the pseudo-handle of this process needs no closing;
+            // SAFETY: `process` is a process handle with query access;
             // `token` is a writable handle.
-            if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
                 return Err(io::Error::last_os_error());
             }
             let token = Handle(token);
