@@ -6,6 +6,8 @@
   import type { SettingsChange } from "../bindings/SettingsChange";
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { onMount } from "svelte";
+  import { api } from "../api";
+  import type { IntegrationView } from "../bindings/IntegrationView";
 
   let {
     settings,
@@ -63,6 +65,23 @@
 
   // Launching at login is the system's own setting (a login item, a
   // registry value or an autostart file), read from it and changed in it.
+  // The browser integration: what the last "fix" said (M5).
+  const BROWSERS: Record<string, string> = { chrome: "Chrome", chromium: "Chromium", edge: "Microsoft Edge", firefox: "Firefox" };
+  let integration = $state<IntegrationView | null>(null);
+  let integrationProblem = $state<string | null>(null);
+  let fixing = $state(false);
+  async function fixIntegration() {
+    fixing = true;
+    try {
+      integration = await api.fixBrowserIntegration();
+      integrationProblem = null;
+    } catch (e) {
+      integrationProblem = String(e);
+    } finally {
+      fixing = false;
+    }
+  }
+
   let autostart = $state<boolean | null>(null);
   let autostartProblem = $state<string | null>(null);
   onMount(() => {
@@ -207,6 +226,29 @@
   </fieldset>
 
   <fieldset>
+    <legend>{locale.t("settings-browser")}</legend>
+    <p class="hint">{locale.t("settings-browser-hint")}</p>
+    <div class="row">
+      <button class="btn" disabled={fixing} onclick={() => void fixIntegration()}>{locale.t("settings-browser-fix")}</button>
+    </div>
+    {#if integrationProblem}
+      <p class="problem" role="alert">{integrationProblem}</p>
+    {:else if integration?.host_missing}
+      <p class="problem" role="alert">{locale.t("settings-browser-missing")}</p>
+    {:else if integration}
+      <ul class="browsers" role="status">
+        {#each integration.browsers as b (b.browser)}
+          <li class={b.error ? "problem" : "done"}>
+            {b.error
+              ? locale.t("settings-browser-failed", { browser: BROWSERS[b.browser] ?? b.browser, error: b.error })
+              : locale.t("settings-browser-ok", { browser: BROWSERS[b.browser] ?? b.browser })}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </fieldset>
+
+  <fieldset>
     <legend>{locale.t("settings-autostart")}</legend>
     <label class="choice">
       <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget.checked)} />
@@ -327,6 +369,11 @@
     gap: 6px;
     align-items: flex-start;
     color: var(--amber);
+  }
+  .browsers {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
   }
   .problem,
   .done {

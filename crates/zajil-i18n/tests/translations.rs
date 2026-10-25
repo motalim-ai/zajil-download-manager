@@ -688,6 +688,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("queue-window", &["start", "stop"]),
     ("queues-count", &["count"]),
     ("seconds-left", &["count"]),
+    ("settings-browser-failed", &["browser", "error"]),
+    ("settings-browser-ok", &["browser"]),
     ("settings-connections-hint", &["default", "max"]),
     ("size-bytes", &["value"]),
     ("size-gib", &["value"]),
@@ -829,6 +831,22 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "notify-failed-body",
         ar: (&[("name", "NAME"), ("reason", "REASON")], "NAME: REASON"),
         en: (&[("name", "NAME"), ("reason", "REASON")], "NAME: REASON"),
+    },
+    Whole {
+        key: "settings-browser-failed",
+        ar: (
+            &[("browser", "Firefox"), ("error", "ERR")],
+            "Firefox: لم يُسجَّل (ERR)",
+        ),
+        en: (
+            &[("browser", "Firefox"), ("error", "ERR")],
+            "Firefox: not registered (ERR)",
+        ),
+    },
+    Whole {
+        key: "settings-browser-ok",
+        ar: (&[("browser", "Chrome")], "Chrome: جاهز"),
+        en: (&[("browser", "Chrome")], "Chrome: ready"),
     },
     Whole {
         key: "queue-window",

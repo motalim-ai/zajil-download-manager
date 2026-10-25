@@ -222,6 +222,27 @@ pub struct SettingsChange {
     pub speed_limit: Option<u64>,
 }
 
+/// The browser integration (M5): `zajil-host` registered with each
+/// browser, or why not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IntegrationView {
+    /// `zajil-host` was not found next to the program (a development
+    /// build): nothing was registered.
+    pub host_missing: bool,
+    pub browsers: Vec<BrowserIntegrationView>,
+}
+
+/// One browser's registration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BrowserIntegrationView {
+    /// `chrome`, `chromium`, `edge` or `firefox`.
+    pub browser: String,
+    /// Why it failed; `null`: registered.
+    pub error: Option<String>,
+}
+
 /// What an import did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

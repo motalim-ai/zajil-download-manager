@@ -3,6 +3,7 @@
 // tests are in ../uitest/api.ts, never in a release build.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { IntegrationView } from "./bindings/IntegrationView";
 import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
 import type { ProbeView } from "./bindings/ProbeView";
@@ -33,6 +34,7 @@ export const api = {
     invoke<ImportView>("import_queues", { path, keepFolders }),
   onChange: (handler: () => void): Promise<UnlistenFn> => listen("downloads-changed", handler),
   showWindow: () => invoke<void>("show_window"),
+  fixBrowserIntegration: () => invoke<IntegrationView>("fix_browser_integration"),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),

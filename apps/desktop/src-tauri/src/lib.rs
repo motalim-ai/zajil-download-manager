@@ -27,6 +27,7 @@ use zajil_core::queue::{
 use zajil_core::settings::SettingsStore;
 use zajil_core::state::DownloadState;
 use zajil_core::{Engine, Options, Stop};
+use zajil_platform::native_host::{Browser, NativeHostRegistrar, SystemRegistrar};
 use zajil_platform::{AppPaths, SystemPaths};
 
 use crate::live::{Live, NOTIFY_EVERY, Notify};
@@ -51,6 +52,8 @@ pub struct App {
     connections: Arc<AtomicUsize>,
     /// Clipboard monitoring is on (the settings, M5).
     clipboard: Arc<AtomicBool>,
+    /// The data folder (`--data-dir` or the system's).
+    data_dir: PathBuf,
     live: Arc<Live>,
     stop: Stop,
     /// Set once the queues have stopped (their downloads recorded their
@@ -103,6 +106,7 @@ pub fn run() {
         system_download_dir,
         connections: Arc::new(AtomicUsize::new(connections)),
         clipboard: Arc::new(AtomicBool::new(clipboard)),
+        data_dir: data.clone(),
         live: Arc::new(Live::default()),
         stop: Stop::new(),
         stopped: tokio::sync::watch::Sender::new(false),
@@ -139,6 +143,18 @@ pub fn run() {
             tray::build(tauri_app)?;
             serve_extension(tauri_app.handle().clone(), data.clone());
             watch_clipboard(tauri_app.handle().clone());
+            // The browser integration, at each start: idempotent, and a
+            // browser installed since then finds Zajil. Not in a ui-test
+            // scene, whose files are demo ones.
+            if !in_scene(tauri_app.handle()) {
+                let data = data.clone();
+                std::thread::spawn(move || {
+                    let integration = integrate_browsers(&data);
+                    for problem in integration_problems(&integration) {
+                        eprintln!("zajil: the browser extension: {problem}");
+                    }
+                });
+            }
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -213,7 +229,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         try_category,
         export_queues,
         import_queues,
-        show_window
+        show_window,
+        fix_browser_integration
     ]
 }
 
@@ -237,6 +254,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         export_queues,
         import_queues,
         show_window,
+        fix_browser_integration,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -615,6 +633,113 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
     });
 }
 
+/// `zajil-host` next to this program (the installers put it there; in a
+/// development build, `cargo build -p zajil-host` into the same target
+/// folder does).
+fn host_path() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "zajil-host.exe"
+    } else {
+        "zajil-host"
+    };
+    let path = std::env::current_exe().ok()?.parent()?.join(name);
+    path.is_file().then_some(path)
+}
+
+/// Registers `zajil-host` with every supported browser for the current user
+/// (ADR-0005), each allowing only Zajil's extension: its fixed id in
+/// Chrome, Chromium and Edge, its Firefox id in Firefox.
+fn integrate_browsers(data: &Path) -> view::IntegrationView {
+    let Some(host) = host_path() else {
+        return view::IntegrationView {
+            host_missing: true,
+            browsers: Vec::new(),
+        };
+    };
+    match SystemRegistrar::for_current_user(data) {
+        Ok(registrar) => register_all(&registrar, &host),
+        Err(err) => view::IntegrationView {
+            host_missing: false,
+            browsers: Browser::ALL
+                .iter()
+                .map(|b| view::BrowserIntegrationView {
+                    browser: browser_name(*b).to_owned(),
+                    error: Some(err.to_string()),
+                })
+                .collect(),
+        },
+    }
+}
+
+/// [`integrate_browsers`] with a given registrar and host.
+fn register_all(registrar: &impl NativeHostRegistrar, host: &Path) -> view::IntegrationView {
+    use zajil_platform::ids::{EXTENSION_ID_CHROMIUM, EXTENSION_ID_FIREFOX};
+    let browsers = Browser::ALL
+        .iter()
+        .map(|&browser| {
+            let allowed = if browser == Browser::Firefox {
+                EXTENSION_ID_FIREFOX
+            } else {
+                EXTENSION_ID_CHROMIUM
+            };
+            view::BrowserIntegrationView {
+                browser: browser_name(browser).to_owned(),
+                error: registrar
+                    .register(browser, host, &[allowed])
+                    .err()
+                    .map(|e| e.to_string()),
+            }
+        })
+        .collect();
+    view::IntegrationView {
+        host_missing: false,
+        browsers,
+    }
+}
+
+fn browser_name(browser: Browser) -> &'static str {
+    match browser {
+        Browser::Chrome => "chrome",
+        Browser::Chromium => "chromium",
+        Browser::Edge => "edge",
+        Browser::Firefox => "firefox",
+    }
+}
+
+/// What went wrong, in words for the log.
+fn integration_problems(integration: &view::IntegrationView) -> Vec<String> {
+    if integration.host_missing {
+        return vec!["zajil-host is not next to the program, so no browser can reach Zajil".into()];
+    }
+    integration
+        .browsers
+        .iter()
+        .filter_map(|b| {
+            Some(format!(
+                "cannot register with {}: {}",
+                b.browser,
+                b.error.as_ref()?
+            ))
+        })
+        .collect()
+}
+
+/// "Fix the browser integration" (settings): registers again, and says
+/// how it went for each browser.
+#[tauri::command]
+async fn fix_browser_integration<R: tauri::Runtime>(
+    app: State<'_, App>,
+    handle: tauri::AppHandle<R>,
+) -> Result<view::IntegrationView, String> {
+    if in_scene(&handle) {
+        return Err("a ui-test scene registers nothing".into());
+    }
+    let data = app.data_dir.clone();
+    tokio::task::spawn_blocking(move || integrate_browsers(&data))
+        .await
+        .map_err(blocking_err)
+}
+
 /// Shows the window and brings it to the front: the page asks when it has
 /// taken a link from the clipboard.
 #[tauri::command]
@@ -943,6 +1068,80 @@ mod tests {
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+    }
+
+    /// M5: every browser is registered with `zajil-host`, each allowing
+    /// only Zajil's extension (its fixed id; the Firefox id in Firefox),
+    /// and nothing is left when unregistered.
+    #[test]
+    fn every_browser_is_registered_for_zajil_s_extension_only() {
+        use zajil_platform::native_host::{Browser, NativeHostRegistrar, SystemRegistrar};
+        let base = tempfile::tempdir().unwrap();
+        let home = base.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // A test registry root on Windows; only it, empty, may remain.
+        let root = format!(r"Software\ZajilDesktopTest-{}", std::process::id());
+        let registrar =
+            SystemRegistrar::under(&home, &base.path().join("data/native-messaging"), &root);
+        let host = base.path().join(if cfg!(windows) {
+            "zajil-host.exe"
+        } else {
+            "zajil-host"
+        });
+        let integration = register_all(&registrar, &host);
+        assert!(!integration.host_missing);
+        assert_eq!(integration.browsers.len(), 4);
+        for (browser, view) in Browser::ALL.iter().zip(&integration.browsers) {
+            assert_eq!(view.error, None, "{browser:?}");
+            assert!(registrar.is_registered(*browser).unwrap());
+            let manifest = std::fs::read_to_string(registrar.manifest_path(*browser)).unwrap();
+            let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+            assert_eq!(manifest["path"], host.to_str().unwrap());
+            let allowed = if *browser == Browser::Firefox {
+                serde_json::json!({ "allowed_extensions": [zajil_platform::ids::EXTENSION_ID_FIREFOX] })
+            } else {
+                serde_json::json!({ "allowed_origins": [format!("chrome-extension://{}/", zajil_platform::ids::EXTENSION_ID_CHROMIUM)] })
+            };
+            let (key, value) = allowed.as_object().unwrap().iter().next().unwrap();
+            assert_eq!(&manifest[key], value, "{browser:?}");
+        }
+        assert_eq!(integration_problems(&integration), Vec::<String>::new());
+        for browser in Browser::ALL {
+            registrar.unregister(browser).unwrap();
+        }
+        let mut left = Vec::new();
+        for entry in walk(base.path()) {
+            if entry.is_file() {
+                left.push(entry);
+            }
+        }
+        assert_eq!(left, Vec::<PathBuf>::new());
+    }
+
+    fn walk(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(walk(&path));
+            }
+            out.push(path);
+        }
+        out
+    }
+
+    /// No `zajil-host` next to the program: nothing is registered, and the
+    /// log says why.
+    #[test]
+    fn without_zajil_host_nothing_is_registered() {
+        let missing = view::IntegrationView {
+            host_missing: true,
+            browsers: Vec::new(),
+        };
+        assert_eq!(
+            integration_problems(&missing),
+            ["zajil-host is not next to the program, so no browser can reach Zajil"]
+        );
     }
 
     /// A clipboard for tests: what each look finds, in turn (`None`: no
