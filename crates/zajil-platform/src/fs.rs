@@ -175,6 +175,19 @@ pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {
     imp::only_user_or_root_can_change(path)
 }
 
+/// Whether no other user can put something else in place of what `dir`
+/// holds (a folder above a program Zajil runs): [`only_user_or_root_can_change`],
+/// or on macOS and Linux a sticky folder of the user or root (like `/tmp`:
+/// others may add, but never rename or remove what is not theirs). On
+/// Windows a volume's root counts too: its usual access list lets users
+/// add folders, not replace or remove those of others.
+pub fn no_other_user_can_replace_in(dir: &Path) -> io::Result<bool> {
+    if only_user_or_root_can_change(dir)? {
+        return Ok(true);
+    }
+    imp::others_only_add_in(dir)
+}
+
 /// Makes `dir` a folder that no other user can change, creating it and
 /// each missing parent as one: mode `0700` on macOS and Linux (whatever the
 /// umask, and on macOS without an inherited access list); on Windows an
@@ -491,6 +504,14 @@ mod imp {
             return Err(err);
         }
         Ok(file)
+    }
+
+    #[allow(unsafe_code)]
+    pub fn others_only_add_in(dir: &Path) -> io::Result<bool> {
+        let meta = std::fs::symlink_metadata(dir)?;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let me = unsafe { libc::geteuid() };
+        Ok(meta.is_dir() && (meta.uid() == me || meta.uid() == 0) && meta.mode() & 0o1000 != 0)
     }
 
     #[allow(unsafe_code)]
@@ -1059,6 +1080,11 @@ mod imp {
         // SAFETY: `len` UTF-16 units precede the NUL.
         let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, len) });
         Ok(text == TRUSTED_INSTALLER)
+    }
+
+    pub fn others_only_add_in(dir: &Path) -> io::Result<bool> {
+        // A volume's root (`C:\`) has no parent.
+        Ok(dir.is_absolute() && dir.parent().is_none())
     }
 
     pub fn only_user_or_root_can_change(path: &Path) -> io::Result<bool> {

@@ -2333,6 +2333,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "landlock"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cca98e95f35b29d469dade6724c6f96cec9236640f745a0e99b0334ec320ab1"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6222,6 +6233,7 @@ dependencies = [
  "arboard",
  "dirs 7.0.0",
  "getrandom 0.4.3",
+ "landlock",
  "libc",
  "objc2-app-kit",
  "thiserror 2.0.21",

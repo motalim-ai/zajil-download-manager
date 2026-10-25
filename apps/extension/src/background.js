@@ -6,9 +6,10 @@
 
 import { api, onNewDownload, pausesSafely } from "./compat.js";
 import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
-import { cookieHeader, cookiesAllowed } from "./cookies.js";
+import { cookieHeader, cookiesAllowed, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
+import { forget, forgetAll, note, originOf, streamFor } from "./streams.js";
 
 const MENU = "zajil-download-link";
 const MENU_VIDEO = "zajil-download-video";
@@ -223,8 +224,10 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
  * shows its formats. The page's cookies go with it when the user allowed
  * them, never from a private window; it is checked before any is read.
  * @param {any} info @param {any} tab
+ * @param {string} [doc] the document that asked (the button's sender), so
+ *   only its own playlist goes
  */
-async function sendVideo(info, tab) {
+async function sendVideo(info, tab, doc) {
   const isPrivate = Boolean(tab?.incognito);
   const page = videoMessage(info);
   if (!page) {
@@ -232,11 +235,80 @@ async function sendVideo(info, tab) {
     return;
   }
   const cookies = isPrivate ? null : await cookieHeader(api, /** @type {string} */ (page.page), tab?.cookieStoreId);
-  const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate }));
+  // The playlist the tab loaded for it (nothing is noted in a private one).
+  // Only while the permission lasts (review: none noted before it went).
+  const noted = !isPrivate && Number.isSafeInteger(tab?.id) && (await videoAllowed(api));
+  const want = { frame: Number.isSafeInteger(info.frameId) ? info.frameId : 0, doc, origin: originOf(info.frameUrl ?? info.pageUrl) };
+  const stream = noted ? await streamFor(api, tab.id, want) : undefined;
+  const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
   const result = await send(api, message);
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
   await report(result, "video");
 }
+
+// The "Download video" button (`video-button.js`) was pressed: the page,
+// its frame and its tab are the browser's word (the sender), never the
+// message's; only the video's address comes from the page.
+api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} */ sender) => {
+  if (sender?.id !== api.runtime.id || !sender.tab || message?.type !== "video-button") return;
+  const frameId = Number.isSafeInteger(sender.frameId) ? sender.frameId : 0;
+  const info = {
+    pageUrl: sender.tab.url,
+    frameUrl: frameId === 0 ? undefined : sender.url,
+    srcUrl: typeof message.src === "string" ? message.src : undefined,
+    frameId,
+  };
+  void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined);
+});
+
+/** The button's script, on every site while the video permissions last. */
+const BUTTON = {
+  id: "zajil-video-button",
+  js: ["video-button.js"],
+  matches: ["<all_urls>"],
+  allFrames: true,
+  runAt: "document_idle",
+  persistAcrossSessions: true,
+};
+
+/** @param {any} details */
+const onHeaders = (details) => void note(api, details);
+const WATCHED = { urls: ["<all_urls>"], types: ["main_frame", "xmlhttprequest", "media", "other"] };
+
+/** Starts or stops the video features as the permissions now are: the
+ * button's script registered or not, the playlists watched or not. */
+async function syncVideo() {
+  const allowed = await videoAllowed(api);
+  const requests = api.webRequest?.onHeadersReceived;
+  if (allowed && requests && !requests.hasListener(onHeaders)) {
+    try {
+      // Watching only: no "blocking".
+      requests.addListener(onHeaders, WATCHED, ["responseHeaders"]);
+    } catch {
+      // the permission went meanwhile
+    }
+  }
+  if (!allowed && requests?.hasListener(onHeaders)) requests.removeListener(onHeaders);
+  if (!allowed) await forgetAll(api);
+  if (!api.scripting) return;
+  const registered = await api.scripting.getRegisteredContentScripts({ ids: [BUTTON.id] }).catch(() => []);
+  if (allowed && !registered.length) await api.scripting.registerContentScripts([BUTTON]).catch(() => {});
+  if (!allowed && registered.length) await api.scripting.unregisterContentScripts({ ids: [BUTTON.id] }).catch(() => {});
+}
+
+// Added at once, at the top, when the permission is there: a background
+// stopped meanwhile is woken by the next playlist.
+if (api.webRequest?.onHeadersReceived) {
+  try {
+    api.webRequest.onHeadersReceived.addListener(onHeaders, WATCHED, ["responseHeaders"]);
+  } catch {
+    // not allowed
+  }
+}
+api.permissions?.onAdded?.addListener(() => void syncVideo());
+api.permissions?.onRemoved?.addListener(() => void syncVideo());
+api.tabs.onRemoved?.addListener((/** @type {number} */ tab) => void forget(api, tab));
+void syncVideo();
 
 // The last private window closed: Zajil takes its downloads out of its
 // queues and deletes what they left (review of #91). Only if one was sent
