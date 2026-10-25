@@ -32,6 +32,9 @@ pub struct WindowPrefs {
     /// Where the user left it.
     #[serde(default)]
     pub drop_place: Option<crate::dropbox::Place>,
+    /// Which sounds play (`sounds.rs`).
+    #[serde(default)]
+    pub sounds: crate::sounds::Sounds,
 }
 
 /// The texts of that notification, in the page's language.

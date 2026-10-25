@@ -700,3 +700,10 @@ about-tool-yt-dlp = { $tool } { $version }، بترخيص { $binary } للملف
 about-or-later = { $license } أو أحدث
 about-not-ours = زاجِل لا يملك هذه الأدوات، وهي لأصحابها:
 tool-license-yt-dlp = { $binary } للملف الذي ينزّله زاجِل (والكود المصدري بترخيص { $source })
+
+## Sounds (M5.5, an IDM touch)
+settings-sounds = الأصوات
+settings-sound-done = صوت عند اكتمال تحميل
+settings-sound-failed = صوت عند فشل تحميل
+settings-sound-queue = صوت عند انتهاء طابور
+settings-sound-try = جرّب الصوت

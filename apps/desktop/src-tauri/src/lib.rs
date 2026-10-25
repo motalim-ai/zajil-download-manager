@@ -15,6 +15,7 @@ mod live;
 mod menu;
 mod removal;
 mod schedule;
+mod sounds;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
@@ -359,6 +360,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        sounds::sound_prefs,
+        sounds::set_sound_prefs,
         video::video_pending,
         video::open_video,
         video::video_folder,
@@ -436,6 +439,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        sounds::sound_prefs,
+        sounds::set_sound_prefs,
         video::video_pending,
         video::open_video,
         video::video_folder,
