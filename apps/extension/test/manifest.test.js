@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { HOST, MAX_NAME, MAX_URL, NO_ANSWER, PROTOCOL_VERSION } from "../src/capture.js";
 
@@ -27,10 +27,11 @@ describe("the manifests", () => {
 
   it("hold a public key only", () => {
     const der = Buffer.from(chrome.key, "base64");
-    // SubjectPublicKeyInfo for RSA: SEQUENCE, then the rsaEncryption OID.
-    expect(der[0]).toBe(0x30);
-    expect(der.includes(Buffer.from("2a864886f70d010101", "hex"))).toBe(true);
-    expect(der.length).toBeLessThan(400);
+    const key = createPublicKey({ key: der, format: "der", type: "spki" });
+    expect(key.asymmetricKeyType).toBe("rsa");
+    expect(key.asymmetricKeyDetails.modulusLength).toBe(2048);
+    // Not readable as a private key in any form.
+    for (const type of ["pkcs8", "pkcs1"]) expect(() => createPrivateKey({ key: der, format: "der", type })).toThrow();
   });
 
   it("ask for the same few permissions, and no site", () => {
@@ -54,12 +55,16 @@ describe("the manifests", () => {
     const en = JSON.parse(read("../src/_locales/en/messages.json"));
     expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort());
     const used = new Set();
-    for (const file of ["background.js", "options.html", "manifest.chrome.json"]) {
-      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|t\("(\w+)"\)|: "(not[A-Z]\w+)")/g)) {
-        used.add(m[1] || m[2] || m[3] || m[4]);
+    for (const file of ["background.js", "options.html", "options.js", "manifest.chrome.json"]) {
+      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|t\("(\w+)"\)|getMessage\("(\w+)"\)|: "((?:not|menu)[A-Z]\w+)")/g)) {
+        used.add(m[1] || m[2] || m[3] || m[4] || m[5]);
       }
     }
-    for (const key of ["notRefused", "notAnswered", "notReachable", "menuDownloadLink"]) expect(used.has(key), key).toBe(true);
+    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "optionsSaved", "lang"]) {
+      expect(used.has(key), key).toBe(true);
+    }
+    expect(ar.lang.message).toBe("ar");
+    expect(en.lang.message).toBe("en");
     for (const key of used) expect(ar[key], key).toBeDefined();
   });
 });
@@ -71,6 +76,8 @@ describe("the protocol, as zajil-host has it", () => {
     expect(rustConst(host, "MAX_URL")).toBe("8 * 1024");
     expect(MAX_URL).toBe(8 * 1024);
     expect(Number(rustConst(host, "MAX_NAME"))).toBe(MAX_NAME);
-    expect(hostMain).toContain(`"${NO_ANSWER} {} s"`);
+    expect(hostMain).toContain(`"${NO_ANSWER[0]} within {} s"`);
+    expect(hostMain).toContain(`"${NO_ANSWER[0]}: {e}"`);
+    expect(hostMain).toContain(`"${NO_ANSWER[1]}: {e}"`);
   });
 });

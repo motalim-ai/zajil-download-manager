@@ -43,5 +43,23 @@
   },
   "optionsSaved": {
     "message": "Saved."
+  },
+  "lang": {
+    "message": "en"
+  },
+  "notAnsweredRunning": {
+    "message": "Zajil did not answer in time and may have taken the download, while the browser goes on with it too: look in Zajil, and cancel one of them if it is there twice."
+  },
+  "menuRefused": {
+    "message": "Zajil did not take this link."
+  },
+  "menuNotAnswered": {
+    "message": "Zajil did not answer in time, and may have taken the link: look in Zajil."
+  },
+  "menuNotReachable": {
+    "message": "The browser cannot reach Zajil. Install Zajil, or open its settings and choose “Fix the browser integration”."
+  },
+  "menuNotALink": {
+    "message": "This is not a link to a file Zajil can download."
   }
 }

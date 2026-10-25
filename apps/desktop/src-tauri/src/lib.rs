@@ -569,7 +569,8 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
             }
             let app = handle.state::<App>();
             let given = download_dir(&app.settings, &app.system_download_dir);
-            let answer = from_extension(&app.store, &request, &given);
+            let reach = |url: &str| reach_file(&app.engine, url);
+            let answer = from_extension(&app.store, &request, &given, reach);
             if answer.ok {
                 let _ = handle.emit("downloads-changed", ());
                 tray::show_window(&handle);
@@ -703,19 +704,50 @@ impl<C: zajil_platform::clipboard::Clipboard> ClipboardWatcher<C> {
     }
 }
 
+/// How long the app may take to reach the file before it answers the
+/// extension: within `zajil_host::CHANNEL_TIMEOUT` (10 s), so the host
+/// still has the answer.
+const EXTENSION_REACH: Duration = Duration::from_secs(7);
+
+/// Whether the engine reaches `url` now, as the add dialog does (the first
+/// response's headers only), within [`EXTENSION_REACH`].
+fn reach_file(engine: &Engine, url: &str) -> Result<(), String> {
+    let stop = Stop::new();
+    tauri::async_runtime::block_on(async {
+        match tokio::time::timeout(EXTENSION_REACH, engine.probe_until(url, &stop)).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(err)) => Err(err.to_string()),
+            Err(_) => {
+                stop.request();
+                Err("the server did not answer in time".to_owned())
+            }
+        }
+    })
+}
+
 /// What a request from the extension does: a download goes into the
-/// default queue, by category, as the add dialog adds one. The referrer,
-/// the suggested name and the cookies are checked by `zajil_host::parse`
-/// and carried, but not used yet: the engine sends no such headers until
-/// a later part of M5.
+/// default queue, by category, as the add dialog adds one, **once Zajil
+/// has reached the file itself** (`reach`): otherwise it is refused, and
+/// the extension leaves it to the browser (review of #70: a file behind a
+/// login, a referrer check or a one-time link would vanish from the browser
+/// and then fail in Zajil). The referrer, the suggested name and the
+/// cookies are checked by `zajil_host::parse` and carried, but not used
+/// yet: the engine sends no such headers until a later part of M5.
 fn from_extension(
     store: &QueueStore,
     request: &zajil_host::Request,
     given: &Path,
+    reach: impl FnOnce(&str) -> Result<(), String>,
 ) -> zajil_host::Response {
     match request {
         zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
         zajil_host::Request::Download { url, .. } => {
+            if let Err(err) = zajil_core::queue::check_url(url) {
+                return zajil_host::Response::refused(err.to_string());
+            }
+            if let Err(why) = reach(url) {
+                return zajil_host::Response::refused(format!("Zajil cannot download it: {why}"));
+            }
             let add = AddRequest {
                 url: url.clone(),
                 queue: None,
@@ -1029,7 +1061,7 @@ mod tests {
         let (served, given) = (store.clone(), data.path().to_path_buf());
         std::thread::spawn(move || {
             zajil_host::serve(listener, move |request| {
-                from_extension(&served, &request, &given)
+                from_extension(&served, &request, &given, |_| Ok(()))
             });
         });
         let mut stream =
@@ -1061,7 +1093,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            from_extension(&store, &request, data.path()),
+            from_extension(&store, &request, data.path(), |_| Ok(())),
             zajil_host::Response::ok()
         );
         let queues = store.load().unwrap();
@@ -1072,10 +1104,37 @@ mod tests {
         assert_eq!(item.status, Status::Waiting);
         let ping = zajil_host::parse(br#"{"type":"ping","protocol_version":1}"#).unwrap();
         assert_eq!(
-            from_extension(&store, &ping, data.path()),
+            from_extension(&store, &ping, data.path(), |_| panic!(
+                "a ping reaches nothing"
+            )),
             zajil_host::Response::ok()
         );
         assert_eq!(store.load().unwrap().queues[0].items.len(), 1);
+    }
+
+    /// A file Zajil cannot reach itself (behind a login, a referrer check,
+    /// or gone) is refused and nothing is added, so the extension leaves it
+    /// to the browser (review of #70).
+    #[test]
+    fn a_file_zajil_cannot_reach_is_refused_and_not_added() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let request = zajil_host::parse(
+            br#"{"type":"download","protocol_version":1,"url":"https://example.com/private.zip"}"#,
+        )
+        .unwrap();
+        let mut asked = Vec::new();
+        let answer = from_extension(&store, &request, data.path(), |url| {
+            asked.push(url.to_owned());
+            Err("the server answered 403 Forbidden".into())
+        });
+        assert!(!answer.ok);
+        assert_eq!(
+            answer.error.as_deref(),
+            Some("Zajil cannot download it: the server answered 403 Forbidden")
+        );
+        assert_eq!(asked, ["https://example.com/private.zip"]);
+        assert!(store.load().unwrap().queues[0].items.is_empty());
     }
 
     /// A folder that comes from the page is checked before anything is

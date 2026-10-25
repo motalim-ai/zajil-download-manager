@@ -4,8 +4,8 @@
 // Every listener is added at once, at the top: a Manifest V3 background
 // stops when idle and is woken by these events.
 
-import { api, onNewDownload } from "./compat.js";
-import { downloadMessage, send, shouldCapture, takeOver } from "./capture.js";
+import { api, onNewDownload, pausesSafely } from "./compat.js";
+import { menuMessage, send, shouldCapture, takeOver } from "./capture.js";
 import { load } from "./settings.js";
 
 const MENU = "zajil-download-link";
@@ -13,34 +13,40 @@ const MENU = "zajil-download-link";
 /** @param {string} key */
 const t = (key) => api.i18n.getMessage(key) || key;
 
+/** The notification text for each outcome Zajil did not take: for a
+ * captured download (paused first, or not: Firefox), and for a link sent
+ * from the menu, where no browser download exists. */
+const TEXTS = {
+  paused: { refused: "notRefused", unknown: "notAnswered", unreachable: "notReachable" },
+  running: { refused: "notRefused", unknown: "notAnsweredRunning", unreachable: "notReachable" },
+  menu: { refused: "menuRefused", unknown: "menuNotAnswered", unreachable: "menuNotReachable" },
+};
+
 /**
- * Tells the user what happened when Zajil did not take a download.
+ * Tells the user what happened when Zajil did not take it.
  * @param {import("./capture.js").Result | null} result
+ * @param {keyof typeof TEXTS} where
  */
-async function report(result) {
+async function report(result, where) {
   if (!result || result.outcome === "taken") {
     await api.action.setBadgeText({ text: "" });
     return;
   }
-  const key = {
-    refused: "notRefused",
-    unknown: "notAnswered",
-    unreachable: "notReachable",
-  }[result.outcome];
   await api.action.setBadgeText({ text: result.outcome === "unknown" ? "?" : "!" });
-  await api.notifications.create({
-    type: "basic",
-    iconUrl: "icons/128.png",
-    title: t("extensionName"),
-    message: t(key),
-  });
+  await notify(t(TEXTS[where][result.outcome]));
+}
+
+/** @param {string} message */
+async function notify(message) {
+  await api.notifications.create({ type: "basic", iconUrl: "icons/128.png", title: t("extensionName"), message });
 }
 
 onNewDownload(api, (item) => {
   void (async () => {
     const settings = await load(api);
     if (!shouldCapture(item, settings, api.runtime.id)) return;
-    await report(await takeOver(api, item));
+    const pause = pausesSafely(api);
+    await report(await takeOver(api, item, { pause }), pause ? "paused" : "running");
   })();
 });
 
@@ -49,9 +55,14 @@ api.runtime.onInstalled.addListener(() => {
 });
 
 api.contextMenus.onClicked.addListener((/** @type {any} */ info) => {
-  if (info.menuItemId !== MENU || !info.linkUrl) return;
+  if (info.menuItemId !== MENU) return;
   void (async () => {
-    await report(await send(api, downloadMessage(info.linkUrl, { referrer: info.pageUrl })));
+    const message = menuMessage(info);
+    if (!message) {
+      await notify(t("menuNotALink"));
+      return;
+    }
+    await report(await send(api, message), "menu");
   })();
 });
 

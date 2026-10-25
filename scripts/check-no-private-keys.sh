@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
 # Fails if the repository holds a private key (owner's decision on #7: the
-# extension's private key never enters the repository). Looks at every file
-# git tracks: key and certificate-store file names, and private-key text.
+# extension's private key never enters the repository): a key or
+# certificate-store file name among the tracked files, or private-key text
+# in a tracked file or anywhere in the history (a key added, then removed,
+# is still there). Fails too when it cannot look (not a git repository).
 # Usage: scripts/check-no-private-keys.sh [repository folder]
 set -euo pipefail
 cd "${1:-.}"
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository: cannot check for private keys" >&2; exit 2; }
+armor='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
 found=0
-while IFS= read -r -d '' file; do
+files=$(git ls-files -z | tr '\0' '\n') || { echo "cannot list the tracked files" >&2; exit 2; }
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
   lower=$(printf '%s' "$file" | tr '[:upper:]' '[:lower:]')
   case "$lower" in
-    *.pem|*.key|*.p8|*.p12|*.pfx|*.jks|*.keystore|*.ppk|id_rsa|*/id_rsa|id_ed25519|*/id_ed25519)
+    *.pem|*.key|*.der|*.p8|*.pk8|*.p12|*.pfx|*.jks|*.keystore|*.ppk|*.crx|id_rsa|*/id_rsa|id_ecdsa|*/id_ecdsa|id_ed25519|*/id_ed25519)
       echo "a key file is tracked: $file"; found=1 ;;
   esac
-done < <(git ls-files -z)
-if git grep -I -l -z -E -e '-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----' >/dev/null 2>&1; then
-  git grep -I -l -E -e '-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----' | sed 's/^/private key text in: /'
-  found=1
+done <<< "$files"
+set +e
+in_tree=$(git grep -I -l -E -e "$armor"); tree_status=$?
+set -e
+if [ "$tree_status" -eq 0 ]; then
+  printf '%s\n' "$in_tree" | sed 's/^/private key text in: /'; found=1
+elif [ "$tree_status" -ne 1 ]; then
+  echo "cannot search the tracked files" >&2; exit 2
+fi
+# The whole history, every branch and tag.
+# (Read whole first: with pipefail, `grep -q` stopping early would make the
+# pipeline fail and hide what it found.)
+history=$(git log --all -p --no-color --no-textconv) || { echo "cannot read the history" >&2; exit 2; }
+if grep -E -q -e "^[+-]$armor" <<< "$history"; then
+  echo "private key text in the history (a commit added it, even if a later one removed it)"; found=1
 fi
 if [ "$found" -ne 0 ]; then
   echo "Private keys must never be in the repository." >&2
   exit 1
 fi
-echo "no private key in the repository"
+echo "no private key in the repository or its history"

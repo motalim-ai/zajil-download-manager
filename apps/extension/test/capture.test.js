@@ -5,10 +5,12 @@ import {
   NO_ANSWER,
   downloadMessage,
   extensionOf,
+  menuMessage,
   send,
   shouldCapture,
   takeOver,
 } from "../src/capture.js";
+import { pausesSafely } from "../src/compat.js";
 import { defaults } from "../src/settings.js";
 
 const item = (over = {}) => ({
@@ -60,6 +62,8 @@ describe("which downloads go to Zajil", () => {
       { finalUrl: `https://example.com/${"a".repeat(MAX_URL)}.zip` },
       { state: "complete" },
       { byExtensionId: "zajil-self" },
+      { incognito: true },
+      { finalUrl: "https://example.com/\u202epiz.exe" },
     ]) {
       expect(shouldCapture(item(over), s, "zajil-self"), JSON.stringify(over)).toBe(false);
     }
@@ -72,6 +76,8 @@ describe("which downloads go to Zajil", () => {
     expect(shouldCapture(item(), s)).toBe(false);
     expect(shouldCapture(item({ referrer: "https://other.test/", finalUrl: "https://dl.example.com/a.zip" }), s)).toBe(false);
     expect(shouldCapture(item({ referrer: "https://other.test/", finalUrl: "https://badexample.com/a.zip", url: "https://badexample.com/a.zip" }), s)).toBe(true);
+    // An excluded link that redirects elsewhere, with no page: still excluded.
+    expect(shouldCapture(item({ url: "https://example.com/get/a.zip", finalUrl: "https://cdn.other.test/a.zip", referrer: "" }), s)).toBe(false);
   });
 });
 
@@ -92,6 +98,8 @@ describe("the message zajil-host accepts", () => {
       { referrer: "https://user:pw@example.com/" },
       { filename: "bad\nname.zip" },
       { filename: "\u0007.zip" },
+      { filename: "a\u0085b.zip" },
+      { filename: "a\u009bb.zip" },
       { filename: ".." },
       { filename: `${"ز".repeat(128)}.zip` },
     ]) {
@@ -100,10 +108,72 @@ describe("the message zajil-host accepts", () => {
   });
 });
 
-describe("handing a download over", () => {
+describe("Download with Zajil on a link", () => {
+  it("sends a web link with its page, and nothing else", () => {
+    expect(menuMessage({ linkUrl: "https://example.com/a.zip", pageUrl: "https://example.com/" })).toEqual(
+      downloadMessage("https://example.com/a.zip", { referrer: "https://example.com/" }),
+    );
+    for (const linkUrl of [undefined, "javascript:alert(document.cookie)", "data:text/plain,x", "ftp://example.com/a.zip", "https://u:p@example.com/a.zip", `https://example.com/${"a".repeat(MAX_URL)}`, "https://example.com/\u202e.zip"]) {
+      expect(menuMessage({ linkUrl, pageUrl: "https://example.com/" }), String(linkUrl)).toBeNull();
+    }
+  });
+});
+
+/** A fake that behaves as Firefox: pausing a download with no data yet
+ * cancels it, and resuming it then fails (review of #70). */
+function firefoxApi(answer) {
+  const api = fakeApi({ answer });
+  let cancelled = false;
+  api.downloads.pause = vi.fn(async () => {
+    api.calls.push(["pause"]);
+    cancelled = true;
+  });
+  api.downloads.resume = vi.fn(async () => {
+    api.calls.push(["resume"]);
+    if (cancelled) throw new Error("Download is not resumable");
+  });
+  api.downloads.onCreated = { addListener() {} };
+  return api;
+}
+
+describe("handing a download over, in Firefox", () => {
+  it("is told apart from Chrome", () => {
+    expect(pausesSafely(firefoxApi())).toBe(false);
+    expect(pausesSafely({ downloads: { onDeterminingFilename: {} } })).toBe(true);
+  });
+
+  it("refused, unreachable or unanswered: the browser's download is never touched", async () => {
+    for (const answer of [{ ok: false, error: "refused" }, { ok: false, error: `${NO_ANSWER[0]} within 10 s` }]) {
+      const api = firefoxApi(answer);
+      const outcome = (await takeOver(api, item(), { pause: pausesSafely(api) })).outcome;
+      expect(api.calls.map((c) => c[0]), outcome).toEqual(["native"]);
+    }
+    const api = firefoxApi();
+    api.runtime.sendNativeMessage = vi.fn(async () => {
+      api.calls.push(["native"]);
+      throw new Error("No such native application");
+    });
+    expect((await takeOver(api, item(), { pause: false })).outcome).toBe("unreachable");
+    expect(api.calls.map((c) => c[0])).toEqual(["native"]);
+  });
+
+  it("taken: cancelled and removed only then", async () => {
+    const api = firefoxApi({ protocol_version: 1, ok: true });
+    expect((await takeOver(api, item(), { pause: pausesSafely(api) })).outcome).toBe("taken");
+    expect(api.calls.map((c) => c[0])).toEqual(["native", "cancel", "erase"]);
+  });
+
+  it("pausing as in Chrome would lose it: the fake shows why the rule exists", async () => {
+    const api = firefoxApi({ ok: false, error: "refused" });
+    await takeOver(api, item(), { pause: true });
+    await expect(api.downloads.resume(7)).rejects.toThrow("not resumable");
+  });
+});
+
+describe("handing a download over, in Chrome and Edge", () => {
   it("taken by Zajil: the browser's download is paused, then cancelled and removed", async () => {
     const api = fakeApi({ answer: { protocol_version: 1, ok: true } });
-    expect(await takeOver(api, item())).toEqual({ outcome: "taken" });
+    expect(await takeOver(api, item(), { pause: true })).toEqual({ outcome: "taken" });
     expect(api.calls.map((c) => c[0])).toEqual(["pause", "native", "cancel", "erase"]);
     expect(api.calls[1][1]).toBe(HOST);
     expect(api.calls[1][2].url).toBe("https://cdn.example.com/files/setup.exe");
@@ -111,26 +181,34 @@ describe("handing a download over", () => {
 
   it("refused by Zajil: the browser goes on with it", async () => {
     const api = fakeApi({ answer: { protocol_version: 1, ok: false, error: "the URL has control characters" } });
-    expect((await takeOver(api, item())).outcome).toBe("refused");
+    expect((await takeOver(api, item(), { pause: true })).outcome).toBe("refused");
     expect(api.calls.map((c) => c[0])).toEqual(["pause", "native", "resume"]);
   });
 
   it("no host (Zajil not installed): the browser goes on with it", async () => {
     const api = fakeApi({ nativeError: "Specified native messaging host not found." });
-    expect((await takeOver(api, item())).outcome).toBe("unreachable");
+    expect((await takeOver(api, item(), { pause: true })).outcome).toBe("unreachable");
     expect(api.calls.map((c) => c[0])).toEqual(["pause", "native", "resume"]);
   });
 
   it("no answer in time: it stays paused, since Zajil may have it (#64)", async () => {
-    const api = fakeApi({ answer: { protocol_version: 1, ok: false, error: `${NO_ANSWER} 10 s` } });
-    expect((await takeOver(api, item())).outcome).toBe("unknown");
+    const api = fakeApi({ answer: { protocol_version: 1, ok: false, error: `${NO_ANSWER[0]} within 10 s` } });
+    expect((await takeOver(api, item(), { pause: true })).outcome).toBe("unknown");
     expect(api.calls.map((c) => c[0])).toEqual(["pause", "native"]);
   });
 
   it("already finished in the browser: nothing is sent", async () => {
     const api = fakeApi({ pauseError: "Download must be in progress" });
-    expect(await takeOver(api, item())).toBeNull();
+    expect(await takeOver(api, item(), { pause: true })).toBeNull();
     expect(api.calls.map((c) => c[0])).toEqual(["pause"]);
+  });
+
+  it("an answer that came back broken counts as unknown, not refused", async () => {
+    for (const error of ["Zajil did not answer: connection reset", "Zajil's answer is not valid: EOF"]) {
+      const api = fakeApi({ answer: { protocol_version: 1, ok: false, error } });
+      expect((await takeOver(api, item(), { pause: true })).outcome, error).toBe("unknown");
+      expect(api.calls.map((c) => c[0])).toEqual(["pause", "native"]);
+    }
   });
 
   it("a malformed answer counts as refused", async () => {

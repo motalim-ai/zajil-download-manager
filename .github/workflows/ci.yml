@@ -48,12 +48,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, for the private-key check below.
+          fetch-depth: 0
       - name: Install pinned toolchain
         run: rustup toolchain install && rustup show active-toolchain
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
       # The extension's private key never enters the repository (owner's
-      # decision on #7). The check is shown to fail on a test key first.
+      # decision on #7): not in the files, not in the history. The check is
+      # shown to refuse each kind of test key first.
       - name: No private key in the repository
         run: |
           bash scripts/test-check-no-private-keys.sh

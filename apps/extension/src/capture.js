@@ -10,13 +10,21 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_URL = 8 * 1024;
 /** The longest file name the host accepts, in UTF-8 bytes (`MAX_NAME`). */
 export const MAX_NAME = 255;
-/** How the host says the app took too long: the download may have been
- * added, so it is neither taken nor refused (review of #62, #64). */
-export const NO_ANSWER = "Zajil did not answer within";
+/** How the host says the request reached Zajil but no answer came back (too
+ * late, or broken): Zajil may have the download, so it is neither taken nor
+ * refused (review of #62, #64, #70). */
+export const NO_ANSWER = ["Zajil did not answer", "Zajil's answer is not valid"];
 
-/** @param {string | undefined} url */
-function isWeb(url) {
-  if (!url || url.length > MAX_URL) return false;
+/** Control characters, C0 and C1, and the direction marks `zajil-host`
+ * refuses in a URL (`queue::check_url`). */
+// eslint-disable-next-line no-control-regex
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/;
+
+/** A link the host would accept: http or https, no user name or password,
+ * no control or direction characters, 8 KiB at most.
+ * @param {string | undefined} url */
+export function isWeb(url) {
+  if (!url || url.length > MAX_URL || UNSAFE.test(url)) return false;
   try {
     const { protocol, username, password } = new URL(url);
     return (protocol === "http:" || protocol === "https:") && !username && !password;
@@ -54,8 +62,9 @@ function onSite(host, site) {
 }
 
 /**
- * Whether a new browser download goes to Zajil: capture is on, it is an
- * http(s) download the host would accept, of a listed type, and neither it
+ * Whether a new browser download goes to Zajil: capture is on, it is not a
+ * private window's, it is an http(s) download the host would accept, of a
+ * listed type, and neither its first URL, its final URL (after redirects)
  * nor the page it came from is on an excluded site.
  *
  * @param {any} item a `downloads.DownloadItem`
@@ -64,12 +73,13 @@ function onSite(host, site) {
  */
 export function shouldCapture(item, settings, ownId) {
   if (!settings.capture) return false;
+  if (item.incognito) return false;
   if (item.state && item.state !== "in_progress") return false;
   if (ownId && item.byExtensionId === ownId) return false;
   const url = item.finalUrl || item.url;
   if (!isWeb(url)) return false;
   if (!settings.extensions.includes(extensionOf(item))) return false;
-  for (const page of [url, item.referrer]) {
+  for (const page of [item.url, item.finalUrl, item.referrer]) {
     if (!page) continue;
     let host;
     try {
@@ -97,16 +107,26 @@ export function downloadMessage(url, extra = {}) {
   if (extra.referrer && isWeb(extra.referrer)) message.referrer = extra.referrer;
   const name = extra.filename ? baseName(extra.filename) : "";
   // eslint-disable-next-line no-control-regex
-  const plain = name && !/[\u0000-\u001f\u007f]/.test(name) && name !== "." && name !== "..";
+  const plain = name && !/[\u0000-\u001f\u007f-\u009f]/.test(name) && name !== "." && name !== "..";
   if (plain && new TextEncoder().encode(name).length <= MAX_NAME) message.filename = name;
   return message;
 }
 
 /**
- * What became of a request: `taken` (Zajil has it), `refused` (it has not:
- * the browser keeps the download), `unknown` (Zajil did not answer in time;
- * it may have it), or `unreachable` (no host: Zajil is not installed, or the
- * browser integration needs fixing).
+ * The message for "Download with Zajil" on a link, or null when the link is
+ * not one Zajil can download (`javascript:`, `data:`, a password in it…).
+ *
+ * @param {{ linkUrl?: string, pageUrl?: string }} info
+ */
+export function menuMessage(info) {
+  return isWeb(info.linkUrl) ? downloadMessage(/** @type {string} */ (info.linkUrl), { referrer: info.pageUrl }) : null;
+}
+
+/**
+ * What became of a request: `taken` (Zajil has it, and reached the file),
+ * `refused` (it has not), `unknown` (it may have it: no answer came back),
+ * or `unreachable` (no host: Zajil is not installed, or the browser
+ * integration needs fixing).
  *
  * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string }} Result
  */
@@ -126,25 +146,34 @@ export async function send(browserApi, message) {
   }
   if (answer && answer.ok === true) return { outcome: "taken" };
   const error = typeof answer?.error === "string" ? answer.error : "no answer";
-  return { outcome: error.startsWith(NO_ANSWER) ? "unknown" : "refused", error };
+  return { outcome: NO_ANSWER.some((start) => error.startsWith(start)) ? "unknown" : "refused", error };
 }
 
 /**
- * Hands a browser download to Zajil without losing it: the browser's
- * download is paused first; taken by Zajil, it is cancelled and removed from
- * the browser's list; refused or unreachable, it goes on in the browser; with
- * no answer in time, it stays paused, since Zajil may have it too.
+ * Hands a browser download to Zajil without losing it.
+ *
+ * - Where pausing keeps what was downloaded (Chrome and Edge), the browser's
+ *   download is paused first. Taken by Zajil, it is cancelled and removed
+ *   from the browser's list; refused or unreachable, it goes on in the
+ *   browser; with no answer, it stays paused, since Zajil may have it.
+ * - In Firefox, pausing a download that has no data yet cancels it for good
+ *   (review of #70), so it is not paused: it goes on in the browser while
+ *   Zajil is asked, and is cancelled only once Zajil has taken it.
  *
  * @param {any} browserApi
  * @param {any} item
+ * @param {{ pause: boolean }} how `pause`: the browser keeps a paused
+ *   download's data (`compat.pausesSafely`)
  * @returns {Promise<Result | null>} null when the browser had already
  *   finished (nothing was sent)
  */
-export async function takeOver(browserApi, item) {
-  try {
-    await browserApi.downloads.pause(item.id);
-  } catch {
-    return null;
+export async function takeOver(browserApi, item, how) {
+  if (how.pause) {
+    try {
+      await browserApi.downloads.pause(item.id);
+    } catch {
+      return null;
+    }
   }
   const result = await send(
     browserApi,
@@ -153,7 +182,7 @@ export async function takeOver(browserApi, item) {
   if (result.outcome === "taken") {
     await browserApi.downloads.cancel(item.id).catch(() => {});
     await browserApi.downloads.erase({ id: item.id }).catch(() => {});
-  } else if (result.outcome !== "unknown") {
+  } else if (how.pause && result.outcome !== "unknown") {
     await browserApi.downloads.resume(item.id).catch(() => {});
   }
   return result;
