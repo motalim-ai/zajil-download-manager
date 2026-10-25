@@ -7,9 +7,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-### Fixed
-- «Download file info», after the owner's test with a Google Drive link: a size the server does not give is said in words («الحجم غير معروف. السيرفر لا يدعم التقسيم…», "Size unknown. …"), never «?.»; the file name it is saved under keeps its own box, which cannot shrink to nothing, with the names' bidi rule; and when the server sends a web page instead of a file, the window says so plainly and how to get the file (open the page in the browser and press its download button, or add the file's own link if the site gives one), with «Cancel» as the main button and «Start download» still there. Tested: the sentences with and without a size and the warning in both languages (Vitest); the window getting the name and the web page mark from the server's answer (Rust).
-
 ### Added
 - The app answers a video from the extension (M6, ADR-0009) with «تحميل الفيديو قادم قريبًا.» or "Video downloads are coming soon.", in the user's language from the translations, and does nothing else (no request to the page, nothing added) until video downloads come. Tested in both languages.
 - M5.5 quit (owner's decision on #83): Ctrl+Q, ⌘Q on macOS (whichever window is in front), the menus' Quit and the tray's ask first while downloads are running («يعمل الآن 3 تحميلات. هل تُنهي زاجِل؟», in the six Arabic plural forms). Closing the window, the Dock's Quit and the end of the session do not ask. Tested: the question in every Arabic and English form (Rust).
