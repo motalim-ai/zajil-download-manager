@@ -100,12 +100,37 @@ export async function rememberTicket(browserApi, ticket, url, store, now = Date.
   });
 }
 
-/** Whether `ticket` is open, for `url`'s site and `store`.
+/** The addresses a download's link leads to that are another origin of
+ * the same site, by the origin of the link: a Google Drive file's page is
+ * downloaded from Drive's download address (owner's decision on the Drive
+ * links: Zajil asks for that address's own cookies, never another site's). */
+const SAME_SITE_DOWNLOADS = /** @type {Record<string, string[]>} */ ({
+  "https://drive.usercontent.google.com": ["https://drive.google.com"],
+});
+
+/** Whether `ticket` is open, for `url`'s site and `store`: the download's
+ * own origin, or its link's download address of the same site.
  * @param {any} browserApi @param {string} ticket @param {string} url
  * @param {string | undefined} store @param {number} [now] */
 export async function openTicket(browserApi, ticket, url, store, now = Date.now()) {
   const found = fresh(await tickets(browserApi), now)[ticket];
-  return Boolean(found) && found.site === (await siteKey(url, store));
+  if (!found) return false;
+  if (found.site === (await siteKey(url, store))) return true;
+  for (const link of SAME_SITE_DOWNLOADS[new URL(url).origin] ?? []) {
+    if (found.site === (await siteKey(link, store))) return true;
+  }
+  return false;
+}
+
+/** Forgets `ticket`: Zajil did not take its download.
+ * @param {any} browserApi @param {string} ticket */
+export async function forgetTicket(browserApi, ticket) {
+  await inTurn(async () => {
+    const all = await tickets(browserApi);
+    if (!(ticket in all)) return;
+    delete all[ticket];
+    await browserApi.storage.local.set({ linkTickets: all }).catch(() => {});
+  });
 }
 
 /** Keeps only the tickets Zajil says are open (and the newest ones).

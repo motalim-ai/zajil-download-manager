@@ -541,3 +541,25 @@ async fn an_expired_confirmed_link_is_confirmed_again() {
     );
     assert!(!server.gets(&again).is_empty());
 }
+
+/// What an interface asks the browser's cookies for: the real download
+/// address of a Drive file's page, and nothing for any other link.
+#[test]
+fn a_drive_file_link_names_its_download_address() {
+    let id = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+    assert_eq!(
+        zajil_core::drive::download_link(&format!(
+            "https://drive.google.com/file/d/{id}/view?usp=sharing"
+        ))
+        .as_deref(),
+        Some(
+            format!("https://drive.usercontent.google.com/download?id={id}&export=download")
+                .as_str()
+        )
+    );
+    assert_eq!(
+        zajil_core::drive::download_link("https://example.com/file/d/x/view"),
+        None
+    );
+    assert_eq!(zajil_core::drive::download_link("not a link"), None);
+}

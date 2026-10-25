@@ -829,6 +829,7 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
         (app.links.clone(), app.asks.clone())
     };
     when_linked(&links, &asks, &handle.state::<App>().store);
+    let ask_links = links.clone();
     std::thread::spawn(move || {
         zajil_host::serve(
             listener,
@@ -842,8 +843,30 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 let reach = extension_reach(&app.engine);
                 // The user's language, for what the extension is told.
                 let lang = app.settings.load().map(|s| s.language).unwrap_or_default();
-                let answer =
-                    from_extension(&app.store, &request, &given, &app.from_browser, lang, reach);
+                // A Drive file's download address's cookies, asked of the
+                // browser the download came from, on its link (the
+                // extension has its ticket already).
+                let drive_cookies = |file: &str| match &request {
+                    zajil_host::Request::Download {
+                        instance: Some(instance),
+                        ticket: Some(ticket),
+                        store,
+                        private: false,
+                        ..
+                    } => ask_links
+                        .ask(instance, file, store.as_deref(), ticket, DRIVE_ASK_PATIENCE)
+                        .flatten(),
+                    _ => None,
+                };
+                let answer = from_extension_with(
+                    &app.store,
+                    &request,
+                    &given,
+                    &app.from_browser,
+                    lang,
+                    reach,
+                    drive_cookies,
+                );
                 if answer.ok {
                     let _ = handle.emit("downloads-changed", ());
                     tray::show_window(&handle);
@@ -967,6 +990,11 @@ const ASK_AGAIN: Duration = Duration::from_secs(5);
 /// How long Zajil waits for a browser's answer.
 const ASK_PATIENCE: Duration = Duration::from_secs(15);
 
+/// How long a download from the browser waits for that browser's cookies
+/// of a Google Drive file's download address: the extension is waiting
+/// for Zajil's answer meanwhile.
+const DRIVE_ASK_PATIENCE: Duration = Duration::from_secs(5);
+
 /// The downloads whose browser is being asked for cookies, or was lately.
 #[derive(Default)]
 struct BrowserAsks(std::sync::Mutex<HashMap<u64, Asked>>);
@@ -1054,11 +1082,25 @@ fn ask_browser(
         );
         match answer {
             Some(cookies) => {
-                let from = zajil_core::FromBrowser::new(
+                let mut from = zajil_core::FromBrowser::new(
                     &url,
                     cookies.as_deref(),
                     source.referrer.as_deref(),
                 );
+                // A Drive file's link: its download address's own cookies
+                // too, as when it came from the browser.
+                if let Some(file) = zajil_core::drive::download_link(&url) {
+                    let more = links
+                        .ask(
+                            &source.instance,
+                            &file,
+                            source.store.as_deref(),
+                            &ticket,
+                            ASK_PATIENCE,
+                        )
+                        .flatten();
+                    from = from.and_cookies_for(&file, more.as_deref());
+                }
                 // The cookies the extension gave with the download itself
                 // are never replaced (review of #80: a look just after the
                 // item was written asked, and got none).
@@ -1471,6 +1513,7 @@ fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option
 /// from the browser and then fail in Zajil). The cookies (sent only when
 /// the user allowed them in the extension) and the page go with the check
 /// and the download, from memory (`App::from_browser`).
+#[cfg(test)]
 fn from_extension(
     store: &QueueStore,
     request: &zajil_host::Request,
@@ -1478,6 +1521,23 @@ fn from_extension(
     headers: &zajil_core::queue::FromBrowserById,
     lang: zajil_core::settings::Language,
     reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
+) -> zajil_host::Response {
+    from_extension_with(store, request, given, headers, lang, reach, |_| None)
+}
+
+/// [`from_extension`], with `drive_cookies`: the browser's cookies for a
+/// Google Drive file's download address (owner's decision on the Drive
+/// links: the browser is asked for that address's own cookies, never
+/// another site's), asked only when the download came with cookies.
+#[allow(clippy::too_many_arguments)]
+fn from_extension_with(
+    store: &QueueStore,
+    request: &zajil_host::Request,
+    given: &Path,
+    headers: &zajil_core::queue::FromBrowserById,
+    lang: zajil_core::settings::Language,
+    reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
+    drive_cookies: impl FnOnce(&str) -> Option<String>,
 ) -> zajil_host::Response {
     match request {
         zajil_host::Request::Ping { .. } => zajil_host::Response::ok(),
@@ -1508,7 +1568,16 @@ fn from_extension(
             }
             // The browser's cookies (when the user allowed them) and page,
             // for the check and then the download: in memory only.
-            let from = zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
+            let mut from =
+                zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
+            // A Google Drive file's page link is downloaded from Drive's
+            // download address, another origin of the same site: that
+            // address's own cookies are asked for.
+            if from.has_cookies()
+                && let Some(file) = zajil_core::drive::download_link(url)
+            {
+                from = from.and_cookies_for(&file, drive_cookies(&file).as_deref());
+            }
             let probe = match reach(url, &from) {
                 Ok(probe) => probe,
                 Err(why) => {
@@ -2939,6 +3008,60 @@ mod tests {
         let item = store.load().unwrap().item(id).unwrap().clone();
         assert_eq!(item.url, "https://example.com/new.iso");
         assert_eq!(item.status, Status::Waiting);
+    }
+
+    /// Owner's decision on the Drive links: a Drive file's page link from
+    /// the browser, with its cookies, asks the browser for the cookies of
+    /// the file's own download address (and nothing else); without
+    /// cookies, or for another site, nothing is asked.
+    #[test]
+    fn a_drive_link_asks_the_browser_for_its_download_address_s_cookies() {
+        let data = tempfile::tempdir().unwrap();
+        let store = QueueStore::new(data.path());
+        let id = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+        let add = |url: &str, cookies: Option<&str>| {
+            let request = zajil_host::Request::Download {
+                protocol_version: 1,
+                url: url.into(),
+                referrer: None,
+                filename: None,
+                cookies: cookies.map(str::to_owned),
+                instance: Some("i".into()),
+                store: None,
+                ticket: Some("t".into()),
+                private: false,
+            };
+            let asked = std::cell::RefCell::new(Vec::new());
+            let answer = from_extension_with(
+                &store,
+                &request,
+                data.path(),
+                &Default::default(),
+                zajil_core::settings::Language::Ar,
+                |_, from| {
+                    assert!(from.has_cookies() == cookies.is_some());
+                    Ok(probe_of("report.pdf", None))
+                },
+                |file| {
+                    asked.borrow_mut().push(file.to_owned());
+                    Some("file=1".into())
+                },
+            );
+            assert!(answer.ok, "{answer:?}");
+            asked.into_inner()
+        };
+        let page = format!("https://drive.google.com/file/d/{id}/view");
+        assert_eq!(
+            add(&page, Some("page=1")),
+            [format!(
+                "https://drive.usercontent.google.com/download?id={id}&export=download"
+            )]
+        );
+        assert!(add(&page, None).is_empty(), "no cookies: nothing asked");
+        assert!(
+            add("https://example.com/report.pdf", Some("site=1")).is_empty(),
+            "not Drive: nothing asked"
+        );
     }
 
     /// Security review #84: a file that can run code, from the browser, is

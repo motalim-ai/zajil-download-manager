@@ -12,6 +12,17 @@
 
 use reqwest::Url;
 
+/// The download address of the Google Drive file whose page `url` is
+/// (`https://drive.google.com/file/d/<id>/view` and the like), if it is
+/// one: where the engine will ask for it. Interfaces ask the browser for
+/// that address's own cookies (owner's decision on the Drive links).
+pub fn download_link(url: &str) -> Option<String> {
+    let url = Url::parse(url).ok()?;
+    DriveSite::default()
+        .direct_link(&url)
+        .map(|link| link.to_string())
+}
+
 /// Pages larger than this are not read for a link.
 pub(crate) const MAX_PAGE_BYTES: usize = 512 * 1024;
 

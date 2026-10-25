@@ -8,7 +8,7 @@ import { api, onNewDownload, pausesSafely } from "./compat.js";
 import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
 import { cookieHeader, cookiesAllowed } from "./cookies.js";
 import { load } from "./settings.js";
-import { instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
+import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
 
 const MENU = "zajil-download-link";
 const MENU_VIDEO = "zajil-download-video";
@@ -142,9 +142,12 @@ onNewDownload(api, (item) => {
     const url = item.finalUrl || item.url;
     const cookies = await cookieHeader(api, url, item.cookieStoreId);
     const ticket = newTicket();
+    // While it is open, Zajil may ask for its cookies again after a
+    // restart, and for its file's download address while taking it (a
+    // Google Drive link): kept before Zajil is asked, forgotten if not taken.
+    if (cookies) await rememberTicket(api, ticket, url, plainStore(item.cookieStoreId));
     const result = await takeOver(api, item, { pause, cookies, instance: await instanceId(api), ticket });
-    // While it is open, Zajil may ask for its cookies again after a restart.
-    if (cookies && result?.outcome === "taken") await rememberTicket(api, ticket, url, plainStore(item.cookieStoreId));
+    if (cookies && result?.outcome !== "taken") await forgetTicket(api, ticket);
     await report(result, pause ? "paused" : "running", { sentCookies: Boolean(cookies) });
   })();
 });
@@ -188,8 +191,11 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
     const message = /** @type {Record<string, unknown>} */ (menuMessage(info, cookies, from));
     // Zajil keeps nothing of a private window's download once it is done.
     if (tab?.incognito) message.private = true;
+    // Kept before Zajil is asked (it may ask for a Drive file's download
+    // address meanwhile), forgotten if not taken.
+    if (cookies) await rememberTicket(api, from.ticket, info.linkUrl, from.store);
     const result = await send(api, message);
-    if (cookies && result.outcome === "taken") await rememberTicket(api, from.ticket, info.linkUrl, from.store);
+    if (cookies && result.outcome !== "taken") await forgetTicket(api, from.ticket);
     // Zajil is told when the last private window closes (only a flag).
     if (tab?.incognito && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
     await report(result, "menu", {
