@@ -666,6 +666,7 @@
           category_site: null,
           category_extension: "iso",
           folder: "~/Downloads",
+          page: false,
         },
       };
     if (screen === "progress") progressScene = true;

@@ -1,10 +1,9 @@
 <script lang="ts">
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
-  import FileName from "./FileName.svelte";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
-  import { size } from "../format";
+  import { probeSentence, sizeText } from "../probeText";
   import type { ProbeView } from "../bindings/ProbeView";
   import type { AddRequest } from "../bindings/AddRequest";
   import type { QueueView } from "../bindings/QueueView";
@@ -49,16 +48,15 @@
   let later = $state(false);
   let main: HTMLElement | undefined = $state();
 
-  // The focus goes to «Start download» once the server has answered.
+  // The focus goes to the main button once the server has answered:
+  // «Start download», or «Cancel» when the link is a web page.
   $effect(() => {
     if (probe && !busy) main?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
   });
+  const page = $derived(probe?.page === true);
 
   // The user's own name, else the translated built-in one (as the sidebar).
   const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? locale.t(`category-${id}`);
-  const probeText = $derived(
-    probe ? (probe.resumable ? "add-probe-ranges" : probe.ranges ? "add-probe-unsure" : "add-probe-single") : "",
-  );
   const extension = $derived((/\.([^.]+)$/.exec(probe?.name ?? "")?.[1] ?? "").toUpperCase());
 
   function add(start: boolean, queue = "main") {
@@ -99,6 +97,9 @@
 
 <main class="info" bind:this={main} aria-labelledby="add-title">
   <h1 id="add-title" class="visually-hidden">{locale.t("info-title")}</h1>
+  {#if page}
+    <p class="page" role="alert"><Icon name="circle-alert" size={16} /><span>{locale.t("add-web-page")}</span></p>
+  {/if}
   <div class="body">
     <div class="fields">
       <span class="label">{locale.t("add-url")}</span>
@@ -124,8 +125,10 @@
           </button>
         </div>
 
-        <span class="label">{locale.t("add-file-name")}</span>
-        <div class="value"><span class="text"><FileName name={probe.name} /></span></div>
+        <label class="label" for="add-name">{locale.t("add-file-name")}</label>
+        <!-- The name it is saved under; editable once zajil-core keeps one
+             (#103). -->
+        <input id="add-name" class="value name" readonly value={probe.name} dir="auto" title={probe.name} />
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
@@ -148,14 +151,12 @@
         <p class="problem" role="alert"><Icon name="alert" />{error}</p>
       {:else if probe}
         <span class="type" aria-hidden="true"><Icon name={categoryIcon(probe.category)} size={30} /></span>
-        <strong class="size">{probe.size === null ? "?" : size(locale.lang, locale.digits, probe.size)}</strong>
+        <strong class="size">{sizeText(locale.t, locale.lang, locale.digits, probe)}</strong>
         <span class="kind">{probe.category ? categoryName(probe.category) : locale.t("category-none")} {extension}</span>
         <span class="resume" class:no={!probe.resumable}>
           <Icon name={probe.resumable ? "check" : "circle-alert"} size={15} />{locale.t(probe.resumable ? "add-resumable" : "add-not-resumable")}
         </span>
-        <p class="why">
-          {locale.t(probeText, { size: probe.size === null ? "?" : size(locale.lang, locale.digits, probe.size) })}
-        </p>
+        <p class="why">{probeSentence(locale.t, locale.lang, locale.digits, probe)}</p>
       {:else}
         <p class="waiting" role="status">{locale.t("add-checking")}</p>
       {/if}
@@ -163,7 +164,7 @@
   </div>
 
   <div class="actions">
-    <button class="btn primary" disabled={!probe || busy} onclick={() => add(true)} data-autofocus>
+    <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
       <Icon name="down" />{locale.t("add-start")}
     </button>
     <div class="split">
@@ -191,7 +192,7 @@
         </div>
       {/if}
     </div>
-    <button class="btn end" onclick={oncancel}>{locale.t("add-cancel")}</button>
+    <button class="btn end" class:primary={page} onclick={oncancel} data-autofocus={page ? true : undefined}>{locale.t("add-cancel")}</button>
   </div>
 </main>
 
@@ -200,6 +201,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    overflow: auto;
     padding: 20px 24px 18px;
     background: var(--surface);
     box-sizing: border-box;
@@ -253,6 +255,23 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+  }
+  .name {
+    font: inherit;
+    color: var(--ink);
+    text-overflow: ellipsis;
+    outline: none;
+  }
+  .page {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    background: var(--amber-bg);
+    color: var(--ink);
+    font-size: 13px;
   }
   .square {
     padding-inline: 8px;

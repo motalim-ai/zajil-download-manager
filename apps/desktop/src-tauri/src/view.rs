@@ -128,6 +128,14 @@ pub struct ProbeView {
     pub category_extension: Option<String>,
     /// The folder it would go to without a folder of its own.
     pub folder: String,
+    /// The server sent a web page, not a file (a Google Drive or sign-in
+    /// page): «Download file info» warns.
+    pub page: bool,
+}
+
+/// Whether a response's media type is a web page.
+pub fn is_web_page(content_type: Option<&str>) -> bool {
+    matches!(content_type, Some("text/html" | "application/xhtml+xml"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -626,6 +634,7 @@ pub fn probe(found: &Probe, categories: &CategoriesFile, given: &Path) -> ProbeV
             .folder_for(&found.name, found.host.as_deref(), given)
             .display()
             .to_string(),
+        page: is_web_page(found.content_type.as_deref()),
     }
 }
 
@@ -664,6 +673,35 @@ pub fn details(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// «Download file info» gets the name the file is saved under and
+    /// whether it is a web page (Google Drive answers a page, review of the
+    /// owner's test).
+    #[test]
+    fn the_info_window_gets_the_name_and_whether_it_is_a_web_page() {
+        let mut categories = CategoriesFile::built_in();
+        categories.categories.clear();
+        let found = Probe {
+            name: "download".into(),
+            size: None,
+            resumable: false,
+            ranges: false,
+            host: Some("drive.usercontent.google.com".into()),
+            content_type: Some("text/html".into()),
+        };
+        let view = probe(&found, &categories, Path::new("/d"));
+        assert_eq!(view.name, "download");
+        assert_eq!(view.size, None);
+        assert!(view.page);
+        let file = Probe {
+            name: "a.zip".into(),
+            content_type: Some("application/zip".into()),
+            ..found
+        };
+        assert!(!probe(&file, &categories, Path::new("/d")).page);
+        assert!(is_web_page(Some("application/xhtml+xml")));
+        assert!(!is_web_page(None));
+    }
 
     /// AGENTS.md §10.3: what the page receives never holds a URL's query
     /// (a token) or its user name and password, even if an item had them.

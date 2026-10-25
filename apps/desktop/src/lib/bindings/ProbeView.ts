@@ -13,4 +13,9 @@ category_site: string | null, category_extension: string | null,
 /**
  * The folder it would go to without a folder of its own.
  */
-folder: string, };
+folder: string, 
+/**
+ * The server sent a web page, not a file (a Google Drive or sign-in
+ * page): «Download file info» warns.
+ */
+page: boolean, };
