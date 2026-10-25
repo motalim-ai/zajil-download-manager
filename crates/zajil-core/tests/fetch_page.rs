@@ -203,3 +203,43 @@ async fn a_stop_gives_up_the_page() {
         "{err:?}"
     );
 }
+
+/// `robots.txt` is plain text: `fetch_text_until` reads it, `fetch_page`
+/// does not, and neither follows a redirect.
+#[tokio::test]
+async fn fetch_text_reads_any_type() {
+    let server = TestServer::http();
+    server.put(
+        "/robots.txt",
+        FileSpec::new(b"User-agent: *\nDisallow: /x\n".to_vec()).content_type("text/plain"),
+    );
+    server.put("/untyped", FileSpec::new(b"plain".to_vec()));
+    let engine = engine();
+    let stop = Stop::new();
+    let text = engine
+        .fetch_text_until(&server.url("/robots.txt"), 1024, &stop)
+        .await
+        .unwrap();
+    assert_eq!(
+        text.body.as_deref(),
+        Some(&b"User-agent: *\nDisallow: /x\n"[..])
+    );
+    let page = engine
+        .fetch_page(&server.url("/robots.txt"), 1024)
+        .await
+        .unwrap();
+    assert_eq!(page.body, None);
+    let untyped = engine
+        .fetch_text_until(&server.url("/untyped"), 3, &stop)
+        .await
+        .unwrap();
+    assert_eq!(untyped.body.as_deref(), Some(&b"pla"[..]));
+    assert!(untyped.truncated);
+    server.redirect("/moved.txt", "/robots.txt", 301);
+    let moved = engine
+        .fetch_text_until(&server.url("/moved.txt"), 1024, &stop)
+        .await
+        .unwrap();
+    assert_eq!(moved.status, 301);
+    assert_eq!(moved.body, None);
+}

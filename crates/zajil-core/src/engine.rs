@@ -737,6 +737,28 @@ impl Engine {
         max_bytes: usize,
         stop: &Stop,
     ) -> Result<Page, Error> {
+        self.fetch(url, max_bytes, stop, Body::Html).await
+    }
+
+    /// Like [`fetch_page_until`](Self::fetch_page_until), but the body of
+    /// any successful answer is read, whatever its type: for `robots.txt`,
+    /// which servers send as `text/plain` or with no type at all.
+    pub async fn fetch_text_until(
+        &self,
+        url: &str,
+        max_bytes: usize,
+        stop: &Stop,
+    ) -> Result<Page, Error> {
+        self.fetch(url, max_bytes, stop, Body::Any).await
+    }
+
+    async fn fetch(
+        &self,
+        url: &str,
+        max_bytes: usize,
+        stop: &Stop,
+        read: Body,
+    ) -> Result<Page, Error> {
         let url = parse_url(url)?;
         let request = self.browser.apply(&url, self.page_client.get(url.clone()));
         let mut response = tokio::select! {
@@ -773,7 +795,7 @@ impl Engine {
             body: None,
             truncated: false,
         };
-        if !(response.status().is_success() && html) {
+        if !(response.status().is_success() && (html || read == Body::Any)) {
             return Ok(page);
         }
         let mut body = Vec::new();
@@ -1994,6 +2016,13 @@ async fn check_space(dir: &Path, needed: u64, reusable: u64) -> Result<(), Error
         });
     }
     Ok(())
+}
+
+/// Which bodies [`Engine::fetch`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Body {
+    Html,
+    Any,
 }
 
 /// Whether a client follows redirects ([`build_client`]).
