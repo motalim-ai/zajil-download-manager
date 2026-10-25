@@ -17,11 +17,14 @@
 //!
 //! Every supported browser is registered, installed or not: a browser's
 //! folder or key appears only once it has run, and a browser installed
-//! later then finds Zajil's host at once. Unregistering removes the
-//! manifest, the registry key, and then each folder or key above them that
-//! is left empty, up to the browser's own (on macOS up to
-//! `Application Support`), so what registering created goes and what
-//! holds anything else stays.
+//! later then finds Zajil's host at once. Registering records each folder
+//! and key it creates (`<data dir>/native-messaging/<browser>.made`), and
+//! makes folders readable by the user only, as the browsers make theirs.
+//! Unregistering removes the manifest and Zajil's registry key, then each
+//! recorded folder or key that is still empty: what was there before
+//! registering stays, even empty, and so does what the browser has put in
+//! since. A record line naming anything but one of these folders or keys
+//! is ignored.
 //!
 //! Not covered: Flatpak browsers and the Chromium snap run in a sandbox
 //! that does not start a program outside it; nothing is registered inside
@@ -71,7 +74,6 @@ impl Browser {
         }
     }
 
-    #[cfg(windows)]
     fn file_stem(self) -> &'static str {
         match self {
             Browser::Chrome => "chrome",
@@ -102,8 +104,8 @@ pub struct SystemRegistrar {
     /// Linux: where Chrome, Chromium and Edge keep their folders.
     #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
     chrome_config: PathBuf,
-    /// Windows: where the manifests are written.
-    #[cfg_attr(unix, allow(dead_code))]
+    /// Where the records of what registering made go, and on Windows the
+    /// manifests: `<data dir>/native-messaging`.
     manifests: PathBuf,
     /// Windows: the key under `HKCU` the vendors' keys are in
     /// (`Software`; another one for tests).
@@ -113,8 +115,8 @@ pub struct SystemRegistrar {
 
 impl SystemRegistrar {
     /// For the current user: their home; on Linux the configuration folder
-    /// Chromium reads; on Windows the manifests go in
-    /// `<data_dir>/native-messaging`, and the keys under `HKCU\Software`.
+    /// Chromium reads; `<data_dir>/native-messaging` for the records (and
+    /// on Windows the manifests); the keys under `HKCU\Software`.
     pub fn for_current_user(data_dir: &Path) -> io::Result<Self> {
         let home = dirs::home_dir()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home folder"))?;
@@ -199,20 +201,110 @@ impl SystemRegistrar {
         }
     }
 
-    /// The folder above which nothing is removed.
-    fn base(&self, browser: Browser) -> PathBuf {
+    /// The folders registering may create for `browser`, outermost first:
+    /// (a folder they are relative to, each one as a path relative to it,
+    /// `.` for that folder itself). On Windows none outside the data folder.
+    fn folder_levels(&self, browser: Browser) -> (PathBuf, Vec<String>) {
         #[cfg(unix)]
         {
-            self.place(browser).0
+            let (base, folder, hosts) = self.place(browser);
+            let mut levels = vec![".".to_owned()];
+            let mut path = String::new();
+            for part in folder.split('/').chain([hosts]) {
+                if !path.is_empty() {
+                    path.push('/');
+                }
+                path.push_str(part);
+                levels.push(path.clone());
+            }
+            (base, levels)
         }
         #[cfg(windows)]
         {
-            // The data folder: `native-messaging` goes when left empty.
             let _ = browser;
-            self.manifests
-                .parent()
-                .unwrap_or(&self.manifests)
-                .to_path_buf()
+            (self.manifests.clone(), Vec::new())
+        }
+    }
+
+    /// Windows: the keys registering may create above Zajil's own key,
+    /// outermost first, relative to the registry root. Elsewhere none.
+    #[cfg_attr(unix, allow(dead_code))]
+    fn key_levels(&self, browser: Browser) -> Vec<String> {
+        #[cfg(windows)]
+        {
+            let mut levels = Vec::new();
+            let mut path = String::new();
+            for part in browser
+                .vendor_key()
+                .split('\\')
+                .chain(["NativeMessagingHosts"])
+            {
+                if !path.is_empty() {
+                    path.push('\\');
+                }
+                path.push_str(part);
+                levels.push(path.clone());
+            }
+            levels
+        }
+        #[cfg(unix)]
+        {
+            let _ = browser;
+            Vec::new()
+        }
+    }
+
+    fn record_path(&self, browser: Browser) -> PathBuf {
+        self.manifests.join(format!("{}.made", browser.file_stem()))
+    }
+}
+
+/// What registering made for one browser: lines `folder <level>` and
+/// `key <level>`, levels as [`SystemRegistrar::folder_levels`] and
+/// [`SystemRegistrar::key_levels`] give them.
+#[derive(Default)]
+struct Made {
+    folders: Vec<String>,
+    keys: Vec<String>,
+}
+
+impl Made {
+    /// The largest record read; a real one is a few hundred bytes.
+    const MAX: u64 = 4096;
+
+    fn read(path: &Path) -> io::Result<Made> {
+        use std::io::Read;
+        let file = match crate::fs::open_regular_nofollow(path, false) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Made::default()),
+            Err(err) => return Err(err),
+        };
+        let mut text = String::new();
+        file.take(Made::MAX).read_to_string(&mut text)?;
+        let mut made = Made::default();
+        for line in text.lines() {
+            match line.split_once(' ') {
+                Some(("folder", level)) => made.folders.push(level.to_owned()),
+                Some(("key", level)) => made.keys.push(level.to_owned()),
+                _ => {}
+            }
+        }
+        Ok(made)
+    }
+
+    fn write(&self, path: &Path) -> io::Result<()> {
+        let mut text = String::new();
+        for (kind, levels) in [("folder", &self.folders), ("key", &self.keys)] {
+            for level in levels {
+                text.push_str(&format!("{kind} {level}\n"));
+            }
+        }
+        write_new_then_replace(path, text.as_bytes())
+    }
+
+    fn add(list: &mut Vec<String>, level: &str) {
+        if !list.iter().any(|l| l == level) {
+            list.push(level.to_owned());
         }
     }
 }
@@ -232,22 +324,32 @@ impl NativeHostRegistrar for SystemRegistrar {
         for id in allowed {
             check_id(browser, id)?;
         }
-        let path = self.manifest_path(browser);
-        let folder = path.parent().expect("a manifest is in a folder");
-        std::fs::create_dir_all(folder)?;
-        let tmp = tmp_path(&path);
-        remove_if_there(&tmp)?;
-        // Created new and private, so a link put in its place is refused.
-        let written = crate::fs::create_private(&tmp)
-            .and_then(|mut file| {
-                file.write_all(manifest_json(browser, host, allowed).as_bytes())?;
-                file.sync_all()
-            })
-            .and_then(|()| crate::fs::replace_file(&tmp, &path));
-        if let Err(err) = written {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(err);
+        // What is missing is recorded before it is made, so that a
+        // registration cut short leaves nothing unregistering would keep.
+        let (base, folders) = self.folder_levels(browser);
+        let mut made = Made::read(&self.record_path(browser))?;
+        let missing: Vec<&String> = folders
+            .iter()
+            .filter(|level| at(&base, level).symlink_metadata().is_err())
+            .collect();
+        for level in &missing {
+            Made::add(&mut made.folders, level);
         }
+        #[cfg(windows)]
+        for level in self.key_levels(browser) {
+            if !imp::key_exists(&format!(r"{}\{level}", self.registry_root))? {
+                Made::add(&mut made.keys, &level);
+            }
+        }
+        std::fs::create_dir_all(&self.manifests)?;
+        if !made.folders.is_empty() || !made.keys.is_empty() {
+            made.write(&self.record_path(browser))?;
+        }
+        for level in missing {
+            make_private_dir(&at(&base, level))?;
+        }
+        let path = self.manifest_path(browser);
+        write_new_then_replace(&path, manifest_json(browser, host, allowed).as_bytes())?;
         #[cfg(windows)]
         imp::set_default(
             &self.registry_key(browser).expect("Windows"),
@@ -257,33 +359,32 @@ impl NativeHostRegistrar for SystemRegistrar {
     }
 
     fn unregister(&self, browser: Browser) -> io::Result<()> {
+        let record = self.record_path(browser);
+        let made = Made::read(&record)?;
         let path = self.manifest_path(browser);
         remove_if_there(&path)?;
         // Left by a registration that stopped before its rename.
         remove_if_there(&tmp_path(&path))?;
-        // Each folder left empty, up to the base: what registering made.
-        // `remove_dir` fails, harmlessly, on the first one holding anything.
-        let base = self.base(browser);
-        let mut folder = path.parent();
-        while let Some(dir) = folder {
-            if dir == base || !dir.starts_with(&base) || std::fs::remove_dir(dir).is_err() {
-                break;
-            }
-            folder = dir.parent();
-        }
         #[cfg(windows)]
         {
-            let key = self.registry_key(browser).expect("Windows");
-            imp::delete_key(&key)?;
-            // NativeMessagingHosts and the vendor's keys, while empty.
-            let mut parent = key.rsplit_once('\\').map(|(p, _)| p);
-            while let Some(k) = parent {
-                if k == self.registry_root || !imp::delete_if_empty(k)? {
-                    break;
+            imp::delete_key(&self.registry_key(browser).expect("Windows"))?;
+            for level in self.key_levels(browser).iter().rev() {
+                if made.keys.contains(level) {
+                    imp::delete_if_empty(&format!(r"{}\{level}", self.registry_root))?;
                 }
-                parent = k.rsplit_once('\\').map(|(p, _)| p);
             }
         }
+        remove_if_there(&record)?;
+        // Innermost first; `remove_dir` fails, harmlessly, on a folder
+        // holding anything, and never follows a link.
+        let (base, folders) = self.folder_levels(browser);
+        for level in folders.iter().rev() {
+            if made.folders.contains(level) {
+                let _ = std::fs::remove_dir(at(&base, level));
+            }
+        }
+        // Zajil's own folder in the data folder, once no record is left.
+        let _ = std::fs::remove_dir(&self.manifests);
         Ok(())
     }
 
@@ -312,8 +413,48 @@ fn chrome_config_home(
         .unwrap_or_else(|| home.join(".config"))
 }
 
-fn tmp_path(manifest: &Path) -> PathBuf {
-    manifest.with_extension("json.tmp")
+/// A folder level of [`SystemRegistrar::folder_levels`] as a path.
+fn at(base: &Path, level: &str) -> PathBuf {
+    if level == "." {
+        base.to_path_buf()
+    } else {
+        base.join(level)
+    }
+}
+
+/// `<name>.tmp` next to `path` (`chrome.json.tmp`, `chrome.made.tmp`).
+fn tmp_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().expect("a file").to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
+/// Writes `bytes` to a new private temporary file next to `path` (a link
+/// in its place is refused), then puts it in place of `path`; the
+/// temporary file is removed if anything fails.
+fn write_new_then_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp = tmp_path(path);
+    remove_if_there(&tmp)?;
+    let written = crate::fs::create_private(&tmp)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .and_then(|()| crate::fs::replace_file(&tmp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+/// A folder only its owner may open on macOS and Linux (`0700`, as the
+/// browsers make theirs), with its missing parents.
+fn make_private_dir(path: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
 }
 
 /// Removes the file or link at `path` (never what a link points to),
@@ -452,7 +593,6 @@ mod imp {
         Ok(Some(Key(handle)))
     }
 
-    #[cfg(test)]
     pub fn key_exists(key: &str) -> io::Result<bool> {
         Ok(open(key, KEY_READ)?.is_some())
     }
@@ -791,18 +931,36 @@ mod tests {
         let manifest = r.manifest_path(Browser::Chrome);
         let hosts = manifest.parent().unwrap().to_path_buf();
         let browser_folder = hosts.parent().unwrap().to_path_buf();
-        std::fs::create_dir_all(browser_folder.join("Default")).unwrap();
+        // Empty, as a folder or key made by someone else before Zajil.
+        std::fs::create_dir_all(&browser_folder).unwrap();
         #[cfg(windows)]
         imp::create(&format!(r"{}\{}", world.root, Browser::Chrome.vendor_key()));
 
         r.register(Browser::Chrome, &host(), &[CHROME_ID]).unwrap();
         r.unregister(Browser::Chrome).unwrap();
-        assert!(browser_folder.join("Default").is_dir());
+        assert!(browser_folder.is_dir());
         #[cfg(windows)]
         assert!(
             imp::key_exists(&format!(r"{}\{}", world.root, Browser::Chrome.vendor_key())).unwrap()
         );
 
+        // What the browser puts in a folder Zajil made stays too.
+        let world = World::new();
+        let r = &world.registrar;
+        r.register(Browser::Edge, &host(), &[CHROME_ID]).unwrap();
+        let profile = r
+            .manifest_path(Browser::Edge)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Default");
+        std::fs::create_dir_all(&profile).unwrap();
+        r.unregister(Browser::Edge).unwrap();
+        assert!(profile.is_dir());
+        let world = World::new();
+        let r = &world.registrar;
+        let manifest = r.manifest_path(Browser::Chrome);
         r.register(Browser::Chrome, &host(), &[CHROME_ID]).unwrap();
         let other = manifest.with_file_name("com.example.other.json");
         std::fs::write(&other, "{}").unwrap();
@@ -818,7 +976,7 @@ mod tests {
         let world = World::new();
         let r = &world.registrar;
         let tmp = tmp_path(&r.manifest_path(Browser::Edge));
-        std::fs::create_dir_all(tmp.parent().unwrap()).unwrap();
+        r.register(Browser::Edge, &host(), &[CHROME_ID]).unwrap();
         std::fs::write(&tmp, "half").unwrap();
         r.register(Browser::Edge, &host(), &[CHROME_ID]).unwrap();
         assert!(!tmp.exists());
@@ -860,6 +1018,48 @@ mod tests {
             assert!(!manifest.exists() && manifest.symlink_metadata().is_err());
             assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         }
+    }
+
+    /// A base folder missing before registering (an empty home's
+    /// `~/.config`) is made, then removed again; the folders registering
+    /// makes are the user's only, as the browsers make theirs.
+    #[cfg(unix)]
+    #[test]
+    fn folders_made_are_private_and_removed_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let world = World::new();
+        let r = &world.registrar;
+        let (base, levels) = r.folder_levels(Browser::Chrome);
+        std::fs::remove_dir(&base).unwrap();
+        r.register(Browser::Chrome, &host(), &[CHROME_ID]).unwrap();
+        for level in &levels {
+            let mode = at(&base, level).metadata().unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700, "{level}");
+        }
+        r.unregister(Browser::Chrome).unwrap();
+        assert!(!base.exists());
+        assert_eq!(world.added(), Vec::<PathBuf>::new(), "left behind");
+    }
+
+    /// A record naming anything but the browser's own levels is ignored:
+    /// an empty folder elsewhere is never removed.
+    #[test]
+    fn a_record_naming_other_folders_is_ignored() {
+        let world = World::new();
+        let r = &world.registrar;
+        let outside = world.base.join("home/outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        r.register(Browser::Chrome, &host(), &[CHROME_ID]).unwrap();
+        let record = r.record_path(Browser::Chrome);
+        let mut text = std::fs::read_to_string(&record).unwrap();
+        let (base, _) = r.folder_levels(Browser::Chrome);
+        for level in ["../outside", "../../outside", "../home/outside"] {
+            text.push_str(&format!("folder {level}\n"));
+        }
+        text.push_str(&format!("folder {}\nkey ..\\Other\n", outside.display()));
+        std::fs::write(&record, text).unwrap();
+        r.unregister(Browser::Chrome).unwrap();
+        assert!(outside.is_dir(), "relative to {base:?}");
     }
 
     #[test]
@@ -923,17 +1123,15 @@ mod tests {
     /// `$XDG_CONFIG_HOME`; relative values are ignored.
     #[test]
     fn chromium_s_configuration_folder_follows_the_environment() {
-        let home = Path::new("/home/u");
-        let os = |s: &str| Some(std::ffi::OsString::from(s));
+        // Absolute on every system.
+        let root = std::env::temp_dir();
+        let home = &root.join("home");
+        let (cfg, c) = (root.join("cfg"), root.join("c"));
+        let os = |p: &Path| Some(p.as_os_str().to_owned());
         assert_eq!(chrome_config_home(home, None, None), home.join(".config"));
-        assert_eq!(
-            chrome_config_home(home, None, os("/x/cfg")),
-            PathBuf::from("/x/cfg")
-        );
-        assert_eq!(
-            chrome_config_home(home, os("/c"), os("/x/cfg")),
-            PathBuf::from("/c")
-        );
+        assert_eq!(chrome_config_home(home, None, os(&cfg)), cfg);
+        assert_eq!(chrome_config_home(home, os(&c), os(&cfg)), c);
+        let os = |s: &str| Some(std::ffi::OsString::from(s));
         assert_eq!(
             chrome_config_home(home, os("rel"), os("also-rel")),
             home.join(".config")
