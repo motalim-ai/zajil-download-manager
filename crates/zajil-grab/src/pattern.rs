@@ -8,11 +8,14 @@
 //! - `*`: a counter whose range comes from outside the pattern ([`Star`]),
 //!   as `--from`, `--to` and `--width` on the command line (owner's
 //!   decision on ADR-0010).
-//! - `\` before one of `[]{}*,\` is that character itself.
+//! - `\` before one of `[]{}*,` is that character itself. Any other `\` is
+//!   refused: the URL parser would turn it into `/` (write `%5C`).
 //!
-//! Patterns are expanded only after the host, never in it, so a pattern can
-//! never fan out to many sites. The number of URLs is computed, with checked
-//! arithmetic, before any is made: a huge range is refused at once.
+//! Patterns are expanded only in the path and query, never in the host or
+//! the fragment, so a pattern can never fan out to many sites; every URL
+//! made is checked to have the pattern's own host and port. The number of
+//! URLs is computed, with checked arithmetic, before any is made: a huge
+//! range is refused at once.
 
 use std::fmt;
 
@@ -22,8 +25,12 @@ use zajil_core::Url;
 pub const DEFAULT_MAX_URLS: u64 = 1_000;
 /// The most URLs a pattern may ever make.
 pub const MAX_URLS: u64 = 10_000;
-/// The most digits `--width` may ask for.
+/// The most digits `--width` (or a zero-padded `--from`) may ask for.
 pub const MAX_WIDTH: u8 = 10;
+/// The most digits a zero-padded `[START-END]` may have: a `u64` has 20.
+pub const MAX_PADDED_WIDTH: usize = 20;
+/// The longest pattern read, in bytes.
+pub const MAX_PATTERN_BYTES: usize = 8 * 1024;
 
 /// The range of the `*` counter: `--from`, `--to` and `--width`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +47,28 @@ pub struct Star {
 pub enum PatternError {
     /// Not an `http://` or `https://` URL.
     NotHttp,
+    /// Longer than [`MAX_PATTERN_BYTES`].
+    TooLong,
+    /// A tab, line break or other control character, which the URL parser
+    /// would silently drop.
+    ControlCharacter { at: usize },
+    /// Nothing between `://` and the path.
+    NoHost,
+    /// A `[`, `{` or `*` in the fragment (after `#`), which is never sent.
+    InFragment { at: usize },
+    /// A backslash that is not before one of `[]{}*,`.
+    Backslash { at: usize },
+    /// A zero-padded end with a start that is not padded (`[1-010]`).
+    PaddedEnd {
+        at: usize,
+        start: String,
+        end: String,
+    },
+    /// A zero-padded width larger than allowed.
+    WidthTooLarge { at: usize, width: usize, max: usize },
+    /// A URL made by the pattern with another host or port than the
+    /// pattern's own.
+    HostChanged { url: String },
     /// A `[`, `{` or `*` inside the host.
     InHost { at: usize },
     /// A `[` or `{` without its `]` or `}`.
@@ -94,6 +123,34 @@ impl fmt::Display for PatternError {
         use PatternError::*;
         match self {
             NotHttp => write!(f, "the pattern must start with http:// or https://"),
+            TooLong => write!(f, "the pattern is longer than {MAX_PATTERN_BYTES} bytes"),
+            ControlCharacter { at } => write!(
+                f,
+                "character {at}: a tab, line break or other control character is not allowed"
+            ),
+            NoHost => write!(f, "the pattern has no host after ://"),
+            InFragment { at } => write!(
+                f,
+                "character {at}: patterns are not allowed after `#`, which is never sent to the server"
+            ),
+            Backslash { at } => write!(
+                f,
+                "character {at}: `\\` only goes before one of [ ] {{ }} * , (write %5C for a backslash)"
+            ),
+            PaddedEnd { at, start, end } => write!(
+                f,
+                "character {at}: the end {end} starts with a zero but the start {start} does not: \
+                 write both with the same number of digits, such as [{}-{end}]",
+                format_args!("{:0>width$}", start, width = end.len())
+            ),
+            WidthTooLarge { at, width, max } => write!(
+                f,
+                "character {at}: {width} digits with zeros on the left, more than {max}"
+            ),
+            HostChanged { url } => write!(
+                f,
+                "the pattern makes {url}, whose host is not the pattern's own"
+            ),
             InHost { at } => write!(
                 f,
                 "character {at}: patterns are not allowed in the host, only after it"
@@ -124,10 +181,10 @@ impl fmt::Display for PatternError {
             ZeroStep { at } => write!(f, "character {at}: the step must be at least 1"),
             WidthMismatch { at, start, end } => write!(
                 f,
-                "character {at}: the start {start} starts with a zero, so every number has {} \
-                 digits, but the end {end} has {}",
-                start.len(),
-                end.len()
+                "character {at}: the start {start} starts with a zero, so every number has {}, \
+                 but the end {end} has {}",
+                digits(start.len()),
+                digits(end.len())
             ),
             TooLarge { at } => write!(f, "character {at}: the number is too large"),
             BadCounter { from, to } => write!(
@@ -151,8 +208,8 @@ impl fmt::Display for PatternError {
             ),
             WidthTooSmall { end, width } => write!(
                 f,
-                "--to {end} has {} digits, more than --width {width}",
-                end.len()
+                "--to {end} has {}, more than --width {width}",
+                digits(end.len())
             ),
             NoPattern => write!(
                 f,
@@ -179,6 +236,14 @@ impl fmt::Display for PatternError {
 }
 
 impl std::error::Error for PatternError {}
+
+fn digits(n: usize) -> String {
+    if n == 1 {
+        "1 digit".to_owned()
+    } else {
+        format!("{n} digits")
+    }
+}
 
 /// A piece of a parsed pattern.
 #[derive(Debug, Clone)]
@@ -232,7 +297,10 @@ impl Part {
 /// [`MAX_URLS`]). `star` is the range of a `*` in the pattern.
 pub fn expand(pattern: &str, star: Option<&Star>, max: u64) -> Result<Vec<String>, PatternError> {
     let max = max.min(MAX_URLS);
-    let parts = parse(pattern, star)?;
+    if pattern.len() > MAX_PATTERN_BYTES {
+        return Err(PatternError::TooLong);
+    }
+    let (parts, host) = parse(pattern, star)?;
     if parts.iter().all(|part| matches!(part, Part::Text(_))) {
         return Err(PatternError::NoPattern);
     }
@@ -251,13 +319,18 @@ pub fn expand(pattern: &str, star: Option<&Star>, max: u64) -> Result<Vec<String
     }
 
     let mut urls = Vec::with_capacity(total as usize);
+    let mut seen = std::collections::HashSet::new();
     let mut index = vec![0u64; parts.len()];
     for _ in 0..total {
         let mut url = String::new();
         for (part, &i) in parts.iter().zip(&index) {
             part.push_value(i, &mut url);
         }
-        urls.push(checked_url(&url)?);
+        let url = checked_url(&url, &host)?;
+        // `{a,a}`, or `{..,b}/x` once the URL is normalised: each once.
+        if seen.insert(url.clone()) {
+            urls.push(url);
+        }
         // The odometer: the rightmost part turns first.
         for (part, i) in parts.iter().zip(index.iter_mut()).rev() {
             *i += 1;
@@ -270,11 +343,25 @@ pub fn expand(pattern: &str, star: Option<&Star>, max: u64) -> Result<Vec<String
     Ok(urls)
 }
 
-/// `url` as the engine will see it, if it is a valid http or https URL.
-fn checked_url(url: &str) -> Result<String, PatternError> {
+/// The host and port of a URL.
+type HostPort = (String, Option<u16>);
+
+fn host_port(url: &Url) -> HostPort {
+    (
+        url.host_str().unwrap_or("").to_owned(),
+        url.port_or_known_default(),
+    )
+}
+
+/// `url` as the engine will see it, if it is a valid http or https URL
+/// with the pattern's own `host` and port.
+fn checked_url(url: &str, host: &HostPort) -> Result<String, PatternError> {
     match Url::parse(url) {
-        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => Ok(parsed.into()),
-        Ok(_) => Err(PatternError::NotHttp),
+        Ok(parsed) if !matches!(parsed.scheme(), "http" | "https") => Err(PatternError::NotHttp),
+        Ok(parsed) if host_port(&parsed) != *host => {
+            Err(PatternError::HostChanged { url: shown(url) })
+        }
+        Ok(parsed) => Ok(parsed.into()),
         Err(err) => Err(PatternError::InvalidUrl {
             url: shown(url),
             reason: err.to_string(),
@@ -282,17 +369,33 @@ fn checked_url(url: &str) -> Result<String, PatternError> {
     }
 }
 
-/// `url` without its query and fragment, which may hold a token (owner's
-/// decision on #28: tokens are never printed).
-fn shown(url: &str) -> String {
-    match url.find(['?', '#']) {
+/// `url` as an error may show it: without a user name and password, and
+/// without its query and fragment, which may hold a token (owner's decision
+/// on #28: tokens are never printed). It is cut as text, since it may not
+/// parse.
+pub(crate) fn shown(url: &str) -> String {
+    let mut url = match url.find(['?', '#']) {
         Some(end) => url[..end].to_owned(),
         None => url.to_owned(),
+    };
+    if let Some(after_scheme) = url.find("://").map(|i| i + 3) {
+        let host_end = url[after_scheme..]
+            .find('/')
+            .map_or(url.len(), |i| i + after_scheme);
+        if let Some(at) = url[after_scheme..host_end].rfind('@') {
+            url.replace_range(after_scheme..=after_scheme + at, "");
+        }
     }
+    url
 }
 
-fn parse(pattern: &str, star: Option<&Star>) -> Result<Vec<Part>, PatternError> {
+fn parse(pattern: &str, star: Option<&Star>) -> Result<(Vec<Part>, HostPort), PatternError> {
     let chars: Vec<char> = pattern.chars().collect();
+    // The URL parser drops tabs and line breaks without a word, which would
+    // move a pattern into the host (`http://\t/[1-3].example.com`).
+    if let Some(i) = chars.iter().position(|c| c.is_control()) {
+        return Err(PatternError::ControlCharacter { at: i + 1 });
+    }
     let scheme_end = ["http://", "https://"]
         .iter()
         .find(|scheme| {
@@ -310,6 +413,9 @@ fn parse(pattern: &str, star: Option<&Star>) -> Result<Vec<Part>, PatternError> 
         .iter()
         .position(|c| matches!(c, '/' | '?' | '#'))
         .map_or(chars.len(), |p| p + scheme_end);
+    if host_end == scheme_end {
+        return Err(PatternError::NoHost);
+    }
     let mut in_ipv6 = false;
     for (i, &c) in chars.iter().enumerate().take(host_end).skip(scheme_end) {
         match c {
@@ -320,17 +426,33 @@ fn parse(pattern: &str, star: Option<&Star>) -> Result<Vec<Part>, PatternError> 
         }
     }
 
-    let mut parts = vec![Part::Text(chars[..host_end].iter().collect())];
+    let prefix: String = chars[..host_end].iter().collect();
+    let host = Url::parse(&format!("{prefix}/"))
+        .map(|url| host_port(&url))
+        .map_err(|err| PatternError::InvalidUrl {
+            url: shown(&prefix),
+            reason: err.to_string(),
+        })?;
+    let mut parts = vec![Part::Text(prefix)];
+    let mut in_fragment = false;
     let mut text = String::new();
     let mut star_seen = false;
     let mut i = host_end;
     while i < chars.len() {
         let c = chars[i];
+        if in_fragment && matches!(c, '[' | '{' | '*') {
+            return Err(PatternError::InFragment { at: i + 1 });
+        }
         match c {
             '\\' if i + 1 < chars.len() && is_special(chars[i + 1]) => {
                 text.push(chars[i + 1]);
                 i += 2;
                 continue;
+            }
+            '\\' => return Err(PatternError::Backslash { at: i + 1 }),
+            '#' if !in_fragment => {
+                in_fragment = true;
+                text.push(c);
             }
             '[' | '{' => {
                 let close = if c == '[' { ']' } else { '}' };
@@ -376,11 +498,11 @@ fn parse(pattern: &str, star: Option<&Star>) -> Result<Vec<Part>, PatternError> 
     if star.is_some() && !star_seen {
         return Err(PatternError::NoStar);
     }
-    Ok(parts)
+    Ok((parts, host))
 }
 
 fn is_special(c: char) -> bool {
-    matches!(c, '[' | ']' | '{' | '}' | '*' | ',' | '\\')
+    matches!(c, '[' | ']' | '{' | '}' | '*' | ',')
 }
 
 /// Whether the host text after a `[` is an IPv6 literal (`::1]`, …): hex
@@ -402,6 +524,7 @@ fn closing(chars: &[char], open: usize, close: char) -> Result<usize, PatternErr
     while i < chars.len() {
         match chars[i] {
             '\\' if i + 1 < chars.len() && is_special(chars[i + 1]) => i += 1,
+            '\\' => return Err(PatternError::Backslash { at: i + 1 }),
             c if c == close => return Ok(i),
             '[' | '{' | '*' => return Err(PatternError::Nested { at: i + 1 }),
             ']' | '}' => {
@@ -473,7 +596,7 @@ fn range(inner: &str, at: usize) -> Result<Part, PatternError> {
         return Err(PatternError::ZeroStep { at });
     }
     let (start, end) = bounds.split_once('-').ok_or_else(bad)?;
-    bounds_part(start, end, step, None, at).map_err(|err| match err {
+    bounds_part(start, end, step, None, MAX_PADDED_WIDTH, at).map_err(|err| match err {
         PatternError::BadRange { .. } => bad(),
         other => other,
     })
@@ -487,7 +610,15 @@ fn star_range(star: &Star, at: usize) -> Result<Part, PatternError> {
     {
         return Err(PatternError::BadWidth { width });
     }
-    bounds_part(&star.from, &star.to, 1, star.width, at).map_err(|err| match err {
+    bounds_part(
+        &star.from,
+        &star.to,
+        1,
+        star.width,
+        usize::from(MAX_WIDTH),
+        at,
+    )
+    .map_err(|err| match err {
         PatternError::BadRange { .. } => PatternError::BadCounter {
             from: star.from.clone(),
             to: star.to.clone(),
@@ -501,6 +632,7 @@ fn bounds_part(
     end: &str,
     step: u64,
     width: Option<u8>,
+    max_width: usize,
     at: usize,
 ) -> Result<Part, PatternError> {
     let text = format!("{start}-{end}");
@@ -508,10 +640,19 @@ fn bounds_part(
     let letter = |s: &str| s.len() == 1 && s.as_bytes()[0].is_ascii_alphabetic();
 
     if digits(start) && digits(end) {
+        // curl's rule: a start of more than one digit with a leading zero
+        // gives the width of every number.
         let padded = start.len() > 1 && start.starts_with('0');
         let end_padded = end.len() > 1 && end.starts_with('0');
         let mut pad = 0;
-        if padded || end_padded {
+        if padded {
+            if start.len() > max_width {
+                return Err(PatternError::WidthTooLarge {
+                    at,
+                    width: start.len(),
+                    max: max_width,
+                });
+            }
             if start.len() != end.len() {
                 return Err(PatternError::WidthMismatch {
                     at,
@@ -520,6 +661,12 @@ fn bounds_part(
                 });
             }
             pad = start.len();
+        } else if end_padded {
+            return Err(PatternError::PaddedEnd {
+                at,
+                start: start.to_owned(),
+                end: end.to_owned(),
+            });
         }
         if let Some(given) = width {
             if pad != 0 && pad != usize::from(given) {
@@ -734,7 +881,7 @@ mod tests {
                     end: "100".into(),
                 },
                 "character 13: the start 01 starts with a zero, so every number has 2 digits, \
-                 but the end 100 has 3",
+                 but the end 100 has 3 digits",
             ),
             (
                 "http://h/img[a-9].jpg",
@@ -1044,5 +1191,187 @@ mod tests {
             assert_eq!(&got, want, "{pattern} {counter:?}");
             assert_eq!(got.to_string(), *message, "{pattern} {counter:?}");
         }
+    }
+
+    /// Review of #113: the host could be reached through an empty host
+    /// part or a character the URL parser drops.
+    #[test]
+    fn patterns_can_never_reach_the_host() {
+        for (pattern, want) in [
+            ("http:///[1-3].example.com/f", PatternError::NoHost),
+            ("https:///{a,b}.e.com", PatternError::NoHost),
+            (
+                "http://\t/[1-3].example.com/f",
+                PatternError::ControlCharacter { at: 8 },
+            ),
+            (
+                "http://\r\n/[1-2].e.com/f",
+                PatternError::ControlCharacter { at: 8 },
+            ),
+            (
+                "http://h/[1-2]\n",
+                PatternError::ControlCharacter { at: 15 },
+            ),
+        ] {
+            assert_eq!(error(pattern), want, "{pattern:?}");
+        }
+        assert_eq!(
+            PatternError::NoHost.to_string(),
+            "the pattern has no host after ://"
+        );
+    }
+
+    /// Every URL made keeps the pattern's own host and port.
+    #[test]
+    fn every_url_keeps_the_patterns_host() {
+        assert_eq!(
+            urls("http://h:8080/[1-2]"),
+            ["http://h:8080/1", "http://h:8080/2"]
+        );
+        let host = (String::from("h"), Some(80));
+        assert!(matches!(
+            checked_url("http://other/1", &host),
+            Err(PatternError::HostChanged { .. })
+        ));
+    }
+
+    /// Review of #113: a huge zero-padded width made `format!` panic.
+    #[test]
+    fn a_huge_padded_width_is_refused_without_panicking() {
+        let start = format!("{}1", "0".repeat(65_535));
+        let end = format!("{}9", "0".repeat(65_535));
+        assert_eq!(
+            expand(&format!("http://h/[{start}-{end}]"), None, MAX_URLS).unwrap_err(),
+            PatternError::TooLong
+        );
+        let start = format!("{}1", "0".repeat(20));
+        let end = format!("{}9", "0".repeat(20));
+        assert_eq!(
+            error(&format!("http://h/[{start}-{end}]")),
+            PatternError::WidthTooLarge {
+                at: 10,
+                width: 21,
+                max: 20
+            }
+        );
+        let padded = format!("{}1", "0".repeat(19));
+        assert_eq!(
+            urls(&format!("http://h/[{padded}-{}2]", "0".repeat(19))).len(),
+            2
+        );
+        let big = format!("{}1", "0".repeat(65_535));
+        let to = format!("{}3", "0".repeat(65_535));
+        assert_eq!(
+            expand("http://h/f*", Some(&star(&big, &to, None)), MAX_URLS).unwrap_err(),
+            PatternError::WidthTooLarge {
+                at: 11,
+                width: 65_536,
+                max: 10
+            }
+        );
+        assert_eq!(
+            expand(
+                "http://h/f*",
+                Some(&star("00000000001", "00000000003", None)),
+                MAX_URLS
+            )
+            .unwrap_err(),
+            PatternError::WidthTooLarge {
+                at: 11,
+                width: 11,
+                max: 10
+            }
+        );
+        assert_eq!(
+            error(&format!("http://h/{}[1-2]", "a".repeat(MAX_PATTERN_BYTES))),
+            PatternError::TooLong
+        );
+    }
+
+    #[test]
+    fn patterns_are_refused_in_the_fragment() {
+        assert_eq!(
+            error("http://h/a#[1-2]"),
+            PatternError::InFragment { at: 12 }
+        );
+        assert_eq!(
+            error("http://h/[1-2]#{a,b}"),
+            PatternError::InFragment { at: 16 }
+        );
+        assert_eq!(
+            urls(r"http://h/[1-2]#x\[y"),
+            ["http://h/1#x[y", "http://h/2#x[y"]
+        );
+    }
+
+    /// Review of #113: a user name and password are never shown.
+    #[test]
+    fn errors_never_show_a_password() {
+        for pattern in [
+            "http://user:secretpw@h:99999/[1-2]?sig=T",
+            "http://u:secretpw@/[1-2].e.com/",
+        ] {
+            let err = error(pattern);
+            let text = err.to_string();
+            assert!(!text.contains("secretpw"), "{text}");
+            assert!(!text.contains("sig=T"), "{text}");
+        }
+        assert_eq!(shown("http://u:p@h:1/a?b#c"), "http://h:1/a");
+        assert_eq!(shown("http://h/a@b"), "http://h/a@b");
+    }
+
+    #[test]
+    fn a_bare_backslash_is_refused() {
+        assert_eq!(
+            error(r"http://h/a\b[1-2]"),
+            PatternError::Backslash { at: 11 }
+        );
+        assert_eq!(
+            error(r"http://h/[1-2]\"),
+            PatternError::Backslash { at: 15 }
+        );
+        assert_eq!(
+            error(r"http://h/{a\b,c}"),
+            PatternError::Backslash { at: 12 }
+        );
+        assert_eq!(
+            error(r"http://h/\\[1-2]"),
+            PatternError::Backslash { at: 10 }
+        );
+    }
+
+    #[test]
+    fn a_padded_end_needs_a_padded_start() {
+        let err = error("http://h/[1-010]");
+        assert_eq!(
+            err,
+            PatternError::PaddedEnd {
+                at: 10,
+                start: "1".into(),
+                end: "010".into()
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "character 10: the end 010 starts with a zero but the start 1 does not: write both \
+             with the same number of digits, such as [001-010]"
+        );
+        assert!(matches!(
+            expand("http://h/f*", Some(&star("1", "0100", Some(3))), MAX_URLS),
+            Err(PatternError::PaddedEnd { .. })
+        ));
+        assert_eq!(
+            error("http://h/[01-5]").to_string(),
+            "character 10: the start 01 starts with a zero, so every number has 2 digits, \
+             but the end 5 has 1 digit"
+        );
+        // `[0-100]`: a single 0 pads nothing.
+        assert_eq!(urls("http://h/[0-100]").len(), 101);
+    }
+
+    #[test]
+    fn the_same_url_is_made_once() {
+        assert_eq!(urls("http://h/{a,a,b}"), ["http://h/a", "http://h/b"]);
+        assert_eq!(urls("http://h/{..,b}/x"), ["http://h/x", "http://h/b/x"]);
     }
 }
