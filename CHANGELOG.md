@@ -7,12 +7,107 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-### Added
+## [0.1.0] - 2026-10-26
+
+The first test build. This list is the titles of the pull requests merged before it (owner's rule for 0.1). The notes each pull request wrote follow under «Details».
+
+### Features
+
+- feat(platform): add zajil-platform crate with AppPaths (#11)
+- feat(core): sanitize file names and confine paths to the download folder (#12)
+- feat(core): add the per-download state file (ADR-0004) (#13)
+- feat(core): download over HTTP(S) with a single connection (#15)
+- feat(core): resume downloads with Range and If-Range (#17)
+- feat(cli): add zajil get and zajil resume (#18)
+- feat(platform): positional writes, disk space checks and rename without hard links (#23)
+- feat(core): download with up to 32 connections (#24)
+- feat(core): split the slowest segment when a connection is free (#25)
+- feat(core): retry with backoff and jitter, and back off on 403 and 429 (#26)
+- feat(core): retry the first request and single-connection downloads (#30)
+- feat: queues with a number of downloads at once, kept across restarts (#31)
+- feat: speed limits for the whole program and for each download (#32)
+- feat: schedule queues by time of day and weekday (#33)
+- feat: shut down or sleep after a queue finishes, and mark M3 done (#35)
+- feat: categories by file type and site, and export and import of queues (#41)
+- feat: Arabic and English translations with Fluent (#43)
+- feat(desktop): the app's window over the engine (#45)
+- feat(desktop): the download list (#46)
+- feat(desktop): adding a download and download details (#48)
+- feat(desktop): settings, categories and the language switch without a restart (#57)
+- feat(desktop): system tray, notifications, starting with the system, and saving at a Windows shutdown (#59)
+- feat(host): zajil-host, the Native Messaging host, and the user's private channel to the app (#62)
+- feat(platform): register the native host with each browser, for the current user (#63)
+- feat(desktop): clipboard monitoring, off by default (#67)
+- feat(extension): the browser extension for Chrome, Edge and Firefox (#70)
+- feat(desktop): register the browser extension's host at each start, and fix it from the settings (#71)
+- feat(core): refresh an expired download link, and the browser's headers in memory (#74)
+- feat(extension): the download link's cookies, with an optional permission asked for once (#76)
+- feat(desktop): refresh the download link from the app (#78)
+- feat: ask the browser for the cookies again after a restart (#80)
+- feat(desktop): the M5.5 main window, part 1 (#96)
+- feat: video from the extension: the menu item, zajil-host's video message, and the app's «coming soon» (#99)
+- feat(desktop): the M5.5 main window, part 2: menus, right-click menu, shortcuts and columns (#101)
+- feat(desktop): the M5.5 add windows, part 3: «Add a link» and «Download file info» as windows of their own (#104)
+- feat(desktop): quit asks first while downloads are running (#105)
+- feat(desktop): closing the window hides it into the system tray, as in IDM (#109)
+- feat(desktop): the M5.5 progress window, part 4 (#111)
+- feat(grab): batch downloads with patterns, zajil batch (M7) (#113)
+- feat(core): a queued download's own file name, category and description, and its last try (#114)
+- feat(desktop): the main window's own title bar with the logo and name, and «فيديوهات» and «صوتيات» (#118)
+- feat(desktop): the M5.5 schedule window: queues, when they start and stop, and what happens after (#126)
+- feat(desktop): the user's file name, category and description in «Download file info», and «Last try» and «Description» in the table (#135)
+
+### Fixes
+
+- fix(cli): explain a resume that needs credentials, and test a change during splitting (#29)
+- fix(core): free a cancelled download's names by moving its files aside (#55) (#56)
+- fix(platform): really check on Windows who may change zajil-host (#89)
+- fix: mark files from the internet, and hold files that run code for the user (#90)
+- fix(extension): a private window's download offers no button and leaves nothing (#91)
+- fix(desktop): «Download file info» says an unknown size in words, shows the name, and warns of a web page (#117)
+
+### Documentation
+
+- docs: add M0 foundation (docs, ADRs, templates, 3-OS CI) (#2)
+- docs: update PARITY and CHANGELOG for M1 (#19)
+- docs: mark M1 done in ROADMAP (#21)
+- docs: add a pre-PR checklist to AGENTS.md (#22)
+- docs: mark M2 done (#27)
+- docs: add ADR-0008, Svelte 5 for the user interface (#38)
+- docs: M4 done (ROADMAP, PARITY, CHANGELOG) (#61)
+- docs: M5.5 (IDM experience), proxy after 0.1, M6 with yt-dlp and FFmpeg, the 0.1 test release (#66)
+- docs: M5 done (#86)
+- docs: ADR-0009, video downloads with yt-dlp and FFmpeg (#88)
+- docs: ROADMAP, YouTube inside M6 and the video tools in M8's signed update channel (#97)
+- docs: ADR-0010, the site grabber and batch downloads (M7) (#108)
+- docs: no Apple or Microsoft signing, ever; 0.1 now, video and the grabber in 0.2 (#123)
+
+### Tests
+
+- test: add zajil-testserver for hard network cases (#14)
+- test(core): verify HTTPS against a temporary test CA and reject invalid certificates (#16)
+- test: run a real-clock speed limit test every night, and record the owner's decisions on #36 (#37)
+- test: record the speed limit's waits in the nightly test and upload them on failure (#42)
+- test(desktop): screenshots of the real window and the image test of mixed names (#47)
+- test: a path of its own for every test server, and no zajil left running by a test (#51)
+- test: a test server prints what it saw when a test fails (#52)
+
+### CI
+
+- ci: bump actions/upload-artifact from 4.6.2 to 7.0.2 (#53)
+- ci: Dependabot ignores TypeScript 7 until svelte-check supports it (#87)
+- ci: build Zajil's LGPL FFmpeg on every system, and release it from a tag (#100)
+- ci: build the 0.1 installers, zajil-host and the extension, and draft a release from a tag (#122)
+- ci: screenshots of «Add a link» and the progress window (#138)
+
+### Details
+
+#### Added
 - The app answers a video from the extension (M6, ADR-0009) with «تحميل الفيديو قادم قريبًا.» or "Video downloads are coming soon.", in the user's language from the translations, and does nothing else (no request to the page, nothing added) until video downloads come. Tested in both languages.
 - M5.5 quit (owner's decision on #83): Ctrl+Q, ⌘Q on macOS (whichever window is in front), the menus' Quit and the tray's ask first while downloads are running («يعمل الآن 3 تحميلات. هل تُنهي زاجِل؟», in the six Arabic plural forms). Closing the window, the Dock's Quit and the end of the session do not ask. Tested: the question in every Arabic and English form (Rust).
 - M5.5 the add windows (#65, the design of #83, windows 2 and 3), part 3: «Add a link» and «Download file info» are windows of their own, as in IDM, no longer dialogs inside the main window. A copied link opens «Add a link» with the link in it and says it came from the clipboard; a link copied while it is open takes its box. «Download file info» shows the link, the category with a «New category» button (which opens the categories in the main window), the file name, the folder with «Change» and «Remember this folder for this category» (the category's folder becomes the chosen one), and a card with the file's size, kind and whether it can be resumed; «Start download», «Download later» (in the main queue, or in a queue chosen from its arrow) and «Cancel»; closing it gives up the check of the server. The file name and the category become editable once zajil-core keeps them (#103), the description once it has one (#95). The two windows have their own capability, added by the app when it starts: Zajil's commands and events and the folder picker, none of the main window's other permissions. On macOS the menu's commands go to the window in front (⌘A selects the link's text there). Tested: the add windows' capability (Rust), the new texts in both languages, and the info window in the screenshots and axe check of the three systems.
 - M5.5 main window (#65, the design of #83), part 2: the menus, File, Edit, Downloads, View and Help, in the window on Windows and Linux (Alt with a menu's underlined letter opens it, Alt alone goes to the bar, the arrows follow the reading direction) and in the system's bar on macOS (built by the app in its language, with the system's own Hide, Undo, Cut, Copy, Paste, Minimize and Zoom; no menu permission for the page); a right-click menu on the selected downloads (also Shift+F10 and the menu key): open, open folder, resume, pause, progress, move to another queue, copy link, refresh link, delete and properties; every shortcut of the design's table, ⌘ on macOS where the others use Ctrl, with macOS's own where they differ (⌘O to open, ⌘I for properties, ⌘⇧R and ⌘⇧H for the queues, ⌘⌫ to delete), and in a text box its own keys stay its own; open a finished download with its program (a file that can run code, #84, only once the user agrees) or show it in its folder, never opening a folder itself (`tauri-plugin-opener`, from Rust only); «Copy link» writes the clipboard from the app, which its clipboard monitoring does not offer back; the table's columns shown or hidden, made wider or narrower (with the mouse or the arrow keys) and moved by dragging their headers, kept for the next time. Tested: the shortcuts on each system and the Arabic layout, every menu text in both languages, and the columns kept, restored and checked (Vitest); moving downloads to another queue in their order (Rust); the screenshots and axe check on the three systems.
-- M6, FFmpeg for Zajil (ADR-0009): `tools/ffmpeg` builds `ffmpeg` and `ffprobe` 8.1.3 from the official source, after checking its signature (a good, valid signature by key FCF986EA15E6E293A5644F10B4322F04D67658D8, neither expired nor revoked) and its pinned SHA-256. LGPL 2.1+ only: `build.sh` accepts only an allow-list of options (turning things off, FFmpeg's own components by name, and how to compile), so no `--enable-gpl`, no `--enable-nonfree` and no external library, with or without a `lib` prefix, and no `-l`, `-L`, `-Wl,`, archive or define in the extra compiler and linker flags; then it checks `config.h` (no GPL, non-free or version 3) and that both lists of external libraries configure prints are empty; libc's `iconv`, which configure probes even with autodetect off, is turned off. And `check-linked.sh` reads what the built files themselves load: the system's C library only on Linux, `libSystem` and Apple's own frameworks only on macOS (both halves; configure always adds CoreFoundation, CoreMedia and CoreVideo), Windows' own DLLs only. Remux only, plus the native AAC encoder for audio-only m4a; protocols `file` and `pipe` only. `.github/workflows/ffmpeg.yml` builds it on Windows (x64, arm64; static, with no MinGW or MSYS2 DLL, and with Windows' own threads, never winpthreads), macOS (universal) and Linux (x64, arm64); real sizes, ffmpeg and ffprobe together, from 4.60 MiB (Windows arm64) to 10.14 MiB (macOS universal, ad-hoc signed), in `tools/ffmpeg/README.md`. A second build for tests only, `ffmpeg-testgen` (adds the encoders and sources that make the test videos), is never distributed. A `tools-ffmpeg-<version>-<n>` tag on main's history publishes the files, the official source and its signature (and its SHA-256 in the notes), the source with the build files, script and options at its root, the LGPL text, FFmpeg's `LICENSE.md` and `SHA256SUMS`. Tested on CI: the signature and the hash, once (Ubuntu), and the hash again by each of the five builds; `smoke-test.sh` on the distributed file itself on the five systems and on both halves of the macOS binary (the x86_64 one proved by its `--arch`) (LGPL 2.1 or later in `-L`, nothing GPL, non-free or external in `-buildconf`, no encoder but `aac`, no protocol but `file` and `pipe`; a remux, HLS and m4a from files the test build makes). The macOS files are ad-hoc signed in the CI (`codesign -s -`, checked with `codesign --verify --strict`, and smoke-tested signed), not signed or notarized by Apple until M8 (owner's decision on #100, ADR-0009 section 2); the release notes say so. Not yet: a release, Zajil downloading these files.
+- M6, FFmpeg for Zajil (ADR-0009): `tools/ffmpeg` builds `ffmpeg` and `ffprobe` 8.1.3 from the official source, after checking its signature (a good, valid signature by key FCF986EA15E6E293A5644F10B4322F04D67658D8, neither expired nor revoked) and its pinned SHA-256. LGPL 2.1+ only: `build.sh` accepts only an allow-list of options (turning things off, FFmpeg's own components by name, and how to compile), so no `--enable-gpl`, no `--enable-nonfree` and no external library, with or without a `lib` prefix, and no `-l`, `-L`, `-Wl,`, archive or define in the extra compiler and linker flags; then it checks `config.h` (no GPL, non-free or version 3) and that both lists of external libraries configure prints are empty; libc's `iconv`, which configure probes even with autodetect off, is turned off. And `check-linked.sh` reads what the built files themselves load: the system's C library only on Linux, `libSystem` and Apple's own frameworks only on macOS (both halves; configure always adds CoreFoundation, CoreMedia and CoreVideo), Windows' own DLLs only. Remux only, plus the native AAC encoder for audio-only m4a; protocols `file` and `pipe` only. `.github/workflows/ffmpeg.yml` builds it on Windows (x64, arm64; static, with no MinGW or MSYS2 DLL, and with Windows' own threads, never winpthreads), macOS (universal) and Linux (x64, arm64); real sizes, ffmpeg and ffprobe together, from 4.60 MiB (Windows arm64) to 10.14 MiB (macOS universal, ad-hoc signed), in `tools/ffmpeg/README.md`. A second build for tests only, `ffmpeg-testgen` (adds the encoders and sources that make the test videos), is never distributed. A `tools-ffmpeg-<version>-<n>` tag on main's history publishes the files, the official source and its signature (and its SHA-256 in the notes), the source with the build files, script and options at its root, the LGPL text, FFmpeg's `LICENSE.md` and `SHA256SUMS`. Tested on CI: the signature and the hash, once (Ubuntu), and the hash again by each of the five builds; `smoke-test.sh` on the distributed file itself on the five systems and on both halves of the macOS binary (the x86_64 one proved by its `--arch`) (LGPL 2.1 or later in `-L`, nothing GPL, non-free or external in `-buildconf`, no encoder but `aac`, no protocol but `file` and `pipe`; a remux, HLS and m4a from files the test build makes). The macOS files are ad-hoc signed in the CI (`codesign -s -`, checked with `codesign --verify --strict`, and smoke-tested signed), never signed or notarized by Apple (owner's decision on #100, then of 2026-10-25: no Apple or Microsoft signing, ever; ADR-0009 section 2); the release notes say so. Not yet: a release, Zajil downloading these files.
 - M5.5 main window (#65, the design of #83), part 1: a toolbar of big buttons with their names under them, coloured by kind of action (add a link, resume, pause, pause all, delete, clear finished, settings, schedule, run queue, halt queue; owner's decision on #83), a search and filter box (Ctrl+F, ⌘F on macOS) over the names and sites; the tree of all downloads, the categories with their unfinished and finished downloads under each, and the queues (a scheduled one says when it starts); the table with its seven columns (file name, size, status with a bar and the percentage, time left, speed, last try, description; the last two filled once #95 lands in zajil-core), several rows selected with Ctrl or ⌘, Shift and Ctrl+A; a status bar; the small «add a link» dialog, which a copied link opens with the link in it. The selection buttons act on the selected downloads the table shows, and only while it shows (not behind the settings); «clear finished» takes off the finished downloads the table shows; both ask first (a system yes-or-no question; the files stay on the disk); the queue buttons act on the queue the tree shows, else the main one, named in their tooltip, and «run queue» never starts a download that waits for the user's OK (#84); the toolbar waits while a dialog is open. The categories editor is reached from the settings. Shortcuts work with any keyboard layout (Arabic too). «القائمة» is «طابور» everywhere in Arabic (owner's decision on #83). Icons from Lucide 1.61.0 (ISC), copied with their license, which ships with the app (`lucide-LICENSE.txt` in the build). Tested: the shortcut helpers on each system and the status column's error code (Vitest), the translations (the six forms of «طابور» and the new texts with values as whole texts, Rust), and the screenshots and axe check of every screen on the three systems.
 - M6, the extension: «حمّل الفيديو بزاجِل» ("Download video with Zajil") in the right-click menu of a video or audio element. It sends Zajil the page the video is on (the frame's, for an embedded player), the video's own address when it is http(s) (not a `blob:` or `data:` one), and the page's cookies when the user allowed them (never from a private window, whose video is marked private). `zajil-host` accepts the new `video` message and checks it as a download: the page and the address as queue URLs, the cookies as a header. Tested: the message for an embedded player, a `blob:` source, a private window, and pages Zajil cannot read (refused before any cookie is read); the host's schema and checks. Until M6 downloads videos, the app answers the `video` message «تحميل الفيديو قادم قريبًا.» (below), and the extension shows that answer.
 - M5 security review #84, files from the internet: every finished download now carries the mark browsers write (`zajil_platform::origin`), so the system warns before a program from the internet runs and Office opens such documents in Protected View: `Zone.Identifier` with `ZoneId=3` and `HostUrl` set to the link's origin only (no path or token) on Windows, `com.apple.quarantine` on macOS, `user.xdg.origin.url` (the origin) on Linux; a file system that cannot hold it keeps the file without it. And a file that can run code (`category::RUNS_CODE`: programs, installers, scripts, Java, macOS images and packages, Office files that can hold macros, disk images) that comes from the extension is never started by itself: it is added paused, «ينتظر موافقتك», until the user starts it (the extension catches a download before the browser's own danger check); and a download from a page is held again by the name the server gives at the download itself, before any file is made, so a server naming `a.zip` to the check and `setup.exe` to the download cannot get round it (review of #90). The mark is written on the part file before it takes its name, so the file never has its name without it. Tested: the mark read back from the finished file on Windows and macOS in CI, with the origin only (shown to fail without it); the file types, any case, a trailing dot or space, and `setup.exe.zip` not one; a program and an Office file with macros from the extension added paused and held, a zip started at once; a held download not started by the queue, and its hold cleared once the user starts it; a server naming another file at the download than at the check held before anything is made, not reported as failed, then downloaded once the user starts it (shown to fail without the check).
@@ -73,7 +168,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - Resume with `Range` and `If-Range` exactly as RFC 9110 §13.1.5 allows: a strong `ETag`, never a weak one, and a `Last-Modified` date only when there is no `ETag` and it is strong (§8.8.2.2: at least one second before the response's `Date`); otherwise the download starts over (tested with a changed file behind a weak `ETag` and behind an unchanged same-second date). HTTP dates outside the years 1900–9999, or on days that do not exist (31 February), are ignored, never compared (tested in debug and release builds, where overflow behaves differently). After a cut at 30 % only the missing bytes are requested; a new `ETag` or a server that answers `200` to `Range` starts over without mixing content; damaged state files are refused before any request; a `.zajil-part` or `.zajil-state` that is a symbolic or hard link is refused, so nothing outside the download folder is written; relative state-file paths work; 64-bit offsets are tested beyond 4 GiB (in `Content-Range` and the state file).
   - The `zajil` command: `zajil get <url> [--dir <folder>]` (defaults to the system Downloads folder) and `zajil resume <state-file>`, with exit codes 0 (done), 1 (failed), 2 (usage) and 3 (stopped but resumable). The printed resume command is quoted for each shell (POSIX shells on macOS and Linux; PowerShell and cmd on Windows) and is run through those shells in a test with a file named `` $(touch PWNED)`id`.zip ``. A process killed mid-download resumes from its state file. Messages are in English (the owner kept the command line in English in M4; the translations are for the GUI).
 
-### Not verified yet
+#### Not verified yet
 - M5 with real browsers (#85, `docs/MANUAL-TESTS.md` item 12): a message from an extension id that is not allowed never reaching Zajil, once in each browser (an M5 criterion; the host is registered for the fixed ids only, tested); the cookies after a restart, especially whether Firefox keeps its background alive with the link open; clipboard monitoring on a real desktop. Every other M5 test runs against fake browsers and the real `zajil-host`.
 - M3 shutdown and sleep (`PowerControl`): tested with a mock only; the real calls were never run on any system (#34, `docs/MANUAL-TESTS.md`).
 - M3 Ctrl+C on `zajil queue run`: the same stop is tested inside the engine, not through a real Ctrl+C.
@@ -102,3 +197,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
     - `io.github.motalim-ai.zajil` for macOS and Tauri.
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
+
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.1.0

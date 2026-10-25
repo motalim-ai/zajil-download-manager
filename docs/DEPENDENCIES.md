@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | `clap` | 4.6.7 | MIT أو Apache-2.0 | `zajil-cli` | تحليل أوامر سطر الأوامر ورسائل المساعدة | M1 |
 | `arboard` | 3.7.0 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | الحافظة: NSPasteboard في ماك، وX11 أو Wayland (data-control، عبر `wl-clipboard-rs`) في لينكس، لمراقبة الحافظة. بلا دعم الصور. وفي ويندوز نستعمل Win32 مباشرة، فلا تدخل واجهتها في ويندوز (`clipboard-win` و`error-code`، بترخيص BSL-1.0) أي بناء، وهما مستثنيتان من رسم cargo-deny بسببهما في `deny.toml` | M5 |
+| `drag` | 2.1.1 | Apache-2.0 أو MIT | `zajil-desktop` | سحب الملف المكتمل من نافذة «اكتمل التحميل» إلى أي برنامج أو مجلد، بسحب النظام نفسه (M5.5). يستدعيه Rust وحده على ملف التحميل نفسه؛ الصفحة تسمّي التحميل ولا تمرّر مسارًا. ومعه `core-graphics` (Apache-2.0 أو MIT) و`objc2-core-video` (Zlib أو Apache-2.0 أو MIT) في ماك، وإصدار آخر من `windows` و`windows-core` وما معهما (Apache-2.0 أو MIT) في ويندوز | M5.5 |
 | `objc2-app-kit` | 0.3.2 | Zlib أو Apache-2.0 أو MIT | `zajil-platform` (ماك فقط) | `NSPasteboard.changeCount`، فلا تُقرأ الحافظة إلا بعد نسخة (مراقبة الحافظة). وكانت في الشجرة تحت `arboard` | M5 |
 | `getrandom` | 0.4.3 | MIT أو Apache-2.0 | `zajil-platform` و`zajil-core` | أرقام عشوائية من النظام: لاسم الـ named pipe في ويندوز (قناة الإضافة، M5)، ولأسماء مجلدات تنزيل أدوات الفيديو وتشغيلها (M6) | M5 |
 | `dirs` | 7.0.0 | MIT أو Apache-2.0 | `zajil-platform` | مسارات النظام القياسية: Known Folders في ويندوز، وXDG في لينكس (يعتمد على `option-ext` بترخيص MPL-2.0) | M1 |

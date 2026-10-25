@@ -443,6 +443,10 @@ pub struct Engine {
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
     hold: Option<Hold>,
+    /// The download's own limit, given by its caller so that its rate can
+    /// change while it runs (#106); `None`: a fresh one from
+    /// [`Options::download_limit`].
+    own_limit: Option<SpeedLimit>,
     /// The name a new download is saved under instead of the server's
     /// (the user's, M5.5, #103). `None`: the server's.
     name: Option<String>,
@@ -470,6 +474,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
             name: None,
         })
     }
@@ -488,6 +493,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
             name: None,
         })
     }
@@ -547,20 +553,35 @@ impl Engine {
     }
 
     /// This engine, with `rate` bytes per second for each download (`None`:
-    /// no limit of its own). The program-wide limit stays shared.
+    /// no limit of its own), instead of a limit given with
+    /// [`Engine::with_own_limit`]. The program-wide limit stays shared.
     pub fn with_download_limit(&self, rate: Option<u64>) -> Engine {
         let mut engine = self.clone();
         engine.options.download_limit = rate;
+        engine.own_limit = None;
+        engine
+    }
+
+    /// This engine, with `limit` as the limit of its own of the download it
+    /// starts (instead of [`Options::download_limit`]): the caller keeps a
+    /// clone and changes its rate while the download runs (#106). Every
+    /// download this engine and its clones start shares it, so it is for
+    /// one download. The program-wide limit stays shared. It wins over
+    /// [`Engine::with_download_limit`], which clears it.
+    pub fn with_own_limit(&self, limit: SpeedLimit) -> Engine {
+        let mut engine = self.clone();
+        engine.own_limit = Some(limit);
         engine
     }
 
     /// The limits a new download goes through: the program's, shared, and
-    /// a fresh one of its own.
+    /// its own: the one given ([`Engine::with_own_limit`]), or a fresh one.
     fn limits(&self) -> Limits {
-        let own = self
-            .options
-            .download_limit
-            .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()));
+        let own = self.own_limit.clone().or_else(|| {
+            self.options
+                .download_limit
+                .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()))
+        });
         Limits {
             limits: self
                 .options

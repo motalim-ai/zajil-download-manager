@@ -9,8 +9,10 @@
 #![forbid(unsafe_code)]
 
 mod closing;
+mod complete;
 mod live;
 mod menu;
+mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
@@ -173,7 +175,9 @@ pub fn run() {
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
-        ));
+        ))
+        .manage(schedule::SharedAfter::default())
+        .manage(complete::Show::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -234,6 +238,10 @@ pub fn run() {
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
+            // The schedule window's and the «download complete» windows'
+            // (`schedule.rs`, `complete.rs`); they close with the main one too.
+            tauri_app.add_capability(schedule::CAPABILITY)?;
+            tauri_app.add_capability(complete::CAPABILITY)?;
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.
@@ -248,6 +256,18 @@ pub fn run() {
                         Some("progress") => Some(windows::PROGRESS_SIZE),
                         _ => None,
                     };
+                    // macOS: the system's title bar is drawn by the page in
+                    // a scene (the main window's own is hidden, #118).
+                    let size = size.map(|(w, h)| {
+                        (
+                            w,
+                            if cfg!(target_os = "macos") {
+                                h + 28.0
+                            } else {
+                                h
+                            },
+                        )
+                    });
                     ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
@@ -313,51 +333,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
-        close_quits,
-        set_close_quits,
-        quit_heard,
-        settings,
-        save_settings,
-        categories,
-        save_categories,
-        try_category,
-        export_queues,
-        import_queues,
-        show_window,
-        fix_browser_integration,
-        browser_integration,
-        refresh_link,
-        cancel_refresh,
-        go_without_cookies,
-        windows::open_add_link,
-        windows::pending_link,
-        windows::open_add_info,
-        windows::pending_info,
-        windows::close_window,
-        windows::show_main_view,
-        windows::open_progress,
-        set_limit,
-        menu::set_menu,
-        quit_app,
-        app_version,
-        open_download,
-        move_to_queue,
-        copy_links
-    ]
-}
-
-#[cfg(feature = "ui-test")]
-fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![
-        snapshot,
-        probe,
-        cancel_probe,
-        add,
-        pause,
-        resume,
-        remove,
-        details,
-        set_tray_texts,
+        tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
         quit_heard,
@@ -388,6 +364,78 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         open_download,
         move_to_queue,
         copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out
+    ]
+}
+
+#[cfg(feature = "ui-test")]
+fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        snapshot,
+        probe,
+        cancel_probe,
+        add,
+        pause,
+        resume,
+        remove,
+        details,
+        set_tray_texts,
+        tray::set_tray_tooltip,
+        close_quits,
+        set_close_quits,
+        quit_heard,
+        settings,
+        save_settings,
+        categories,
+        save_categories,
+        try_category,
+        export_queues,
+        import_queues,
+        show_window,
+        fix_browser_integration,
+        browser_integration,
+        refresh_link,
+        cancel_refresh,
+        go_without_cookies,
+        windows::open_add_link,
+        windows::pending_link,
+        windows::open_add_info,
+        windows::pending_info,
+        windows::close_window,
+        windows::show_main_view,
+        windows::open_progress,
+        set_limit,
+        menu::set_menu,
+        quit_app,
+        app_version,
+        open_download,
+        move_to_queue,
+        copy_links,
+        schedule::open_schedule,
+        schedule::queue_plans,
+        schedule::new_queue,
+        schedule::delete_queue,
+        schedule::save_queue,
+        schedule::move_in_queue,
+        schedule::start_queue,
+        schedule::set_after,
+        schedule::countdown,
+        schedule::cancel_after,
+        complete::set_show_complete,
+        complete::complete_info,
+        complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report
     ]
@@ -397,11 +445,18 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
 /// ended. After that it gives up: every download's progress is in its state
 /// file, at most a second old (ADR-0004), and the next start resumes there.
 async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
+    // How long the stop took, said every time (#132: on Windows it ran
+    // out a few times; the time shows how near the limit it usually is).
+    let asked = std::time::Instant::now();
     let wait = stopped.wait_for(|stopped| *stopped);
     match tokio::time::timeout(STOP_WAIT, wait).await {
-        Ok(_) => eprintln!("zajil: the downloads stopped; exiting"),
+        Ok(_) => eprintln!(
+            "zajil: the downloads stopped; exiting (after {} ms)",
+            asked.elapsed().as_millis()
+        ),
         Err(_) => eprintln!(
-            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files"
+            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files (after {} ms)",
+            asked.elapsed().as_millis()
         ),
     }
 }
@@ -592,6 +647,8 @@ async fn run_queues(handle: tauri::AppHandle) {
                     }
                 };
                 on_queue_event(&event, &live, &links, &asks, &from_browser, &store, changed);
+                schedule::on_event(&handle, &event);
+                complete::on_event(&handle, &event);
                 notify(&handle, &live);
             })
             .await;

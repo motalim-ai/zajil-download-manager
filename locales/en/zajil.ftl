@@ -411,6 +411,75 @@ quit-question =
     }
 quit-ok = Quit Zajil
 
+## الجدولة
+
+schedule-title = Schedule
+schedule-queues = Queues
+schedule-new = New queue
+schedule-new-name = The new queue's name
+schedule-new-hint = Letters, digits, - and _ only, no spaces.
+schedule-create = Create
+schedule-cancel = Cancel
+schedule-delete = Delete
+schedule-delete-confirm = This queue is deleted, and its downloads go to the end of the main queue. Delete it?
+schedule-main-stays = The main queue cannot be deleted.
+schedule-summary-none = No set time
+schedule-start = Start
+schedule-start-any = No set time: runs whenever something waits in it
+schedule-start-at = Start at
+schedule-days = Days
+schedule-days-hint = No days chosen: every day.
+schedule-day-sat = Sat
+schedule-day-sun = Sun
+schedule-day-mon = Mon
+schedule-day-tue = Tue
+schedule-day-wed = Wed
+schedule-day-thu = Thu
+schedule-day-fri = Fri
+schedule-stop = Stop
+schedule-stop-at = Stop at
+schedule-stop-hint = What is not finished stops, and goes on at the next start.
+schedule-max-active = Downloads at the same time
+schedule-after = When the queue is done
+schedule-after-nothing = Nothing
+schedule-after-shutdown = Shut down the computer
+schedule-after-sleep = Sleep
+schedule-after-hint = For this run only, never saved. Zajil counts down a minute first, which you can cancel.
+schedule-countdown-shutdown = The queue is done. The computer shuts down in:
+schedule-countdown-sleep = The queue is done. The computer goes to sleep in:
+schedule-countdown-cancel = Cancel
+schedule-after-failed = That did not happen:
+schedule-files = Downloads in the queue (in starting order)
+schedule-up = Up
+schedule-down = Down
+schedule-move = Move to queue…
+schedule-empty = No downloads in this queue.
+schedule-start-now = Start now
+schedule-started = The queue has started.
+schedule-closed-now = The queue is outside its time now: its downloads wait for its next start.
+schedule-save = Save
+schedule-saved = Saved.
+schedule-close = Close
+schedule-tries = Tries per file
+schedule-after-open = And open a file or program after it:
+schedule-after-open-pick = Choose a file…
+schedule-soon = Coming soon
+
+## الاكتمال
+
+complete-title = Download complete
+complete-name = Name
+complete-size = Size
+complete-folder = Saved in
+complete-url = Link
+complete-open = Open
+complete-open-folder = Open folder
+complete-close = Close
+complete-dont-show = Don't show this window again
+complete-setting = Show the «Download complete» window when a download finishes
+complete-drag = Drag it from here
+complete-drag-hint = Drag the file from here into any program or folder
+
 ## Video (M6)
 
 video-soon = Video downloads are coming soon.

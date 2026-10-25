@@ -35,6 +35,10 @@ tauri-plugin-autostart = "2.7.0"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-notification = "2.7.0"
 tauri-plugin-opener = "2.7.0"
+# The schedule window's time of day (`schedule.rs`), as zajil-core's.
+jiff = "0.2.38"
+# Dragging a finished file out of «Download complete» (`complete.rs`).
+drag = "2.1.1"
 serde = { version = "1.0.229", features = ["derive"] }
 # The reports of the UI tests (`ui_test.rs`), and the tests.
 serde_json = "1.0.154"

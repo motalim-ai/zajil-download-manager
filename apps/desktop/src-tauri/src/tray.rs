@@ -75,10 +75,54 @@ pub fn show_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// The longest tooltip Windows shows (`NOTIFYICONDATAW::szTip` holds 128
+/// UTF-16 units with its end).
+const TIP_UNITS: usize = 127;
+
+/// What runs now, on the icon's tooltip (from the page, in its language).
+/// Windows and macOS show it; Linux's tray (AppIndicator) has no tooltip.
+#[tauri::command]
+pub fn set_tray_tooltip<R: Runtime>(handle: AppHandle<R>, text: String) -> Result<(), String> {
+    if let Some(tray) = handle.tray_by_id(ID) {
+        tray.set_tooltip(Some(fit(&text)))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// `text` cut to [`TIP_UNITS`] UTF-16 units, at a character's edge.
+fn fit(text: &str) -> String {
+    let mut units = 0;
+    text.chars()
+        .take_while(|c| {
+            units += c.len_utf16();
+            units <= TIP_UNITS
+        })
+        .collect()
+}
+
 /// The menu's texts in the interface's language.
 pub fn set_texts<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id(ID) {
         tray.set_menu(Some(menu(app, show, quit)?))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_tooltip_is_cut_at_a_character_within_windows_limit() {
+        assert_eq!(fit("زاجِل"), "زاجِل");
+        let long = "ب".repeat(200);
+        let cut = fit(&long);
+        assert_eq!(cut.encode_utf16().count(), TIP_UNITS);
+        // A character of two UTF-16 units is never cut in half.
+        let wide = "😀".repeat(100);
+        let cut = fit(&wide);
+        assert_eq!(cut.encode_utf16().count(), TIP_UNITS - 1);
+        assert!(cut.chars().all(|c| c == '😀'));
+    }
 }

@@ -201,3 +201,179 @@ async fn the_limit_holds_from_the_first_second_not_only_on_average() {
         }
     }
 }
+
+/// #106: a download's own limit is a handle its caller keeps: a new rate
+/// reaches the running download at once, up or down, and removing it lets
+/// the download go without waiting any more.
+#[tokio::test]
+async fn a_running_download_takes_a_new_limit_of_its_own() {
+    let server = TestServer::http();
+    let data = random_bytes(12 * MIB as usize, 706);
+    server.put("/f.bin", FileSpec::new(data.clone()));
+    let dir = tempfile::tempdir().unwrap();
+
+    // Up, then down: one rate for eight seconds, then the other. Each rate
+    // is measured between two moments of steady flow, away from the change
+    // and the end: pieces taken but not yet written would count on the
+    // wrong side of the change. One connection, so that one piece at most
+    // is in flight (four make a MiB, four seconds at a quarter MiB/s); it
+    // reports a piece before it waits for it, so what is paid at a mark is
+    // what it had before that piece.
+    for (first, second) in [(MIB / 4, MIB), (MIB, MIB / 4)] {
+        let clock = ManualClock::new();
+        let limit = SpeedLimit::new(Some(first), clock.clone());
+        let limited = engine(&clock, 1).with_own_limit(limit.clone());
+        let start = MIB / 2;
+        let change = start + 8 * first;
+        let marks = [start, change, change + MIB, change + MIB + 8 * second];
+        let mut seen: Vec<(u64, Duration)> = Vec::new();
+        let mut paid = 0;
+        let at = clock.clone();
+        let finished = limited
+            .download(&server.url("/f.bin"), dir.path(), &mut |event| {
+                let zajil_core::Event::Progress { done, .. } = event else {
+                    return;
+                };
+                let before = std::mem::replace(&mut paid, done);
+                if marks.get(seen.len()).is_some_and(|&mark| done >= mark) {
+                    seen.push((before, at.now()));
+                    if seen.len() == 2 {
+                        limit.set_rate(Some(second));
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            sha256_hex(&fs::read(&finished.file).unwrap()),
+            sha256_hex(&data)
+        );
+        assert_eq!(seen.len(), 4, "{seen:?}");
+        assert_rate(seen[1].0 - seen[0].0, seen[1].1 - seen[0].1, first);
+        assert_rate(seen[3].0 - seen[2].0, seen[3].1 - seen[2].1, second);
+        fs::remove_file(&finished.file).unwrap();
+    }
+
+    // No limit, then one: the case of the «Speed limit» tab on a download
+    // that runs without one. On one connection and on four (the split
+    // download takes its limits elsewhere). The server sends at 8 MiB/s on
+    // the real clock, so that the change comes while the data does.
+    server.put(
+        "/slow.bin",
+        FileSpec::new(random_bytes(6 * MIB as usize, 708)).throttle(8 * MIB),
+    );
+    for connections in [1, 4] {
+        let clock = ManualClock::new();
+        let limit = SpeedLimit::new(None, clock.clone());
+        let limited = engine(&clock, connections).with_own_limit(limit.clone());
+        let marks = [MIB, 5 * MIB / 2, 9 * MIB / 2];
+        let mut seen: Vec<(u64, Duration)> = Vec::new();
+        let mut paid = 0;
+        let at = clock.clone();
+        let finished = limited
+            .download(&server.url("/slow.bin"), dir.path(), &mut |event| {
+                let zajil_core::Event::Progress { done, .. } = event else {
+                    return;
+                };
+                // One connection reports a piece before it waits for it.
+                let before = std::mem::replace(&mut paid, done);
+                let counted = if connections == 1 { before } else { done };
+                if marks.get(seen.len()).is_some_and(|&mark| done >= mark) {
+                    seen.push((counted, at.now()));
+                    if seen.len() == 1 {
+                        assert_eq!(at.now(), Duration::ZERO, "it waited without a limit");
+                        limit.set_rate(Some(MIB / 4));
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(seen.len(), 3, "{connections}: {seen:?}");
+        assert_rate(seen[2].0 - seen[1].0, seen[2].1 - seen[1].1, MIB / 4);
+        fs::remove_file(&finished.file).unwrap();
+    }
+
+    // Limited, then no limit: nothing waits after the change. One
+    // connection, whose events come as it goes: the change is made with
+    // most of the file still to come.
+    let clock = ManualClock::new();
+    let limit = SpeedLimit::new(Some(MIB / 4), clock.clone());
+    let limited = engine(&clock, 1).with_own_limit(limit.clone());
+    let mut removed = None;
+    let at = clock.clone();
+    limited
+        .download(&server.url("/f.bin"), dir.path(), &mut |event| {
+            if let zajil_core::Event::Progress { done, .. } = event
+                && done >= MIB
+                && removed.is_none()
+            {
+                limit.set_rate(None);
+                removed = Some((done, at.now()));
+            }
+        })
+        .await
+        .unwrap();
+    let (done, removed_at) = removed.expect("the limit was never removed");
+    assert!(done <= 2 * MIB, "removed only at {done} bytes");
+    // It was limited until then (without a limit the clock never moves;
+    // a piece of a connection can be half a MiB).
+    assert!(removed_at >= Duration::from_secs(1), "{removed_at:?}");
+    // The piece already waiting finishes its wait: a second at most.
+    assert!(
+        clock.now() - removed_at <= Duration::from_secs(1),
+        "it still waited {:?} after the limit was removed",
+        clock.now() - removed_at
+    );
+}
+
+/// #106: the runner reads an item's limit at each look and gives it to the
+/// download that runs: removed in the queues file (as the progress
+/// window's «Speed limit» tab does), it stops limiting at once. On the
+/// real clock: at the first limit the download would take 32 seconds.
+#[tokio::test]
+async fn the_runner_gives_a_running_download_the_limit_of_its_item() {
+    let server = TestServer::http();
+    server.put("/f.bin", FileSpec::new(random_bytes(2 * MIB as usize, 707)));
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = store
+        .update(|q| {
+            let id = q.add("main", &server.url("/f.bin"), downloads.path())?;
+            q.item_mut(id).unwrap().limit = Some(64 * 1024);
+            Ok(id)
+        })
+        .unwrap();
+    let engine = Engine::new(Options::default()).unwrap();
+    let runner = Runner::new(engine, store.clone()).poll(Duration::from_millis(50));
+    let steering = store.clone();
+    let mut lifted = false;
+    let started = std::time::Instant::now();
+    let summary = runner
+        .run(&Stop::new(), &mut |event| {
+            if let zajil_core::queue::QueueEvent::Download {
+                event: zajil_core::Event::Progress { done, .. },
+                ..
+            } = event
+                && done > 0
+                && !lifted
+            {
+                lifted = true;
+                steering
+                    .update(|q| {
+                        q.item_mut(id).unwrap().limit = None;
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    assert!(lifted);
+    assert_eq!(summary.finished, 1);
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(16),
+        "{took:?}: the new limit did not reach the running download"
+    );
+}

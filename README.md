@@ -5,11 +5,21 @@
 [![CI](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-> **الحالة: قيد البناء.** المشروع الآن في المرحلة **M0 (ملفات الأساس)**: المستودع فيه الوثائق والقرارات والـ CI فقط، ولا يوجد برنامج يمكن تشغيله بعد.
+> **الحالة: نسخة تجريبية.** [زاجِل 0.1.0](https://github.com/motalim-ai/zajil-download-manager/releases) أول نسخة للتجربة، لا للاستعمال اليومي بعد. وما يأتي بعدها في [ROADMAP](docs/ROADMAP.md).
 
 **زاجِل** برنامج مجاني ومفتوح المصدر لإدارة التحميل. يعمل على **ويندوز وماك ولينكس**، وواجهته **عربية أولًا** (من اليمين إلى اليسار)، والإنجليزية بضغطة زر.
 
 الاسم مأخوذ من **الحمام الزاجل** الذي كان يوصل الرسائل مهما بعدت المسافة. وهذا ما نريده من البرنامج: أن يوصل ملفك كاملًا وسليمًا، حتى لو انقطع الاتصال في الطريق.
+
+## صور
+
+صور حقيقية من الـ CI (بيانات تجريبية فقط):
+
+| النافذة الرئيسية (فاتح) | النافذة الرئيسية (داكن) |
+|---|---|
+| ![النافذة الرئيسية بالعربية، الوضع الفاتح](docs/screenshots/main-ar-light.png) | ![النافذة الرئيسية بالعربية، الوضع الداكن](docs/screenshots/main-ar-dark.png) |
+| **نافذة التقدم بالأجزاء** | **معلومات ملف التحميل** |
+| ![نافذة التقدم: الأجزاء والاتصالات الثمانية](docs/screenshots/progress-ar.png) | ![نافذة معلومات ملف التحميل](docs/screenshots/file-info-ar.png) |
 
 ## الفكرة
 
@@ -60,7 +70,17 @@
 
 **Zajil Download Manager** is a free, open-source (GPL-3.0-or-later) download manager for **Windows, macOS and Linux**, designed **Arabic-first (RTL)** with one-click English.
 
-**Status: under construction.** The project is in phase **M0 (foundation)**. The repository holds docs, decisions and CI only; there is no runnable program yet.
+**Status: test build.** [Zajil 0.1.0](https://github.com/motalim-ai/zajil-download-manager/releases) is the first build to try, not for daily use yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Screenshots
+
+Real screenshots from CI (test data only):
+
+| Main window (light) | Main window (dark) |
+|---|---|
+| ![The main window in Arabic, light](docs/screenshots/main-ar-light.png) | ![The main window in Arabic, dark](docs/screenshots/main-ar-dark.png) |
+| **The progress window with its parts** | **Download file info** |
+| ![The progress window: its parts and eight connections](docs/screenshots/progress-ar.png) | ![The Download file info window](docs/screenshots/file-info-ar.png) |
 
 **Planned for 1.0:**
 - Segmented parallel downloads (up to 32 connections) with dynamic re-segmentation.
