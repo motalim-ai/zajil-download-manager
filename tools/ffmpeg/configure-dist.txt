@@ -1,0 +1,24 @@
+# configure options of the ffmpeg and ffprobe that Zajil distributes
+# (ADR-0009): remux only, plus FFmpeg's own AAC encoder for audio-only
+# m4a. No --enable-gpl, no --enable-nonfree, no external library: LGPL.
+--disable-everything
+--disable-autodetect
+--disable-doc
+--disable-network
+--disable-debug
+--disable-ffplay
+--enable-ffmpeg
+--enable-ffprobe
+--enable-static
+--disable-shared
+--disable-x86asm
+--enable-small
+--enable-protocol=file,pipe
+--enable-demuxer=mov,matroska,mpegts,hls,aac,mp3,ogg,flac,wav
+--enable-muxer=mp4,ipod,mov,matroska,webm,mpegts,adts,mp3,ogg,flac
+--enable-parser=h264,hevc,av1,vp8,vp9,aac,opus,vorbis,mpegaudio,flac
+--enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,vp9_superframe
+--enable-decoder=aac,opus,vorbis,mp3,flac
+--enable-encoder=aac
+--enable-filter=aresample,aformat,anull,null,format
+--enable-swresample
