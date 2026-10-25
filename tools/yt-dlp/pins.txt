@@ -1,0 +1,12 @@
+# The yt-dlp that Zajil downloads and runs (ADR-0009): its stable version,
+# then one line per target: the release file and its SHA-256, from the
+# release's SHA2-256SUMS, whose signature was checked against yt-dlp's key
+# AC0CBBE6848D6A873464AF4E57CF65933B5A7581 when the version was pinned.
+# Read by crates/zajil-core/src/tools.rs (built in) and by the CI.
+version 2026.10.21
+windows-x86_64 yt-dlp.exe 33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555
+windows-aarch64 yt-dlp_arm64.exe 1380a9f105302764e6a5d383c2f07238ae242f0f4fbf3414aea00e56619a79b3
+macos-x86_64 yt-dlp_macos 7a6fe71d7d680f1fb0ac18d4949873d77db2859e90017c0f44bd94b23be4ee40
+macos-aarch64 yt-dlp_macos 7a6fe71d7d680f1fb0ac18d4949873d77db2859e90017c0f44bd94b23be4ee40
+linux-x86_64 yt-dlp_linux d8bd33fca9d5b23bd5b9952b3fca36db5c46331933fda9f598a3da14ce2c243f
+linux-aarch64 yt-dlp_linux_aarch64 e137c2171b0b8ef648e6136e86aa70c65923e93e434f01c93901d64744b190aa
