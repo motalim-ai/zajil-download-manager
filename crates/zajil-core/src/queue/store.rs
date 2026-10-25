@@ -36,6 +36,8 @@ pub const DEFAULT_MAX_ACTIVE: u32 = 3;
 pub const MAX_ACTIVE: u32 = 32;
 /// The longest queue name, in characters.
 pub const MAX_NAME_CHARS: usize = 64;
+/// The longest description of a download, in characters (#95).
+pub const MAX_DESCRIPTION_CHARS: usize = 1000;
 
 const FILE_NAME: &str = "queues.json";
 const LOCK_NAME: &str = "queues.lock";
@@ -135,6 +137,29 @@ pub struct Item {
     /// Forgotten once the download is done.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<BrowserSource>,
+    /// The name the user gave the file (M5.5, #103), cleaned like any name
+    /// ([`sanitize_file_name`](crate::sanitize::sanitize_file_name)): a new
+    /// download is saved under it instead of the server's name. Set only
+    /// before the download starts ([`QueuesFile::set_name`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The category the user chose (its id, #103), instead of the one its
+    /// name or site gives. A new download added without a folder of its
+    /// own (`categorize`) goes to its folder; one with a folder the user
+    /// chose stays there (an interface that wants the category's folder
+    /// sets `dir` to it, as the user may then change it). Once the file is
+    /// made it does not move. A category that no longer exists counts as
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The user's description (#95): at most [`MAX_DESCRIPTION_CHARS`]
+    /// characters, lines of plain text ([`check_description`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// When it last started or resumed (#95): RFC 3339 time in UTC, written
+    /// by the runner when it marks it active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_try: Option<String>,
 }
 
 /// Where a download from the browser extension came from.
@@ -332,6 +357,10 @@ impl QueuesFile {
             private: false,
             added_at: now_rfc3339(),
             browser: None,
+            name: None,
+            category: None,
+            description: None,
+            last_try: None,
         };
         self.queue_or_new(queue)?.items.push(item);
         self.next_id = id.checked_add(1).ok_or_else(|| StoreError::Corrupt {
@@ -339,6 +368,78 @@ impl QueuesFile {
             reason: "no ids are left".into(),
         })?;
         Ok(id)
+    }
+
+    /// Saves item `id` under `name` instead of the server's name (#103),
+    /// cleaned like any name; `None` or an empty name: the server's again.
+    /// Returns the name it will have.
+    ///
+    /// Only before the download starts: once it has a state file (or runs,
+    /// or is done) its name is taken, and this is refused. A name that can
+    /// run code where the server's could not is held for the user like a
+    /// file from a page (#90): the runner checks it against the server's
+    /// name, at the download itself, and a change of name asks the user
+    /// again.
+    pub fn set_name(&mut self, id: u64, name: Option<&str>) -> Result<Option<String>, StoreError> {
+        let item = self.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+        let started = item.state_file.is_some()
+            || item.file.is_some()
+            || matches!(item.status, Status::Active | Status::Done);
+        if started {
+            return Err(StoreError::Refused(
+                "the download has already started, so its file has its name".into(),
+            ));
+        }
+        let name = name.filter(|n| !n.trim().is_empty());
+        let name = match name {
+            None => None,
+            Some(raw) => {
+                let clean = crate::sanitize::sanitize_file_name(raw);
+                // Nothing of it was a name (`.`, `\u{202E}`): refused, not
+                // turned into `download` behind the user's back.
+                if clean == crate::sanitize::FALLBACK_NAME && raw.trim() != clean {
+                    return Err(StoreError::Refused(format!(
+                        "{:?} has nothing that can be a file name",
+                        crate::category::printable(raw)
+                    )));
+                }
+                Some(clean)
+            }
+        };
+        if name != item.name {
+            item.ok_given = false;
+        }
+        item.name = name.clone();
+        Ok(name)
+    }
+
+    /// Puts item `id` in the category `category` (its id, #103); `None`:
+    /// the category its name or site gives, as before. Whether the category
+    /// exists is not checked here (it lives in another file): one that does
+    /// not counts as none. See [`Item::category`] for the folder.
+    pub fn set_category(&mut self, id: u64, category: Option<&str>) -> Result<(), StoreError> {
+        if let Some(category) = category {
+            crate::category::check_id(category).map_err(|e| StoreError::Refused(e.to_string()))?;
+        }
+        let item = self.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+        item.category = category.map(str::to_owned);
+        Ok(())
+    }
+
+    /// Sets item `id`'s description (#95); `None` or an empty text removes
+    /// it. Checked with [`check_description`].
+    pub fn set_description(
+        &mut self,
+        id: u64,
+        description: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let description = description.filter(|d| !d.trim().is_empty());
+        if let Some(description) = description {
+            check_description(description).map_err(StoreError::Refused)?;
+        }
+        let item = self.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+        item.description = description.map(str::to_owned);
+        Ok(())
     }
 
     /// Removes item `id` from its queue and returns it. Its files stay.
@@ -396,6 +497,7 @@ impl QueuesFile {
                 if item.limit == Some(0) {
                     return Err(format!("a speed limit of 0 for item {}", item.id));
                 }
+                check_item_details(item).map_err(|why| format!("item {} {why}", item.id))?;
             }
         }
         Ok(())
@@ -429,6 +531,69 @@ pub fn check_name(name: &str) -> Result<(), StoreError> {
     } else {
         Err(StoreError::InvalidName(name.to_owned()))
     }
+}
+
+/// A description (#95): 1 to [`MAX_DESCRIPTION_CHARS`] characters, lines of
+/// text with nothing hidden in them (the rule of queue names, line by
+/// line), since interfaces show it. Line breaks are `\n` only.
+pub fn check_description(text: &str) -> Result<(), String> {
+    let count = text.chars().count();
+    if text.trim().is_empty() || count > MAX_DESCRIPTION_CHARS {
+        return Err(format!(
+            "a description has 1 to {MAX_DESCRIPTION_CHARS} characters, not {count}"
+        ));
+    }
+    if text.split('\n').any(crate::category::has_hidden) {
+        return Err("the description has control characters or hidden text".into());
+    }
+    Ok(())
+}
+
+/// The user's details of an item (#95, #103), as its setters make them:
+/// for the queues file and for imports.
+pub(crate) fn check_user_details(
+    name: Option<&str>,
+    category: Option<&str>,
+    description: Option<&str>,
+) -> Result<(), String> {
+    // Only what no change of the cleaning rules can move (review of #103:
+    // a name stored once cleaned, refused after an update of those rules,
+    // would make the whole file unreadable). The engine cleans it again
+    // when it uses it.
+    if let Some(name) = name {
+        let plain = !name.is_empty()
+            && name.len() <= crate::sanitize::MAX_NAME_BYTES
+            && name != "."
+            && name != ".."
+            && !name
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\'));
+        if !plain {
+            return Err("has a file name that is not a plain name".into());
+        }
+    }
+    if let Some(category) = category {
+        crate::category::check_id(category).map_err(|e| format!("has an {e}"))?;
+    }
+    if let Some(description) = description {
+        check_description(description).map_err(|e| format!("has a bad description: {e}"))?;
+    }
+    Ok(())
+}
+
+/// [`check_user_details`], and the runner's time.
+fn check_item_details(item: &Item) -> Result<(), String> {
+    check_user_details(
+        item.name.as_deref(),
+        item.category.as_deref(),
+        item.description.as_deref(),
+    )?;
+    if let Some(time) = &item.last_try
+        && (time.len() > 64 || !time.ends_with('Z') || time.parse::<jiff::Timestamp>().is_err())
+    {
+        return Err("has a last_try that is not an RFC 3339 time in UTC".into());
+    }
+    Ok(())
 }
 
 /// The queues file in one folder, and the locks next to it.

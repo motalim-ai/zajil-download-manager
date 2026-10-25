@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
   import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
@@ -8,11 +8,13 @@
   import { accelerator, commandFor, keyOf, type Command } from "./lib/commands";
   import { MENU_BAR, commandKey } from "./lib/menus";
   import MenuBar from "./lib/components/MenuBar.svelte";
+  import TitleBar from "./lib/components/TitleBar.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import Categories from "./lib/components/Categories.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
+  import ProgressWindow from "./windows/ProgressWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
@@ -43,6 +45,8 @@
   // The «add» UI test scene: «Download file info» drawn in this window
   // (the add windows are windows of their own, M5.5).
   let addScene = $state<{ url: string; probe: ProbeView } | null>(null);
+  // The «progress» scene: the first demo download's progress window.
+  let progressScene = $state(false);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -106,7 +110,7 @@
     locale.digits = next.digits as Digits;
     setTheme(next.theme);
     // The tray menu speaks the same language.
-    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit")).catch(() => {});
+    void api.setTrayTexts(locale.t("tray-open"), locale.t("tray-quit"), locale.t("app-name"), locale.t("tray-still-running")).catch(() => {});
   }
 
   async function changeSettings(change: SettingsChange) {
@@ -462,6 +466,7 @@
       case "open-folder":
         return void showIn(one!.id, true);
       case "progress":
+        return void showProgress(one!.id);
       case "properties":
         return void open(one!.id);
       case "refresh-link":
@@ -475,8 +480,29 @@
   async function openOne(id: number) {
     const d = snapshot.downloads.find((x) => x.id === id);
     if (d?.status === "done") await showIn(id, false);
-    else await open(id);
+    else await showProgress(id);
   }
+  /** The download's progress window (M5.5). */
+  async function showProgress(id: number) {
+    const d = snapshot.downloads.find((x) => x.id === id);
+    await api.openProgress(id, d?.name ?? locale.t("progress-title")).catch((e) => (failed = String(e)));
+  }
+
+  let shownProgress: number | null | undefined = undefined;
+  // The running downloads' progress on the taskbar (Windows) or the Dock
+  // (macOS): how much of what they fetch has come, or nothing.
+  $effect(() => {
+    const sized = active.filter((d) => d.size !== null && d.size > 0);
+    const all = sized.reduce((sum, d) => sum + (d.size ?? 0), 0);
+    const got = sized.reduce((sum, d) => sum + d.done, 0);
+    const shown = all > 0 ? Math.min(100, Math.floor((got / all) * 100)) : null;
+    // Only when it changes (review of #111).
+    if (shown === shownProgress) return;
+    shownProgress = shown;
+    void getCurrentWindow()
+      .setProgressBar(shown === null ? { status: ProgressBarStatus.None } : { status: ProgressBarStatus.Normal, progress: shown })
+      .catch(() => {});
+  });
   // A file that can run code opens once the user agrees (#84; review of
   // #101: a double-click ran a program).
   async function showIn(id: number, folder: boolean) {
@@ -516,6 +542,8 @@
    * decision on #83). */
   let quitting = false;
   async function quit() {
+    // A close that quits waits for this page's answer (`closing.rs`).
+    void api.quitHeard().catch(() => {});
     // One question at a time (review of #105: a second ⌘Q asked again).
     if (quitting) return;
     const running = active.length;
@@ -626,7 +654,26 @@
       const said = refreshText(locale.t, locale.lang, locale.digits, problem);
       refreshing = { id: 6, name: details.download.name, problem: said.text, detail: null, busy: false };
     }
-    if (screen === "add")
+    // Dark: a Google Drive link as the owner tried it (a web page, no
+    // size, the link's last part as its name), to see its warning, name
+    // and size in words; light: an ordinary file.
+    if (screen === "add" && theme === "dark")
+      addScene = {
+        url: "https://drive.google.com/uc?export=download&id=1AbC",
+        probe: {
+          name: "download",
+          size: null,
+          resumable: false,
+          ranges: false,
+          category: null,
+          category_site: null,
+          category_extension: null,
+          folder: "~/Downloads",
+          page: true,
+          download_folder: "~/Downloads",
+        },
+      };
+    else if (screen === "add")
       addScene = {
         url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
         probe: {
@@ -638,8 +685,11 @@
           category_site: null,
           category_extension: "iso",
           folder: "~/Downloads",
+          page: false,
+          download_folder: "~/Downloads",
         },
       };
+    if (screen === "progress") progressScene = true;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
     const settle = async () => {
       await tick();
@@ -719,6 +769,8 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if progressScene}
+  <ProgressWindow id={1} />
 {:else if addScene}
   <AddDialog
     url={addScene.url}
@@ -734,6 +786,7 @@
   />
 {:else}
   <div class="window">
+    <TitleBar />
     <header>
       <h1 class="visually-hidden">{locale.t("app-name")}</h1>
       {#if !onMac()}<MenuBar can={canRun} onrun={run} />{/if}

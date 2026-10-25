@@ -98,7 +98,7 @@ jobs:
             echo
             echo "Source SHA-256: $FFMPEG_SHA256 ($FFMPEG_TARBALL, signed by FFmpeg's key $FFMPEG_SIGNING_KEY)."
             echo
-            echo "macOS: ad-hoc signed only, not signed or notarized by Apple. Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
+            echo "macOS: ad-hoc signed only, never signed or notarized by Apple (owner's decision). Zajil pins each file's SHA-256 and checks it before running it (ADR-0009)."
             echo
             echo "No change to the FFmpeg source. Built by .github/workflows/ffmpeg.yml (released by ffmpeg-release.yml) from commit $GITHUB_SHA. FFmpeg belongs to its authors: https://ffmpeg.org"
           } > "$RUNNER_TEMP/notes.md"

@@ -448,7 +448,14 @@ async fn a_download_takes_the_page_s_title_safely_and_never_replaces_a_file() {
         .download(&request, &Stop::new(), &mut |e| events.push(e))
         .await
         .unwrap();
-    assert_eq!(file, s.dest.join("دورة Rust (Part 2) (1).mp4"));
+    // The runner gives the file's real path: on macOS the temporary folder
+    // is under /private/var (/var is a link), and on Windows its long name
+    // replaces the short one (RUNNER~1). Compare real paths.
+    let real = |p: &Path| dunce::canonicalize(p).unwrap();
+    assert_eq!(
+        real(&file),
+        real(&s.dest).join("دورة Rust (Part 2) (1).mp4")
+    );
     assert_eq!(fs::read(&file).unwrap(), vec![7u8; 1000]);
     assert_eq!(
         fs::read(s.dest.join("دورة Rust (Part 2).mp4")).unwrap(),
@@ -468,7 +475,12 @@ async fn a_download_takes_the_page_s_title_safely_and_never_replaces_a_file() {
     // yt-dlp worked in a private folder next to the destination, under a
     // fixed name.
     let call = &calls(&s.control)[0];
-    assert!(Path::new(call["cwd"].as_str().unwrap()).starts_with(&s.dest));
+    // Gone now, so not resolved: under the destination as given or real.
+    let cwd = Path::new(call["cwd"].as_str().unwrap());
+    assert!(
+        cwd.starts_with(&s.dest) || cwd.starts_with(real(&s.dest)),
+        "{cwd:?}"
+    );
     let a = args(call);
     let pos = a.iter().position(|x| x == "--output").unwrap();
     assert_eq!(a[pos + 1], "media.%(ext)s");

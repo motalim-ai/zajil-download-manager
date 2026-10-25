@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "progress",
+  "description": "Added from Rust when the app starts (windows.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the progress windows (M5.5, one per download) may do: Zajil's own commands and events, set their own title (the percentage and the file's name) and size (with or without the details), and the system's yes-or-no question before a file that can run code opens. Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "progress-*"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-set-title",
+    "core:window:allow-set-size",
+    "dialog:allow-message"
+  ]
+}
