@@ -434,11 +434,18 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
 /// ended. After that it gives up: every download's progress is in its state
 /// file, at most a second old (ADR-0004), and the next start resumes there.
 async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
+    // How long the stop took, said every time (#132: on Windows it ran
+    // out a few times; the time shows how near the limit it usually is).
+    let asked = std::time::Instant::now();
     let wait = stopped.wait_for(|stopped| *stopped);
     match tokio::time::timeout(STOP_WAIT, wait).await {
-        Ok(_) => eprintln!("zajil: the downloads stopped; exiting"),
+        Ok(_) => eprintln!(
+            "zajil: the downloads stopped; exiting (after {} ms)",
+            asked.elapsed().as_millis()
+        ),
         Err(_) => eprintln!(
-            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files"
+            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files (after {} ms)",
+            asked.elapsed().as_millis()
         ),
     }
 }
