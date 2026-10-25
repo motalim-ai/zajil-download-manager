@@ -30,10 +30,11 @@
   });
 </script>
 
-<div class="titlebar" class:mac data-tauri-drag-region>
-  <span class="brand" data-tauri-drag-region>
+<!-- "deep": the logo and the name drag too; the buttons do not. -->
+<div class="titlebar" class:mac data-tauri-drag-region="deep">
+  <span class="brand">
     <Mark size={18} />
-    <span class="name" data-tauri-drag-region>{locale.t("app-title")}</span>
+    <span class="name">{locale.t("app-title")}</span>
   </span>
   {#if !mac}
     <span class="controls">
