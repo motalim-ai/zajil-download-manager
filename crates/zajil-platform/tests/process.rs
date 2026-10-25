@@ -111,6 +111,22 @@ fn killing_a_tree_ends_its_grandchildren() {
 }
 
 #[test]
+fn a_killer_ends_the_tree_from_another_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    let beat = dir.path().join("beat");
+    let mut tree = process::spawn(me("tool", &beat)).unwrap();
+    wait_beating(&beat);
+    let killer = tree.killer();
+    let waiter = std::thread::spawn(move || tree.wait().unwrap());
+    killer.kill().unwrap();
+    let status = waiter.join().unwrap();
+    assert!(!status.success(), "{status:?}");
+    assert!(stopped(&beat), "the grandchild still runs");
+    // Again, once it is gone: nothing to do, no error.
+    killer.kill().unwrap();
+}
+
+#[test]
 fn dropping_a_tree_ends_it() {
     let dir = tempfile::tempdir().unwrap();
     let beat = dir.path().join("beat");
