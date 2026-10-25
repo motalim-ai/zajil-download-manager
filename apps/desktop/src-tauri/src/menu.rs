@@ -12,6 +12,8 @@ use tauri::{AppHandle, Runtime};
 
 /// A menu, as the page gives it.
 #[derive(Debug, Deserialize)]
+// Read only where the system's bar is built (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct MenuSpec {
     pub label: String,
     /// The Edit menu: the system's own text items go first.
@@ -22,6 +24,8 @@ pub struct MenuSpec {
 
 /// One of its items: a command, or a separator (no id).
 #[derive(Debug, Deserialize)]
+// Read only where the system's bar is built (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct ItemSpec {
     pub id: Option<String>,
     #[serde(default)]
@@ -39,6 +43,8 @@ fn yes() -> bool {
 
 /// The system's own items, named in the page's language.
 #[derive(Debug, Deserialize)]
+// Read only where the system's bar is built (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct SystemTexts {
     pub hide: String,
     pub hide_others: String,
