@@ -210,6 +210,9 @@
     top: 110px;
     inset-inline-start: 24px;
     width: 300px;
+    /* Never past the window's bottom (its smallest is 560 px high). */
+    max-height: calc(100vh - 130px);
+    overflow: auto;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 12px;
