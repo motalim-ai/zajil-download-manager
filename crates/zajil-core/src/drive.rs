@@ -102,9 +102,14 @@ impl DriveSite {
     }
 
     /// The confirmed link on the page Drive answers `asked` with: its form
-    /// (`<form action=".../download">` and its hidden fields), or its link
-    /// (`<a href="/uc?export=download&confirm=…&id=…">`). `None` when the
-    /// page has none for this file.
+    /// (`<form action=".../download">` and its hidden fields, the page
+    /// Drive answers today), or its link
+    /// (`<a href="…/uc?export=download&confirm=…&id=…">`). The engine reads
+    /// only pages from the download address, so a relative `/uc` link there
+    /// is not followed: only the form, or a link written in full on
+    /// `drive.google.com` (review of the Drive links; the older page's
+    /// test serves both addresses from one server). `None` when the page
+    /// has none for this file.
     pub(crate) fn confirmed_link(&self, page: &str, page_url: &Url, asked: &Url) -> Option<Url> {
         // The file asked for; else the one the page itself is for (a link
         // that came to Drive's address through a redirect).

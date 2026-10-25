@@ -992,8 +992,9 @@ const ASK_PATIENCE: Duration = Duration::from_secs(15);
 
 /// How long a download from the browser waits for that browser's cookies
 /// of a Google Drive file's download address: the extension is waiting
-/// for Zajil's answer meanwhile.
-const DRIVE_ASK_PATIENCE: Duration = Duration::from_secs(5);
+/// for Zajil's answer meanwhile, and the host gives up on it after 10 s,
+/// the check of the file included (review of the Drive links).
+const DRIVE_ASK_PATIENCE: Duration = Duration::from_secs(2);
 
 /// The downloads whose browser is being asked for cookies, or was lately.
 #[derive(Default)]
