@@ -18,6 +18,11 @@ use crate::App;
 /// picker. Added when the app starts, for those two windows only.
 pub const CAPABILITY: &str = include_str!("../runtime-capabilities/add.json");
 
+/// The progress windows' capability: listening to events, and their own
+/// title (the percentage and the name) and size (with or without the
+/// details); the system's question before a program opens (#84).
+pub const PROGRESS_CAPABILITY: &str = include_str!("../runtime-capabilities/progress.json");
+
 pub const LINK: &str = "add-link";
 pub const INFO: &str = "add-info";
 
@@ -25,6 +30,14 @@ pub const INFO: &str = "add-info";
 pub const LINK_SIZE: (f64, f64) = (560.0, 230.0);
 /// The «Download file info» window's.
 pub const INFO_SIZE: (f64, f64) = (680.0, 440.0);
+
+/// A progress window's size with its details shown (design window 4).
+pub const PROGRESS_SIZE: (f64, f64) = (600.0, 640.0);
+
+/// The progress window of download `id`.
+pub fn progress_label(id: u64) -> String {
+    format!("progress-{id}")
+}
 
 /// What «Add a link» starts with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -64,7 +77,14 @@ fn open<R: tauri::Runtime>(
     )
     .title(title)
     .inner_size(width, height)
-    .min_inner_size(width, height)
+    .min_inner_size(
+        width,
+        height.min(if label == INFO || label == LINK {
+            height
+        } else {
+            320.0
+        }),
+    )
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
@@ -144,7 +164,7 @@ pub fn open_add_info<R: tauri::Runtime>(
 /// page says it in the user's language.
 pub const INFO_OPEN: &str = "info-open";
 
-/// The add windows close when the main one does: without it the program
+/// The other windows close when the main one does: without it the program
 /// would go on with no main window to come back to (review of #104).
 pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     let Some(main) = handle.get_webview_window("main") else {
@@ -153,8 +173,8 @@ pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     let app = handle.clone();
     main.on_window_event(move |event| {
         if let tauri::WindowEvent::Destroyed = event {
-            for label in [LINK, INFO] {
-                if let Some(window) = app.get_webview_window(label) {
+            for (label, window) in app.webview_windows() {
+                if label != "main" {
                     let _ = window.close();
                 }
             }
@@ -172,6 +192,21 @@ pub fn pending_info(pending: State<'_, Shared>) -> Option<String> {
 #[tauri::command]
 pub fn close_window<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
+}
+
+/// The progress window of download `id` (design window 4), one per
+/// download as in IDM, titled `title`; an open one comes to the front. The
+/// page reads the download's id from the window's label.
+#[tauri::command]
+pub fn open_progress<R: tauri::Runtime>(
+    id: u64,
+    title: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if crate::in_scene(&handle) {
+        return Ok(());
+    }
+    open(&handle, &progress_label(id), &title, PROGRESS_SIZE).map_err(|e| e.to_string())
 }
 
 /// Shows the main window on `view` (the categories editor, from «New
@@ -192,6 +227,24 @@ mod tests {
         assert!(pending.link.is_none() && pending.info.is_none());
         assert_eq!(LINK, "add-link");
         assert_eq!(INFO, "add-info");
+        assert_eq!(progress_label(7), "progress-7");
+    }
+
+    /// The progress windows may listen, set their own title and size, and
+    /// ask before a program opens; nothing more.
+    #[test]
+    fn the_progress_windows_have_only_their_own_permissions() {
+        let capability: serde_json::Value = serde_json::from_str(PROGRESS_CAPABILITY).unwrap();
+        assert_eq!(capability["windows"], serde_json::json!(["progress-*"]));
+        assert_eq!(
+            capability["permissions"],
+            serde_json::json!([
+                "core:event:default",
+                "core:window:allow-set-title",
+                "core:window:allow-set-size",
+                "dialog:allow-message"
+            ])
+        );
     }
 
     /// The add windows may listen and pick a folder, and nothing more; the

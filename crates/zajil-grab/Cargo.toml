@@ -1,0 +1,11 @@
+[package]
+name = "zajil-grab"
+description = "Zajil batch patterns and site grabber (UI-less library, M7)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+zajil-core.workspace = true

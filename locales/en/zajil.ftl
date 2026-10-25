@@ -78,7 +78,7 @@ queue-window = from { $start } to { $stop }
 
 category-programs = Programs
 category-video = Videos
-category-music = Music
+category-music = Audio
 category-documents = Documents
 category-archives = Archives
 category-none = No category
@@ -414,3 +414,52 @@ quit-ok = Quit Zajil
 ## Video (M6)
 
 video-soon = Video downloads are coming soon.
+
+## The main window's title bar (the design of #83)
+app-title = Zajil Download Manager
+win-minimize = Minimize
+win-maximize = Maximize
+win-restore = Restore
+win-close = Close
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = Zajil is still running in the system tray, and the downloads go on. Choose “Quit Zajil” from its icon to quit.
+settings-closing = Closing the window
+settings-closing-label = Closing the window quits Zajil
+settings-closing-hint = Without this, the window hides and Zajil stays in the system tray while the downloads go on, as in IDM.
+settings-closing-no-tray = This desktop shows no system tray, so closing the window always quits Zajil (asking first while downloads run).
+
+## M5.5: the progress window (design window 4)
+progress-title = Download progress
+progress-tab-status = Download status
+progress-tab-limit = Speed limit
+progress-tab-finish = When finished
+progress-status = Status
+progress-size = File size
+progress-done = Downloaded
+progress-resume = Resume
+progress-resume-yes = Possible
+progress-resume-no = Not possible
+progress-receiving = Receiving data…
+progress-more = Show details
+progress-less = Hide details
+progress-close = Close
+progress-connection = Connection
+progress-got = Downloaded
+progress-working = { $number } working
+progress-left-part = Left
+progress-no-parts = The parts show once the download starts.
+progress-limit-on = Limit this download's speed
+progress-limit-unit = KB/s
+progress-limit-hint = The limit for the whole program, in the settings, still applies too.
+progress-limit-save = Save
+progress-limit-saved = The limit is saved.
+progress-limit-next = The limit is saved; it applies the next time the download resumes.
+progress-finish-hint = What this window does when the download finishes while it is open:
+progress-finish-open = Open the file
+progress-finish-folder = Open the folder
+progress-finish-close = Close this window
+progress-gone = This download was taken off the list.
+progress-parts-done = The download is complete; every part has come.
+progress-limit-bad = Write a whole number from { $min } to { $max }.
+progress-connections = { $connections }, { $working }

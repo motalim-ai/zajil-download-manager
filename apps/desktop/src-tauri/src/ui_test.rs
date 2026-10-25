@@ -293,7 +293,13 @@ pub fn demo_details(id: u64) -> Option<DetailsView> {
             }
         })
         .collect();
+    let url = format!(
+        "https://{}/{}",
+        download.host.clone().unwrap_or_default(),
+        download.name
+    );
     Some(DetailsView {
+        url,
         download,
         segments,
         resumable: Some(true),

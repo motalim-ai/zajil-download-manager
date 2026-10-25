@@ -47,8 +47,10 @@
     busy = true;
     error = null;
     try {
-      await api.add(request);
+      const id = await api.add(request);
       added = true;
+      // A download that starts shows its progress, as in IDM.
+      if (request.start) void api.openProgress(id, probe?.name ?? "").catch(() => {});
     } catch (e) {
       busy = false;
       error = String(e);

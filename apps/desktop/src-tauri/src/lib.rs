@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod closing;
 mod live;
 mod menu;
 mod tray;
@@ -145,7 +146,19 @@ pub fn run() {
     };
     #[cfg(unix)]
     let signals = stop_signals();
-    let builder = tauri::Builder::default()
+    // One Zajil per user: with its window hidden in the tray, opening Zajil
+    // again shows it instead of starting a second program on the same
+    // queues (review of #109). Not with `--data-dir` (the tests and the
+    // screenshots, each on a folder of its own).
+    let builder = tauri::Builder::default();
+    let builder = if args.iter().any(|a| a == "--data-dir") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
+    };
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Opens a finished download or its folder from Rust only
@@ -156,7 +169,11 @@ pub fn run() {
             None,
         ))
         .manage(app)
-        .manage(windows::Shared::default());
+        .manage(windows::Shared::default())
+        .manage(closing::Closing::new(
+            &data,
+            args.iter().any(|a| a == "--close-quits"),
+        ));
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -165,17 +182,18 @@ pub fn run() {
             // To the window in front: in an add window, Select all is its
             // text box's, not the main window's rows (M5.5).
             if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
-                let front = [windows::LINK, windows::INFO]
+                let front = handle
+                    .webview_windows()
                     .into_iter()
-                    .find(|l| {
-                        handle
-                            .get_webview_window(l)
-                            .is_some_and(|w| w.is_focused().unwrap_or(false))
-                    })
-                    .unwrap_or("main");
+                    .find(|(_, w)| w.is_focused().unwrap_or(false))
+                    .map_or_else(|| "main".to_owned(), |(label, _)| label);
                 // Quit is the main window's, which asks first while
                 // downloads run (review of #105: an add window quit at once).
-                let front = if command == "quit" { "main" } else { front };
+                let front = if command == "quit" {
+                    "main"
+                } else {
+                    front.as_str()
+                };
                 let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
@@ -212,6 +230,9 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            // The close button hides the window into the tray (`closing.rs`).
+            closing::watch(tauri_app.handle());
+            tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
@@ -224,6 +245,7 @@ pub fn run() {
                     let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
                         Some("add") => Some(windows::INFO_SIZE),
                         Some("link") => Some(windows::LINK_SIZE),
+                        Some("progress") => Some(windows::PROGRESS_SIZE),
                         _ => None,
                     };
                     ui_test::fit_to_screen(&window, size)?;
@@ -271,6 +293,9 @@ pub fn run() {
                 app.stop.request();
                 tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
             }
+            // macOS: a click on the Dock icon shows the window it hid.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::show_window(handle),
             _ => {}
         });
 }
@@ -288,6 +313,9 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -307,6 +335,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
@@ -328,6 +358,9 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         remove,
         details,
         set_tray_texts,
+        close_quits,
+        set_close_quits,
+        quit_heard,
         settings,
         save_settings,
         categories,
@@ -347,6 +380,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::close_window,
         windows::show_main_view,
+        windows::open_progress,
+        set_limit,
         menu::set_menu,
         quit_app,
         app_version,
@@ -453,10 +488,37 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
 #[tauri::command]
 fn set_tray_texts<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
+    closing: State<'_, closing::Closing>,
     show: String,
     quit: String,
+    notice_title: String,
+    notice: String,
 ) -> Result<(), String> {
+    closing.set_notice(closing::Notice {
+        title: notice_title,
+        body: notice,
+    });
     tray::set_texts(&handle, &show, &quit).map_err(|e| e.to_string())
+}
+
+/// Whether closing the main window quits Zajil (the settings), and whether
+/// this desktop has a system tray to go on in.
+#[tauri::command]
+fn close_quits(closing: State<'_, closing::Closing>) -> (bool, bool) {
+    (closing.prefs().close_quits, closing.tray())
+}
+
+/// The page heard «quit» from closing the window (`closing.rs`).
+#[tauri::command]
+fn quit_heard(closing: State<'_, closing::Closing>) {
+    closing.heard();
+}
+
+#[tauri::command]
+fn set_close_quits(closing: State<'_, closing::Closing>, quits: bool) -> Result<(), String> {
+    closing
+        .change(|p| p.close_quits = quits)
+        .map_err(|e| e.to_string())
 }
 
 /// Tells the page that something changed: at once, or once the throttle
@@ -1840,6 +1902,23 @@ fn copied_here(copied: &str, link: &str) -> bool {
     copied.lines().any(|l| l.trim() == link.trim())
 }
 
+/// A download's own speed limit (the progress window, M5.5); `None` or 0:
+/// none. A running download takes it the next time it starts (the runner
+/// reads it then).
+#[tauri::command]
+async fn set_limit<R: tauri::Runtime>(
+    app: State<'_, App>,
+    id: u64,
+    limit: Option<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    change(&app, &handle, move |q| {
+        q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?.limit = limit.filter(|l| *l > 0);
+        Ok(())
+    })
+    .await
+}
+
 /// Moves downloads to queue `queue`, in their order, at its end.
 #[tauri::command]
 async fn move_to_queue<R: tauri::Runtime>(
@@ -1921,6 +2000,42 @@ async fn remove<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The main window is the same on every system but for its title bar
+    /// (the design of #83): hidden under the page on macOS, none on Windows
+    /// and Linux, where the page draws it.
+    #[test]
+    fn the_main_window_differs_by_system_only_in_its_title_bar() {
+        let read = |name: &str| -> serde_json::Value {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        for (name, own) in [
+            (
+                "tauri.macos.conf.json",
+                serde_json::json!({"titleBarStyle": "Overlay", "hiddenTitle": true}),
+            ),
+            (
+                "tauri.windows.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+            (
+                "tauri.linux.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+        ] {
+            let mut expected = base.clone();
+            for (k, v) in own.as_object().unwrap() {
+                expected[k] = v.clone();
+            }
+            assert_eq!(
+                read(name)["app"]["windows"],
+                serde_json::json!([expected]),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn a_link_copied_by_the_app_is_not_offered_back() {

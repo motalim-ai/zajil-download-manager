@@ -15,6 +15,7 @@ path = "src/main.rs"
 clap.workspace = true
 tokio.workspace = true
 zajil-core.workspace = true
+zajil-grab.workspace = true
 zajil-platform.workspace = true
 
 [dev-dependencies]

@@ -107,8 +107,8 @@ queue-window = من { $start } إلى { $stop }
 ## الفئات المدمجة (المفتاح category-<id>)
 
 category-programs = برامج
-category-video = أفلام
-category-music = موسيقى
+category-video = فيديوهات
+category-music = صوتيات
 category-documents = مستندات
 category-archives = مضغوطات
 category-none = بلا فئة
@@ -472,3 +472,52 @@ quit-ok = إنهاء زاجِل
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.
+
+## The main window's title bar (the design of #83)
+app-title = زاجِل لإدارة التحميل
+win-minimize = تصغير
+win-maximize = تكبير
+win-restore = استعادة
+win-close = إغلاق
+
+## Closing the window (owner's decision, after #105)
+tray-still-running = زاجِل ما زال يعمل في شريط النظام، والتحميلات تكمل. اختر «إنهاء زاجِل» من أيقونته لإنهائه.
+settings-closing = إغلاق النافذة
+settings-closing-label = إغلاق النافذة يُنهي زاجِل
+settings-closing-hint = دون هذا الخيار تختفي النافذة ويبقى زاجِل في شريط النظام والتحميلات تكمل، كما في IDM.
+settings-closing-no-tray = لا يظهر شريط النظام في سطح المكتب هذا، فإغلاق النافذة يُنهي زاجِل دائمًا (ويسأل أولًا إن كانت هناك تحميلات تعمل).
+
+## M5.5: the progress window (design window 4)
+progress-title = تقدّم التحميل
+progress-tab-status = حالة التحميل
+progress-tab-limit = حد السرعة
+progress-tab-finish = عند الانتهاء
+progress-status = الحالة
+progress-size = حجم الملف
+progress-done = ما نُزّل
+progress-resume = الاستكمال
+progress-resume-yes = ممكن
+progress-resume-no = غير ممكن
+progress-receiving = يستقبل البيانات…
+progress-more = إظهار التفاصيل
+progress-less = إخفاء التفاصيل
+progress-close = إغلاق
+progress-connection = الاتصال
+progress-got = ما نزّله
+progress-working = يعمل { $number }
+progress-left-part = باقٍ
+progress-no-parts = تظهر الأجزاء حين يبدأ التحميل.
+progress-limit-on = حدّد سرعة هذا التحميل
+progress-limit-unit = كيلوبايت/ث
+progress-limit-hint = حد البرنامج كله في الإعدادات يبقى ساريًا كذلك.
+progress-limit-save = حفظ
+progress-limit-saved = حُفظ الحد.
+progress-limit-next = حُفظ الحد، ويسري حين يُستكمل التحميل في المرة القادمة.
+progress-finish-hint = ما تفعله هذه النافذة حين ينتهي التحميل وهي مفتوحة:
+progress-finish-open = افتح الملف
+progress-finish-folder = افتح المجلد
+progress-finish-close = أغلق هذه النافذة
+progress-gone = أُزيل هذا التحميل من القائمة.
+progress-parts-done = اكتمل التحميل، وكل أجزائه وصلت.
+progress-limit-bad = اكتب رقمًا صحيحًا من { $min } إلى { $max }.
+progress-connections = { $connections }، { $working }
