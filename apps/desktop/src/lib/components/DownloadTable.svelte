@@ -164,7 +164,7 @@
   }
   table.grid {
     width: 100%;
-    min-width: 900px;
+    min-width: 640px;
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;

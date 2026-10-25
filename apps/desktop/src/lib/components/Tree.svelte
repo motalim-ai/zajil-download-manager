@@ -144,9 +144,13 @@
     color: var(--ink);
     text-align: start;
     cursor: pointer;
-    flex: 1;
     min-width: 0;
     font: inherit;
+  }
+  /* Wide only beside its twist, in a category's row: alone in the column
+     it keeps its own height. */
+  .row .node {
+    flex: 1;
   }
   .node:hover {
     background: color-mix(in oklab, var(--sel) 60%, transparent);

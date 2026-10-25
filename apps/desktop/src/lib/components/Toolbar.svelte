@@ -79,15 +79,16 @@
     padding: 6px 10px;
     border-bottom: 1px solid var(--line);
     background: var(--surface);
-    overflow-x: auto;
+    overflow: hidden;
   }
   .tb {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    min-width: 74px;
-    padding: 6px 6px 4px;
+    min-width: 62px;
+    flex: none;
+    padding: 6px 4px 4px;
     border-radius: 8px;
     border: 1px solid transparent;
     background: none;
@@ -135,8 +136,9 @@
   }
   .sep {
     width: 1px;
+    flex: none;
     background: var(--line);
-    margin: 6px;
+    margin: 6px 4px;
   }
   .search {
     margin-inline-start: auto;
@@ -147,8 +149,8 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 5px 10px;
-    width: 230px;
-    flex: none;
+    flex: 0 1 230px;
+    min-width: 150px;
     color: var(--faint);
     background: var(--sunken);
     font-size: 13px;
