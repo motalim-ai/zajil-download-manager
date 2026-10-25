@@ -234,7 +234,7 @@ settings-browser-unsafe = Another user could change zajil-host or its folder, so
 settings-browser-working = Registering…
 settings-clipboard = Clipboard
 settings-clipboard-label = Watch the clipboard and put the download links I copy in the add box
-settings-clipboard-hint = Zajil looks at the clipboard twice a second for a link to a file, and keeps nothing of it. It does not contact the link or add anything before you press Download.
+settings-clipboard-hint = Zajil looks at the clipboard twice a second for a link to a file, and keeps nothing of it. It does not contact the link or add anything before you press OK in «Add a link».
 settings-export = Export queues
 settings-import = Import queues
 settings-export-warning = The file holds the links as they are, and some may contain temporary access keys. Do not share it.
@@ -292,6 +292,7 @@ categories-remove = Remove { $value }
 
 ## Main window (M5.5, the design of #83)
 
+settings-edit-categories = Edit the categories
 tb-add = Add link
 tb-resume = Resume
 tb-pause = Pause
@@ -305,6 +306,17 @@ tb-halt-queue = Halt queue
 tb-toolbar = Download tools
 tree-unfinished = Unfinished
 tree-finished = Finished
+tree-label = Downloads, categories and queues
+confirm-delete-done =
+    { PLURAL($count) ->
+        [one] { $count } finished download shown is taken off the list. The file itself stays where it is.
+       *[other] { $count } finished downloads shown are taken off the list. The files themselves stay where they are.
+    }
+confirm-delete =
+    { PLURAL($count) ->
+        [one] { $count } download is taken off the list. What was downloaded stays on the disk.
+       *[other] { $count } downloads are taken off the list. What was downloaded stays on the disk.
+    }
 tree-expand = Show what is under it
 queue-main = Main queue
 queue-starts = Starts { $time }

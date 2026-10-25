@@ -21,9 +21,12 @@
   let {
     search = $bindable(),
     can,
+    hint,
     onaction,
   }: {
     search: string;
+    /** A button's longer name, if it has one (what it acts on). */
+    hint: (action: ToolAction) => string | undefined;
     /** Whether a button has something to act on now. */
     can: (action: ToolAction) => boolean;
     onaction: (action: ToolAction) => void;
@@ -58,7 +61,7 @@
   {#each groups as group, g (g)}
     {#if g > 0}<span class="sep" aria-hidden="true"></span>{/if}
     {#each group as b (b.action)}
-      <button id="tb-{b.action}" class="tb {b.kind}" disabled={!can(b.action)} onclick={() => onaction(b.action)}>
+      <button id="tb-{b.action}" class="tb {b.kind}" title={hint(b.action)} disabled={!can(b.action)} onclick={() => onaction(b.action)}>
         <span class="tile"><Icon name={b.icon} size={22} stroke={1.7} /></span>
         <span class="label">{locale.t(b.key)}</span>
       </button>

@@ -49,7 +49,7 @@
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
 </script>
 
-<nav class="tree" aria-label={locale.t("nav-categories")}>
+<nav class="tree" aria-label={locale.t("tree-label")}>
   <button class="node top" aria-current={current({ kind: "all" })} onclick={() => show({ kind: "all" })}>
     <Icon name="layers" size={16} /><span class="label">{locale.t("nav-all")}</span><span class="n num">{count(() => true)}</span>
   </button>

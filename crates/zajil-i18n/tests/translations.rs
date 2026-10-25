@@ -182,6 +182,28 @@ const ARABIC: &[(&str, [&str; 6])] = &[
         ],
     ),
     (
+        "confirm-delete-done",
+        [
+            "لا تحميلات مكتملة معروضة.",
+            "يُحذف من القائمة تحميل مكتمل واحد. الملف نفسه يبقى في مكانه.",
+            "يُحذف من القائمة تحميلان مكتملان. الملفان نفساهما يبقيان في مكانهما.",
+            "يُحذف من القائمة 3 تحميلات مكتملة. الملفات نفسها تبقى في مكانها.",
+            "يُحذف من القائمة 11 تحميلًا مكتملًا. الملفات نفسها تبقى في مكانها.",
+            "يُحذف من القائمة 100 تحميل مكتمل. الملفات نفسها تبقى في مكانها.",
+        ],
+    ),
+    (
+        "confirm-delete",
+        [
+            "لا شيء محدد.",
+            "يُحذف من القائمة تحميل واحد. ما نُزّل منه يبقى على القرص.",
+            "يُحذف من القائمة تحميلان. ما نُزّل منهما يبقى على القرص.",
+            "يُحذف من القائمة 3 تحميلات. ما نُزّل منها يبقى على القرص.",
+            "يُحذف من القائمة 11 تحميلًا. ما نُزّل منها يبقى على القرص.",
+            "يُحذف من القائمة 100 تحميل. ما نُزّل منها يبقى على القرص.",
+        ],
+    ),
+    (
         "files-count",
         [
             "لا ملفات",
@@ -265,6 +287,20 @@ const ENGLISH: &[(&str, [&str; 2])] = &[
     ("import-done", ["1 download added.", "2 downloads added."]),
     ("connections-count", ["1 connection", "2 connections"]),
     ("queues-count", ["1 queue", "2 queues"]),
+    (
+        "confirm-delete-done",
+        [
+            "1 finished download shown is taken off the list. The file itself stays where it is.",
+            "2 finished downloads shown are taken off the list. The files themselves stay where they are.",
+        ],
+    ),
+    (
+        "confirm-delete",
+        [
+            "1 download is taken off the list. What was downloaded stays on the disk.",
+            "2 downloads are taken off the list. What was downloaded stays on the disk.",
+        ],
+    ),
     ("files-count", ["1 file", "2 files"]),
     ("seconds-left", ["1 second", "2 seconds"]),
     ("minutes-left", ["1 minute", "2 minutes"]),
@@ -695,6 +731,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("progress-label", &["count", "percent"]),
     ("queue-window", &["start", "stop"]),
     ("queues-count", &["count"]),
+    ("confirm-delete-done", &["count"]),
+    ("confirm-delete", &["count"]),
     ("seconds-left", &["count"]),
     ("settings-browser-failed", &["browser", "error"]),
     ("settings-browser-ok", &["browser"]),

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
   import AddLink from "./lib/components/AddLink.svelte";
@@ -327,8 +327,20 @@
   const idsOf = (pick: (d: Snapshot["downloads"][number]) => boolean) => snapshot.downloads.filter(pick).map((d) => d.id);
   const chosen = $derived(snapshot.downloads.filter((d) => selected.includes(d.id)));
 
+  // A dialog is open: the toolbar waits (review of #96: a second dialog
+  // lost the first one's link).
+  const dialogOpen = $derived(Boolean(adding || linking || refreshing));
+  // The table is on screen: what the selection buttons act on is seen
+  // (review of #96: Delete removed rows hidden behind the settings).
+  const tableShown = $derived(view === "list" && !details);
+  // A download held for the user's OK (#84) starts only when it is chosen,
+  // never with a whole queue (review of #96).
+  const runnable = (d: Snapshot["downloads"][number]) => d.queue === queueShown && !d.needs_ok && (d.status === "paused" || d.status === "failed");
+
   /** Whether a toolbar button has something to act on. */
   function can(action: ToolAction): boolean {
+    if (dialogOpen) return false;
+    if (!tableShown && (action === "resume" || action === "pause" || action === "delete" || action === "delete-done")) return false;
     switch (action) {
       case "resume":
         return chosen.some((d) => d.status === "paused" || d.status === "failed");
@@ -339,9 +351,9 @@
       case "pause-all":
         return snapshot.downloads.some((d) => d.status === "active" || d.status === "waiting");
       case "delete-done":
-        return snapshot.downloads.some((d) => d.status === "done");
+        return shown.some((d) => d.status === "done");
       case "run-queue":
-        return snapshot.downloads.some((d) => d.queue === queueShown && (d.status === "paused" || d.status === "failed"));
+        return snapshot.downloads.some(runnable);
       case "halt-queue":
         return snapshot.downloads.some((d) => d.queue === queueShown && (d.status === "active" || d.status === "waiting"));
       default:
@@ -361,16 +373,20 @@
         void act("pause");
         break;
       case "delete":
-        void act("remove");
+        void confirmThen(locale.t("confirm-delete", { count: selected.length }), selected.length > 1, () => act("remove"));
         break;
       case "pause-all":
         void act("pause", idsOf((d) => d.status === "active" || d.status === "waiting"));
         break;
-      case "delete-done":
-        void act("remove", idsOf((d) => d.status === "done"));
+      // Only the finished downloads the table shows, and once the user
+      // agrees (review of #96: every category's went, with no word).
+      case "delete-done": {
+        const done = shown.filter((d) => d.status === "done").map((d) => d.id);
+        void confirmThen(locale.t("confirm-delete-done", { count: done.length }), true, () => act("remove", done));
         break;
+      }
       case "run-queue":
-        void act("resume", idsOf((d) => d.queue === queueShown && (d.status === "paused" || d.status === "failed")));
+        void act("resume", idsOf(runnable));
         break;
       case "halt-queue":
         void act("pause", idsOf((d) => d.queue === queueShown && (d.status === "active" || d.status === "waiting")));
@@ -383,6 +399,22 @@
         view = "settings";
         break;
     }
+  }
+
+  /** The toolbar's word on what a button acts on: the queue's name. */
+  function hint(action: ToolAction): string | undefined {
+    if (action !== "run-queue" && action !== "halt-queue") return undefined;
+    const name = queueShown === "main" ? locale.t("queue-main") : queueShown;
+    return `${locale.t(action === "run-queue" ? "tb-run-queue" : "tb-halt-queue")}: ${name}`;
+  }
+
+  /** Runs `then` once the user agrees to `question` (when `needed`). */
+  async function confirmThen(question: string, needed: boolean, then: () => Promise<void>) {
+    if (needed) {
+      const yes = await ask(question, { title: locale.t("app-name"), kind: "warning" }).catch(() => false);
+      if (!yes) return;
+    }
+    await then();
   }
 
   // Ctrl+F (⌘F) goes to the search box, unless a dialog is open.
@@ -513,7 +545,9 @@
   <NamesPage />
 {:else}
   <div class="window">
-    <Toolbar bind:search {can} onaction={doAction} />
+    <header>
+      <Toolbar bind:search {can} {hint} onaction={doAction} />
+    </header>
     <div class="body">
     <Tree {snapshot} bind:filter bind:view />
     <main class="main">
@@ -530,6 +564,7 @@
           }}
           onexport={() => void exportQueues()}
           onimport={() => void importQueues()}
+          oncategories={() => (view = "categories")}
           message={settingsMessage}
         />
       {:else if view === "categories"}

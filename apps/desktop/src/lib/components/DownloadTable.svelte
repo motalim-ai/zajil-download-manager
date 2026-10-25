@@ -76,8 +76,11 @@
     if (next >= 0 && next < downloads.length) {
       event.preventDefault();
       const id = downloads[next]!.id;
-      if (event.shiftKey && anchor !== null) {
-        selected = range(downloads.findIndex((d) => d.id === anchor), next);
+      const from = anchor === null ? -1 : downloads.findIndex((d) => d.id === anchor);
+      // A Shift range from an anchor that is gone (filtered, deleted)
+      // starts here (review of #96: it cleared the selection).
+      if (event.shiftKey && from >= 0) {
+        selected = range(from, next);
       } else {
         selected = [id];
         anchor = id;
@@ -251,10 +254,15 @@
     color: var(--faint);
   }
   .st {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 6px;
-    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .st :global(.icon) {
+    flex: none;
   }
   .pct {
     min-width: 34px;

@@ -2,7 +2,8 @@
 Icons from Lucide 1.61.0 (lucide-static), copied unchanged (M5.5, the design
 of #83; docs/DEPENDENCIES.md). Each value is the inside of a 24x24 SVG drawn
 with a stroke, as Lucide draws them. The license of lucide-static 1.61.0
-follows, as in lucide-LICENSE.txt beside this file.
+follows; the same text is shipped with the app as lucide-LICENSE.txt
+(`public/`, copied into the build as it is).
 
 ISC License
 

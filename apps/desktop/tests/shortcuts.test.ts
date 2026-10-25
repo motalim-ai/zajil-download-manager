@@ -23,6 +23,9 @@ describe("shortcuts", () => {
     expect(isMod(key({ key: "f", ctrlKey: true }), "f", true)).toBe(false);
     expect(isMod(key({ key: "f", ctrlKey: true, shiftKey: true }), "f", false)).toBe(false);
     expect(isMod(key({ key: "a", ctrlKey: true }), "f", false)).toBe(false);
+    // The Arabic layout: the key is «ب», its place is still F.
+    expect(isMod(key({ key: "ب", code: "KeyF", ctrlKey: true }), "f", false)).toBe(true);
+    expect(isMod(key({ key: "ش", code: "KeyA", metaKey: true }), "a", true)).toBe(true);
   });
 });
 
