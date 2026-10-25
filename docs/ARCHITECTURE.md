@@ -43,6 +43,7 @@ zajil-download-manager/
 │   ├── zajil-core/        # المحرّك (موجود الآن كمشروع فارغ)
 │   ├── zajil-platform/    # واجهة الأنظمة + تنفيذ ويندوز/ماك/لينكس   (M1+)
 │   ├── zajil-cli/         # الأمر zajil                              (M1)
+│   ├── zajil-grab/        # الأنماط وتحميل الموقع، فوق المحرّك        (M7)
 │   ├── zajil-host/        # مضيف Native Messaging الصغير              (M5)
 │   ├── zajil-i18n/        # الترجمات (Fluent) لجهة Rust               (M4)
 │   └── zajil-testserver/  # سيرفر تجريبي للحالات الصعبة (للاختبار فقط) (M1)
