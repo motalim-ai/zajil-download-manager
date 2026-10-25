@@ -65,44 +65,60 @@ pub(crate) fn open<R: tauri::Runtime>(
     title: &str,
     size: (f64, f64),
 ) -> tauri::Result<()> {
-    open_page(handle, label, label, title, size)
+    open_page(handle, label, label, title, size, false)
 }
 
 /// [`open`], with `page` after `win=` in the page's address (a window of
-/// a download: its kind and id, never a link).
+/// a download: its kind and id, never a link). `owned`: the window belongs
+/// to the main one (see [`open_beside_main`]).
 pub(crate) fn open_page<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     label: &str,
     page: &str,
     title: &str,
     (width, height): (f64, f64),
+    owned: bool,
 ) -> tauri::Result<()> {
     if let Some(window) = handle.get_webview_window(label) {
         let _ = window.unminimize();
         window.show()?;
         return window.set_focus();
     }
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         handle,
         label,
         WebviewUrl::App(format!("index.html?win={page}").into()),
-    )
-    .title(title)
-    .inner_size(width, height)
-    .min_inner_size(
-        width,
-        height.min(if label == INFO || label == LINK {
-            height
-        } else {
-            320.0
-        }),
-    )
-    .resizable(true)
-    .maximizable(false)
-    .minimizable(false)
-    .center()
-    .focused(true)
-    .build()?;
+    );
+    // On Windows a window Zajil opens by itself is owned by the main one:
+    // a close sent to the program (`taskkill`, an installer) goes to its
+    // main window, the first unowned one, which would otherwise be this
+    // newer window, and Zajil would go on (review of #137: the close tests).
+    // Owned windows also go with their owner. Windows only: elsewhere a
+    // parent ties the window to the main one, hidden in the tray with it.
+    #[cfg(windows)]
+    let builder = match handle.get_webview_window("main") {
+        Some(main) if owned => builder.owner(&main)?,
+        _ => builder,
+    };
+    #[cfg(not(windows))]
+    let _ = owned;
+    let window = builder
+        .title(title)
+        .inner_size(width, height)
+        .min_inner_size(
+            width,
+            height.min(if label == INFO || label == LINK {
+                height
+            } else {
+                320.0
+            }),
+        )
+        .resizable(true)
+        .maximizable(false)
+        .minimizable(false)
+        .center()
+        .focused(true)
+        .build()?;
     // The info window closed: a check of the server still running is given
     // up (as the dialog's cancel did).
     if label == INFO {
@@ -199,7 +215,7 @@ pub(crate) fn open_beside_main(
     if !main_is_up(handle) {
         return Ok(());
     }
-    open_page(handle, label, page, title, size)?;
+    open_page(handle, label, page, title, size, true)?;
     if !main_is_up(handle)
         && let Some(window) = handle.get_webview_window(label)
     {
