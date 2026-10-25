@@ -1445,7 +1445,7 @@ fn reach_file(engine: &Engine, url: &str) -> Result<zajil_core::Probe, String> {
 /// web page (a sign-in page a link redirected to, review of #70), or a file
 /// of another type than the name the browser had.
 fn not_the_file(probe: &zajil_core::Probe, browser_name: Option<&str>) -> Option<String> {
-    if view::is_web_page(probe.content_type.as_deref()) {
+    if probe.is_page() {
         return Some("the server sent a web page (a sign-in page?), not the file".into());
     }
     let extension = |name: &str| {

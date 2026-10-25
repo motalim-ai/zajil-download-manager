@@ -308,11 +308,17 @@ impl Probe {
     }
 }
 
-/// Whether `media_type` (lower case, without parameters, as
-/// [`Probe::content_type`]) is a web page: `text/html` or
-/// `application/xhtml+xml`.
+/// Whether `media_type` is a web page: `text/html` or
+/// `application/xhtml+xml`, in any case and with any parameters (a raw
+/// `Content-Type` header, or [`Probe::content_type`]).
 pub fn is_page_type(media_type: &str) -> bool {
-    matches!(media_type, "text/html" | "application/xhtml+xml")
+    let media_type = media_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
 }
 
 /// Why a new link is not shown to be the same file as a download's

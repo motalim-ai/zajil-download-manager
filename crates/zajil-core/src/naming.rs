@@ -261,13 +261,19 @@ mod tests {
             with_type_extension("view".into(), Some("application/x-msdownload")),
             "view"
         );
-        // At the limit, it stays within it, with its extension.
-        let long = "ع".repeat(100);
-        let named = with_type_extension(long, Some("text/html"));
-        assert!(
-            named.len() <= MAX_NAME_BYTES && named.ends_with(".html"),
-            "{named}"
-        );
+        // At the limit, it stays within it, with its extension, and is a
+        // name the engine accepts back as it is (AGENTS §10.7): Arabic
+        // names of 197 to 200 bytes (an odd byte with a Latin letter).
+        for bytes in 197..=MAX_NAME_BYTES {
+            let long = format!("{}{}", "ع".repeat(bytes / 2), "x".repeat(bytes % 2));
+            assert_eq!(long.len(), bytes);
+            let named = with_type_extension(long, Some("text/html"));
+            assert!(
+                named.len() <= MAX_NAME_BYTES && named.ends_with(".html"),
+                "{named}"
+            );
+            assert_eq!(sanitize_file_name(&named), named);
+        }
         // A reserved name stays safe.
         assert_eq!(
             with_type_extension("_CON".into(), Some("text/plain")),

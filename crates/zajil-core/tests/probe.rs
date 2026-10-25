@@ -170,3 +170,20 @@ async fn a_web_page_is_said_and_named_as_one() {
     let setup = engine.probe(&server.url("/files/setup")).await.unwrap();
     assert_eq!(setup.name, "setup");
 }
+
+/// A raw `Content-Type` is a web page in any case and with parameters, as
+/// the probe's own (review of the probe-page change).
+#[test]
+fn a_page_type_is_known_in_any_case_and_with_parameters() {
+    for page in [
+        "text/html",
+        "text/html; charset=utf-8",
+        "Text/HTML",
+        " application/XHTML+xml ;q=1",
+    ] {
+        assert!(zajil_core::is_page_type(page), "{page}");
+    }
+    for file in ["application/zip", "text/plain", "", "text/htmlx", "html"] {
+        assert!(!zajil_core::is_page_type(file), "{file}");
+    }
+}
