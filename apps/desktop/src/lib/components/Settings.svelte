@@ -15,6 +15,7 @@
     onchoosefolder,
     onexport,
     onimport,
+    oncategories,
     message,
     keepFolders = $bindable(),
   }: {
@@ -25,6 +26,8 @@
     onchoosefolder: () => void;
     onexport: () => void;
     onimport: () => void;
+    /** Opens the categories editor (M5.5: its way in, review of #96). */
+    oncategories: () => void;
     /** What the last action said (an import's summary, or an error). */
     message: { text: string; problem: boolean } | null;
   } = $props();
@@ -269,6 +272,14 @@
       <span>{locale.t("settings-autostart-label")}</span>
     </label>
     {#if autostartProblem}<p class="hint problem" role="alert">{autostartProblem}</p>{/if}
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("categories-title")}</legend>
+    <p class="hint">{locale.t("categories-hint")}</p>
+    <div class="row">
+      <button class="btn" onclick={oncategories}><Icon name="tag" />{locale.t("settings-edit-categories")}</button>
+    </div>
   </fieldset>
 
   <fieldset>

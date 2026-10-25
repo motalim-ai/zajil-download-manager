@@ -60,11 +60,11 @@ describe("the manifests", () => {
     expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort());
     const used = new Set();
     for (const file of ["background.js", "options.html", "options.js", "page.js", "welcome.html", "welcome.js", "manifest.chrome.json"]) {
-      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|\bt\("(\w+)"\)|getMessage\("(\w+)"\)|"((?:not|menu|signIn|cookies)[A-Z]\w+)")/g)) {
+      for (const m of read(`../src/${file}`).matchAll(/(?:__MSG_(\w+)__|data-i18n="(\w+)"|\bt\("(\w+)"\)|getMessage\("(\w+)"\)|"((?:not|menu|signIn|cookies|video)[A-Z]\w+)")/g)) {
         used.add(m[1] || m[2] || m[3] || m[4] || m[5]);
       }
     }
-    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang", "signInNeedsCookies", "signInEvenWithCookies", "menuSignInNeedsCookies", "menuSignInEvenWithCookies", "downloadWithBrowser", "cookiesAllow", "cookiesDrop", "cookiesAllowed", "cookiesNotAllowed", "cookiesOnlyHere", "cookiesOnlyThisSite", "cookiesNotKept", "cookiesPrompt", "signInNoCookies", "menuSignInNoCookies"]) {
+    for (const key of ["notRefused", "notAnswered", "notAnsweredRunning", "notReachable", "menuDownloadLink", "menuRefused", "menuNotAnswered", "menuNotReachable", "menuNotALink", "takenAlsoInBrowser", "optionsSaved", "lang", "signInNeedsCookies", "signInEvenWithCookies", "menuSignInNeedsCookies", "menuSignInEvenWithCookies", "downloadWithBrowser", "cookiesAllow", "cookiesDrop", "cookiesAllowed", "cookiesNotAllowed", "cookiesOnlyHere", "cookiesOnlyThisSite", "cookiesNotKept", "cookiesPrompt", "signInNoCookies", "menuSignInNoCookies", "menuDownloadVideo", "videoRefused", "videoNotAnswered", "videoNotWeb"]) {
       expect(used.has(key), key).toBe(true);
     }
     expect(ar.lang.message).toBe("ar");
