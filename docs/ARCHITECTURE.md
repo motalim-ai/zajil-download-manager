@@ -233,7 +233,12 @@ flowchart LR
 
 كل ما يختلف بين الأنظمة يمر عبر **واجهة واحدة (trait)** لها ثلاثة تنفيذات. الكود الذي فوقها لا يحتوي أي `if windows`. التفاصيل في [ADR-0006](adr/0006-platform-abstraction.md).
 
-**`unsafe`**: ممنوع في كل المكتبات (`forbid`)، إلا في `zajil-platform` حيث هو `deny`، ومسموح فقط في وحدة `fs` لاستدعاءات نظام لا توفرها المكتبة القياسية: إعادة التسمية دون استبدال (`renameat2` في لينكس، و`renamex_np` في ماك، و`MoveFileExW` في ويندوز)، و`MOVEFILE_WRITE_THROUGH`، وعدد الروابط الصلبة في ويندوز. ومنذ M2: حجز المساحة (`fallocate` في لينكس، و`F_PREALLOCATE` في ماك)، والملف المتناثر في ويندوز (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`statvfs` و`statfs` و`GetDiskFreeSpaceExW`). ومنذ M3: حذف قائمة الصلاحيات الموروثة في ماك (`acl_set_fd_np`، وقراءتها بـ `acl_get_fd_np` للفحص)، وملف لا يقرؤه إلا صاحبه في ويندوز (`CreateFileW` مع قائمة صلاحيات محمية من `ConvertStringSecurityDescriptorToSecurityDescriptorW`، وقراءتها بـ `GetNamedSecurityInfoW` للفحص). ومنذ M3 أيضًا وحدة `power` في ويندوز: `AdjustTokenPrivileges` و`InitiateShutdownW` و`SetSuspendState`. ومنذ M4 وحدة `session` في ويندوز: `SetWindowSubclass` و`DefSubclassProc`، لالتقاط انتهاء الجلسة في نافذة التطبيق (#49). كل استدعاء معه تعليق `SAFETY`.
+**`unsafe`**: ممنوع في كل المكتبات (`forbid`)، إلا في `zajil-platform` حيث هو `deny`، ومسموح فقط في وحدة `fs` لاستدعاءات نظام لا توفرها المكتبة القياسية: إعادة التسمية دون استبدال (`renameat2` في لينكس، و`renamex_np` في ماك، و`MoveFileExW` في ويندوز)، و`MOVEFILE_WRITE_THROUGH`، وعدد الروابط الصلبة في ويندوز. ومنذ M2: حجز المساحة (`fallocate` في لينكس، و`F_PREALLOCATE` في ماك)، والملف المتناثر في ويندوز (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`statvfs` و`statfs` و`GetDiskFreeSpaceExW`). ومنذ M3: حذف قائمة الصلاحيات الموروثة في ماك (`acl_set_fd_np`، وقراءتها بـ `acl_get_fd_np` للفحص)، وملف لا يقرؤه إلا صاحبه في ويندوز (`CreateFileW` مع قائمة صلاحيات محمية من `ConvertStringSecurityDescriptorToSecurityDescriptorW`، وقراءتها بـ `GetNamedSecurityInfoW` للفحص). ومنذ M3 أيضًا وحدة `power` في ويندوز: `AdjustTokenPrivileges` و`InitiateShutdownW` و`SetSuspendState`. ومنذ M4 وحدة `session` في ويندوز: `SetWindowSubclass` و`DefSubclassProc`، لالتقاط انتهاء الجلسة في نافذة التطبيق (#49). ومنذ M5 وحدة `native_host` في ويندوز: دوال الريجستري (`RegCreateKeyExW` و`RegSetValueExW` و`RegGetValueW` و`RegDeleteKeyW` و`RegQueryInfoKeyW`) تحت `HKCU` فقط، لتسجيل مضيف الإضافة. كل استدعاء معه تعليق `SAFETY`.
+
+**`NativeHostRegistrar` (M5، `native_host`)**:
+- **للمستخدم الحالي وحده**، ولا شيء على مستوى الجهاز.
+- **يُسجَّل المتصفح المثبَّت فقط**: مجلده في ماك ولينكس، ومفتاح المورّد في ويندوز. ولا يُنشأ أبدًا شيء لمتصفح غير مثبَّت، فلا يبقى شيء بعد إلغاء التسجيل: يُحذف الـ manifest ومفتاح الريجستري، ومعهما مجلد أو مفتاح `NativeMessagingHosts` إن بقي فارغًا.
+- **معرّفات الإضافة تُفحص** قبل أن تدخل ملفًا يثق به المتصفح: 32 حرفًا من `a` إلى `p` في عائلة Chrome، و`name@domain` أو `{uuid}` في Firefox. ومسار المضيف يجب أن يكون مطلقًا.
 
 **`PowerControl` (M3)**:
 - **لا يُستدعى إلا بطلب صريح** من المستخدم لقائمة واحدة في تشغيل واحد (`--shutdown-after` أو `--sleep-after`)، والطلب لا يُحفظ.
@@ -248,7 +253,7 @@ flowchart LR
 
 | الواجهة | ويندوز | ماك | لينكس |
 |---|---|---|---|
-| تسجيل مضيف Native Messaging | مفتاح في الريجستري (`HKCU\Software\…\NativeMessagingHosts\io.github.motalim_ai.zajil.host`) يشير إلى ملف manifest | ملف manifest في مجلد كل متصفح داخل `~/Library/Application Support/…` | ملف manifest في `~/.config/…` لـ Chrome وChromium وEdge، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
+| تسجيل مضيف Native Messaging (`zajil_platform::native_host`، M5) | ملف manifest في `<مجلد البيانات>/native-messaging/<المتصفح>.json`، والقيمة الافتراضية لمفتاح `HKCU\Software\<المورّد>\NativeMessagingHosts\io.github.motalim_ai.zajil.host` تشير إليه | ملف manifest في `~/Library/Application Support/<المتصفح>/NativeMessagingHosts/` (Google/Chrome، وChromium، وMicrosoft Edge، وMozilla) | ملف manifest في `~/.config/<المتصفح>/NativeMessagingHosts/` لـ Chrome وChromium وEdge، و`~/.mozilla/native-messaging-hosts/` لـ Firefox |
 | الحافظة | Win32 Clipboard | NSPasteboard | X11 أو Wayland |
 | الإشعارات | Windows notifications | Notification Center | freedesktop notifications (D-Bus) |
 | التشغيل مع بدء النظام | مفتاح `Run` في الريجستري | LaunchAgent (ملف plist في `~/Library/LaunchAgents`) | ملف `.desktop` في `~/.config/autostart` |
