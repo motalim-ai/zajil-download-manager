@@ -1,0 +1,17 @@
+# The ffprobe that Zajil downloads and runs (ADR-0009): Zajil's own LGPL build
+# of FFmpeg, published with its source by .github/workflows/ffmpeg-release.yml
+# under the tag tools-ffmpeg-<version> of this repository. The version is
+# FFmpeg's, then the build number; ffmpeg and ffprobe share it (and one
+# folder), so pins-ffmpeg.txt and pins-ffprobe.txt always name the same one.
+# One line per target: the release file and its SHA-256, from the release's
+# SHA256SUMS, checked against the downloaded files when the version was
+# pinned. Both Macs use the universal file; Windows on arm64 its own build.
+# Read by crates/zajil-core/src/tools.rs (built in, read strictly: see
+# parse_pins there; a test reads this file).
+version 8.1.3-1
+windows-x86_64 ffprobe-windows-x86_64.exe d38f473972db11e21b647a2614b75e3c19b612943fa8574589dcc4c306851a67
+windows-aarch64 ffprobe-windows-aarch64.exe 31a13e2b32204d5617a7aac35ce904b5bc3181a953f30f80c5ce52112adbb58c
+macos-x86_64 ffprobe-macos-universal 99b567808a4f753047c936eb7614d7a8087bfa1d152f55b970e8c42dba5866fb
+macos-aarch64 ffprobe-macos-universal 99b567808a4f753047c936eb7614d7a8087bfa1d152f55b970e8c42dba5866fb
+linux-x86_64 ffprobe-linux-x86_64 6645f10e441b2296eea25419a9fc114402d60e3a3de489b17b00c785d118efdc
+linux-aarch64 ffprobe-linux-aarch64 968ff1ff22981c4154ab852d17f85a5af051690a9e4a12a8907d35281d03d3a6
