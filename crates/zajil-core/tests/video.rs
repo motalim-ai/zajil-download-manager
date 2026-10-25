@@ -6,8 +6,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use zajil_core::tools::{Pinned, Tool, ToolError, Toolbox};
 use zajil_core::video::{
-    Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner, VideoTools,
+    Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner,
 };
 use zajil_core::{Engine, Options, Stop};
 
@@ -16,23 +17,69 @@ struct Setup {
     control: PathBuf,
     runs: PathBuf,
     dest: PathBuf,
+    /// The stand-in, as the tools folder holds it.
+    yt_dlp: PathBuf,
     runner: VideoRunner,
 }
 
-/// A runner whose yt-dlp is the stand-in, doing `script`.
+const VERSION: &str = "2099.01.01";
+
+fn exe(name: &str) -> String {
+    format!("{name}{}", if cfg!(windows) { ".exe" } else { "" })
+}
+
+/// Puts `bytes` in the tools folder as `name`, as an install leaves it.
+fn put_tool(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+    use std::io::Write;
+    zajil_platform::fs::private_dir(dir).unwrap();
+    let path = dir.join(name);
+    let mut file = zajil_platform::fs::create_private(&path).unwrap();
+    file.write_all(bytes).unwrap();
+    zajil_platform::fs::make_executable(&file).unwrap();
+    path
+}
+
+/// A runner whose yt-dlp is the stand-in, doing `script`. The stand-in and
+/// two stand-ins for ffmpeg and ffprobe are in a tools folder of their
+/// own, pinned with their SHA-256, and checked before every run like the
+/// real tools. The stand-in's instructions are in the ffmpeg folder, which
+/// it gets as `--ffmpeg-location`.
 fn setup(script: &str) -> Setup {
     let root = tempfile::tempdir().unwrap();
-    let control = root.path().join("control");
+    let tools = root.path().join("data").join("tools");
     let runs = root.path().join("data").join("run");
     let dest = root.path().join("Downloads");
-    fs::create_dir_all(&control).unwrap();
     fs::create_dir_all(&dest).unwrap();
+    let fake = fs::read(env!("CARGO_BIN_EXE_fake-yt-dlp")).unwrap();
+    let yt_dlp = put_tool(&tools.join("yt-dlp").join(VERSION), &exe("yt-dlp"), &fake);
+    let control = tools.join("ffmpeg").join(VERSION);
+    put_tool(&control, &exe("ffmpeg"), b"ffmpeg stand-in");
+    put_tool(&control, &exe("ffprobe"), b"ffprobe stand-in");
+    let hashes = [
+        (Tool::YtDlp, zajil_testserver::sha256_hex(&fake)),
+        (
+            Tool::Ffmpeg,
+            zajil_testserver::sha256_hex(b"ffmpeg stand-in"),
+        ),
+        (
+            Tool::Ffprobe,
+            zajil_testserver::sha256_hex(b"ffprobe stand-in"),
+        ),
+    ];
     fs::write(control.join("script"), script).unwrap();
+    let toolbox = Toolbox::with_pins(
+        &tools,
+        Box::new(move |tool, _| {
+            let (_, sha256) = hashes.iter().find(|(t, _)| *t == tool)?;
+            Some(Pinned {
+                version: VERSION.to_owned(),
+                url: "https://example.invalid/tool".to_owned(),
+                sha256: sha256.clone(),
+            })
+        }),
+    );
     let runner = VideoRunner::new(
-        VideoTools {
-            yt_dlp: PathBuf::from(env!("CARGO_BIN_EXE_fake-yt-dlp")),
-            ffmpeg_dir: control.clone(),
-        },
+        toolbox,
         Runs::new(&runs),
         Engine::new(Options::default()).unwrap(),
     );
@@ -41,8 +88,26 @@ fn setup(script: &str) -> Setup {
         control,
         runs,
         dest,
+        yt_dlp,
         runner,
     }
+}
+
+/// Formats the probe found, for the downloads of these tests: plain ones
+/// (not HLS), so the DRM check fetches nothing.
+fn known() -> &'static [Format] {
+    static KNOWN: std::sync::OnceLock<Vec<Format>> = std::sync::OnceLock::new();
+    KNOWN.get_or_init(|| {
+        ["hls-360", "137", "140", "1"]
+            .iter()
+            .map(|id| {
+                serde_json::from_value(serde_json::json!({
+                    "format_id": id, "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a"
+                }))
+                .unwrap()
+            })
+            .collect()
+    })
 }
 
 /// What the stand-in was given, run by run.
@@ -228,7 +293,7 @@ async fn no_run_passes_an_option_outside_the_allow_list() {
                 let request = Download {
                     url: "https://example.com/v",
                     choice,
-                    formats: &[],
+                    formats: known(),
                     cookies: Some("sid=1"),
                     dest: &s.dest,
                     name: "x",
@@ -267,7 +332,7 @@ async fn nothing_from_the_page_becomes_an_option() {
         let request = Download {
             url: "https://example.com/v",
             choice: &Choice::Format(id.into()),
-            formats: &[],
+            formats: known(),
             cookies: None,
             dest: &s.dest,
             name: "x",
@@ -363,7 +428,7 @@ async fn a_download_takes_the_page_s_title_safely_and_never_replaces_a_file() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("hls-360".into()),
-        formats: &[],
+        formats: known(),
         cookies: None,
         dest: &s.dest,
         name: "../دورة Rust (Part 2)",
@@ -405,7 +470,7 @@ async fn a_file_printed_outside_the_output_folder_is_refused() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
-        formats: &[],
+        formats: known(),
         cookies: None,
         dest: &s.dest,
         name: "x",
@@ -466,7 +531,12 @@ async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     let watcher = {
         let (stop, started) = (stop.clone(), s.control.join("started"));
         tokio::spawn(async move {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
             while !started.exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the stand-in never started"
+                );
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
             stop.request();
@@ -475,7 +545,7 @@ async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
-        formats: &[],
+        formats: known(),
         cookies: Some("sid=abc"),
         dest: &s.dest,
         name: "x",
@@ -525,7 +595,7 @@ async fn a_download_dropped_mid_way_ends_its_tree_and_leaves_nothing() {
     let request = Download {
         url: "https://example.com/v",
         choice: &Choice::Format("1".into()),
-        formats: &[],
+        formats: known(),
         cookies: Some("sid=abc"),
         dest: &s.dest,
         name: "x",
@@ -577,7 +647,12 @@ async fn leftovers_of_a_crash_are_ended_and_removed_at_the_next_start() {
     let tree = zajil_platform::process::spawn(command).unwrap();
     fs::write(run.join("tree"), tree.record().to_line()).unwrap();
     let started = s.control.join("started");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !started.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the stand-in never started"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     // The crashed Zajil is gone: its handle on the tree must not be what
@@ -620,14 +695,14 @@ async fn an_hls_playlist_protected_in_a_way_yt_dlp_misses_is_refused_before_it_r
         .unwrap()
     };
     let formats = [
-        format("wv", "/v/widevine.m3u8"),
+        format("drm-hls", "/v/widevine.m3u8"),
         format("clear", "/v/clear.m3u8"),
     ];
 
     let s = setup("download mp4");
     let request = Download {
         url: "https://example.com/v",
-        choice: &Choice::Format("wv".into()),
+        choice: &Choice::Format("drm-hls".into()),
         formats: &formats,
         cookies: None,
         dest: &s.dest,
@@ -691,4 +766,168 @@ async fn a_playlist_larger_than_the_limit_is_not_read_past_it() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("larger than 1024 bytes"), "{err}");
+}
+
+/// Review of the video runner: the tools are checked before every run, not
+/// once when the runner is made. A yt-dlp changed after it was installed
+/// (or an ffmpeg) is never run.
+#[tokio::test]
+async fn a_tool_changed_after_it_was_installed_is_never_run() {
+    let s = setup("probe");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    s.runner
+        .probe("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap();
+    assert_eq!(calls(&s.control).len(), 1);
+
+    // Another file in its place, after the runner was made.
+    fs::remove_file(&s.yt_dlp).unwrap();
+    put_tool(
+        s.yt_dlp.parent().unwrap(),
+        &exe("yt-dlp"),
+        b"not the pinned file",
+    );
+    let err = s
+        .runner
+        .probe("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            VideoError::Tools(ToolError::Mismatch {
+                tool: Tool::YtDlp,
+                ..
+            })
+        ),
+        "{err}"
+    );
+    assert_eq!(calls(&s.control).len(), 1, "a changed yt-dlp ran");
+
+    let s = setup("probe");
+    let ffmpeg = s.control.join(exe("ffmpeg"));
+    fs::remove_file(&ffmpeg).unwrap();
+    put_tool(&s.control, &exe("ffmpeg"), b"another ffmpeg");
+    let err = s
+        .runner
+        .probe("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            VideoError::Tools(ToolError::Mismatch {
+                tool: Tool::Ffmpeg,
+                ..
+            })
+        ),
+        "{err}"
+    );
+    assert!(
+        calls(&s.control).is_empty(),
+        "yt-dlp ran with a changed ffmpeg"
+    );
+}
+
+/// ADR-0009, section 10, test 8: the cookie file is gone after a run that
+/// failed too, and nothing of the run is left.
+#[tokio::test]
+async fn a_failed_run_leaves_no_cookie_file() {
+    let s = setup("fail something went wrong");
+    let request = Download {
+        url: "https://example.com/v",
+        choice: &Choice::Format("1".into()),
+        formats: known(),
+        cookies: Some("sid=SECRET"),
+        dest: &s.dest,
+        name: "x",
+    };
+    let err = s
+        .runner
+        .download(&request, &Stop::new(), &mut |_| {})
+        .await
+        .unwrap_err();
+    assert!(matches!(err, VideoError::Tool(_)), "{err}");
+    assert_eq!(
+        calls(&s.control)[0]["cookie_text"]
+            .as_str()
+            .map(|t| t.contains("SECRET")),
+        Some(true)
+    );
+    assert!(names_in(&s.runs).is_empty(), "{:?}", names_in(&s.runs));
+    assert!(names_in(&s.dest).is_empty(), "{:?}", names_in(&s.dest));
+}
+
+/// Review of the video runner: a choice that is not one the probe found
+/// is refused, never downloaded unchecked for DRM.
+#[tokio::test]
+async fn a_choice_the_probe_did_not_find_is_refused() {
+    let s = setup("download mp4");
+    for (choice, formats) in [
+        (Choice::Format("999".into()), known()),
+        (
+            Choice::Merge {
+                video: "137".into(),
+                audio: "999".into(),
+            },
+            known(),
+        ),
+        (Choice::AudioOnly, &[][..]),
+    ] {
+        let request = Download {
+            url: "https://example.com/v",
+            choice: &choice,
+            formats,
+            cookies: None,
+            dest: &s.dest,
+            name: "x",
+        };
+        let err = s
+            .runner
+            .download(&request, &Stop::new(), &mut |_| {})
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VideoError::Refused(_)), "{choice:?}: {err}");
+    }
+    assert!(calls(&s.control).is_empty());
+}
+
+/// Review of the video runner: the sweep at the start never follows a link
+/// in place of the runs folder, and leaves a live run of another Zajil
+/// alone.
+#[tokio::test]
+async fn the_sweep_follows_no_link_and_leaves_a_live_run_alone() {
+    let s = setup("hang");
+    let elsewhere = tempfile::tempdir().unwrap();
+    fs::create_dir(elsewhere.path().join("precious")).unwrap();
+    let linked_root = s.runs.with_file_name("linked-run");
+    zajil_platform::fs::symlink_dir(elsewhere.path(), &linked_root)
+        .expect("this test must be able to create a symbolic link");
+    assert!(Runs::new(&linked_root).clean_leftovers().is_err());
+    assert!(elsewhere.path().join("precious").exists());
+
+    // A live run: the stand-in hangs until stopped.
+    let stop = Stop::new();
+    let request_stop = stop.clone();
+    let control = s.control.clone();
+    let runner = s.runner;
+    let live =
+        tokio::spawn(async move { runner.probe("https://example.com/v", None, &stop).await });
+    let started = control.join("started");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !started.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the stand-in never started"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let runs = s.runs.clone();
+    tokio::task::spawn_blocking(move || Runs::new(&runs).clean_leftovers().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(names_in(&s.runs).len(), 1, "a live run was swept");
+    request_stop.request();
+    assert!(matches!(live.await.unwrap(), Err(VideoError::Stopped)));
 }

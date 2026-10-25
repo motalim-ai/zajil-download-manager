@@ -220,11 +220,45 @@ pub fn make_executable(file: &File) -> io::Result<()> {
     imp::make_executable(file)
 }
 
+/// Gives a finished download made by a tool under `umask 077` the mode of
+/// any other download (`0644` on macOS and Linux; nothing to do on
+/// Windows, where it took its folder's access list).
+pub fn make_ordinary(file: &File) -> io::Result<()> {
+    imp::make_ordinary(file)
+}
+
+/// Removes the file `path` (never what a link points to), again for about
+/// a second while another program (an antivirus) holds it. A missing file
+/// is fine.
+pub fn remove_file_retrying(path: &Path) -> io::Result<()> {
+    with_retry(|| match std::fs::remove_file(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
+}
+
+/// Removes the folder `dir` with what is in it (a link is removed, not
+/// followed), again for about a second while another program holds a file
+/// in it. A missing folder is fine.
+pub fn remove_dir_all_retrying(dir: &Path) -> io::Result<()> {
+    with_retry(|| match std::fs::remove_dir_all(dir) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
+}
+
 /// Creates a symbolic link `link` pointing to the file `target`. Used by
 /// tests that check symbolic links are refused. On Windows this needs
 /// Developer Mode or administrator rights.
 pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
     imp::symlink_file(target, link)
+}
+
+/// Creates a symbolic link `link` pointing to the folder `target`. Used by
+/// tests that check links in place of folders are refused. On Windows this
+/// needs Developer Mode or administrator rights.
+pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+    imp::symlink_dir(target, link)
 }
 
 /// For tests: opens `path` for reading the way an antivirus scanner or
@@ -405,6 +439,11 @@ mod imp {
         file.set_permissions(std::fs::Permissions::from_mode(0o700))
     }
 
+    pub fn make_ordinary(file: &File) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o644))
+    }
+
     pub fn open_regular_nofollow(path: &Path, write: bool) -> io::Result<File> {
         // O_NOFOLLOW refuses a symbolic link; O_NONBLOCK keeps a planted
         // FIFO from blocking the open.
@@ -428,6 +467,10 @@ mod imp {
     }
 
     pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
         std::os::unix::fs::symlink(target, link)
     }
 
@@ -839,6 +882,10 @@ mod imp {
         Ok(())
     }
 
+    pub fn make_ordinary(_file: &File) -> io::Result<()> {
+        Ok(())
+    }
+
     pub fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
         move_file(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
     }
@@ -876,6 +923,10 @@ mod imp {
 
     pub fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
         std::os::windows::fs::symlink_file(target, link)
+    }
+
+    pub fn symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
     }
 
     /// Security attributes that allow `access` (SDDL rights, such as `FA`
