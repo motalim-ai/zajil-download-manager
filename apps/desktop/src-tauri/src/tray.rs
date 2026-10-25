@@ -10,7 +10,7 @@
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const ID: &str = "zajil";
 
@@ -29,8 +29,16 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_window(app),
-            // The same path as closing the window (`RunEvent::ExitRequested`).
-            "quit" => app.exit(0),
+            // The page's Quit, which asks first while downloads run (owner's
+            // decision on #83), its window shown for the question; without
+            // the window, the same path as closing it.
+            "quit" => match app.get_webview_window("main") {
+                Some(_) => {
+                    show_window(app);
+                    let _ = app.emit_to("main", "menu-command", "quit");
+                }
+                None => app.exit(0),
+            },
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

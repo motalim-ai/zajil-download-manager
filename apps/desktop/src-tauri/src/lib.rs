@@ -173,6 +173,9 @@ pub fn run() {
                             .is_some_and(|w| w.is_focused().unwrap_or(false))
                     })
                     .unwrap_or("main");
+                // Quit is the main window's, which asks first while
+                // downloads run (review of #105: an add window quit at once).
+                let front = if command == "quit" { "main" } else { front };
                 let _ = handle.emit_to(front, "menu-command", command.to_owned());
             }
         })
