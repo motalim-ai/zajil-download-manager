@@ -409,8 +409,9 @@ pub enum Error {
     },
     #[error("another process is already downloading {}", .0.display())]
     Locked(PathBuf),
-    /// A download held for the user before anything was made: the server
-    /// named a file that can run code ([`Engine::holding`]).
+    /// A download held for the user before anything was made: the name it
+    /// would be saved under (the server's, or the user's) is one that
+    /// [`Engine::holding`] holds.
     #[error("{0} can run code: it waits for you to start it")]
     Held(String),
     /// "Refresh the link": the new link is not the same file (M5).
@@ -442,11 +443,18 @@ pub struct Engine {
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
     hold: Option<Hold>,
+    /// The name a new download is saved under instead of the server's
+    /// (the user's, M5.5, #103). `None`: the server's.
+    name: Option<String>,
 }
 
-/// What [`Engine::holding`] checks a new download's name with.
+/// What [`Engine::holding`] checks a new download's names with.
 #[derive(Clone)]
-struct Hold(Arc<dyn Fn(&str) -> bool + Send + Sync>);
+struct Hold(HoldCheck);
+
+/// Whether to hold a new download, from the name the server gives and the
+/// name it is saved under ([`Engine::named`]; the same when it has none).
+pub type HoldCheck = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 impl std::fmt::Debug for Hold {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -462,6 +470,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            name: None,
         })
     }
 
@@ -479,6 +488,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            name: None,
         })
     }
 
@@ -500,14 +510,25 @@ impl Engine {
         engine
     }
 
-    /// This engine, holding a new download whose name makes `hold` true:
-    /// it stops with [`Error::Held`] once the server has named the file,
-    /// before anything is created. For a file from a page that can run
-    /// code: the probe's name is not enough, the download's own answer
-    /// may name another file (review of #90).
-    pub fn holding(&self, hold: Arc<dyn Fn(&str) -> bool + Send + Sync>) -> Engine {
+    /// This engine, holding a new download whose names make `hold` true
+    /// (the server's, then the one it is saved under): it stops with
+    /// [`Error::Held`] once the server has named the file, before anything
+    /// is created. For a file from a page that can run code: the probe's
+    /// name is not enough, the download's own answer may name another file
+    /// (review of #90).
+    pub fn holding(&self, hold: HoldCheck) -> Engine {
         let mut engine = self.clone();
         engine.hold = Some(Hold(hold));
+        engine
+    }
+
+    /// This engine, saving a new download under `name` instead of the name
+    /// the server gives (`None`: the server's). Cleaned like any name
+    /// ([`sanitize_file_name`]), and numbered like any name if it is
+    /// taken. A resumed download keeps the name it has.
+    pub fn named(&self, name: Option<&str>) -> Engine {
+        let mut engine = self.clone();
+        engine.name = name.map(sanitize_file_name);
         engine
     }
 
@@ -602,14 +623,19 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let name = suggested_name(
+        let server_name = suggested_name(
             response
                 .headers()
                 .get(header::CONTENT_DISPOSITION)
                 .map(|v| v.as_bytes()),
             response.url(),
         );
-        if self.hold.as_ref().is_some_and(|hold| (hold.0)(&name)) {
+        let name = self.name.clone().unwrap_or_else(|| server_name.clone());
+        if self
+            .hold
+            .as_ref()
+            .is_some_and(|hold| (hold.0)(&server_name, &name))
+        {
             return Err(Error::Held(name));
         }
         let dir = choose(&name, response.url());
