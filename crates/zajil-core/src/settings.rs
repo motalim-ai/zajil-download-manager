@@ -174,9 +174,17 @@ impl SettingsFile {
                 .ok()
                 .filter(|u| u.port().is_none() && u.path() == "/")
                 .and_then(|u| u.host_str().map(str::to_owned));
-            if host.as_deref() != Some(site) {
+            // Only what a host can be, so nothing that would never match
+            // (`*.example.com`) nor the same site twice (`example.com.`;
+            // review of #166).
+            let plain = site
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.:[]".contains(&b))
+                && !site.starts_with('.')
+                && !site.ends_with('.');
+            if host.as_deref() != Some(site) || !plain {
                 return Err(format!(
-                    "{site:?} is not a site name: write it in small letters, without http:// or a path, such as example.com"
+                    "{site:?} is not a site name: write it in small letters, without http:// or a path, such as example.com (a name in other letters in its xn-- form)"
                 ));
             }
             if !(1..=crate::MAX_CONNECTIONS as u32).contains(&entry.connections) {

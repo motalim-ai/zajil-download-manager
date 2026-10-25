@@ -165,6 +165,118 @@ async fn a_download_waiting_for_its_site_stops_when_asked() {
     let _ = busy.0.await;
 }
 
+/// An engine limited to `n` on the test server's site, and that site's
+/// counter, to see every slot come back.
+fn limited(n: u32) -> (Engine, std::sync::Arc<tokio::sync::Semaphore>) {
+    let limits = SiteLimits::new([("127.0.0.1", n)]);
+    let counter = limits
+        .counter_for(&zajil_core::Url::parse("http://127.0.0.1/").unwrap())
+        .unwrap();
+    (engine(None).with_site_limits(limits), counter)
+}
+
+/// One download with four connections on a site limited to three opens
+/// exactly three: its own slot and two more. And every slot comes back.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_split_download_opens_as_many_connections_as_the_limit() {
+    let server = TestServer::http();
+    let data = random_bytes(3_000_000, 45);
+    server.put("/f.bin", FileSpec::new(data.clone()).throttle(500_000));
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, counter) = limited(3);
+    let done = engine
+        .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        sha256_hex(&std::fs::read(done.file).unwrap()),
+        sha256_hex(&data)
+    );
+    assert_eq!(server.most_concurrent("/f.bin"), 3);
+    assert_eq!(counter.available_permits(), 3);
+}
+
+/// Review of #166: a connection that found no slot used to end for good.
+/// Now it looks again: once the other download is over, this one grows to
+/// two connections.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connection_without_a_slot_opens_when_one_comes_back() {
+    let server = TestServer::http();
+    let short = random_bytes(500_000, 46);
+    let long = random_bytes(4_000_000, 47);
+    server.put("/short.bin", FileSpec::new(short).throttle(1_000_000));
+    server.put("/long.bin", FileSpec::new(long.clone()).throttle(500_000));
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (engine, counter) = limited(2);
+    let one = engine.with_connections(1);
+    let two = engine.with_connections(2);
+    let first = {
+        let (url, dir) = (server.url("/short.bin"), a.path().to_owned());
+        tokio::spawn(async move { one.download(&url, &dir, &mut |_| {}).await })
+    };
+    while server.gets("/short.bin").is_empty() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The long one starts on the last slot; its second connection waits.
+    let done = two
+        .download(&server.url("/long.bin"), b.path(), &mut |_| {})
+        .await
+        .unwrap();
+    first.await.unwrap().unwrap();
+    assert_eq!(
+        sha256_hex(&std::fs::read(done.file).unwrap()),
+        sha256_hex(&long)
+    );
+    assert_eq!(server.most_concurrent("/long.bin"), 2);
+    assert_eq!(counter.available_permits(), 2);
+}
+
+/// Review of #166: a resume that waited for its slot reads its state again,
+/// so one finished meanwhile by another resume is not downloaded again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_that_waited_for_its_slot_does_not_download_a_finished_file_again() {
+    let server = TestServer::http();
+    let data = random_bytes(2_000_000, 48);
+    server.put("/f.bin", FileSpec::new(data.clone()).throttle(1_000_000));
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, counter) = limited(1);
+    // A download stopped early, with its state file.
+    let stop = Stop::new();
+    let early = stop.clone();
+    let err = engine
+        .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| {
+            if matches!(e, zajil_core::Event::Progress { done, .. } if done > 200_000) {
+                early.request();
+            }
+        })
+        .await
+        .unwrap_err();
+    let Error::Stopped {
+        state_file: Some(state_file),
+    } = err
+    else {
+        panic!("{err:?}");
+    };
+    // Two resumes of it at once: one waits for the other's slot.
+    let (mut on_a, mut on_b) = (|_| {}, |_| {});
+    let (one, two) = tokio::join!(
+        engine.resume(&state_file, &mut on_a),
+        engine.resume(&state_file, &mut on_b),
+    );
+    let finished = one.as_ref().or(two.as_ref()).expect("one resume finishes");
+    assert!(
+        one.is_err() || two.is_err(),
+        "both finished: downloaded twice"
+    );
+    assert_eq!(
+        sha256_hex(&std::fs::read(&finished.file).unwrap()),
+        sha256_hex(&data)
+    );
+    // One file, never `f (1).bin` from a second whole download.
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    assert_eq!(counter.available_permits(), 1);
+}
+
 #[test]
 fn the_settings_list_is_empty_by_default_and_checked() {
     let data = tempfile::tempdir().unwrap();
@@ -196,6 +308,9 @@ fn the_settings_list_is_empty_by_default_and_checked() {
         (vec![ok("https://example.com", 2)], "not a site name"),
         (vec![ok("example.com/x", 2)], "not a site name"),
         (vec![ok("example.com:8080", 2)], "not a site name"),
+        (vec![ok("*.example.com", 2)], "not a site name"),
+        (vec![ok("example.com.", 2)], "not a site name"),
+        (vec![ok("bücher.de", 2)], "xn--"),
         (vec![ok("example.com", 0)], "from 1 to"),
         (vec![ok("example.com", 33)], "from 1 to"),
         (vec![ok("example.com", 2), ok("example.com", 3)], "twice"),

@@ -6,9 +6,12 @@
 //!
 //! Each download holds one slot of its site for as long as it runs (its
 //! first connection), and a split download needs one more slot for each
-//! further connection; a connection that finds none simply does not open,
-//! as when a server refuses more. So the connections to a site never pass
-//! its limit, whatever the number of downloads.
+//! further connection; a connection that finds none waits and looks again a
+//! moment later, and holds no slot while it waits for anything. So the
+//! connections to a site never pass its limit, whatever the number of
+//! downloads. (The short probe and page requests, and a refreshed link's
+//! first request, are not counted.) The site is the address the download
+//! was given, not where it redirects.
 
 use std::sync::Arc;
 
@@ -79,8 +82,10 @@ pub(crate) async fn take_slot(
         return Ok(None);
     };
     tokio::select! {
-        permit = counter.clone().acquire_owned() => Ok(permit.ok()),
+        // A stop already asked wins over a free slot.
+        biased;
         () = stop.requested() => Err(Error::Stopped { state_file: None }),
+        permit = counter.clone().acquire_owned() => Ok(permit.ok()),
     }
 }
 

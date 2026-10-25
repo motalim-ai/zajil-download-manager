@@ -875,6 +875,15 @@ impl Engine {
             .map_err(|_| Error::Stopped {
                 state_file: Some(state_file.clone()),
             })?;
+        // Read again once the slot came, as the wait may be long and the
+        // part file is not locked meanwhile: if another resume finished it,
+        // the state file is gone and nothing is downloaded again (review of
+        // #166).
+        let state = if site.is_some() {
+            DownloadState::load(&state_file)?
+        } else {
+            state
+        };
         let new_attempt = || Attempt::new(None, stop, &limits).with_site(site.clone());
         let part_file = part_path(&final_path);
         let part = match zajil_platform::fs::open_regular_nofollow(&part_file, true) {

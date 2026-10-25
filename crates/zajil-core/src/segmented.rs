@@ -81,6 +81,10 @@ const STALLED_AFTER: Duration = Duration::from_secs(1);
 /// split.
 const LOOK_AGAIN: Duration = Duration::from_millis(100);
 
+/// How long a connection waits before it looks again for a free slot of a
+/// limited site (`crate::sites`), which another download may give back.
+const SITE_LOOK_AGAIN: Duration = Duration::from_millis(250);
+
 /// The segments for a new download of `len` bytes over at most
 /// `connections` connections, none smaller than `min_segment` bytes; `None`
 /// when one connection is all it needs.
@@ -845,19 +849,20 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
             return Work::Done;
         }
         // On a site the user limited, a connection besides another one of
-        // this download needs a slot of its own; without one it does not
-        // open, as when a server refuses more (`crate::sites`).
+        // this download needs a slot of its own (`crate::sites`). Without
+        // one it waits and looks again, as another download may give one
+        // back (review of #166: it used to end, so the download never grew
+        // again). Once this download's other connections have all ended, it
+        // needs none: so it never waits for nothing.
         let slot = match (&ctx.site, board.active >= 1) {
-            (Some(site), true) => match site.clone().try_acquire_owned() {
-                Ok(slot) => Some(slot),
-                Err(_) => return Work::Done,
-            },
-            _ => None,
+            (Some(site), true) => site.clone().try_acquire_owned().map(Some).ok(),
+            _ => Some(None),
         };
         let paused = board.pause_until.filter(|&until| until > now);
-        let found = match paused {
-            Some(until) => Err(until),
-            None => match board.take_free(id, now) {
+        let found = match (&slot, paused) {
+            (None, _) => Err(now + SITE_LOOK_AGAIN),
+            (_, Some(until)) => Err(until),
+            (Some(_), None) => match board.take_free(id, now) {
                 Some(free) => Ok(free),
                 None => match board.soonest_retry() {
                     Some(at) => Err(at),
@@ -878,16 +883,14 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
         if found.is_ok() {
             board.active += 1;
         }
-        (found, slot)
+        (found, slot.flatten())
     };
     let (start, from, to) = match found {
         Ok(work) => work,
         Err(until) => {
-            tokio::select! {
-                _ = tokio::time::sleep_until(until.into()) => {}
-                _ = ctx.stop_requested() => {}
-            }
-            return Work::Again;
+            // No slot of the site is held while waiting (review of #166).
+            drop(slot);
+            return wait_then_again(ctx, until).await;
         }
     };
     match request_range(ctx, id, start, from, to).await {
@@ -902,6 +905,15 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
             Work::Again
         }
     }
+}
+
+/// Waits until `until` (or a stop), then looks for work again.
+async fn wait_then_again(ctx: &Arc<Ctx>, until: Instant) -> Work {
+    tokio::select! {
+        _ = tokio::time::sleep_until(until.into()) => {}
+        _ = ctx.stop_requested() => {}
+    }
+    Work::Again
 }
 
 /// Asks the server for bytes `from` to `to` of the segment starting at
