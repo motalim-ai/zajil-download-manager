@@ -12,12 +12,13 @@
 
 ## 2. الهوية في git وGitHub (إلزامي)
 
-- **صاحب كل commit** هو `Motalim <252922374+motalim-ai@users.noreply.github.com>` فقط. تحقق قبل كل commit:
+- **كل commit باسم Motalim**، `Motalim <252922374+motalim-ai@users.noreply.github.com>`، **ما عدا commits الـ Dependabot** التي تُدمج من الـ PRs الخاصة به (بقرار المالك على [#86](https://github.com/motalim-ai/zajil-download-manager/pull/86): روبوت GitHub الرسمي، لا أداة ذكاء اصطناعي). تحقق قبل كل commit:
   ```bash
   git config user.name    # Motalim
   git config user.email   # 252922374+motalim-ai@users.noreply.github.com
   ```
 - **ممنوع** إضافة سطر `Co-Authored-By` أو أي سطر نسبة آخر، في رسائل الـ commits وفي وصف الـ PR.
+- **ممنوع في كل الأحوال أي ذكر لأي أداة ذكاء اصطناعي**: في الـ commits، ووصف الـ PRs، والتعليقات، والـ Issues (ومنه سطر «Generated with …» في آخر الوصف).
 - **الحساب النشط في `gh` على جهاز المالك حساب آخر. لا تغيّره أبدًا** (لا تستخدم `gh auth switch` ولا `gh auth login`). استخدم حساب `motalim-ai` عبر التوكن في كل أمر:
   ```bash
   GH_TOKEN=$(gh auth token -u motalim-ai) gh <command>
