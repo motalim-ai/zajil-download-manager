@@ -7,7 +7,7 @@
 //
 //   node scripts/ui-shots.mjs <app> <out-folder> <scenario>...
 //   scenario: <view>-<lang>-<theme>, e.g. list-ar-light, or names; view is
-//   list, add, details, settings, categories, or switch (the language
+//   list, add, details, refresh, settings, categories, or switch (the language
 //   changes in the same session, checked here)
 //
 // Each scenario also carries an axe-core check of the page: a critical or

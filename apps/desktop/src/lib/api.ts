@@ -36,6 +36,8 @@ export const api = {
   showWindow: () => invoke<void>("show_window"),
   fixBrowserIntegration: () => invoke<IntegrationView>("fix_browser_integration"),
   browserIntegration: () => invoke<IntegrationView | null>("browser_integration"),
+  /** "Refresh the download link" (M5); refused with a `RefreshProblem`. */
+  refreshLink: (id: number, url: string) => invoke<void>("refresh_link", { id, url }),
   /** Clipboard monitoring (M5): a download link the user copied. */
   onClipboardLink: (handler: (url: string) => void): Promise<UnlistenFn> =>
     listen<string>("clipboard-link", (event) => handler(event.payload)),

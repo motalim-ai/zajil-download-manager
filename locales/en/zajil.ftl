@@ -169,6 +169,25 @@ details-queue = Queue
 details-speed-chart = Speed over the last minute
 details-chart-then = A minute ago
 details-chart-now = Now
+details-failed = The download stopped: { $error }
+
+## Refresh the download link
+
+refresh-action = Refresh link
+refresh-title = Refresh the download link
+refresh-hint = If the link expired, get a new link to the same file from the site and paste it here. Zajil makes sure it is the same file, then goes on from where it stopped.
+refresh-url = New link
+refresh-cancel = Cancel
+refresh-go = Refresh and go on
+refresh-not-stopped = Pause the download first, then refresh its link.
+refresh-done = This download has finished: it needs no new link.
+refresh-bad-link = Zajil does not take this link: it must start with http or https, without a user name or password.
+refresh-size = The new link is to another file: its size is { $theirs }, this download's { $ours }.
+refresh-version = The new link is to another version of the file, so Zajil will not go on from it, not to spoil the file.
+refresh-validator-kind = The server describes the new file differently, so Zajil cannot be sure it is the same file.
+refresh-new-no-validator = The new link's server gives nothing Zajil can check that it is the same file with.
+refresh-no-validator = This download's server gave nothing Zajil can check the file with, so its link cannot be refreshed. Start a new download from the new link.
+refresh-failed = The link was not refreshed.
 
 ## Settings
 

@@ -299,6 +299,55 @@ pub struct Probe {
     pub content_type: Option<String>,
 }
 
+/// Why a new link is not shown to be the same file as a download's
+/// ([`Error::NotTheSameFile`], M5 "refresh the download link"), for the
+/// user in their language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mismatch {
+    /// The download's server gave no strong validator (an `ETag`, or a
+    /// strong `Last-Modified`), so no other link can be shown the same.
+    NoValidator,
+    /// The sizes differ, or one of them is unknown.
+    Size {
+        theirs: Option<u64>,
+        ours: Option<u64>,
+    },
+    /// An `ETag` on one side, a date on the other.
+    ValidatorKind,
+    /// The new link gives no strong validator.
+    NewNoValidator,
+    /// Another version of the file: the validators differ.
+    Version,
+}
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let size = |n: &Option<u64>| n.map_or("unknown".to_owned(), |n| format!("{n} bytes"));
+        match self {
+            Mismatch::NoValidator => f.write_str(
+                "the server gave this download no strong validator (ETag or Last-Modified), \
+                 so Zajil cannot tell that another link is the same file",
+            ),
+            Mismatch::Size { theirs, ours } => write!(
+                f,
+                "its size is {}, the download's {}",
+                size(theirs),
+                size(ours)
+            ),
+            Mismatch::ValidatorKind => f.write_str(
+                "the server describes it differently (an ETag on one side, a date on the \
+                 other), so Zajil cannot tell it is the same file",
+            ),
+            Mismatch::NewNoValidator => f.write_str(
+                "the new link has no strong validator, so Zajil cannot tell it is the same file",
+            ),
+            Mismatch::Version => f.write_str(
+                "the server says it is another version of the file (its validator differs)",
+            ),
+        }
+    }
+}
+
 /// Why a download did not finish.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -362,7 +411,7 @@ pub enum Error {
     Locked(PathBuf),
     /// "Refresh the link": the new link is not the same file (M5).
     #[error("the new link is not the same file: {0}")]
-    NotTheSameFile(String),
+    NotTheSameFile(Mismatch),
     #[error(
         "refusing to use {}: it is a symbolic link, a hard link or not a regular file",
         .0.display()
@@ -821,7 +870,7 @@ impl Engine {
             Err(err) => return Err(err.into()),
         };
         lock(&part, &final_path)?;
-        let result = self.refresh_locked(&state_file, &url, new_url).await;
+        let result = self.refresh_locked(&state_file, &url).await;
         if result.is_err() && made {
             drop(part);
             let _ = std::fs::remove_file(&part_file);
@@ -830,19 +879,10 @@ impl Engine {
     }
 
     /// [`Engine::refresh_link`], with the part file locked.
-    async fn refresh_locked(
-        &self,
-        state_file: &Path,
-        url: &Url,
-        new_url: &str,
-    ) -> Result<(), Error> {
+    async fn refresh_locked(&self, state_file: &Path, url: &Url) -> Result<(), Error> {
         let mut state = DownloadState::load(state_file)?;
         let Some(ours) = if_range_value(&state.validator) else {
-            return Err(Error::NotTheSameFile(
-                "the server gave this download no strong validator (ETag or Last-Modified), \
-                 so Zajil cannot tell that another link is the same file"
-                    .into(),
-            ));
+            return Err(Error::NotTheSameFile(Mismatch::NoValidator));
         };
         let limits = self.limits();
         let mut attempt = Attempt::new(None, &Stop::new(), &limits);
@@ -853,41 +893,26 @@ impl Engine {
             return Err(Error::Status(response.status()));
         }
         // Built as a download's state is: the final URL without a user
-        // name or password (review of #74: a redirect's were kept).
-        let theirs = state_from_response(new_url.to_owned(), false, &response);
+        // name or password (review of #74: a redirect's were kept), and the
+        // link as the URL parser writes it, as a download's and a queue
+        // item's are (a queue resumes a state only for its item's link).
+        let theirs = state_from_response(without_credentials(url), false, &response);
         drop(response);
-        let size = |n: Option<u64>| n.map_or("unknown".to_owned(), |n| format!("{n} bytes"));
         if state.content_length.is_none() || theirs.content_length != state.content_length {
-            return Err(Error::NotTheSameFile(format!(
-                "its size is {}, the download's {}",
-                size(theirs.content_length),
-                size(state.content_length)
-            )));
+            return Err(Error::NotTheSameFile(Mismatch::Size {
+                theirs: theirs.content_length,
+                ours: state.content_length,
+            }));
         }
         match if_range_value(&theirs.validator) {
             Some(new) if new == ours => {}
             // Another kind of validator, or none: not shown to differ, but
             // nothing shows it is the same file either.
             Some(new) if new.starts_with('"') != ours.starts_with('"') => {
-                return Err(Error::NotTheSameFile(
-                    "the server describes it differently (an ETag on one side, a date on the \
-                     other), so Zajil cannot tell it is the same file"
-                        .into(),
-                ));
+                return Err(Error::NotTheSameFile(Mismatch::ValidatorKind));
             }
-            None => {
-                return Err(Error::NotTheSameFile(
-                    "the new link has no strong validator, so Zajil cannot tell it is the same \
-                     file"
-                        .into(),
-                ));
-            }
-            Some(_) => {
-                return Err(Error::NotTheSameFile(
-                    "the server says it is another version of the file (its validator differs)"
-                        .into(),
-                ));
-            }
+            None => return Err(Error::NotTheSameFile(Mismatch::NewNoValidator)),
+            Some(_) => return Err(Error::NotTheSameFile(Mismatch::Version)),
         }
         state.url = theirs.url;
         state.final_url = theirs.final_url;

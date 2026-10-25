@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zajil_core::{Engine, Error, FromBrowser, Options};
+use zajil_core::{Engine, Error, FromBrowser, Mismatch, Options};
 use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 
 const SIZE: usize = 4 * 1024 * 1024;
@@ -46,10 +46,12 @@ async fn a_download_goes_on_from_a_new_link_to_the_same_file() {
     assert!(engine().resume(&state_file, &mut |_| {}).await.is_err());
 
     server.put("/token2/f.bin", spec());
-    engine()
-        .refresh_link(&state_file, &server.url("/token2/f.bin"))
-        .await
-        .unwrap();
+    // Written as a person may type it: kept as the URL parser writes it,
+    // as a queue item's link is, so a queue still resumes it.
+    let typed = server.url("/token2/f.bin").replace("http://", "HTTP://");
+    engine().refresh_link(&state_file, &typed).await.unwrap();
+    let state = zajil_core::state::DownloadState::load(&state_file).unwrap();
+    assert_eq!(state.url, server.url("/token2/f.bin"));
     let finished = engine().resume(&state_file, &mut |_| {}).await.unwrap();
     assert_eq!(
         sha256_hex(&fs::read(&finished.file).unwrap()),
@@ -91,12 +93,25 @@ async fn a_link_to_another_file_is_refused() {
         FileSpec::new(random_bytes(SIZE - 1, 83)).etag(Some("\"v1\"")),
     );
     server.put("/gone", FileSpec::new(Vec::new()).forbid_after(0));
-    for path in ["/other-version", "/other-size"] {
+    let why = [
+        ("/other-version", Mismatch::Version),
+        (
+            "/other-size",
+            Mismatch::Size {
+                theirs: Some(SIZE as u64 - 1),
+                ours: Some(SIZE as u64),
+            },
+        ),
+    ];
+    for (path, mismatch) in why {
         let err = engine()
             .refresh_link(&state_file, &server.url(path))
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::NotTheSameFile(_)), "{path}: {err}");
+        assert!(
+            matches!(err, Error::NotTheSameFile(m) if m == mismatch),
+            "{path}: {err}"
+        );
     }
     let err = engine()
         .refresh_link(&state_file, &server.url("/gone"))
@@ -240,7 +255,7 @@ async fn without_a_strong_validator_a_new_link_is_refused() {
         .await
         .unwrap_err();
     assert!(
-        matches!(&err, Error::NotTheSameFile(why) if why.contains("validator")),
+        matches!(&err, Error::NotTheSameFile(Mismatch::NoValidator)),
         "{err}"
     );
 }

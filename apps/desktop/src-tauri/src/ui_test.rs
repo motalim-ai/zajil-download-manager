@@ -4,7 +4,7 @@
 //! names (owner's decision on the M4 plan).
 //!
 //! `zajil-desktop --ui-test <view>-<lang>-<theme> --ui-test-out <folder>`: the page
-//! shows the view (`list`, `add`, `details`, `names`), then calls
+//! shows the view (`list`, `add`, `details`, `refresh`, `names`…), then calls
 //! [`ui_test_report`], which writes `<folder>/<scenario>.json`. The CI
 //! script waits for that file, takes a screenshot of the window with the
 //! system's own tool, and closes the program.

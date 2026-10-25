@@ -6,11 +6,13 @@
   import { left, num, percent, size, speed } from "../format";
   import type { DetailsView } from "../bindings/DetailsView";
 
-  let { details, onback, onpause, onresume }: {
+  let { details, onback, onpause, onresume, onrefresh }: {
     details: DetailsView;
     onback: () => void;
     onpause: () => void;
     onresume: () => void;
+    /** "Refresh the download link" (M5), for a paused or failed download. */
+    onrefresh: () => void;
   } = $props();
 
   const d = $derived(details.download);
@@ -27,6 +29,7 @@
       {#if d.status === "active" || d.status === "waiting"}
         <button class="btn" onclick={onpause}><Icon name="pause" />{locale.t("action-pause")}</button>
       {:else if d.status === "paused" || d.status === "failed"}
+        <button class="btn quiet" onclick={onrefresh}><Icon name="link" />{locale.t("refresh-action")}</button>
         <button class="btn" onclick={onresume}><Icon name="play" />{locale.t("action-resume")}</button>
       {/if}
     </span>
@@ -37,6 +40,9 @@
       <p class="from">
         {locale.t("details-from-to", { site: d.host ?? "", folder: d.folder })}
       </p>
+      {#if d.status === "failed" && d.error}
+        <p class="failed" role="status"><Icon name="alert" /><span>{locale.t("details-failed", { error: d.error })}</span></p>
+      {/if}
       <div class="total">
         <span class="big num">{percent(locale.lang, locale.digits, fraction)}</span>
         <span class="of num">
@@ -119,6 +125,18 @@
     color: var(--muted);
     margin: 2px 0 0;
     font-size: 13px;
+  }
+  .failed {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 12px 0 0;
+    padding: 8px 12px;
+    border-radius: 9px;
+    background: var(--red-bg);
+    color: var(--red);
+    font-size: 13px;
+    overflow-wrap: anywhere;
   }
   .total {
     display: flex;

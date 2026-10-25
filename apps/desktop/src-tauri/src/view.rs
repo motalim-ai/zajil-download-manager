@@ -160,6 +160,70 @@ pub struct DetailsView {
     pub limit: Option<u64>,
 }
 
+/// Why a download did not take a new link (M5, "refresh the download
+/// link"), for the page to say in the user's language.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum RefreshProblem {
+    /// It is downloading or waiting for its turn (or another refresh of it
+    /// is under way): pause it first.
+    NotStopped,
+    /// It has finished.
+    Done,
+    /// Not a link Zajil takes; the reason, in English.
+    BadLink { reason: String },
+    /// The server does not show it is the same file.
+    NotTheSameFile {
+        why: MismatchView,
+        #[ts(type = "number | null")]
+        theirs: Option<u64>,
+        #[ts(type = "number | null")]
+        ours: Option<u64>,
+    },
+    /// Anything else (the new link's server refused, no connection…); the
+    /// engine's message, in English.
+    Failed { error: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MismatchView {
+    NoValidator,
+    Size,
+    ValidatorKind,
+    NewNoValidator,
+    Version,
+}
+
+impl From<zajil_core::Error> for RefreshProblem {
+    fn from(err: zajil_core::Error) -> Self {
+        use zajil_core::{Error, Mismatch};
+        match err {
+            Error::NotTheSameFile(mismatch) => {
+                let (why, theirs, ours) = match mismatch {
+                    Mismatch::NoValidator => (MismatchView::NoValidator, None, None),
+                    Mismatch::Size { theirs, ours } => (MismatchView::Size, theirs, ours),
+                    Mismatch::ValidatorKind => (MismatchView::ValidatorKind, None, None),
+                    Mismatch::NewNoValidator => (MismatchView::NewNoValidator, None, None),
+                    Mismatch::Version => (MismatchView::Version, None, None),
+                };
+                RefreshProblem::NotTheSameFile { why, theirs, ours }
+            }
+            Error::Locked(_) => RefreshProblem::NotStopped,
+            err @ (Error::InvalidUrl { .. } | Error::UnsupportedScheme(_)) => {
+                RefreshProblem::BadLink {
+                    reason: err.to_string(),
+                }
+            }
+            err => RefreshProblem::Failed {
+                error: err.to_string(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]

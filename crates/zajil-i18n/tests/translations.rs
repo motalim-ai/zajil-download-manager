@@ -672,6 +672,9 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-connections-value", &["active", "total"]),
     ("details-file-map", &["size"]),
     ("details-from-to", &["folder", "site"]),
+    // The engine's own words (English), and two sizes formatted beforehand.
+    ("details-failed", &["error"]),
+    ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
     ("import-done", &["count"]),
     ("import-kept", &["names"]),
@@ -810,6 +813,22 @@ const WHOLE_TEXTS: &[Whole] = &[
         en: (
             &[("site", "SITE"), ("folder", "FOLDER")],
             "From SITE, to FOLDER",
+        ),
+    },
+    Whole {
+        key: "details-failed",
+        ar: (&[("error", "ERROR")], "توقف التحميل: ERROR"),
+        en: (&[("error", "ERROR")], "The download stopped: ERROR"),
+    },
+    Whole {
+        key: "refresh-size",
+        ar: (
+            &[("theirs", "THEIRS"), ("ours", "OURS")],
+            "الرابط الجديد لملف آخر: حجمه THEIRS، وحجم هذا التحميل OURS.",
+        ),
+        en: (
+            &[("theirs", "THEIRS"), ("ours", "OURS")],
+            "The new link is to another file: its size is THEIRS, this download's OURS.",
         ),
     },
     Whole {
