@@ -1,0 +1,47 @@
+{
+  "extensionName": {
+    "message": "Zajil"
+  },
+  "extensionDescription": {
+    "message": "Sends your downloads to the Zajil download manager, to download them faster and resume them when they stop."
+  },
+  "menuDownloadLink": {
+    "message": "Download with Zajil"
+  },
+  "notRefused": {
+    "message": "Zajil did not take this download, so the browser went on with it."
+  },
+  "notAnswered": {
+    "message": "Zajil did not answer in time. The download is paused in the browser, since Zajil may have it: look in Zajil before you resume it here."
+  },
+  "notReachable": {
+    "message": "The browser cannot reach Zajil, so it went on with the download. Install Zajil, or open its settings and choose “Fix the browser integration”."
+  },
+  "optionsTitle": {
+    "message": "Zajil settings"
+  },
+  "optionsCapture": {
+    "message": "Send downloads to Zajil"
+  },
+  "optionsExtensions": {
+    "message": "File types"
+  },
+  "optionsExtensionsHint": {
+    "message": "Extensions without the dot, separated by spaces."
+  },
+  "optionsSites": {
+    "message": "Excluded sites"
+  },
+  "optionsSitesHint": {
+    "message": "Downloads from these sites (and their subdomains) stay in the browser. One site per line."
+  },
+  "optionsSave": {
+    "message": "Save"
+  },
+  "optionsReset": {
+    "message": "Original settings"
+  },
+  "optionsSaved": {
+    "message": "Saved."
+  }
+}

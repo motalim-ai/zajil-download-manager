@@ -1,0 +1,47 @@
+{
+  "extensionName": {
+    "message": "زاجِل"
+  },
+  "extensionDescription": {
+    "message": "يرسل تحميلاتك إلى برنامج زاجِل لتحميلها أسرع، ويستكملها إن انقطعت."
+  },
+  "menuDownloadLink": {
+    "message": "حمّل بزاجِل"
+  },
+  "notRefused": {
+    "message": "لم يأخذ زاجِل هذا التحميل، فأكمله المتصفح."
+  },
+  "notAnswered": {
+    "message": "لم يرد زاجِل في الوقت. أوقفتُ التحميل في المتصفح، لأن زاجِل ربما أخذه: انظر في زاجِل قبل أن تكمله هنا."
+  },
+  "notReachable": {
+    "message": "لا يصل المتصفح إلى زاجِل، فأكمل هو التحميل. ثبّت زاجِل، أو افتح إعداداته واختر «أصلح التكامل مع المتصفح»."
+  },
+  "optionsTitle": {
+    "message": "إعدادات زاجِل"
+  },
+  "optionsCapture": {
+    "message": "أرسل التحميلات إلى زاجِل"
+  },
+  "optionsExtensions": {
+    "message": "أنواع الملفات"
+  },
+  "optionsExtensionsHint": {
+    "message": "امتدادات بلا نقطة، تفصل بينها مسافة."
+  },
+  "optionsSites": {
+    "message": "المواقع المستثناة"
+  },
+  "optionsSitesHint": {
+    "message": "تحميلات هذه المواقع (ومواقعها الفرعية) تبقى في المتصفح. موقع في كل سطر."
+  },
+  "optionsSave": {
+    "message": "احفظ"
+  },
+  "optionsReset": {
+    "message": "الإعدادات الأصلية"
+  },
+  "optionsSaved": {
+    "message": "حُفظت."
+  }
+}

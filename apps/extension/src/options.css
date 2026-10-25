@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light dark;
+  /* Zajil's colours (apps/desktop/src/styles/app.css). */
+  --ink: #10263d;
+  --faint: #55687e;
+  --line: #d8e2ec;
+  --paper: #ffffff;
+  --accent: #1c6cd0;
+  --accent-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e3eef9;
+    --faint: #8aa2bd;
+    --line: #1c3550;
+    --paper: #0e2034;
+    --accent: #8adcff;
+    --accent-ink: #0a1828;
+  }
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.6 system-ui, "Segoe UI", "IBM Plex Sans Arabic", sans-serif;
+}
+main {
+  max-width: 640px;
+  margin: 32px auto;
+  padding: 0 16px;
+}
+form {
+  display: grid;
+  gap: 8px;
+}
+label {
+  font-weight: 600;
+  margin-top: 12px;
+}
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 13.5px;
+}
+textarea {
+  font: 14px/1.5 ui-monospace, monospace;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+button {
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+button[type="submit"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}

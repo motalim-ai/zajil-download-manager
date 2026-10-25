@@ -52,6 +52,12 @@ jobs:
         run: rustup toolchain install && rustup show active-toolchain
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
+      # The extension's private key never enters the repository (owner's
+      # decision on #7). The check is shown to fail on a test key first.
+      - name: No private key in the repository
+        run: |
+          bash scripts/test-check-no-private-keys.sh
+          bash scripts/check-no-private-keys.sh
 
   build-test:
     name: Build & test (${{ matrix.os }})
@@ -402,6 +408,42 @@ jobs:
           name: ui-screenshots-${{ matrix.os }}
           path: ${{ runner.temp }}/ui-shots
           if-no-files-found: warn
+
+  extension:
+    name: Browser extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/extension
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+      - name: Install npm packages (from the lock file only)
+        run: npm ci
+      # Build and lint tools only: nothing from npm goes into the extension.
+      - name: Licenses and advisories of npm packages
+        run: |
+          node ../desktop/scripts/check-licenses.mjs
+          npm audit --audit-level=high
+      - name: Types (checkJs)
+        run: npm run check
+      - name: Tests
+        run: npm test
+      - name: Build (Chrome and Edge, Firefox)
+        run: npm run build
+      # addons-linter is the linter `web-ext lint` runs, and AMO's.
+      - name: Lint the Firefox build
+        run: npm run lint
+      - name: Upload the built extension
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zajil-extension
+          path: apps/extension/dist
+          if-no-files-found: error
 
   desktop-licenses:
     name: Desktop licenses & advisories (cargo-deny)

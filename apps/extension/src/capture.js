@@ -1,0 +1,160 @@
+// @ts-check
+// Which downloads go to Zajil, the message `zajil-host` accepts, and handing a
+// download over without losing it (ADR-0005).
+
+/** The Native Messaging host's name (`zajil_platform::ids::NATIVE_HOST_NAME`). */
+export const HOST = "io.github.motalim_ai.zajil.host";
+/** `zajil_host::PROTOCOL_VERSION`. */
+export const PROTOCOL_VERSION = 1;
+/** The longest URL the host accepts (`zajil_host::MAX_URL`). */
+export const MAX_URL = 8 * 1024;
+/** The longest file name the host accepts, in UTF-8 bytes (`MAX_NAME`). */
+export const MAX_NAME = 255;
+/** How the host says the app took too long: the download may have been
+ * added, so it is neither taken nor refused (review of #62, #64). */
+export const NO_ANSWER = "Zajil did not answer within";
+
+/** @param {string | undefined} url */
+function isWeb(url) {
+  if (!url || url.length > MAX_URL) return false;
+  try {
+    const { protocol, username, password } = new URL(url);
+    return (protocol === "http:" || protocol === "https:") && !username && !password;
+  } catch {
+    return false;
+  }
+}
+
+/** The last part of a path, with `/` or `\` (Windows) between folders.
+ * @param {string} path */
+function baseName(path) {
+  return path.split(/[\\/]/).pop() ?? "";
+}
+
+/** The file's extension, lower case: from the name the browser gave, else
+ * from the URL's path.
+ * @param {{ filename?: string, url?: string, finalUrl?: string }} item */
+export function extensionOf(item) {
+  let name = item.filename ? baseName(item.filename) : "";
+  if (!name) {
+    try {
+      name = decodeURIComponent(baseName(new URL(item.finalUrl || item.url || "").pathname));
+    } catch {
+      name = "";
+    }
+  }
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+/** Whether `host` is `site` or one of its subdomains.
+ * @param {string} host @param {string} site */
+function onSite(host, site) {
+  return host === site || host.endsWith(`.${site}`);
+}
+
+/**
+ * Whether a new browser download goes to Zajil: capture is on, it is an
+ * http(s) download the host would accept, of a listed type, and neither it
+ * nor the page it came from is on an excluded site.
+ *
+ * @param {any} item a `downloads.DownloadItem`
+ * @param {import("./settings.js").Settings} settings
+ * @param {string} [ownId] this extension's id: its own downloads stay
+ */
+export function shouldCapture(item, settings, ownId) {
+  if (!settings.capture) return false;
+  if (item.state && item.state !== "in_progress") return false;
+  if (ownId && item.byExtensionId === ownId) return false;
+  const url = item.finalUrl || item.url;
+  if (!isWeb(url)) return false;
+  if (!settings.extensions.includes(extensionOf(item))) return false;
+  for (const page of [url, item.referrer]) {
+    if (!page) continue;
+    let host;
+    try {
+      host = new URL(page).hostname;
+    } catch {
+      continue;
+    }
+    if (settings.excludedSites.some((site) => onSite(host, site))) return false;
+  }
+  return true;
+}
+
+/**
+ * The `download` message for `zajil-host`: the URL, and the page and the
+ * browser's file name when the host would accept them (a referrer that is
+ * an http(s) URL; a plain name, no path, no control characters, 255 bytes at
+ * most). Cookies are not sent yet (a later part of M5).
+ *
+ * @param {string} url
+ * @param {{ referrer?: string, filename?: string }} [extra]
+ */
+export function downloadMessage(url, extra = {}) {
+  /** @type {Record<string, unknown>} */
+  const message = { type: "download", protocol_version: PROTOCOL_VERSION, url };
+  if (extra.referrer && isWeb(extra.referrer)) message.referrer = extra.referrer;
+  const name = extra.filename ? baseName(extra.filename) : "";
+  // eslint-disable-next-line no-control-regex
+  const plain = name && !/[\u0000-\u001f\u007f]/.test(name) && name !== "." && name !== "..";
+  if (plain && new TextEncoder().encode(name).length <= MAX_NAME) message.filename = name;
+  return message;
+}
+
+/**
+ * What became of a request: `taken` (Zajil has it), `refused` (it has not:
+ * the browser keeps the download), `unknown` (Zajil did not answer in time;
+ * it may have it), or `unreachable` (no host: Zajil is not installed, or the
+ * browser integration needs fixing).
+ *
+ * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string }} Result
+ */
+
+/**
+ * Sends `message` to Zajil through the host.
+ * @param {any} browserApi
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<Result>}
+ */
+export async function send(browserApi, message) {
+  let answer;
+  try {
+    answer = await browserApi.runtime.sendNativeMessage(HOST, message);
+  } catch (err) {
+    return { outcome: "unreachable", error: String(err) };
+  }
+  if (answer && answer.ok === true) return { outcome: "taken" };
+  const error = typeof answer?.error === "string" ? answer.error : "no answer";
+  return { outcome: error.startsWith(NO_ANSWER) ? "unknown" : "refused", error };
+}
+
+/**
+ * Hands a browser download to Zajil without losing it: the browser's
+ * download is paused first; taken by Zajil, it is cancelled and removed from
+ * the browser's list; refused or unreachable, it goes on in the browser; with
+ * no answer in time, it stays paused, since Zajil may have it too.
+ *
+ * @param {any} browserApi
+ * @param {any} item
+ * @returns {Promise<Result | null>} null when the browser had already
+ *   finished (nothing was sent)
+ */
+export async function takeOver(browserApi, item) {
+  try {
+    await browserApi.downloads.pause(item.id);
+  } catch {
+    return null;
+  }
+  const result = await send(
+    browserApi,
+    downloadMessage(item.finalUrl || item.url, { referrer: item.referrer, filename: item.filename }),
+  );
+  if (result.outcome === "taken") {
+    await browserApi.downloads.cancel(item.id).catch(() => {});
+    await browserApi.downloads.erase({ id: item.id }).catch(() => {});
+  } else if (result.outcome !== "unknown") {
+    await browserApi.downloads.resume(item.id).catch(() => {});
+  }
+  return result;
+}

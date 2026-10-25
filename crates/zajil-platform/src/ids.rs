@@ -18,6 +18,14 @@ pub const APP_ID: &str = "io.github.motalim_ai.zajil";
 /// On Windows it is also the registry key name.
 pub const NATIVE_HOST_NAME: &str = "io.github.motalim_ai.zajil.host";
 
+/// The extension's id in Chrome and Edge: from the public `key` in its
+/// manifest (`apps/extension/src/manifest.chrome.json`; owner's decision on
+/// #7). The private key never enters the repository.
+pub const EXTENSION_ID_CHROMIUM: &str = "nbgfmhkjbkmldddelnepobieoehecmif";
+
+/// The extension's id in Firefox (`browser_specific_settings.gecko.id`).
+pub const EXTENSION_ID_FIREFOX: &str = "zajil@motalim-ai.github.io";
+
 #[cfg(test)]
 mod tests {
     use super::*;

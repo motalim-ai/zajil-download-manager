@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n="optionsTitle">Zajil</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1 data-i18n="optionsTitle">Zajil</h1>
+      <form id="settings">
+        <label class="choice">
+          <input type="checkbox" id="capture" />
+          <span data-i18n="optionsCapture"></span>
+        </label>
+        <label for="extensions" data-i18n="optionsExtensions"></label>
+        <p class="hint" id="extensions-hint" data-i18n="optionsExtensionsHint"></p>
+        <textarea id="extensions" rows="4" dir="ltr" spellcheck="false" aria-describedby="extensions-hint"></textarea>
+        <label for="sites" data-i18n="optionsSites"></label>
+        <p class="hint" id="sites-hint" data-i18n="optionsSitesHint"></p>
+        <textarea id="sites" rows="4" dir="ltr" spellcheck="false" aria-describedby="sites-hint"></textarea>
+        <div class="row">
+          <button type="submit" data-i18n="optionsSave"></button>
+          <button type="button" id="reset" data-i18n="optionsReset"></button>
+          <output id="saved" role="status"></output>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
