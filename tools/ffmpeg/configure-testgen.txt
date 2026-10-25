@@ -1,0 +1,30 @@
+# configure options of ffmpeg-testgen and ffprobe-testgen: for the tests
+# only, never distributed (ADR-0009). The distributed set, plus FFmpeg's
+# own MPEG-4 Part 2 and Opus encoders and the testsrc and sine sources,
+# so the tests can make their own video and audio. Still no external
+# library and no --enable-gpl.
+--disable-everything
+--disable-autodetect
+# libc's iconv is probed even with --disable-autodetect: off, as nothing
+# here converts subtitle character sets.
+--disable-iconv
+--disable-doc
+--disable-network
+--disable-debug
+--disable-ffplay
+--enable-ffmpeg
+--enable-ffprobe
+--enable-static
+--disable-shared
+--disable-x86asm
+--enable-small
+--enable-protocol=file,pipe
+--enable-demuxer=mov,matroska,mpegts,hls,aac,mp3,ogg,flac,wav
+--enable-muxer=mp4,ipod,mov,matroska,webm,mpegts,adts,mp3,ogg,flac,hls,dash
+--enable-parser=h264,hevc,av1,vp8,vp9,aac,opus,vorbis,mpegaudio,flac,mpeg4video
+--enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,vp9_superframe
+--enable-decoder=aac,opus,vorbis,mp3,flac,mpeg4
+--enable-encoder=aac,mpeg4,opus
+--enable-filter=aresample,aformat,anull,null,format,testsrc,sine,scale
+--enable-swresample
+--enable-swscale
