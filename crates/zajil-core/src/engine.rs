@@ -32,7 +32,7 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use crate::http_date;
 use crate::limit::{Clock, Limits, SpeedLimit, SystemClock};
-use crate::naming::{ReserveError, reserve_target, suggested_name};
+use crate::naming::{ReserveError, reserve_target, suggested_name, with_type_extension};
 use crate::sanitize::{ConfineError, MAX_NAME_BYTES, confine, sanitize_file_name};
 use crate::segmented::{self, Job, Outcome};
 use crate::state::{
@@ -299,6 +299,28 @@ pub struct Probe {
     pub content_type: Option<String>,
 }
 
+impl Probe {
+    /// The server answered with a web page, not a file: a sign-in page a
+    /// link redirected to, or a file's page on a site. Interfaces warn
+    /// before downloading it.
+    pub fn is_page(&self) -> bool {
+        self.content_type.as_deref().is_some_and(is_page_type)
+    }
+}
+
+/// Whether `media_type` is a web page: `text/html` or
+/// `application/xhtml+xml`, in any case and with any parameters (a raw
+/// `Content-Type` header, or [`Probe::content_type`]).
+pub fn is_page_type(media_type: &str) -> bool {
+    let media_type = media_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
+}
+
 /// Why a new link is not shown to be the same file as a download's
 /// ([`Error::NotTheSameFile`], M5 "refresh the download link"), for the
 /// user in their language.
@@ -443,6 +465,10 @@ pub struct Engine {
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
     hold: Option<Hold>,
+    /// The download's own limit, given by its caller so that its rate can
+    /// change while it runs (#106); `None`: a fresh one from
+    /// [`Options::download_limit`].
+    own_limit: Option<SpeedLimit>,
     /// The name a new download is saved under instead of the server's
     /// (the user's, M5.5, #103). `None`: the server's.
     name: Option<String>,
@@ -470,6 +496,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
             name: None,
         })
     }
@@ -488,6 +515,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             hold: None,
+            own_limit: None,
             name: None,
         })
     }
@@ -547,20 +575,35 @@ impl Engine {
     }
 
     /// This engine, with `rate` bytes per second for each download (`None`:
-    /// no limit of its own). The program-wide limit stays shared.
+    /// no limit of its own), instead of a limit given with
+    /// [`Engine::with_own_limit`]. The program-wide limit stays shared.
     pub fn with_download_limit(&self, rate: Option<u64>) -> Engine {
         let mut engine = self.clone();
         engine.options.download_limit = rate;
+        engine.own_limit = None;
+        engine
+    }
+
+    /// This engine, with `limit` as the limit of its own of the download it
+    /// starts (instead of [`Options::download_limit`]): the caller keeps a
+    /// clone and changes its rate while the download runs (#106). Every
+    /// download this engine and its clones start shares it, so it is for
+    /// one download. The program-wide limit stays shared. It wins over
+    /// [`Engine::with_download_limit`], which clears it.
+    pub fn with_own_limit(&self, limit: SpeedLimit) -> Engine {
+        let mut engine = self.clone();
+        engine.own_limit = Some(limit);
         engine
     }
 
     /// The limits a new download goes through: the program's, shared, and
-    /// a fresh one of its own.
+    /// its own: the one given ([`Engine::with_own_limit`]), or a fresh one.
     fn limits(&self) -> Limits {
-        let own = self
-            .options
-            .download_limit
-            .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()));
+        let own = self.own_limit.clone().or_else(|| {
+            self.options
+                .download_limit
+                .map(|rate| SpeedLimit::new(Some(rate), self.options.clock.clone()))
+        });
         Limits {
             limits: self
                 .options
@@ -623,13 +666,7 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let server_name = suggested_name(
-            response
-                .headers()
-                .get(header::CONTENT_DISPOSITION)
-                .map(|v| v.as_bytes()),
-            response.url(),
-        );
+        let server_name = response_name(&response);
         let name = self.name.clone().unwrap_or_else(|| server_name.clone());
         if self
             .hold
@@ -675,6 +712,39 @@ impl Engine {
         .await
     }
 
+    /// A small text resource at `url` (an HLS playlist), at most `limit`
+    /// bytes, with the same TLS, redirects and browser headers as a
+    /// download, and not saved anywhere. For the video module's own DRM
+    /// check (ADR-0009, section 6). A larger answer is an error, never
+    /// read past the limit.
+    pub async fn fetch_text(&self, url: &str, limit: usize, stop: &Stop) -> Result<String, Error> {
+        let url = parse_url(url)?;
+        let fetch = async {
+            let mut response = self.get(url, None).await?;
+            if response.status() != StatusCode::OK {
+                return Err(Error::Status(response.status()));
+            }
+            let mut body = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|err| Error::Http(without_secrets(err)))?
+            {
+                if body.len().saturating_add(chunk.len()) > limit {
+                    return Err(Error::Io(io::Error::other(format!(
+                        "the answer is larger than {limit} bytes"
+                    ))));
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(String::from_utf8_lossy(&body).into_owned())
+        };
+        tokio::select! {
+            result = fetch => result,
+            () = stop.requested() => Err(Error::Stopped { state_file: None }),
+        }
+    }
+
     /// What `url` holds, without downloading it: the name the file would
     /// get, its size, and whether it can be split and resumed (the server
     /// announces `Accept-Ranges: bytes`, a size and a strong validator).
@@ -695,13 +765,7 @@ impl Engine {
         if response.status() != StatusCode::OK {
             return Err(Error::Status(response.status()));
         }
-        let name = suggested_name(
-            response
-                .headers()
-                .get(header::CONTENT_DISPOSITION)
-                .map(|v| v.as_bytes()),
-            response.url(),
-        );
+        let name = response_name(&response);
         let state = state_from_response(String::new(), false, &response);
         let size = response.content_length();
         let resumable = state.resumable();
@@ -2124,6 +2188,24 @@ fn validator_from(headers: &HeaderMap) -> Validator {
         last_modified: header_str(headers, header::LAST_MODIFIED).map(str::to_owned),
         date: header_str(headers, header::DATE).map(str::to_owned),
     }
+}
+
+/// The name a response's file gets: from its `Content-Disposition` or its
+/// address, cleaned, with the extension of its `Content-Type` when it has
+/// none (`view` sent as `text/html` is `view.html`).
+fn response_name(response: &Response) -> String {
+    let name = suggested_name(
+        response
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .map(|v| v.as_bytes()),
+        response.url(),
+    );
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    with_type_extension(name, content_type)
 }
 
 /// The first state for a whole-file response. `had_credentials`: the URL

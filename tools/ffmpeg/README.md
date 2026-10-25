@@ -21,9 +21,9 @@
 | `smoke-test.sh` | يفحص النسخة الموزَّعة من الملف نفسه، ثم يجرّبها على الدمج وHLS وm4a بملفات تصنعها نسخة الاختبار. وما يفحصه في الملف: أن ترخيصها LGPL، وأنه لا مرمّز فيها غير `aac`، ولا بروتوكول غير `file` و`pipe` |
 | `check-linked.sh` | يقرأ من الملفات الموزَّعة نفسها المكتبات التي تحتاجها: مكتبة C الخاصة بالنظام فقط في لينكس، و`libSystem` وأُطر Apple الخاصة بالنظام فقط في ماك (للمعماريتين؛ configure يضيف CoreFoundation وCoreMedia وCoreVideo دائمًا)، وملفات DLL الخاصة بويندوز فقط. ويفشل على أي مكتبة غيرها |
 
-**البناء في الـ CI:** يتولاه [`.github/workflows/ffmpeg.yml`](../../.github/workflows/ffmpeg.yml) على ويندوز (x64 وarm64)، وماك (ملف universal فيه arm64 وx86_64)، ولينكس (x64 وarm64). ونسخة الاختبار تُحفظ في الـ cache الخاص بالـ CI.
+**البناء في الـ CI:** يتولاه [`.github/workflows/ffmpeg.yml`](../../.github/workflows/ffmpeg.yml) على ويندوز (x64 وarm64)، وماك (ملف universal فيه arm64 وx86_64)، ولينكس (x64 وarm64). ونسخة الاختبار تُحفظ في الـ cache الخاص بالـ CI، و`ci.yml` يستدعي نفس الـ workflow لاختبارات الفيديو الحقيقية (`crates/zajil-core/tests/video_real.rs`).
 
-**النشر:** tag باسم `tools-ffmpeg-<النسخة>-<رقم>`، على commit من تاريخ `main` وبنفس النسخة المثبّتة، ينشر إصدارًا فيه:
+**النشر** ([`.github/workflows/ffmpeg-release.yml`](../../.github/workflows/ffmpeg-release.yml)، وهو يستدعي `ffmpeg.yml` للبناء): tag باسم `tools-ffmpeg-<النسخة>-<رقم>`، على commit من تاريخ `main` وبنفس النسخة المثبّتة، ينشر إصدارًا فيه:
 - الملفات التنفيذية.
 - المصدر الرسمي كما هو، ومعه توقيعه.
 - نسخة من المصدر في جذرها ملفات البناء، ومعها سكربت البناء وخياراته (`zajil-build/`).

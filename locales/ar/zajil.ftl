@@ -518,6 +518,25 @@ schedule-closed-now = الطابور خارج موعده الآن: تنتظر ت
 schedule-save = حفظ
 schedule-saved = حُفظ.
 schedule-close = إغلاق
+schedule-tries = المحاولات لكل ملف
+schedule-after-open = وافتح بعده ملفًا أو برنامجًا:
+schedule-after-open-pick = اختر ملفًا…
+schedule-soon = قريبًا
+
+## الاكتمال
+
+complete-title = اكتمل التحميل
+complete-name = الاسم
+complete-size = الحجم
+complete-folder = حُفظ في
+complete-url = الرابط
+complete-open = افتح
+complete-open-folder = افتح المجلد
+complete-close = إغلاق
+complete-dont-show = لا تُظهر هذه النافذة مرة أخرى
+complete-setting = أظهر نافذة «اكتمل التحميل» حين ينتهي تحميل
+complete-drag = اسحبه من هنا
+complete-drag-hint = اسحب الملف من هنا إلى أي برنامج أو مجلد
 
 ## التحديث
 
@@ -590,3 +609,13 @@ add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، �
 add-description = الوصف
 add-description-hint = اختياري
 last-try-yesterday = أمس { $time }
+
+## The toolbar as the user leaves it (M5.5, an IDM touch)
+tb-big = أزرار كبيرة
+tb-small = أزرار صغيرة
+tb-customize = تخصيص شريط الأدوات…
+tb-customize-title = تخصيص شريط الأدوات
+tb-earlier = قدّم «{ $name }»
+tb-later = أخّر «{ $name }»
+tb-reset = كما كان
+tb-done = تم

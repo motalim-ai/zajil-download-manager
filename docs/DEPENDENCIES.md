@@ -15,8 +15,9 @@
 |---|---|---|---|---|---|
 | `clap` | 4.6.7 | MIT أو Apache-2.0 | `zajil-cli` | تحليل أوامر سطر الأوامر ورسائل المساعدة | M1 |
 | `arboard` | 3.7.0 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | الحافظة: NSPasteboard في ماك، وX11 أو Wayland (data-control، عبر `wl-clipboard-rs`) في لينكس، لمراقبة الحافظة. بلا دعم الصور. وفي ويندوز نستعمل Win32 مباشرة، فلا تدخل واجهتها في ويندوز (`clipboard-win` و`error-code`، بترخيص BSL-1.0) أي بناء، وهما مستثنيتان من رسم cargo-deny بسببهما في `deny.toml` | M5 |
+| `drag` | 2.1.1 | Apache-2.0 أو MIT | `zajil-desktop` | سحب الملف المكتمل من نافذة «اكتمل التحميل» إلى أي برنامج أو مجلد، بسحب النظام نفسه (M5.5). يستدعيه Rust وحده على ملف التحميل نفسه؛ الصفحة تسمّي التحميل ولا تمرّر مسارًا. ومعه `core-graphics` (Apache-2.0 أو MIT) و`objc2-core-video` (Zlib أو Apache-2.0 أو MIT) في ماك، وإصدار آخر من `windows` و`windows-core` وما معهما (Apache-2.0 أو MIT) في ويندوز | M5.5 |
 | `objc2-app-kit` | 0.3.2 | Zlib أو Apache-2.0 أو MIT | `zajil-platform` (ماك فقط) | `NSPasteboard.changeCount`، فلا تُقرأ الحافظة إلا بعد نسخة (مراقبة الحافظة). وكانت في الشجرة تحت `arboard` | M5 |
-| `getrandom` | 0.4.3 | MIT أو Apache-2.0 | `zajil-platform` | أرقام عشوائية من النظام، لاسم الـ named pipe في ويندوز (قناة الإضافة، M5) | M5 |
+| `getrandom` | 0.4.3 | MIT أو Apache-2.0 | `zajil-platform` و`zajil-core` | أرقام عشوائية من النظام: لاسم الـ named pipe في ويندوز (قناة الإضافة، M5)، ولأسماء مجلدات تنزيل أدوات الفيديو وتشغيلها (M6) | M5 |
 | `dirs` | 7.0.0 | MIT أو Apache-2.0 | `zajil-platform` | مسارات النظام القياسية: Known Folders في ويندوز، وXDG في لينكس (يعتمد على `option-ext` بترخيص MPL-2.0) | M1 |
 | `serde` | 1.0.229 | MIT أو Apache-2.0 | `zajil-core` | قراءة ملف الحالة وكتابته | M1 |
 | `serde_json` | 1.0.154 | MIT أو Apache-2.0 | `zajil-core` | صيغة JSON لملف الحالة (ADR-0004) | M1 |
@@ -33,8 +34,9 @@
 | `ring` | 0.17.14 | Apache-2.0 و ISC | عبر `rustls` و`rcgen` | مزوّد التشفير. اخترناه بدل `aws-lc-rs` لأن ترخيص `aws-lc-sys` يتضمن رخصة OpenSSL غير المتوافقة مع GPL-3.0 | M1 |
 | `tokio-rustls` | 0.26.6 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | سيرفر HTTPS للاختبار | M1 |
 | `rcgen` | 0.14.10 | MIT أو Apache-2.0 | `zajil-testserver` (اختبار فقط) | ينشئ في كل تشغيل للاختبارات جهة إصدار (CA) مؤقتة في الذاكرة، ويوقّع بها شهادات السيرفر التجريبي (صالحة، ومنتهية)، وشهادة موقّعة ذاتيًا. **لا توجد أي شهادة أو مفتاح في المستودع**. بمزوّد `ring` فقط | M1 |
-| `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`). ومنذ M2: حجز المساحة (`fallocate` و`F_PREALLOCATE`)، والمساحة الحرة (`statvfs` و`statfs`) | M1 |
-| `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة. ومنذ M2 (الميزتان `Win32_System_IO` و`Win32_System_Ioctl`): الملف المتناثر (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`GetDiskFreeSpaceExW`) | M1 |
+| `landlock` | 0.4.7 | MIT أو Apache-2.0 | `zajil-platform` (لينكس فقط) | صندوق QuickJS-NG ليوتيوب (`zajil_platform::sandbox`، ADR-0009): يمنع الكتابة خارج مجلده والشبكة. من مشروع Landlock نفسه، بدل كتابة واجهة النواة بـ `unsafe` | M6 |
+| `libc` | 0.2.191 | MIT أو Apache-2.0 | `zajil-platform` (ماك ولينكس فقط) | `O_NOFOLLOW`، وإعادة التسمية دون استبدال (`renameat2` و`renamex_np`). ومنذ M2: حجز المساحة (`fallocate` و`F_PREALLOCATE`)، والمساحة الحرة (`statvfs` و`statfs`). ومنذ M6: شجرة عمليات أداة الفيديو (`umask` و`kill` لمجموعة العمليات، و`PR_SET_PDEATHSIG` في لينكس، و`sysctl` و`proc_listallpids` في ماك لإيجاد عمليات الشجرة) | M1 |
+| `windows-sys` | 0.61.2 | MIT أو Apache-2.0 | `zajil-platform` (ويندوز فقط) | `MoveFileExW` مع `MOVEFILE_WRITE_THROUGH`، و`FILE_FLAG_OPEN_REPARSE_POINT`، وعدد الروابط الصلبة. ومنذ M2 (الميزتان `Win32_System_IO` و`Win32_System_Ioctl`): الملف المتناثر (`FSCTL_SET_SPARSE`)، والمساحة الحرة (`GetDiskFreeSpaceExW`). ومنذ M6 (الميزتان `Win32_System_JobObjects` و`Win32_System_Diagnostics_ToolHelp`): شجرة عمليات أداة الفيديو في Job Object تنتهي بانتهاء زاجِل، وقائمة عمليات الشجرة | M1 |
 | `dunce` | 1.0.5 | CC0-1.0 أو MIT-0 أو Apache-2.0 | `zajil-core` | مسار مجلد التحميل الحقيقي دون بادئة `\\?\` في ويندوز حين لا تلزم، حتى تبقى المسارات المعروضة للمستخدم مقروءة | M1 |
 | `icu_properties` | 2.4.0 | Unicode-3.0 | `zajil-core` | بيانات يونيكود (Joining_Type وCanonical_Combining_Class) لقواعد ContextJ في RFC 5892: متى يبقى ZWNJ وZWJ في اسم الملف. موجودة أصلًا في البرنامج عبر `reqwest` ← `url` ← `idna`، فلا تضيف كودًا جديدًا إلى النسخة النهائية | M1 |
 | `thiserror` | 2.0.21 | MIT أو Apache-2.0 | كل المكتبات | تعريف أنواع الأخطاء | M1 |
@@ -64,13 +66,16 @@
 | `typescript` | 6.0.3 | Apache-2.0 | فحص الأنواع في ملفات JavaScript (`checkJs`) | M5 |
 | `vitest` | 5.0.5 | MIT | اختبارات الإضافة | M5 |
 | `addons-linter` | 10.14.0 | MPL-2.0 | فاحص AMO، وهو ما يشغّله `web-ext lint`. لم نستعمل `web-ext` نفسه لأن جزءه الخاص بأندرويد يجلب `node-forge` بتحذير أمني عالٍ لا إصلاح له بعد | M5 |
+| `playwright-core` | 1.63.0 | Apache-2.0 | يشغّل متصفحًا حقيقيًا في اختبار زر «نزّل الفيديو» (Chrome الموجود على جهاز الـ CI، أو Chromium محليًا). لا ينزّل متصفحًا بنفسه | M6 |
 
 ## أدوات خارجية تُشغَّل كبرامج منفصلة
 
 | الأداة | الترخيص | ملاحظات | الحالة |
 |---|---|---|---|
 | ffmpeg وffprobe | LGPL 2.1 أو أحدث (بناؤنا من المصدر الرسمي، بلا `--enable-gpl` ولا `--enable-nonfree` ولا أي مكتبة خارجية) | يُبنيان في الـ CI من المصدر الرسمي الموقّع (`tools/ffmpeg`)، ويُنشران مع مصدرهما في إصدار `tools-ffmpeg-*` من هذا المستودع ([ADR-0009](adr/0009-video-tools.md)). وسينزّلهما زاجِل عند أول تحميل فيديو بموافقة المستخدم (في PR أدوات الفيديو) | معتمدة (M6) |
-| yt-dlp | Unlicense (يحتاج تحقق عند المراجعة) | **تُراجع قبل M6، مع شروط استخدام المواقع** | لم تُعتمد |
+| yt-dlp | GPLv3+ للملف المستقل كما يُبنى (المصدر Unlicense) | تُنزَّل عند أول تحميل فيديو بموافقة المستخدم، ببصمة مثبّتة من `SHA2-256SUMS` الموقّع (`tools/yt-dlp/pins.txt`) | معتمدة (M6) |
+| QuickJS-NG (`qjs`) | MIT | ليوتيوب فقط، إن لم يوجد Deno أو Node. تُنزَّل مع الأدوات بموافقة المستخدم، ببصمة مثبّتة (`tools/quickjs/pins.txt`؛ لا ينشر QuickJS-NG بصمات ولا توقيعات). ولا يشغّلها yt-dlp إلا عبر `zajil-jsbox`، في صندوق وبحدود (ADR-0009، القسم 3) | معتمدة (M6) |
+| Deno 2.3+ أو Node 22+ | MIT | ليوتيوب، إن ثبّتها المستخدم بنفسه: لا نوزّعها ولا ننزّلها. وتُقبل فقط إن لم يستطع غير المستخدم أو النظام تغييرها | استثناء بقرار المالك (ADR-0009) |
 
 ## الخطوط والأيقونات والصور
 

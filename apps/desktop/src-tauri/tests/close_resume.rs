@@ -96,16 +96,23 @@ fn start_with(data: &Path, close_quits: bool) -> App {
 /// Asks the app to close and checks that it stopped its downloads and
 /// exited cleanly, sooner than its own 5 s limit: a close that only waited
 /// the limit out would pass otherwise (review of #45).
-fn close_cleanly(app: &mut App, how: Close) {
+fn close_cleanly(app: &mut App, how: Close, store: &QueueStore) {
     let asked = Instant::now();
     ask_to_close(&app.child, how);
     let status = wait_exit(&mut app.child, Duration::from_secs(30));
     let took = asked.elapsed();
     // Let the reader thread take the last lines.
     std::thread::sleep(Duration::from_millis(200));
+    // Said every time, so the CI log shows how near the 5 s limit a close
+    // usually is (#132).
+    println!("closing took {took:?}");
+    let stopped = app.said("zajil: the downloads stopped; exiting");
+    if !(status.success() && stopped && took < Duration::from_millis(4500)) {
+        report(app, store, took);
+    }
     assert!(status.success(), "asked to close, it ended with {status:?}");
     assert!(
-        app.said("zajil: the downloads stopped; exiting"),
+        stopped,
         "it exited without saying that the downloads stopped"
     );
     assert!(took < Duration::from_millis(4500), "closing took {took:?}");
@@ -125,6 +132,42 @@ fn close_cleanly(app: &mut App, how: Close) {
             }
         );
     }
+}
+
+/// What a failed close leaves to look at (#132): how long it took, the
+/// download as the queues file has it, its part and state files, and all
+/// the app said (its own times included).
+fn report(app: &App, store: &QueueStore, took: Duration) {
+    println!("---- the close failed after {took:?}; what is left ----");
+    let item = item(store);
+    println!(
+        "the download: {:?}, recorded {} bytes, state file {:?}",
+        item.status,
+        recorded(&item),
+        item.state_file
+    );
+    let age = |p: &Path| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+    };
+    if let Some(state) = item.state_file.as_deref() {
+        println!("  state file written {:?} ago", age(state));
+        let part = std::path::PathBuf::from(state.to_string_lossy().replace(
+            zajil_core::state::STATE_SUFFIX,
+            zajil_core::state::PART_SUFFIX,
+        ));
+        if let Ok(meta) = std::fs::metadata(&part) {
+            println!(
+                "  part file {part:?}: {} bytes, written {:?} ago",
+                meta.len(),
+                age(&part)
+            );
+        }
+    }
+    println!("---- all the app said ----\n{}", app.stderr.lock().unwrap());
+    println!("---- end ----");
 }
 
 /// How the app is asked to close.
@@ -255,7 +298,7 @@ fn close_in_the_middle_then_open_again(close: Option<Close>) {
         app.child.kill().expect("the app is killed");
         wait_exit(&mut app.child, Duration::from_secs(30));
     } else if let Some(how) = close {
-        close_cleanly(&mut app, how);
+        close_cleanly(&mut app, how, &store);
     }
     let before = item(&store);
     let progress = recorded(&before);
@@ -271,7 +314,7 @@ fn close_in_the_middle_then_open_again(close: Option<Close>) {
     wait_until("the download finished", Duration::from_secs(120), || {
         item(&store).status == Status::Done
     });
-    close_cleanly(&mut app, Close::Ask);
+    close_cleanly(&mut app, Close::Ask, &store);
 
     let done = item(&store);
     let file = done.file.as_deref().expect("the finished file");

@@ -22,6 +22,7 @@
   import Icon from "./lib/components/Icon.svelte";
   import { api } from "./lib/api";
   import { scheduleApi } from "./lib/scheduleApi";
+  import { showTrayTip, trayTip } from "./lib/trayTip";
   import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
@@ -210,6 +211,7 @@
       if (mine !== asked) return;
       snapshot = next;
       announce(snapshot.downloads);
+      showTrayTip(trayTip(next.downloads, locale.lang, locale.digits, locale.t));
       error = snapshot.problem;
       // The details follow the list: closed when their download is gone
       // (review of #48: they stayed, stale, and every refresh failed), and

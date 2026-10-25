@@ -131,6 +131,9 @@ struct Running {
     /// From a private window: nothing of it stays if it fails or is taken
     /// out of the queues (review of #91).
     private: bool,
+    /// Its own speed limit, its rate read from its item at each look: a
+    /// new limit reaches it while it runs (#106).
+    limit: SpeedLimit,
 }
 
 impl Runner {
@@ -239,6 +242,11 @@ impl Runner {
                 let store = self.store.clone();
                 let queues = blocking(move || store.load()).await?;
                 speed_limit.set_rate(queues.settings.speed_limit);
+                for (id, run) in &running {
+                    if let Some(item) = queues.item(*id) {
+                        run.limit.set_rate(item.limit);
+                    }
+                }
                 // The browser's headers of downloads that are done or gone
                 // are forgotten; a failed one keeps them for a retry. An id
                 // from `next_id` on was added after this load (the app adds
@@ -492,8 +500,9 @@ impl Runner {
                     item: id,
                 });
                 let stop = Stop::new();
+                let limit = SpeedLimit::new(item.limit, engine.clock());
                 let mut engine = engine
-                    .with_download_limit(item.limit)
+                    .with_own_limit(limit.clone())
                     .named(item.name.as_deref());
                 // Not yet started by the user, a file that can run code is
                 // held, by the names the download itself gets (review of
@@ -607,6 +616,7 @@ impl Runner {
                         stop,
                         by_runner: false,
                         private,
+                        limit,
                     },
                 );
             }

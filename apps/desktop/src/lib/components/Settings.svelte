@@ -8,6 +8,7 @@
   import { onMount } from "svelte";
   import { api } from "../api";
   import type { IntegrationView } from "../bindings/IntegrationView";
+  import CompleteSetting from "./CompleteSetting.svelte";
 
   let {
     settings,
@@ -243,6 +244,7 @@
       <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
       <span>{locale.t("settings-notifications-label")}</span>
     </label>
+    <CompleteSetting />
   </fieldset>
 
   <fieldset>

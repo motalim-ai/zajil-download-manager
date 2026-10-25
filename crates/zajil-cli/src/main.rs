@@ -12,6 +12,7 @@
 mod batch;
 mod category;
 mod queue;
+mod video;
 
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -111,6 +112,12 @@ enum Command {
         #[command(subcommand)]
         command: category::CategoryCommand,
     },
+    /// Download videos (with yt-dlp and Zajil's ffmpeg, downloaded only
+    /// after you agree: `zajil video tools install`).
+    Video {
+        #[command(subcommand)]
+        command: video::VideoCommand,
+    },
     /// Download the files a pattern stands for, one after the other, such
     /// as `img[001-100].jpg`.
     #[command(
@@ -162,12 +169,18 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
-    if let Command::Batch(args) = cli.command {
+    if matches!(cli.command, Command::Video { .. } | Command::Batch(_)) {
         let engine = match Engine::new(options(cli.connections.into(), cli.tries)) {
             Ok(engine) => engine,
             Err(err) => return fail(&err.to_string()),
         };
-        return runtime.block_on(batch::run(engine, args));
+        match cli.command {
+            Command::Video { command } => {
+                return runtime.block_on(video::run(command, &data_dir, engine));
+            }
+            Command::Batch(args) => return runtime.block_on(batch::run(engine, args)),
+            _ => unreachable!("matched above"),
+        }
     }
     runtime.block_on(run(
         cli.command,
@@ -270,7 +283,10 @@ async fn run(
                     .await
                     .map_err(Failure::Engine)
             }
-            Command::Queue { .. } | Command::Category { .. } | Command::Batch(_) => {
+            Command::Queue { .. }
+            | Command::Category { .. }
+            | Command::Video { .. }
+            | Command::Batch(_) => {
                 unreachable!("handled in main")
             }
         }

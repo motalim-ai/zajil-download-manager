@@ -140,11 +140,6 @@ pub struct ProbeView {
     pub download_folder: String,
 }
 
-/// Whether a response's media type is a web page.
-pub fn is_web_page(content_type: Option<&str>) -> bool {
-    matches!(content_type, Some("text/html" | "application/xhtml+xml"))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AddRequest {
@@ -461,7 +456,8 @@ pub fn category_views(categories: &CategoriesFile) -> Vec<CategoryView> {
 }
 
 /// The name the engine would give a download of `url` before the server
-/// answers (no `Content-Disposition` yet): the same function it uses.
+/// answers (no `Content-Disposition` yet): the same function it uses
+/// (the engine may then add the extension of the server's type).
 fn name_from_url(url: &str) -> String {
     zajil_core::Url::parse(url)
         .map(|u| zajil_core::naming::suggested_name(None, &u))
@@ -659,7 +655,7 @@ pub fn probe(found: &Probe, categories: &CategoriesFile, given: &Path) -> ProbeV
             .folder_for(&found.name, found.host.as_deref(), given)
             .display()
             .to_string(),
-        page: is_web_page(found.content_type.as_deref()),
+        page: found.is_page(),
         download_folder: given.display().to_string(),
     }
 }
@@ -726,8 +722,16 @@ mod tests {
             ..found
         };
         assert!(!probe(&file, &categories, Path::new("/d")).page);
-        assert!(is_web_page(Some("application/xhtml+xml")));
-        assert!(!is_web_page(None));
+        let xhtml = Probe {
+            content_type: Some("application/xhtml+xml".into()),
+            ..file.clone()
+        };
+        assert!(probe(&xhtml, &categories, Path::new("/d")).page);
+        let unknown = Probe {
+            content_type: None,
+            ..file
+        };
+        assert!(!probe(&unknown, &categories, Path::new("/d")).page);
     }
 
     /// AGENTS.md §10.3: what the page receives never holds a URL's query
