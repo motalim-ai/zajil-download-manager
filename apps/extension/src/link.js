@@ -49,6 +49,19 @@ export function plainStore(store) {
   return typeof store === "string" && ID.test(store) && store !== "firefox-private" ? store : undefined;
 }
 
+/** Every change of the tickets, one after the other: two at once (two
+ * downloads taken together, or a `keep` meanwhile) would each read the old
+ * list and write it back without the other's ticket (review of #80).
+ * @type {Promise<unknown>} */
+let changing = Promise.resolve();
+
+/** @template T @param {() => Promise<T>} f @returns {Promise<T>} */
+function inTurn(f) {
+  const next = changing.then(f, f);
+  changing = next.catch(() => {});
+  return next;
+}
+
 /** A new download's random ticket. */
 export const newTicket = () => crypto.randomUUID();
 
@@ -80,8 +93,11 @@ function fresh(all, now) {
  * @param {any} browserApi @param {string} ticket @param {string} url
  * @param {string | undefined} store @param {number} [now] */
 export async function rememberTicket(browserApi, ticket, url, store, now = Date.now()) {
-  const all = { ...(await tickets(browserApi)), [ticket]: { site: await siteKey(url, store), at: now } };
-  await browserApi.storage.local.set({ linkTickets: fresh(all, now) }).catch(() => {});
+  const site = await siteKey(url, store);
+  await inTurn(async () => {
+    const all = { ...(await tickets(browserApi)), [ticket]: { site, at: now } };
+    await browserApi.storage.local.set({ linkTickets: fresh(all, now) }).catch(() => {});
+  });
 }
 
 /** Whether `ticket` is open, for `url`'s site and `store`.
@@ -96,10 +112,12 @@ export async function openTicket(browserApi, ticket, url, store, now = Date.now(
  * @param {any} browserApi @param {string[]} open @param {number} [now] */
 export async function keepTickets(browserApi, open, now = Date.now()) {
   const listed = new Set(open);
-  const kept = Object.fromEntries(
-    Object.entries(fresh(await tickets(browserApi), now)).filter(([id, t]) => listed.has(id) || now - t.at < NEW_TICKET_MS),
-  );
-  await browserApi.storage.local.set({ linkTickets: kept }).catch(() => {});
+  await inTurn(async () => {
+    const kept = Object.fromEntries(
+      Object.entries(fresh(await tickets(browserApi), now)).filter(([id, t]) => listed.has(id) || now - t.at < NEW_TICKET_MS),
+    );
+    await browserApi.storage.local.set({ linkTickets: kept }).catch(() => {});
+  });
 }
 
 /**

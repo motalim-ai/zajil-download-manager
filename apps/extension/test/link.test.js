@@ -83,6 +83,18 @@ describe("the link to Zajil (M5)", () => {
     expect(await openTicket(api, "t-3", "https://files.example.com/a.zip", undefined)).toBe(false);
   });
 
+  it("loses no ticket when two changes come at once (review of #80)", async () => {
+    const { api } = fake();
+    // Storage that answers late, as a real one may.
+    const { get, set } = api.storage.local;
+    api.storage.local.get = async (k) => (await new Promise((r) => setTimeout(r, 5)), get(k));
+    api.storage.local.set = async (v) => (await new Promise((r) => setTimeout(r, 5)), set(v));
+    const url = "https://files.example.com/a.zip";
+    await Promise.all([rememberTicket(api, "t-1", url, undefined), rememberTicket(api, "t-2", url, undefined), keepTickets(api, ["t-0"])]);
+    expect(await openTicket(api, "t-1", url, undefined)).toBe(true);
+    expect(await openTicket(api, "t-2", url, undefined)).toBe(true);
+  });
+
   it("gives no cookies without the permission, and forgets a ticket after 30 days", async () => {
     const { api } = fake({ granted: false });
     await rememberTicket(api, "t-1", "https://files.example.com/a.zip", undefined);
