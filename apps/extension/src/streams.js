@@ -14,7 +14,24 @@ import { isWeb } from "./capture.js";
 /** At most this many playlists are kept for a tab (the newest). */
 export const MAX_STREAMS = 20;
 
-/** @typedef {{ url: string, kind: "hls" | "dash", frame: number }} Stream */
+/**
+ * `doc`: the document that loaded it (Chrome's `documentId`); `origin`: that
+ * document's origin (Chrome's `initiator`, Firefox's `documentUrl`). So a
+ * playlist goes only with a video of the same document (review of #151: a
+ * page restored by Back, a prerender, an ad's frame).
+ * @typedef {{ url: string, kind: "hls" | "dash", frame: number, doc?: string, origin?: string }} Stream
+ */
+
+/** @param {unknown} url @returns {string | undefined} */
+export function originOf(url) {
+  if (typeof url !== "string") return undefined;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const HLS_TYPES = ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"];
 const DASH_TYPES = ["application/dash+xml"];
@@ -87,18 +104,25 @@ export async function forgetAll(browserApi) {
  * Chrome is asked for the tab.
  *
  * @param {any} browserApi
- * @param {{ url: string, tabId: number, frameId?: number, type?: string, incognito?: boolean, responseHeaders?: { name: string, value?: string }[] }} details
+ * @param {{ url: string, tabId: number, frameId?: number, type?: string, incognito?: boolean, statusCode?: number, documentId?: string, documentLifecycle?: string, documentUrl?: string, initiator?: string, responseHeaders?: { name: string, value?: string }[] }} details
  */
 export async function note(browserApi, details) {
   const tab = details.tabId;
   if (!Number.isSafeInteger(tab) || tab < 0) return;
   if (details.type === "main_frame") {
-    await forget(browserApi, tab);
+    // A page Chrome prerenders may never be shown: the tab's current page
+    // keeps its playlists (review of #151).
+    if (details.documentLifecycle !== "prerender") await forget(browserApi, tab);
     return;
   }
+  // Only a playlist the server gave (a 404 page named .m3u8 is none).
+  const status = details.statusCode;
+  if (typeof status === "number" && (status < 200 || status > 299)) return;
   const kind = kindOf(details);
   if (!kind || !isWeb(details.url) || details.incognito) return;
   const frame = Number.isSafeInteger(details.frameId) ? /** @type {number} */ (details.frameId) : 0;
+  const doc = typeof details.documentId === "string" ? details.documentId : undefined;
+  const origin = originOf(details.documentUrl ?? details.initiator);
   // In turn from here, Chrome's question included: a playlist of the old
   // page whose answer comes late is never written after the new page's
   // `main_frame` forgot the old ones.
@@ -108,20 +132,27 @@ export async function note(browserApi, details) {
       if (!info || info.incognito) return;
     }
     const kept = (await streamsOf(browserApi, tab)).filter((s) => s.url !== details.url);
-    kept.push({ url: details.url, kind, frame });
+    kept.push({ url: details.url, kind, frame, ...(doc ? { doc } : {}), ...(origin ? { origin } : {}) });
     await browserApi.storage.session.set({ [key(tab)]: kept.slice(-MAX_STREAMS) }).catch(() => {});
   });
 }
 
 /**
  * The playlist to send with a tab's video whose own address only the page
- * can read: the newest of its frame, else the newest of the tab; or none.
+ * can read: the newest one loaded by the same document (by its id when both
+ * sides know it, else by its frame and origin); or none. Never another
+ * frame's, nor another page's (review of #151).
  *
- * @param {any} browserApi @param {number} tab @param {number} [frame]
+ * @param {any} browserApi @param {number} tab
+ * @param {{ frame?: number, doc?: string, origin?: string }} [want]
  * @returns {Promise<string | undefined>}
  */
-export async function streamFor(browserApi, tab, frame = 0) {
-  const all = await streamsOf(browserApi, tab);
-  const own = all.filter((s) => s.frame === frame);
-  return (own.at(-1) ?? all.at(-1))?.url;
+export async function streamFor(browserApi, tab, want = {}) {
+  const frame = want.frame ?? 0;
+  const same = (/** @type {Stream} */ s) => {
+    if (s.frame !== frame) return false;
+    if (want.doc && s.doc) return s.doc === want.doc;
+    return Boolean(want.origin && s.origin && s.origin === want.origin);
+  };
+  return (await streamsOf(browserApi, tab)).filter(same).at(-1)?.url;
 }

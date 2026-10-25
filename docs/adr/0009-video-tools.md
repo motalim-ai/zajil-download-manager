@@ -255,7 +255,7 @@
 ## 6. المحتوى المحمي (DRM)
 
 **ممنوع تجاوز DRM** (AGENTS.md، القسم 6).
-- **الإضافة:** زر «نزّل الفيديو» لا يظهر على صفحة تستعمل EME (`requestMediaKeySystemAccess` أو `MediaKeys`).
+- **الإضافة:** زر «نزّل الفيديو» لا يظهر فوق فيديو يُشغَّل عبر EME: له `mediaKeys`، أو أطلق حدث `encrypted` (#151، باختبارين في Chromium حقيقي). **أما صفحة طلبت EME فقط** (`requestMediaKeySystemAccess`) ولم تربطه بفيديو بعد، فلا يراها سكريبت الإضافة من عالمه المعزول (يحتاج ذلك سكريبتًا في عالم الصفحة نفسه)، وزاجِل يرفض المحتوى المحمي على كل حال عند الفحص.
 - **البرنامج:**
   - yt-dlp يعلّم الصيغ المحمية (`has_drm`).
   - **لكن كشفه في HLS محدود:** لا يعرف إلا `URI="skd://"` و`KEYFORMAT="com.apple.streamingkeydelivery"` و`com.microsoft.playready` و`#EXT-X-FAXS-CM`. وأي `SAMPLE-AES` آخر (مثل Widevine) يعدّه «غير مدعوم» ويسلّمه لـ FFmpeg. لذلك:

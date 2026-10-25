@@ -404,6 +404,7 @@ describe("the background", () => {
       tabId: 4,
       frameId: 0,
       type: "xmlhttprequest",
+      initiator: "https://example.com",
       responseHeaders: [{ name: "Content-Type", value: "application/x-mpegURL" }],
     });
     await flush();
@@ -457,10 +458,16 @@ describe("the background", () => {
     const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
     await load(fake);
     await flush();
-    fake.session["streams:8"] = [{ url: "https://cdn.example/m.mpd", kind: "dash", frame: 0 }];
+    // As `note` keeps it: with the origin of the document that loaded it.
+    fake.session["streams:8"] = [{ url: "https://cdn.example/m.mpd", kind: "dash", frame: 0, origin: "https://example.com" }];
     fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v", srcUrl: "blob:https://example.com/2", frameId: 0 }, { id: 8 });
     await flush();
     expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/v", media: "https://cdn.example/m.mpd" }]);
+    // Another page's playlist (another origin) never goes with this one.
+    fake.session["streams:8"] = [{ url: "https://cdn.example/other.mpd", kind: "dash", frame: 0, origin: "https://other.example" }];
+    fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v", srcUrl: "blob:https://example.com/2", frameId: 0 }, { id: 8 });
+    await flush();
+    expect(fake.done.sent.at(-1)).toEqual({ type: "video", protocol_version: 1, page: "https://example.com/v" });
   });
 
   it("a link Zajil cannot download is refused before any cookie is read", async () => {

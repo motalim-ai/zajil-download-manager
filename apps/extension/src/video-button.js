@@ -16,6 +16,11 @@
 // element is there, so that the extension is installed with site access;
 // and like any page element, it can be covered.
 //
+// A video the page plays through EME (DRM: `mediaKeys` set, or an
+// `encrypted` event) never gets the button (ADR-0009, section 6). Whether a
+// page only asked for EME (`requestMediaKeySystemAccess`) cannot be seen
+// from here: that would need a script in the page's own world.
+//
 // Its look is a first version: the final one comes with the video window's
 // design (M5.5).
 
@@ -54,6 +59,19 @@
   button.dir = api.i18n.getMessage("lang") === "en" ? "ltr" : "rtl";
   root.append(style, button);
 
+  /** Videos that fired `encrypted`: played through EME. */
+  const encrypted = new WeakSet();
+  // Capture, on the document: the event does not bubble.
+  document.addEventListener(
+    "encrypted",
+    (event) => {
+      if (event.target instanceof HTMLVideoElement) encrypted.add(event.target);
+    },
+    { capture: true },
+  );
+  /** @param {HTMLVideoElement} found */
+  const isProtected = (found) => found.mediaKeys != null || encrypted.has(found);
+
   /** @type {HTMLVideoElement | null} */
   let video = null;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -67,7 +85,7 @@
   /** @param {HTMLVideoElement} found */
   const show = (found) => {
     const box = found.getBoundingClientRect();
-    if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT) return;
+    if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT || isProtected(found)) return;
     // Last in the page each time, above what the page added since.
     if (host !== document.documentElement.lastElementChild) document.documentElement.append(host);
     video = found;
@@ -114,9 +132,14 @@
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!event.isTrusted || !video) return;
+    if (!event.isTrusted || !video || isProtected(video)) return;
     // Not pressed for real if the page made it unseen.
-    if (!host.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return;
+    // Both spellings: `opacityProperty` and `visibilityProperty` came in
+    // Chrome 121, the older names work from Chrome 105 (review).
+    const seen = host.checkVisibility(
+      /** @type {any} */ ({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true }),
+    );
+    if (!seen) return;
     const src = video.currentSrc || video.src || "";
     hide();
     // A longer address is left out, never cut into another one (review).

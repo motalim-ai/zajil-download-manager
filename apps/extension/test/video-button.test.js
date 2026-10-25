@@ -77,6 +77,40 @@ describe("the Download video button", () => {
     await page.close();
   });
 
+  // ADR-0009, section 6: a video played through EME (DRM) gets no button.
+  it("does not show over a video that fired encrypted (EME)", async () => {
+    const page = await pageWith(VIDEO);
+    await page.evaluate(() => document.querySelector("video")?.dispatchEvent(new Event("encrypted")));
+    await page.mouse.move(400, 200);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("does not show over a video with media keys (EME), even when they come after the button showed", async () => {
+    const page = await pageWith(VIDEO);
+    // ClearKey: the EME system every browser has, no real DRM needed.
+    const setKeys = () =>
+      page.evaluate(async () => {
+        const access = await navigator.requestMediaKeySystemAccess("org.w3.clearkey", [
+          { initDataTypes: ["keyids"], videoCapabilities: [{ contentType: 'video/webm; codecs="vp8"' }] },
+        ]);
+        await document.querySelector("video")?.setMediaKeys(await access.createMediaKeys());
+        return document.querySelector("video")?.mediaKeys != null;
+      });
+    // Shown first; the keys come before the click: nothing is sent.
+    await page.mouse.move(400, 200);
+    expect(await setKeys()).toBe(true);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toEqual([]);
+    // And no button over it from now on.
+    await page.mouse.move(10, 600);
+    await page.mouse.move(400, 200);
+    await page.mouse.click(120, 66);
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
   it("does not show over a small video (an icon, a preview)", async () => {
     const page = await pageWith(`<video src="https://media.invalid/v.mp4" style="position:absolute;left:100px;top:50px;width:150px;height:100px"></video>`);
     await page.mouse.move(150, 90);

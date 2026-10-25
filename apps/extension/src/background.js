@@ -9,7 +9,7 @@ import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOv
 import { cookieHeader, cookiesAllowed, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
-import { forget, forgetAll, note, streamFor } from "./streams.js";
+import { forget, forgetAll, note, originOf, streamFor } from "./streams.js";
 
 const MENU = "zajil-download-link";
 const MENU_VIDEO = "zajil-download-video";
@@ -207,8 +207,10 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
  * shows its formats. The page's cookies go with it when the user allowed
  * them, never from a private window; it is checked before any is read.
  * @param {any} info @param {any} tab
+ * @param {string} [doc] the document that asked (the button's sender), so
+ *   only its own playlist goes
  */
-async function sendVideo(info, tab) {
+async function sendVideo(info, tab, doc) {
   const isPrivate = Boolean(tab?.incognito);
   const page = videoMessage(info);
   if (!page) {
@@ -219,7 +221,8 @@ async function sendVideo(info, tab) {
   // The playlist the tab loaded for it (nothing is noted in a private one).
   // Only while the permission lasts (review: none noted before it went).
   const noted = !isPrivate && Number.isSafeInteger(tab?.id) && (await videoAllowed(api));
-  const stream = noted ? await streamFor(api, tab.id, info.frameId) : undefined;
+  const want = { frame: Number.isSafeInteger(info.frameId) ? info.frameId : 0, doc, origin: originOf(info.frameUrl ?? info.pageUrl) };
+  const stream = noted ? await streamFor(api, tab.id, want) : undefined;
   const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
   const result = await send(api, message);
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
@@ -238,7 +241,7 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     srcUrl: typeof message.src === "string" ? message.src : undefined,
     frameId,
   };
-  void sendVideo(info, sender.tab);
+  void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined);
 });
 
 /** The button's script, on every site while the video permissions last. */

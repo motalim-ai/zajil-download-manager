@@ -110,13 +110,47 @@ describe("the playlists a tab loads", () => {
     expect(api.session).toEqual({});
   });
 
-  it("the video's frame's newest goes with it, else the tab's newest, else none", async () => {
+  it("a video gets the newest playlist of its own document: by its id, else its frame and origin; never another frame's", async () => {
     const api = browserWith();
-    expect(await streamFor(api, 1, 0)).toBeUndefined();
-    await note(api, hls("https://player.example/embed.m3u8", { frameId: 7 }));
-    await note(api, hls("https://cdn.example/ad.m3u8", { frameId: 0 }));
-    expect(await streamFor(api, 1, 7)).toBe("https://player.example/embed.m3u8");
-    expect(await streamFor(api, 1, 0)).toBe("https://cdn.example/ad.m3u8");
-    expect(await streamFor(api, 1, 9)).toBe("https://cdn.example/ad.m3u8");
+    expect(await streamFor(api, 1, { frame: 0, origin: "https://site.example" })).toBeUndefined();
+    await note(api, hls("https://player.example/embed.m3u8", { frameId: 7, initiator: "https://player.example" }));
+    await note(api, hls("https://cdn.example/ad.m3u8", { frameId: 9, initiator: "https://ads.example" }));
+    await note(api, hls("https://cdn.example/main.m3u8", { frameId: 0, documentUrl: "https://site.example/watch" }));
+    expect(await streamFor(api, 1, { frame: 7, origin: "https://player.example" })).toBe("https://player.example/embed.m3u8");
+    expect(await streamFor(api, 1, { frame: 0, origin: "https://site.example" })).toBe("https://cdn.example/main.m3u8");
+    // An ad's frame never lends its playlist to the page, nor the reverse.
+    expect(await streamFor(api, 1, { frame: 0, origin: "https://ads.example" })).toBeUndefined();
+    expect(await streamFor(api, 1, { frame: 9, origin: "https://site.example" })).toBeUndefined();
+    expect(await streamFor(api, 1, { frame: 3, origin: "https://site.example" })).toBeUndefined();
+    // Nothing known of either side: nothing goes.
+    expect(await streamFor(api, 1, { frame: 0 })).toBeUndefined();
+  });
+
+  it("a page restored by Back gets none of the next page's playlists (Chrome's documentId)", async () => {
+    const api = browserWith();
+    // Page A, then B in the same tab; Back brings A from the cache with no
+    // request at all, so B's playlist is still noted.
+    await note(api, { url: "https://b.example/", tabId: 1, frameId: 0, type: "main_frame" });
+    await note(api, hls("https://cdn.example/b.m3u8", { initiator: "https://site.example", documentId: "doc-B" }));
+    expect(await streamFor(api, 1, { frame: 0, doc: "doc-A", origin: "https://site.example" })).toBeUndefined();
+    expect(await streamFor(api, 1, { frame: 0, doc: "doc-B", origin: "https://site.example" })).toBe("https://cdn.example/b.m3u8");
+  });
+
+  it("a prerendered page does not forget the current page's playlists; a real new page does", async () => {
+    const api = browserWith();
+    await note(api, hls("https://cdn.example/a.m3u8", { initiator: "https://site.example" }));
+    await note(api, { url: "https://site.example/next", tabId: 1, frameId: 0, type: "main_frame", documentLifecycle: "prerender" });
+    expect(await streamsOf(api, 1)).toHaveLength(1);
+    await note(api, { url: "https://site.example/next", tabId: 1, frameId: 0, type: "main_frame", documentLifecycle: "active" });
+    expect(await streamsOf(api, 1)).toEqual([]);
+  });
+
+  it("an answer that is not a success is no playlist", async () => {
+    const api = browserWith();
+    await note(api, hls("https://cdn.example/missing.m3u8", { statusCode: 404 }));
+    await note(api, hls("https://cdn.example/moved.m3u8", { statusCode: 302 }));
+    expect(api.session).toEqual({});
+    await note(api, hls("https://cdn.example/ok.m3u8", { statusCode: 200 }));
+    expect(await streamsOf(api, 1)).toHaveLength(1);
   });
 });
