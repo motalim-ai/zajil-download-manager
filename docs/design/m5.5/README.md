@@ -57,6 +57,7 @@
    - الرمادي للإعدادات والجدولة.
    - الأزرق لإضافة رابط.
 4. **زر «افتح»** يأخذ أيقونة ملف لا مجلد، حتى لا يختلط بـ «افتح المجلد»، في نافذة الاكتمال وفي قائمة الزر الأيمن.
+5. **الخروج** (2026-10-25): <kbd>Ctrl</kbd>+<kbd>Q</kbd> في ويندوز ولينكس، و<kbd>⌘</kbd><kbd>Q</kbd> في ماك. وإذا كانت هناك تحميلات تعمل يسأل أولًا: «يعمل الآن N تحميلات. هل تغلق زاجِل؟» بصيغ الجمع العربية.
 
 ## اختصارات لوحة المفاتيح
 
@@ -78,6 +79,7 @@
 | افتح المجلد | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd> |
 | نسخ الرابط | <kbd>Ctrl</kbd>+<kbd>C</kbd> | <kbd>Ctrl</kbd>+<kbd>C</kbd> | <kbd>⌘</kbd><kbd>C</kbd> |
 | الخصائص | <kbd>Alt</kbd>+<kbd>Enter</kbd> | <kbd>Alt</kbd>+<kbd>Enter</kbd> | <kbd>⌘</kbd><kbd>I</kbd> |
+| الخروج من البرنامج (يسأل أولًا إن كانت هناك تحميلات تعمل) | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | <kbd>⌘</kbd><kbd>Q</kbd> |
 | فتح قائمة من شريط القوائم | <kbd>Alt</kbd>+الحرف المسطّر | <kbd>Alt</kbd>+الحرف المسطّر | لا يوجد: القوائم في شريط النظام أعلى الشاشة، ويصل إليها <kbd>⌃</kbd><kbd>F2</kbd> من النظام |
 
 الصور تعرض اختصارات ويندوز ولينكس. وفي ماك تُعرض في القوائم بالرموز المعتادة (⌘ ⇧ ⌥ ⌫).
@@ -89,7 +91,8 @@
 - **الخصائص:** <kbd>⌘</kbd><kbd>I</kbd> هو «معلومات» في ماك.
 
 **التعارض مع اختصارات النظام:** لا يستعمل أي اختصار في الجدول مفتاح Win أو Super أو <kbd>Ctrl</kbd>+<kbd>Alt</kbd>، ولا اختصارات النظام في ماك المعروفة، مثل:
-- <kbd>⌘</kbd><kbd>Space</kbd> و<kbd>⌘</kbd><kbd>Tab</kbd> و<kbd>⌘</kbd><kbd>Q</kbd> و<kbd>⌘</kbd><kbd>H</kbd> و<kbd>⌘</kbd><kbd>M</kbd>.
+- <kbd>⌘</kbd><kbd>Space</kbd> و<kbd>⌘</kbd><kbd>Tab</kbd> و<kbd>⌘</kbd><kbd>H</kbd> و<kbd>⌘</kbd><kbd>M</kbd>.
+- <kbd>⌘</kbd><kbd>Q</kbd> مستعمل للخروج فقط، وهو معناه نفسه في النظام، فلا تعارض.
 - <kbd>⌘</kbd><kbd>⇧</kbd><kbd>3</kbd> و<kbd>⌘</kbd><kbd>⇧</kbd><kbd>4</kbd> و<kbd>⌘</kbd><kbd>⇧</kbd><kbd>5</kbd>.
 - <kbd>⌘</kbd><kbd>⇧</kbd><kbd>Q</kbd> و<kbd>⌘</kbd><kbd>⌥</kbd><kbd>Esc</kbd> و<kbd>⌃</kbd><kbd>⌘</kbd><kbd>Q</kbd>.
 
