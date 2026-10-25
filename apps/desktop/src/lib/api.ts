@@ -18,7 +18,15 @@ export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   probe: (url: string) => invoke<ProbeView>("probe", { url }),
   cancelProbe: () => invoke<void>("cancel_probe"),
-  setTrayTexts: (show: string, quit: string) => invoke<void>("set_tray_texts", { show, quit }),
+  /** The tray menu's texts, and the notification the first time the
+   * window hides into the tray. */
+  setTrayTexts: (show: string, quit: string, noticeTitle: string, notice: string) =>
+    invoke<void>("set_tray_texts", { show, quit, noticeTitle, notice }),
+  /** Closing the window quits Zajil; and whether there is a tray. */
+  closeQuits: () => invoke<[boolean, boolean]>("close_quits"),
+  setCloseQuits: (quits: boolean) => invoke<void>("set_close_quits", { quits }),
+  /** The page heard the «quit» a close sent: Zajil waits for its answer. */
+  quitHeard: () => invoke<void>("quit_heard"),
   add: (request: AddRequest) => invoke<number>("add", { request }),
   pause: (ids: number[]) => invoke<void>("pause", { ids }),
   resume: (ids: number[]) => invoke<void>("resume", { ids }),
@@ -69,6 +77,11 @@ export const api = {
   /** «Download file info» for `url`; «Add a link» closes. */
   openAddInfo: (url: string, title: string) => invoke<void>("open_add_info", { url, title }),
   pendingInfo: () => invoke<string | null>("pending_info"),
+  /** A download's progress window (M5.5), titled `title` until it names
+   * itself. */
+  openProgress: (id: number, title: string) => invoke<void>("open_progress", { id, title }),
+  /** A download's own speed limit, bytes per second; `null`: none. */
+  setLimit: (id: number, limit: number | null) => invoke<void>("set_limit", { id, limit }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

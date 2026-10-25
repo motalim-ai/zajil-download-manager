@@ -61,6 +61,7 @@ icu_locale_core = "2.4.0"
 
 # Workspace crates
 zajil-core = { path = "crates/zajil-core" }
+zajil-grab = { path = "crates/zajil-grab" }
 zajil-i18n = { path = "crates/zajil-i18n" }
 zajil-platform = { path = "crates/zajil-platform" }
 zajil-testserver = { path = "crates/zajil-testserver" }

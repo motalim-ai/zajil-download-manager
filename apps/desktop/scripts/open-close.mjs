@@ -71,7 +71,9 @@ async function once(run, way) {
   let stage = "starting the app";
   const log = (text) => console.log(`[run ${run} (${way}), ${at()}] ${text}`);
   const data = mkdtempSync(join(tmpdir(), "zajil-open-close-"));
-  const child = spawn(app, ["--data-dir", data], { stdio: ["ignore", "inherit", "pipe"] });
+  // `--close-quits`: on Windows the window's close is how it is asked to
+  // quit (otherwise it hides into the tray, #109).
+  const child = spawn(app, ["--data-dir", data, "--close-quits"], { stdio: ["ignore", "inherit", "pipe"] });
   let stderr = "";
   child.stderr.on("data", (chunk) => {
     stderr += chunk;

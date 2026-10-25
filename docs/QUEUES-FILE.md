@@ -4,7 +4,7 @@
 
 | البند | القيمة |
 |---|---|
-| الحالة | مُطبَّق في M3، ومعه في M4 الحقل `categorize` وملف التصدير |
+| الحالة | مُطبَّق في M3، ومعه في M4 الحقل `categorize` وملف التصدير، وفي M5.5 الحقول `name` و`category` و`description` و`last_try` (#95، #103) |
 | القرار | [ADR-0007](adr/0007-queues-and-settings-storage.md) |
 | الكود | `crates/zajil-core/src/queue/store.rs` |
 
@@ -45,6 +45,10 @@
 | `items[].private` | منطقي، اختياري | (مراجعة الأمان #84) جاء من نافذة خاصة: يُؤخذ من القوائم حين يكتمل، فلا يبقى منه إلا الملف. غيابه يعني `false` |
 | `items[].added_at` | نص | وقت الإضافة بصيغة RFC 3339 بتوقيت UTC |
 | `items[].browser` | كائن، اختياري | (M5) جاء من إضافة المتصفح: `instance` (معرّف الإضافة العشوائي، واحد لكل ملف شخصي في المتصفح)، و`store` (مخزن الكوكيز، حاوية Firefox، إن لم يكن الافتراضي)، و`cookies` (هل ذهبت معه كوكيز)، و`referrer` (الصفحة التي جاء منها، بلا الجزء بعد `#`، ولا تُطبع في أي سجل أو رسالة)، و`ticket` (تذكرة التحميل العشوائية من الإضافة). **الكوكيز نفسها لا تُكتب هنا أبدًا** (قرار المالك على #7): بعد إعادة التشغيل يطلبها زاجِل من نفس المتصفح. ويُحذف حين يكتمل التحميل. أُضيف إلى المخطط v1 قبل نشره، كما أُضيف `categorize` |
+| `items[].name` | نص، اختياري | (M5.5، #103) اسم الملف الذي اختاره المستخدم: يُحفظ التحميل الجديد به بدل اسم السيرفر. يُنظَّف كأي اسم ملف (`sanitize_file_name`)، ويُرقَّم كأي اسم إذا كان مأخوذًا، ويُرفض الاسم الذي لا يبقى منه شيء بعد التنظيف (مثل `.`). لا يتغير بعد أن يبدأ التحميل (`state_file` أو `file`، أو الحالة `active` أو `done`)، لأن الملف أخذ اسمه. وإذا كان الاسم الجديد لملف قد يشغّل برامج (`RUNS_CODE`) واسم السيرفر لا، يُوقف التحميل قبل أن يُنشأ أي ملف، كما في #90، حتى يبدأه المستخدم. وتغيير الاسم يمسح `ok_given`. والتحميل من صفحة (`from_page`) يُوقف بالاسم الذي يُحفظ به. غيابه: اسم السيرفر |
+| `items[].category` | نص، اختياري | (M5.5، #103) معرّف الفئة التي اختارها المستخدم ([CATEGORIES-FILE](CATEGORIES-FILE.md))، بدل الفئة التي يعطيها الاسم أو الموقع. التحميل الذي أُضيف دون مجلد خاص به (`categorize`) يذهب إلى مجلدها، أيًّا كان اسمه أو موقعه، وإلى `dir` إذا لم يكن لها مجلد. أما التحميل الذي اختار له المستخدم مجلدًا، فيبقى في مجلده، والفئة تسمية فقط (والواجهة التي تريد مجلد الفئة تضعه في `dir`). والفئة المحذوفة كأنها غير موجودة. والملف الذي أُنشئ لا يُنقل. غيابه: الفئة من الاسم أو الموقع كما في M4 |
+| `items[].description` | نص، اختياري | (M5.5، #95) وصف يكتبه المستخدم: من 1 إلى 1000 حرف، أسطر يفصلها `\n` فقط، بلا رموز تحكم ولا نص خفي (نفس فحص أسماء القوائم، سطرًا سطرًا) |
+| `items[].last_try` | نص، اختياري | (M5.5، #95) وقت آخر بداية أو استكمال بصيغة RFC 3339 بتوقيت UTC، يكتبه المشغّل حين يعلّم العنصر `active`. لا يُصدَّر |
 | `updated_at` | نص | وقت آخر تعديل |
 | `checksum` | نص | `sha256:` ثم البصمة، بنفس الصيغة القانونية التي يستعملها ملف الحالة ([STATE-FILE](STATE-FILE.md#البصمة-والصيغة-القانونية)) |
 
@@ -56,6 +60,7 @@
 - لم يكن JSON صالحًا، أو كان `format` غيره، أو `schema_version` غير مدعوم.
 - احتوى حقلًا غير معروف، أو لم تطابق البصمة.
 - كان فيه رقم مكرر أو أكبر من `next_id`، أو اسم قائمة مكرر أو غير صالح، أو `max_active` خارج حدوده، أو حد سرعة يساوي 0.
+- كان فيه `name` فارغ أو أطول من 200 بايت أو فيه فاصل مسار أو رمز تحكم، أو كان `.` أو `..`، أو `category` ليس معرّف فئة، أو `description` يرفضه فحصه، أو `last_try` ليس وقتًا بصيغة RFC 3339 بتوقيت UTC. وفحص `name` هنا لا يعتمد على قواعد التنظيف، حتى لا يصبح الملف كله تالفًا إذا تغيّرت تلك القواعد. والمحرّك ينظّف الاسم من جديد عند استعماله.
 
 والملف غير الموجود يعني قائمة `main` فارغة.
 
@@ -75,7 +80,7 @@
 | `schema_version` | دائمًا `1` |
 | `settings.speed_limit` | حد البرنامج، كما في `queues.json` |
 | `queues[]` | `name` و`max_active` و`schedule`، كما في `queues.json` |
-| `queues[].items[]` | `url` و`dir` و`limit` و`categorize` و`added_at`، و`status`: `waiting` أو `paused` أو `done`. التحميل الجاري أو الفاشل يُصدَّر `waiting`، فيعمل من جديد في الطرف الآخر |
+| `queues[].items[]` | `url` و`dir` و`limit` و`categorize` و`added_at`، و`status`: `waiting` أو `paused` أو `done`. التحميل الجاري أو الفاشل يُصدَّر `waiting`، فيعمل من جديد في الطرف الآخر. ومعها ما أعطاه المستخدم (M5.5): `name` و`category` و`description`، اختيارية، وتُفحص عند الاستيراد بنفس القواعد. أما `last_try` فلا يُصدَّر |
 | `exported_at` | وقت التصدير |
 | `checksum` | بنفس الصيغة القانونية |
 
@@ -111,4 +116,4 @@
 
 ## English summary
 
-`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, schedule {start, stop, days}, items [{id, url, dir, status, state_file, file, error, limit, categorize, needs_ok, from_page, ok_given, private, added_at, browser {instance, store, cookies, referrer, ticket}}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file. M4: `categorize` (optional) sends an item to its category's folder; `zajil queue export`/`import` use a separate `zajil-queues-export` file (no ids, progress or credentials, owner-only, never written over; imports are strictly checked and use the file's folders only with `--keep-folders`). M5: `browser` (optional) says which extension instance and cookie store a download came from, whether cookies went with it, its page (without its `#` part, never printed) and its ticket; never the cookies themselves; removed when it is done; not exported.
+`queues.json` in the data folder (schema v1): `format` (`zajil-queues`), `schema_version`, `next_id`, `settings {speed_limit}`, `queues [{name, max_active, schedule {start, stop, days}, items [{id, url, dir, status, state_file, file, error, limit, categorize, needs_ok, from_page, ok_given, private, added_at, browser {instance, store, cookies, referrer, ticket}}]}]`, `updated_at`, `checksum` (same canonical SHA-256 as the state file). Every change goes through `QueueStore::update`, holding `queues.lock` from read to write; `runner.lock` allows one `zajil queue run`. Writes are safe (temporary file readable by the user only, fsync, rename, folder sync); a damaged file is refused and never overwritten. URLs never hold a user name or password; a token in a URL is kept but never printed. A download's progress stays in its `.zajil-state` file. M4: `categorize` (optional) sends an item to its category's folder; `zajil queue export`/`import` use a separate `zajil-queues-export` file (no ids, progress or credentials, owner-only, never written over; imports are strictly checked and use the file's folders only with `--keep-folders`). M5: `browser` (optional) says which extension instance and cookie store a download came from, whether cookies went with it, its page (without its `#` part, never printed) and its ticket; never the cookies themselves; removed when it is done; not exported. M5.5 (#95, #103), all optional: `name` (the user's file name, cleaned like any name, used instead of the server's; fixed once the download starts; held like #90 when it can run code and the server's name could not), `category` (a category id chosen by the user: a download added without a folder of its own goes to its folder; with a folder the user chose it is a label; a removed category counts as none; a made file does not move), `description` (1 to 1000 characters, `\n`-separated lines without hidden text), `last_try` (RFC 3339 UTC, written by the runner when it marks the item active). The first three are exported and checked on import; `last_try` is not exported.

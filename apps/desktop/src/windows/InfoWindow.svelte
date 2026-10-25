@@ -42,13 +42,15 @@
     })();
   });
 
-  async function add(request: AddRequest, remember: boolean) {
+  async function add(request: AddRequest, remember: string | null) {
     if (busy || added) return;
     busy = true;
     error = null;
     try {
-      await api.add(request);
+      const id = await api.add(request);
       added = true;
+      // A download that starts shows its progress, as in IDM.
+      if (request.start) void api.openProgress(id, probe?.name ?? "").catch(() => {});
     } catch (e) {
       busy = false;
       error = String(e);
@@ -57,8 +59,8 @@
     // The folder becomes the category's: the next file of that kind goes
     // there. The categories as they are now, not as they were when the
     // window opened (review of #104: one added meanwhile was lost).
-    if (remember && probe?.category && request.folder !== null) {
-      const id = probe.category;
+    if (remember !== null && request.folder !== null) {
+      const id = remember;
       const folder = request.folder;
       try {
         const now = (await api.snapshot()).categories;

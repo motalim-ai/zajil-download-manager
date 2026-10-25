@@ -69,7 +69,7 @@
 - Automatic categories.
 - A Manifest V3 browser extension for Chrome, Edge and Firefox, connected through Native Messaging.
 - Video download that never bypasses DRM, and a site grabber.
-- Signed installers and signed auto-updates.
+- Installers checked by published SHA-256 sums (never signed by Apple or Microsoft; macOS ad-hoc only), and auto-updates signed with the project's own key.
 
 No telemetry, no ads, no bundled software.
 

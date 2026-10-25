@@ -49,3 +49,23 @@ export function left(lang: Lang, digits: Digits, remainingBytes: number, bytesPe
 export function counted(lang: Lang, digits: Digits, key: string, n: number): string {
   return format(lang, key, { count: n }, digits);
 }
+
+/** «Last try» (#95): the time today, «yesterday» and the time, else the
+ * date; in the user's local time. `when`: RFC 3339. */
+export function lastTry(
+  lang: Lang,
+  digits: Digits,
+  when: string,
+  t: (key: string, args?: Record<string, string | number>) => string,
+  now: Date = new Date(),
+): string {
+  const at = new Date(when);
+  if (Number.isNaN(at.getTime())) return "";
+  const locale = `${lang}-u-nu-${digits}`;
+  const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(now) - day(at)) / 86_400_000);
+  if (days === 0) return time;
+  if (days === 1) return t("last-try-yesterday", { time });
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }).format(at);
+}
