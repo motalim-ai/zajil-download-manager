@@ -3,6 +3,7 @@
   import Icon from "./Icon.svelte";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
+  import FileName from "./FileName.svelte";
   import { probeSentence, sizeText } from "../probeText";
   import type { ProbeView } from "../bindings/ProbeView";
   import type { AddRequest } from "../bindings/AddRequest";
@@ -125,10 +126,12 @@
           </button>
         </div>
 
-        <label class="label" for="add-name">{locale.t("add-file-name")}</label>
-        <!-- The name it is saved under; editable once zajil-core keeps one
-             (#103). -->
-        <input id="add-name" class="value name" readonly value={probe.name} dir="auto" title={probe.name} />
+        <span class="label" id="add-name-label">{locale.t("add-file-name")}</span>
+        <!-- The name it is saved under, with the names' bidi rule
+             (fname.ts); editable once zajil-core keeps one (#103). -->
+        <div class="value name" role="textbox" aria-readonly="true" aria-labelledby="add-name-label" tabindex="0">
+          <span class="text"><FileName name={probe.name} /></span>
+        </div>
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
@@ -256,11 +259,13 @@
     white-space: nowrap;
     min-width: 0;
   }
+  /* Never narrower than a few letters, whatever the row does (the
+     owner's test: the name came out empty). */
   .name {
-    font: inherit;
-    color: var(--ink);
-    text-overflow: ellipsis;
-    outline: none;
+    min-width: 8ch;
+  }
+  .name .text {
+    flex: 1;
   }
   .page {
     display: flex;

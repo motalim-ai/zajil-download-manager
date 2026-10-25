@@ -654,7 +654,25 @@
       const said = refreshText(locale.t, locale.lang, locale.digits, problem);
       refreshing = { id: 6, name: details.download.name, problem: said.text, detail: null, busy: false };
     }
-    if (screen === "add")
+    // Dark: a Google Drive link as the owner tried it (a web page, no
+    // size, the link's last part as its name), to see its warning, name
+    // and size in words; light: an ordinary file.
+    if (screen === "add" && theme === "dark")
+      addScene = {
+        url: "https://drive.google.com/uc?export=download&id=1AbC",
+        probe: {
+          name: "download",
+          size: null,
+          resumable: false,
+          ranges: false,
+          category: null,
+          category_site: null,
+          category_extension: null,
+          folder: "~/Downloads",
+          page: true,
+        },
+      };
+    else if (screen === "add")
       addScene = {
         url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
         probe: {

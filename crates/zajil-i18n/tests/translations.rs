@@ -721,6 +721,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("add-probe-ranges", &["size"]),
     ("add-probe-single", &["size"]),
     ("add-probe-unsure", &["size"]),
+    ("add-probe-unsure-no-size", &["size"]),
     ("connections-count", &["count"]),
     ("details-part", &["number"]),
     ("details-connections-value", &["active", "total"]),
@@ -849,6 +850,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         en: (
             &[("size", "SIZE")],
             "SIZE. The server allows ranges but gives no size, or no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.",
+        ),
+    },
+    Whole {
+        key: "add-probe-unsure-no-size",
+        ar: (
+            &[("size", "SIZE")],
+            "SIZE. السيرفر يدعم التقسيم، لكنه لا يعطي ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.",
+        ),
+        en: (
+            &[("size", "SIZE")],
+            "SIZE. The server allows ranges but gives no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.",
         ),
     },
     Whole {

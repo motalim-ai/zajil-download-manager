@@ -14,6 +14,9 @@ export function sizeText(t: T, lang: Lang, digits: Digits, probe: Pick<ProbeView
 
 /** The sentence on how it downloads, starting with its size. */
 export function probeSentence(t: T, lang: Lang, digits: Digits, probe: Pick<ProbeView, "size" | "resumable" | "ranges">): string {
-  const key = probe.resumable ? "add-probe-ranges" : probe.ranges ? "add-probe-unsure" : "add-probe-single";
+  // With no size, the «unsure» sentence does not say the size is missing
+  // a second time.
+  const unsure = probe.size === null ? "add-probe-unsure-no-size" : "add-probe-unsure";
+  const key = probe.resumable ? "add-probe-ranges" : probe.ranges ? unsure : "add-probe-single";
   return t(key, { size: sizeText(t, lang, digits, probe) });
 }
