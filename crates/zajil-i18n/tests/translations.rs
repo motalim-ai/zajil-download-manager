@@ -160,6 +160,17 @@ const ARABIC: &[(&str, [&str; 6])] = &[
         ],
     ),
     (
+        "quit-question",
+        [
+            "لا تحميلات تعمل الآن. هل تُنهي زاجِل؟",
+            "يعمل الآن تحميل واحد. هل تُنهي زاجِل؟",
+            "يعمل الآن تحميلان. هل تُنهي زاجِل؟",
+            "يعمل الآن 3 تحميلات. هل تُنهي زاجِل؟",
+            "يعمل الآن 11 تحميلًا. هل تُنهي زاجِل؟",
+            "يعمل الآن 100 تحميل. هل تُنهي زاجِل؟",
+        ],
+    ),
+    (
         "connections-count",
         [
             "لا اتصالات",
@@ -284,6 +295,13 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
     ("downloads-count", ["1 download", "2 downloads"]),
+    (
+        "quit-question",
+        [
+            "1 download is running. Quit Zajil?",
+            "2 downloads are running. Quit Zajil?",
+        ],
+    ),
     ("import-done", ["1 download added.", "2 downloads added."]),
     ("connections-count", ["1 connection", "2 connections"]),
     ("queues-count", ["1 queue", "2 queues"]),
@@ -725,6 +743,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
+    ("quit-question", &["count"]),
     ("import-done", &["count"]),
     ("import-kept", &["names"]),
     ("files-count", &["count"]),
