@@ -238,12 +238,10 @@ pub fn run() {
             closing::watch(tauri_app.handle());
             tauri_app.add_capability(windows::PROGRESS_CAPABILITY)?;
             windows::close_with_main(tauri_app.handle());
-            // The schedule window's, the same way (`schedule.rs`).
+            // The schedule window's and the «download complete» windows'
+            // (`schedule.rs`, `complete.rs`); they close with the main one too.
             tauri_app.add_capability(schedule::CAPABILITY)?;
-            schedule::close_with_main(tauri_app.handle());
-            // The «download complete» windows', the same way (`complete.rs`).
             tauri_app.add_capability(complete::CAPABILITY)?;
-            complete::close_with_main(tauri_app.handle());
             #[cfg(feature = "ui-test")]
             if tauri_app.state::<ui_test::UiTest>().scenario.is_some() {
                 // Fixed demo data: nothing runs, so nothing to wait for.

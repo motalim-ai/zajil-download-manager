@@ -132,7 +132,7 @@ pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
         };
         let label = format!("{PREFIX}{id}");
         let page = format!("complete&id={id}");
-        if let Err(err) = crate::windows::open_page(&handle, &label, &page, &title, SIZE) {
+        if let Err(err) = crate::windows::open_beside_main(&handle, &label, &page, &title, SIZE) {
             eprintln!("zajil: the «download complete» window: {err}");
         }
     });
@@ -147,23 +147,6 @@ fn title(lang: zajil_core::settings::Language) -> String {
     zajil_i18n::Localizer::new(lang)
         .text("complete-title", &[])
         .unwrap_or_else(|_| "Download complete".to_owned())
-}
-
-/// The complete windows close with the main one, as the add windows do.
-pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
-    let Some(main) = handle.get_webview_window("main") else {
-        return;
-    };
-    let app = handle.clone();
-    main.on_window_event(move |event| {
-        if let tauri::WindowEvent::Destroyed = event {
-            for (label, window) in app.webview_windows() {
-                if label.starts_with(PREFIX) {
-                    let _ = window.close();
-                }
-            }
-        }
-    });
 }
 
 #[cfg(test)]

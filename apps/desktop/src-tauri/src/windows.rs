@@ -176,6 +176,38 @@ pub fn open_add_info<R: tauri::Runtime>(
 /// page says it in the user's language.
 pub const INFO_OPEN: &str = "info-open";
 
+/// Opens window `label` on `page` only while the main window is there and
+/// Zajil is not quitting: a window that Zajil opens by itself (a download
+/// finished) must not keep a quitting Zajil alive. Closing the main window
+/// ends Zajil once no window is left (the close tests on Windows, review
+/// of #137): a window that opened just after it would stop that. If the
+/// main window goes while this one opens, this one goes too.
+pub(crate) fn open_beside_main(
+    handle: &tauri::AppHandle,
+    label: &str,
+    page: &str,
+    title: &str,
+    size: (f64, f64),
+) -> tauri::Result<()> {
+    let main_is_up = |h: &tauri::AppHandle| {
+        h.get_webview_window("main").is_some()
+            && !h
+                .state::<App>()
+                .exiting
+                .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    if !main_is_up(handle) {
+        return Ok(());
+    }
+    open_page(handle, label, page, title, size)?;
+    if !main_is_up(handle)
+        && let Some(window) = handle.get_webview_window(label)
+    {
+        window.destroy()?;
+    }
+    Ok(())
+}
+
 /// The other windows close when the main one does: without it the program
 /// would go on with no main window to come back to (review of #104).
 pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
