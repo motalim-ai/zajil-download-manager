@@ -31,8 +31,8 @@ for bad in --enable-gpl --enable-nonfree --enable-version3 --enable-lib; do
   case "$conf" in *"$bad"*) fail "the distributed ffmpeg was built with $bad" ;; esac
 done
 license="$(run "$ff" -hide_banner -L)"
-printf '%s\n' "$license" | grep -q 'GNU Lesser General Public' || fail "ffmpeg -L does not say LGPL"
-printf '%s\n' "$license" | grep -q '^version 2.1 of the License, or (at your option) any later version.$' ||
+grep -q 'GNU Lesser General Public' <<< "$license" || fail "ffmpeg -L does not say LGPL"
+grep -q '^version 2.1 of the License, or (at your option) any later version.$' <<< "$license" ||
   fail "ffmpeg -L does not say LGPL version 2.1 or later"
 # The list after its legend (" V..... = Video" and so on).
 encoders="$(run "$ff" -hide_banner -encoders | awk '/^ -+$/ { body = 1; next } body { print $2 }' | sort | tr '\n' ' ')"

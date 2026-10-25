@@ -153,10 +153,12 @@ jobs:
             # Read first, and proved read: every Windows program imports
             # KERNEL32.dll, so a dump without it is a dump that failed.
             deps="$("$dump" -p "$f")"
-            printf '%s\n' "$deps" | grep -qiE 'DLL Name: KERNEL32\.dll' || {
+            # A here-string, not a pipe: `grep -q` stops at the first match,
+            # and a writer cut off then fails the pipe under pipefail.
+            grep -qiE 'DLL Name: KERNEL32\.dll' <<< "$deps" || {
               echo "::error::$dump could not read the imports of $f"; exit 1
             }
-            if printf '%s\n' "$deps" | grep -iE 'DLL Name: (lib|msys-)'; then
+            if grep -iE 'DLL Name: (lib|msys-)' <<< "$deps"; then
               echo "::error::$f needs a MinGW or MSYS2 DLL"; exit 1
             fi
           done
