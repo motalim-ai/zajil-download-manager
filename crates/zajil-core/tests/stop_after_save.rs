@@ -3,7 +3,7 @@
 //! resumes from the last save (a little is downloaded again) to the right
 //! file. Its own test binary: the save hook is global.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,16 +40,12 @@ fn count_saves(stop: Stop, at: usize) -> Arc<AtomicUsize> {
 }
 
 /// Resumes `state_file` and checks the file: the resume starts exactly at
-/// the bytes the state file counts, which are at most `progress` (the last
-/// progress seen before the stop), and the result is `data`.
-async fn resumes_from_the_last_save(
-    engine: &Engine,
-    state_file: &std::path::Path,
-    progress: u64,
-    data: &[u8],
-) {
+/// the bytes the state file counts, and the result is `data`. (Not
+/// compared with the last progress the test saw: a save counts every byte
+/// synced, also those whose progress event was not handled yet; CI run of
+/// #176: 180000 on disk, 100000 seen.)
+async fn resumes_from_the_last_save(engine: &Engine, state_file: &std::path::Path, data: &[u8]) {
     let on_disk = DownloadState::load(state_file).unwrap().bytes_done();
-    assert!(on_disk <= progress, "{on_disk} on disk, {progress} seen");
     let from = Arc::new(Mutex::new(None));
     let seen = from.clone();
     let done = engine
@@ -82,15 +78,9 @@ async fn stops_after_a_save_without_saving_again(connections: usize, seed: u64) 
     // Save 1 is the new download's own; 2 and 3 are periodic.
     let saves = count_saves(stop.clone(), 3);
     let engine = engine(connections, Duration::from_millis(150), 1024 * KIB);
-    let progress = Arc::new(AtomicU64::new(0));
-    let last = progress.clone();
 
     let err = engine
-        .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| {
-            if let Event::Progress { done, .. } = e {
-                last.store(done, Ordering::SeqCst);
-            }
-        })
+        .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |_| {})
         .await
         .unwrap_err();
     test_hooks::set_after_temporary_written(None);
@@ -102,7 +92,7 @@ async fn stops_after_a_save_without_saving_again(connections: usize, seed: u64) 
     };
     // No save after the stop.
     assert_eq!(saves.load(Ordering::SeqCst), 3);
-    resumes_from_the_last_save(&engine, &state_file, progress.load(Ordering::SeqCst), &data).await;
+    resumes_from_the_last_save(&engine, &state_file, &data).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -138,28 +128,20 @@ async fn a_split_after_the_last_save_is_resumed_from_the_coarser_segments() {
     let engine = engine(4, Duration::from_millis(400), 64 * KIB);
     let splits = Arc::new(AtomicUsize::new(0));
     let at_stop = Arc::new(AtomicUsize::new(usize::MAX));
-    let progress = Arc::new(AtomicU64::new(0));
-    let (asked, counted, split_count, marker, last) = (
-        stop.clone(),
-        saves.clone(),
-        splits.clone(),
-        at_stop.clone(),
-        progress.clone(),
-    );
+    let (asked, counted, split_count, marker) =
+        (stop.clone(), saves.clone(), splits.clone(), at_stop.clone());
 
     let err = engine
-        .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| match e {
-            Event::Progress { done, .. } => last.store(done, Ordering::SeqCst),
+        .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| {
             // The first split once a periodic save is on disk: stop now,
             // so the split is newer than the last save.
-            Event::Split { .. } => {
+            if let Event::Split { .. } = e {
                 split_count.fetch_add(1, Ordering::SeqCst);
                 if counted.load(Ordering::SeqCst) >= 2 && !asked.is_requested() {
                     marker.store(counted.load(Ordering::SeqCst), Ordering::SeqCst);
                     asked.request();
                 }
             }
-            _ => {}
         })
         .await
         .unwrap_err();
@@ -182,7 +164,7 @@ async fn a_split_after_the_last_save_is_resumed_from_the_coarser_segments() {
         "the newest split is on disk: {} segments",
         on_disk.segments.len()
     );
-    resumes_from_the_last_save(&engine, &state_file, progress.load(Ordering::SeqCst), &data).await;
+    resumes_from_the_last_save(&engine, &state_file, &data).await;
 }
 
 /// Before any periodic save, a stop still saves what is on disk, as before:
@@ -199,22 +181,16 @@ async fn a_stop_before_any_periodic_save_saves_once() {
         let saves = count_saves(Stop::new(), usize::MAX);
         let engine = engine(connections, Duration::from_secs(60), 1024 * KIB);
         let at_stop = Arc::new(AtomicUsize::new(usize::MAX));
-        let progress = Arc::new(AtomicU64::new(0));
-        let (asked, counted, marker, last) = (
-            stop.clone(),
-            saves.clone(),
-            at_stop.clone(),
-            progress.clone(),
-        );
+        let (asked, counted, marker) = (stop.clone(), saves.clone(), at_stop.clone());
 
         let err = engine
             .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| {
-                if let Event::Progress { done, .. } = e {
-                    last.store(done, Ordering::SeqCst);
-                    if done > 0 && !asked.is_requested() {
-                        marker.store(counted.load(Ordering::SeqCst), Ordering::SeqCst);
-                        asked.request();
-                    }
+                if let Event::Progress { done, .. } = e
+                    && done > 0
+                    && !asked.is_requested()
+                {
+                    marker.store(counted.load(Ordering::SeqCst), Ordering::SeqCst);
+                    asked.request();
                 }
             })
             .await
@@ -231,7 +207,6 @@ async fn a_stop_before_any_periodic_save_saves_once() {
             at_stop.load(Ordering::SeqCst) + 1,
             "{connections}: the stop saved once"
         );
-        resumes_from_the_last_save(&engine, &state_file, progress.load(Ordering::SeqCst), &data)
-            .await;
+        resumes_from_the_last_save(&engine, &state_file, &data).await;
     }
 }
