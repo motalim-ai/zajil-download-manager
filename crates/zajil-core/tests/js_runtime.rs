@@ -191,10 +191,11 @@ fn a_runtime_behind_a_link_is_checked_and_named_at_its_real_place() {
     );
 }
 
-/// #180: a runtime file held open for writing for a moment (as a process
-/// that forks while it is being written holds it, on Linux: «text file
-/// busy») is still found once it is free, not taken for missing. Elsewhere
-/// the file runs at once; the test holds there too.
+/// #180: a runtime file held open for writing for a moment is still found
+/// once it is free, not taken for missing: «text file busy» on Linux (as a
+/// process that forks while it is being written holds it), a sharing
+/// violation on Windows. On macOS the file runs at once; the test holds
+/// there too.
 #[test]
 fn a_runtime_busy_for_a_moment_is_still_found() {
     let (dir, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

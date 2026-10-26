@@ -103,17 +103,22 @@ fn version_of(program: &Path) -> Option<(u64, u64)> {
         }
         command
     };
-    // «Text file busy» (Linux, ETXTBSY): a file that some process holds
-    // open for writing cannot be run. A file just written (a runtime just
-    // installed, a test's stand-in) can be held that way for an instant by
-    // any process that forks meanwhile, until its child runs its own
-    // program (#180). Tried again a few times, 20 ms apart; any other
-    // failure is final.
+    // A file that some process holds open for writing cannot be run:
+    // «text file busy» on Linux (ETXTBSY), a sharing violation on Windows
+    // (error 32). A file just written (a runtime just installed, a test's
+    // stand-in) can be held that way for a moment: on Linux by any process
+    // that forks meanwhile, until its child runs its own program (#180); on
+    // Windows by whoever wrote or scans it. Tried again a few times, 20 ms
+    // apart; any other failure is final.
+    let busy = |err: &std::io::Error| {
+        err.kind() == std::io::ErrorKind::ExecutableFileBusy
+            || (cfg!(windows) && err.raw_os_error() == Some(32))
+    };
     let mut tries = 0;
     let mut tree = loop {
         match zajil_platform::process::spawn(command()) {
             Ok(tree) => break tree,
-            Err(err) if err.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 25 => {
+            Err(err) if busy(&err) && tries < 25 => {
                 tries += 1;
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
