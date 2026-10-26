@@ -86,6 +86,11 @@ pub struct Pinned {
 const YT_DLP_PINS: &str = include_str!("../../../tools/yt-dlp/pins.txt");
 /// The pinned QuickJS-NG (`tools/quickjs/pins.txt`), in the same form.
 const QUICKJS_PINS: &str = include_str!("../../../tools/quickjs/pins.txt");
+/// Zajil's own FFmpeg build (`tools/ffmpeg/pins-ffmpeg.txt` and
+/// `pins-ffprobe.txt`), in the same form, from the `tools-ffmpeg-<version>`
+/// release of this repository. Both name one version: they share a folder.
+const FFMPEG_PINS: &str = include_str!("../../../tools/ffmpeg/pins-ffmpeg.txt");
+const FFPROBE_PINS: &str = include_str!("../../../tools/ffmpeg/pins-ffprobe.txt");
 
 /// A pins file: one version, and the file and SHA-256 of each target.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +192,17 @@ fn quickjs_pins() -> &'static PinsFile {
     PINS.get_or_init(|| parse_pins(QUICKJS_PINS).expect("tools/quickjs/pins.txt is valid"))
 }
 
+/// This build's ffmpeg and ffprobe pins (checked by a test, like yt-dlp's).
+fn ffmpeg_pins() -> &'static PinsFile {
+    static PINS: std::sync::OnceLock<PinsFile> = std::sync::OnceLock::new();
+    PINS.get_or_init(|| parse_pins(FFMPEG_PINS).expect("tools/ffmpeg/pins-ffmpeg.txt is valid"))
+}
+
+fn ffprobe_pins() -> &'static PinsFile {
+    static PINS: std::sync::OnceLock<PinsFile> = std::sync::OnceLock::new();
+    PINS.get_or_init(|| parse_pins(FFPROBE_PINS).expect("tools/ffmpeg/pins-ffprobe.txt is valid"))
+}
+
 /// The pinned version of yt-dlp.
 pub fn yt_dlp_version() -> &'static str {
     &yt_dlp_pins().version
@@ -207,8 +223,13 @@ fn target_name(target: Target) -> String {
 }
 
 /// The pinned file of `pins` for `target`, if it has one, from the GitHub
-/// releases of `repository`.
-fn from_pins(pins: &PinsFile, repository: &str, target: Target) -> Option<Pinned> {
+/// releases of `repository`, under the tag `<tag_prefix><version>`.
+fn from_pins(
+    pins: &PinsFile,
+    repository: &str,
+    tag_prefix: &str,
+    target: Target,
+) -> Option<Pinned> {
     let wanted = target_name(target);
     let version = &pins.version;
     pins.files
@@ -216,10 +237,15 @@ fn from_pins(pins: &PinsFile, repository: &str, target: Target) -> Option<Pinned
         .find(|(t, _, _)| *t == wanted)
         .map(|(_, file, sha256)| Pinned {
             version: version.clone(),
-            url: format!("https://github.com/{repository}/releases/download/{version}/{file}"),
+            url: format!(
+                "https://github.com/{repository}/releases/download/{tag_prefix}{version}/{file}"
+            ),
             sha256: sha256.clone(),
         })
 }
+
+/// Where Zajil's FFmpeg build is released (.github/workflows/ffmpeg-release.yml).
+const FFMPEG_REPOSITORY: &str = "motalim-ai/zajil-download-manager";
 
 /// What a [`Toolbox`] downloads: a tool and a target to the pinned file,
 /// or `None` while that file is not released yet.
@@ -228,11 +254,10 @@ pub type Pins = dyn Fn(Tool, Target) -> Option<Pinned> + Send + Sync;
 /// The files pinned in this build of Zajil.
 pub fn pinned(tool: Tool, target: Target) -> Option<Pinned> {
     match tool {
-        Tool::YtDlp => from_pins(yt_dlp_pins(), "yt-dlp/yt-dlp", target),
-        Tool::QuickJs => from_pins(quickjs_pins(), "quickjs-ng/quickjs", target),
-        // Pinned once the first tools-ffmpeg release is published by
-        // .github/workflows/ffmpeg.yml.
-        Tool::Ffmpeg | Tool::Ffprobe => None,
+        Tool::YtDlp => from_pins(yt_dlp_pins(), "yt-dlp/yt-dlp", "", target),
+        Tool::QuickJs => from_pins(quickjs_pins(), "quickjs-ng/quickjs", "", target),
+        Tool::Ffmpeg => from_pins(ffmpeg_pins(), FFMPEG_REPOSITORY, "tools-ffmpeg-", target),
+        Tool::Ffprobe => from_pins(ffprobe_pins(), FFMPEG_REPOSITORY, "tools-ffmpeg-", target),
     }
 }
 
@@ -653,10 +678,79 @@ mod tests {
 
     #[test]
     fn this_build_s_pins_files_are_valid() {
-        for text in [YT_DLP_PINS, QUICKJS_PINS] {
+        for text in [YT_DLP_PINS, QUICKJS_PINS, FFMPEG_PINS, FFPROBE_PINS] {
             let pins = parse_pins(text).unwrap();
             assert_eq!(pins.files.len(), KNOWN_TARGETS.len());
         }
+    }
+
+    /// Zajil's FFmpeg build: every target, from this repository's
+    /// `tools-ffmpeg-<version>` release; ffmpeg and ffprobe of one version
+    /// (they share a folder); both Macs the universal file; each file named
+    /// as the release names it. The version is FFmpeg's and a build number,
+    /// never newer than source.env: a new source.env comes first, then its
+    /// release (tagged on main), then its pins (review of #164).
+    #[test]
+    fn every_target_has_our_ffmpeg_and_ffprobe_of_one_version() {
+        let source = include_str!("../../../tools/ffmpeg/source.env")
+            .lines()
+            .find_map(|l| l.strip_prefix("FFMPEG_VERSION="))
+            .unwrap();
+        let version = &ffmpeg_pins().version;
+        assert_eq!(&ffprobe_pins().version, version);
+        let numbers = |v: &str| -> Vec<u32> { v.split('.').map(|n| n.parse().unwrap()).collect() };
+        let (ffmpeg, build) = version.rsplit_once('-').expect("<ffmpeg version>-<build>");
+        assert!(build.parse::<u32>().is_ok(), "{version}");
+        assert_eq!(numbers(ffmpeg).len(), 3, "{version}");
+        assert!(
+            numbers(ffmpeg) <= numbers(source),
+            "{version} is newer than {source}"
+        );
+        for tool in [Tool::Ffmpeg, Tool::Ffprobe] {
+            for os in [Os::Windows, Os::Macos, Os::Linux] {
+                for arch in [Arch::X86_64, Arch::Aarch64] {
+                    let target = Target { os, arch };
+                    let pin = pinned(tool, target).expect("a pin for every target");
+                    assert_eq!(&pin.version, version);
+                    let file = match os {
+                        Os::Windows => format!("{tool}-{}.exe", target_name(target)),
+                        Os::Macos => format!("{tool}-macos-universal"),
+                        Os::Linux => format!("{tool}-{}", target_name(target)),
+                    };
+                    assert_eq!(
+                        pin.url,
+                        format!(
+                            "https://github.com/motalim-ai/zajil-download-manager/releases/download/tools-ffmpeg-{version}/{file}"
+                        )
+                    );
+                }
+            }
+        }
+        // The FFmpeg notice links the source of the build Zajil downloads
+        // (ADR-0009, LGPL checklist, item 9).
+        let release = format!("releases/tag/tools-ffmpeg-{version})");
+        assert!(
+            include_str!("../../../README.md").contains(&release),
+            "README.md: {release}"
+        );
+        let mac = |tool, arch| {
+            pinned(
+                tool,
+                Target {
+                    os: Os::Macos,
+                    arch,
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            mac(Tool::Ffmpeg, Arch::X86_64),
+            mac(Tool::Ffmpeg, Arch::Aarch64)
+        );
+        assert_ne!(
+            mac(Tool::Ffmpeg, Arch::X86_64),
+            mac(Tool::Ffprobe, Arch::X86_64)
+        );
     }
 
     #[test]

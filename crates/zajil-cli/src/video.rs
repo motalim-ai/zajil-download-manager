@@ -306,14 +306,15 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool) -> ExitCode {
     }
     // Every tool needs a released file for this system before anything is
     // downloaded: yt-dlp alone (about 35 MB) is of no use without FFmpeg
-    // (review of #128). Until FFmpeg's release is pinned, nothing comes.
+    // (review of #128). Every tool is pinned for every target this build
+    // knows; on another system, nothing comes.
     let unavailable: Vec<String> = Tool::ALL
         .into_iter()
         .filter_map(|tool| toolbox.path(tool).err().map(|err| format!("{tool}: {err}")))
         .collect();
     if !unavailable.is_empty() {
         return crate::fail(&format!(
-            "video downloads are not available in this build yet ({}); nothing was downloaded",
+            "video downloads are not available on this system ({}); nothing was downloaded",
             unavailable.join("; ")
         ));
     }

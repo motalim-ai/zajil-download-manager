@@ -58,6 +58,10 @@
 
 زاجِل برنامج حر بترخيص [GPL-3.0-or-later](LICENSE).
 
+لتحميل الفيديو، ينزّل زاجِل بموافقتك ffmpeg وffprobe من بنائه الخاص لمشروع FFmpeg. FFmpeg ملك أصحابه ([ffmpeg.org](https://ffmpeg.org))، وترخيصه LGPL 2.1 أو أحدث، ومصدر النسخة التي ينزّلها زاجِل وطريقة بنائها في [إصدار tools-ffmpeg-8.1.3-1](https://github.com/motalim-ai/zajil-download-manager/releases/tag/tools-ffmpeg-8.1.3-1).
+
+This software uses code of [FFmpeg](https://ffmpeg.org) licensed under the [LGPLv2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html) and its source can be downloaded [here](https://github.com/motalim-ai/zajil-download-manager/releases/tag/tools-ffmpeg-8.1.3-1).
+
 ## تنبيه
 
 زاجِل مشروع مستقل، ولا علاقة له بشركة Tonec ولا ببرنامج Internet Download Manager (IDM). كُتب من الصفر، اعتمادًا على المعايير المنشورة ووثائق المتصفحات الرسمية فقط. التفاصيل في [قاعدة الغرفة النظيفة](CONTRIBUTING.md#قاعدة-الغرفة-النظيفة).

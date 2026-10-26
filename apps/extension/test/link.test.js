@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answer, instanceId, keepTickets, MAX_RETRY_MS, NEW_TICKET_MS, openTicket, plainStore, rememberTicket, TICKET_DAYS, startLink } from "../src/link.js";
+import { answer, forgetTicket, instanceId, keepTickets, MAX_RETRY_MS, NEW_TICKET_MS, openTicket, plainStore, rememberTicket, TICKET_DAYS, startLink } from "../src/link.js";
 
 /** A fake browser: `storage.local`, the cookie permission, the cookie
  * jar (by store), and native ports. */
@@ -63,6 +63,31 @@ describe("the link to Zajil (M5)", () => {
     expect((await answer(api, wanted({ ticket: "t-2", store: "firefox-container-1" }))).cookies).toBeNull();
     expect((await answer(api, wanted({ store: "firefox-private" }))).cookies).toBeNull();
     expect(reads).toHaveLength(1);
+  });
+
+  it("answers for a Drive link's download address, and no other site (owner's decision)", async () => {
+    const { api, reads } = fake();
+    const id = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+    await rememberTicket(api, "t-1", `https://drive.google.com/file/d/${id}/view`, undefined);
+    const file = `https://drive.usercontent.google.com/download?id=${id}&export=download`;
+    // Drive's download address, for the Drive link's ticket: its own cookies.
+    expect((await answer(api, wanted({ url: file }))).cookies).toBe("sid=default");
+    expect(reads).toEqual([{ url: file }]);
+    // Another Google host, or another site: none.
+    expect((await answer(api, wanted({ url: "https://mail.google.com/x" }))).cookies).toBeNull();
+    expect((await answer(api, wanted({ url: "https://files.example.com/a.zip" }))).cookies).toBeNull();
+    // A ticket of another site never opens Drive's download address.
+    await rememberTicket(api, "t-2", "https://files.example.com/a.zip", undefined);
+    expect((await answer(api, wanted({ url: file, ticket: "t-2" }))).cookies).toBeNull();
+    expect(reads).toHaveLength(1);
+  });
+
+  it("forgets a ticket whose download Zajil did not take", async () => {
+    const { api } = fake();
+    await rememberTicket(api, "t-1", "https://files.example.com/a.zip", undefined);
+    await forgetTicket(api, "t-1");
+    expect(await openTicket(api, "t-1", "https://files.example.com/a.zip", undefined)).toBe(false);
+    await forgetTicket(api, "never");
   });
 
   it("forgets a download Zajil says is done or removed, at once", async () => {

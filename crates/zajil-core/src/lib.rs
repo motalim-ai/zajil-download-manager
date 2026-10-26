@@ -8,6 +8,7 @@
 pub mod browser;
 pub mod category;
 pub mod clipboard;
+pub mod drive;
 mod engine;
 mod http_date;
 pub mod limit;

@@ -31,12 +31,9 @@ fn the_tools_status_says_what_is_missing() {
     let out = zajil(data.path(), &["video", "tools"]);
     assert!(out.status.success(), "{}", printed(&out));
     let text = printed(&out);
-    assert!(text.contains("yt-dlp: not downloaded"), "{text}");
-    for tool in ["ffmpeg", "ffprobe"] {
-        assert!(
-            text.lines().any(|l| l.starts_with(&format!("{tool}: "))),
-            "{text}"
-        );
+    // Every tool is pinned for this system: each one can be downloaded.
+    for tool in ["yt-dlp", "ffmpeg", "ffprobe"] {
+        assert!(text.contains(&format!("{tool}: not downloaded")), "{text}");
     }
 }
 
@@ -50,24 +47,6 @@ fn nothing_is_downloaded_without_a_yes() {
     let text = printed(&out);
     assert!(text.contains("yt-dlp") && text.contains("LGPL"), "{text}");
     assert!(text.contains("--yes"), "{text}");
-    assert!(!data.path().join("tools").join("yt-dlp").exists());
-}
-
-/// Review of #128: while FFmpeg has no released file pinned for this
-/// system, a yes downloads nothing at all, not even yt-dlp (which is of no
-/// use alone). When FFmpeg is pinned, this test must change to expect the
-/// download (it then needs the network, so it moves to the real tests).
-#[test]
-fn a_yes_downloads_nothing_while_a_tool_has_no_released_file() {
-    let data = tempfile::tempdir().unwrap();
-    let out = zajil(data.path(), &["video", "tools", "install", "--yes"]);
-    assert_eq!(out.status.code(), Some(1), "{}", printed(&out));
-    let text = printed(&out);
-    assert!(
-        text.contains("video downloads are not available in this build yet"),
-        "{text}"
-    );
-    assert!(text.contains("nothing was downloaded"), "{text}");
     assert!(!data.path().join("tools").join("yt-dlp").exists());
 }
 

@@ -16,7 +16,11 @@ use reqwest::{RequestBuilder, Url};
 /// one, and nothing from https to http (review of #74).
 #[derive(Clone, Default)]
 pub struct FromBrowser {
-    cookie: Option<(Origin, HeaderValue)>,
+    /// Each origin's cookies, as the browser gave them for an address of
+    /// that origin: the download's, and its file's download address when
+    /// it is another of the same site (a Google Drive link, owner's
+    /// decision: never another site's).
+    cookies: Vec<(Origin, HeaderValue)>,
     referer: Option<Url>,
 }
 
@@ -36,16 +40,7 @@ impl FromBrowser {
     /// page `referrer`. Values a header cannot hold (control characters…)
     /// are left out, as is anything for a URL that does not parse.
     pub fn new(url: &str, cookies: Option<&str>, referrer: Option<&str>) -> Self {
-        let origin = Url::parse(url).ok().as_ref().and_then(origin);
-        let cookie = match (origin, cookies) {
-            (Some(origin), Some(cookies)) if !cookies.is_empty() => {
-                HeaderValue::from_str(cookies).ok().map(|mut value| {
-                    value.set_sensitive(true);
-                    (origin, value)
-                })
-            }
-            _ => None,
-        };
+        let cookies = cookie_for(url, cookies).into_iter().collect();
         let referer = referrer
             .and_then(|r| Url::parse(r).ok())
             .filter(|r| matches!(r.scheme(), "http" | "https") && r.host_str().is_some())
@@ -56,19 +51,34 @@ impl FromBrowser {
                 r.set_fragment(None);
                 r
             });
-        FromBrowser { cookie, referer }
+        FromBrowser { cookies, referer }
+    }
+
+    /// These headers, and the `cookies` the browser has for `url` as well,
+    /// for `url`'s origin only (its file's download address). An origin
+    /// that has its cookies already keeps them.
+    pub fn and_cookies_for(mut self, url: &str, cookies: Option<&str>) -> Self {
+        if let Some((origin, value)) = cookie_for(url, cookies)
+            && !self.cookies.iter().any(|(o, _)| *o == origin)
+        {
+            self.cookies.push((origin, value));
+        }
+        self
     }
 
     /// Whether there are cookies to send.
     pub fn has_cookies(&self) -> bool {
-        self.cookie.is_some()
+        !self.cookies.is_empty()
     }
 
     /// `request`, to `url`, with these headers: the cookies only when `url`
     /// is of their origin.
     pub(crate) fn apply(&self, url: &Url, mut request: RequestBuilder) -> RequestBuilder {
-        if let Some((theirs, cookie)) = &self.cookie
-            && origin(url).as_ref() == Some(theirs)
+        let to = origin(url);
+        if let Some((_, cookie)) = self
+            .cookies
+            .iter()
+            .find(|(theirs, _)| to.as_ref() == Some(theirs))
         {
             request = request.header(header::COOKIE, cookie.clone());
         }
@@ -81,6 +91,15 @@ impl FromBrowser {
         }
         request
     }
+}
+
+/// `cookies` (a `Cookie` header) for `url`'s origin, if both are good.
+fn cookie_for(url: &str, cookies: Option<&str>) -> Option<(Origin, HeaderValue)> {
+    let origin = Url::parse(url).ok().as_ref().and_then(origin)?;
+    let cookies = cookies.filter(|c| !c.is_empty())?;
+    let mut value = HeaderValue::from_str(cookies).ok()?;
+    value.set_sensitive(true);
+    Some((origin, value))
 }
 
 /// What `strict-origin-when-cross-origin` sends as the `Referer` of `page`
@@ -101,7 +120,7 @@ fn referer_for(page: &Url, to: &Url) -> Option<HeaderValue> {
 impl std::fmt::Debug for FromBrowser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FromBrowser")
-            .field("cookie", &self.cookie.as_ref().map(|_| "[hidden]"))
+            .field("cookies", &format!("[{} hidden]", self.cookies.len()))
             .field("referer", &self.referer)
             .finish()
     }
@@ -110,6 +129,50 @@ impl std::fmt::Debug for FromBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each origin's cookies go to that origin only: the download's to it,
+    /// its file's download address's to that address, none elsewhere.
+    #[test]
+    fn each_origin_gets_its_own_cookies_only() {
+        let from = FromBrowser::new(
+            "https://drive.google.com/file/d/X/view",
+            Some("a=PAGE"),
+            None,
+        )
+        .and_cookies_for(
+            "https://drive.usercontent.google.com/download?id=X",
+            Some("b=FILE"),
+        )
+        // An origin that has its cookies keeps them.
+        .and_cookies_for("https://drive.google.com/other", Some("c=LATER"));
+        let sent = |to: &str| {
+            // As the engine's client: its TLS provider first.
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            let client = reqwest::Client::builder()
+                .tls_backend_rustls()
+                .build()
+                .unwrap();
+            let request = from
+                .apply(&Url::parse(to).unwrap(), client.get(to))
+                .build()
+                .unwrap();
+            request
+                .headers()
+                .get(header::COOKIE)
+                .map(|v| v.to_str().unwrap().to_owned())
+        };
+        assert_eq!(
+            sent("https://drive.google.com/x").as_deref(),
+            Some("a=PAGE")
+        );
+        assert_eq!(
+            sent("https://drive.usercontent.google.com/download?id=X").as_deref(),
+            Some("b=FILE")
+        );
+        assert_eq!(sent("https://example.com/x"), None);
+        assert_eq!(sent("http://drive.google.com/x"), None);
+        assert!(!format!("{from:?}").contains("FILE"));
+    }
 
     #[test]
     fn the_cookies_are_never_shown() {

@@ -436,6 +436,14 @@ pub enum Error {
     /// [`Engine::holding`] holds.
     #[error("{0} can run code: it waits for you to start it")]
     Held(String),
+    /// Google Drive answered with a page, not the file, and the page gave
+    /// no link to it: the file is not shared with everyone, is over its
+    /// download limit, or is not a file. Nothing was made.
+    #[error(
+        "Google Drive answered with a page, not the file: it may not be shared with everyone, \
+         or it was downloaded too many times today; open it in the browser"
+    )]
+    DrivePage,
     /// "Refresh the link": the new link is not the same file (M5).
     #[error("the new link is not the same file: {0}")]
     NotTheSameFile(Mismatch),
@@ -472,6 +480,8 @@ pub struct Engine {
     /// The name a new download is saved under instead of the server's
     /// (the user's, M5.5, #103). `None`: the server's.
     name: Option<String>,
+    /// Where Google Drive's links and downloads are.
+    drive: Arc<crate::drive::DriveSite>,
 }
 
 /// What [`Engine::holding`] checks a new download's names with.
@@ -498,6 +508,7 @@ impl Engine {
             hold: None,
             own_limit: None,
             name: None,
+            drive: Arc::default(),
         })
     }
 
@@ -517,7 +528,21 @@ impl Engine {
             hold: None,
             own_limit: None,
             name: None,
+            drive: Arc::default(),
         })
+    }
+
+    /// **Test builds only.** This engine, taking `links` for Google
+    /// Drive's files' pages and `download` for its download address (a
+    /// local test server's).
+    #[cfg(feature = "test-support")]
+    pub fn with_test_drive(&self, links: &str, download: &str) -> Engine {
+        let mut engine = self.clone();
+        engine.drive = Arc::new(crate::drive::DriveSite::new(
+            Url::parse(links).expect("a valid URL"),
+            Url::parse(download).expect("a valid URL"),
+        ));
+        engine
     }
 
     /// This engine, with `limit` shared by all its downloads (and those of
@@ -1180,6 +1205,11 @@ impl Engine {
                     split: attempt.split && reason != RestartReason::FileChanged,
                     ..attempt
                 };
+                // A page Drive answered a connection with (its file was
+                // downloaded too often, its link expired) is not the file:
+                // start over through `get`, which follows or refuses it.
+                let response =
+                    response.filter(|r| !(is_bare_page(r) && self.is_drive_download(&old)));
                 match response {
                     Some(response) => {
                         on_event(Event::Restarted { reason });
@@ -1587,8 +1617,53 @@ impl Engine {
     }
 
     /// GETs `url`; with `range`, only bytes `from` to `to` (or to the end)
-    /// and only if the file still matches `If-Range`.
+    /// and only if the file still matches `If-Range`. A Google Drive
+    /// file's page is asked for at its download address, and the page
+    /// Drive answers a large file with is followed to its link, once (see
+    /// [`crate::drive`]). Any other page that comes for Drive's address
+    /// (a sign-in page it redirects a private file to, a page saying the
+    /// file was downloaded too often) is [`Error::DrivePage`]: never the
+    /// file.
     async fn get(
+        &self,
+        url: Url,
+        range: Option<(u64, Option<u64>, String)>,
+    ) -> Result<Response, Error> {
+        let url = self.drive.direct_link(&url).unwrap_or(url);
+        let response = self.send(url.clone(), range.clone()).await?;
+        // Only what is asked of Drive's download address is Drive's: a page
+        // from anywhere else is the page the user asked for.
+        if !(self.drive.is_download(&url) && is_bare_page(&response)) {
+            return Ok(response);
+        }
+        // Drive's own page, at its own address, may lead to the file;
+        // one it redirected to elsewhere (a sign-in page) never does.
+        if !self.drive.is_download(response.url()) {
+            return Err(Error::DrivePage);
+        }
+        let page_url = response.url().clone();
+        let page = read_page(response, crate::drive::MAX_PAGE_BYTES).await?;
+        let link = page
+            .and_then(|page| self.drive.confirmed_link(&page, &page_url, &url))
+            .ok_or(Error::DrivePage)?;
+        let response = self.send(link, range).await?;
+        if is_bare_page(&response) {
+            return Err(Error::DrivePage);
+        }
+        Ok(response)
+    }
+
+    /// Whether `state` is a Google Drive download: its link is a file's
+    /// page or its download address, or its file came from there.
+    fn is_drive_download(&self, state: &DownloadState) -> bool {
+        [&state.url, &state.final_url].iter().any(|u| {
+            Url::parse(u)
+                .is_ok_and(|u| self.drive.direct_link(&u).is_some() || self.drive.is_download(&u))
+        })
+    }
+
+    /// One GET of `url`, as it is.
+    async fn send(
         &self,
         url: Url,
         range: Option<(u64, Option<u64>, String)>,
@@ -2220,6 +2295,38 @@ fn response_name(response: &Response) -> String {
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok());
     with_type_extension(name, content_type)
+}
+
+/// A web page sent as a page (`200`, `text/html` or
+/// `application/xhtml+xml`, without `Content-Disposition`), not as a file:
+/// a file, an `.html` one too, comes with `Content-Disposition` from Drive.
+fn is_bare_page(response: &Response) -> bool {
+    let page = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|t| is_page_type(&t.trim().to_ascii_lowercase()));
+    response.status() == StatusCode::OK
+        && page
+        && !response.headers().contains_key(header::CONTENT_DISPOSITION)
+}
+
+/// The text of a page of at most `limit` bytes; `None` when it is larger
+/// or not text.
+async fn read_page(mut response: Response, limit: usize) -> Result<Option<String>, Error> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| Error::Http(without_secrets(err)))?
+    {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8(body).ok())
 }
 
 /// The first state for a whole-file response. `had_credentials`: the URL
