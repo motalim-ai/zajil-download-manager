@@ -551,7 +551,9 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::open_release_page,
         complete::drag_out,
         ui_test::ui_test_scenario,
-        ui_test::ui_test_report
+        ui_test::ui_test_report,
+        ui_test::ui_test_windows,
+        ui_test::ui_test_loaded
     ]
 }
 
@@ -4041,8 +4043,13 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        for cmd in ["ui_test_scenario", "ui_test_report"] {
-            let body = serde_json::json!({ "report": {} });
+        for cmd in [
+            "ui_test_scenario",
+            "ui_test_report",
+            "ui_test_windows",
+            "ui_test_loaded",
+        ] {
+            let body = serde_json::json!({ "report": {}, "label": "main" });
             let answer = tauri::test::get_ipc_response(
                 &webview,
                 tauri::webview::InvokeRequest {
