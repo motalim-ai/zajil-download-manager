@@ -191,6 +191,36 @@ fn a_runtime_behind_a_link_is_checked_and_named_at_its_real_place() {
     );
 }
 
+/// #180: a runtime file held open for writing for a moment (as a process
+/// that forks while it is being written holds it, on Linux: «text file
+/// busy») is still found once it is free, not taken for missing. Elsewhere
+/// the file runs at once; the test holds there too.
+#[test]
+fn a_runtime_busy_for_a_moment_is_still_found() {
+    let (dir, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let node = runtime(dir.path(), "node", "v22.3.0\n");
+    let place = bin.path().join(node.file_name().unwrap());
+    std::fs::rename(&node, &place).unwrap();
+    std::fs::rename(
+        dir.path().join("node.version"),
+        bin.path().join("node.version"),
+    )
+    .unwrap();
+    // Held open for writing, then let go 150 ms later.
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&place)
+        .unwrap();
+    let letting_go = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        drop(held);
+    });
+    let path = path_of(&[bin.path()]);
+    let found = find_js_runtime(Some(&path), quickjs(), false);
+    letting_go.join().unwrap();
+    assert!(matches!(found, Some(JsRuntime::Node(_))), "{found:?}");
+}
+
 // Unix only, as above: a link whose real file sits in a folder anyone can
 // write in.
 #[cfg(unix)]

@@ -90,17 +90,36 @@ fn on_path<'a>(path: &'a std::ffi::OsStr, name: &str) -> impl Iterator<Item = Pa
 /// The major and minor version a runtime prints for `--version` (`deno
 /// 2.5.6 (...)`, `v22.11.0`), within a few seconds; or none.
 fn version_of(program: &Path) -> Option<(u64, u64)> {
-    let mut command = Command::new(program);
-    command
-        .arg("--version")
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    if let Some(root) = std::env::var_os("SystemRoot") {
-        command.env("SystemRoot", root);
-    }
-    let mut tree = zajil_platform::process::spawn(command).ok()?;
+    let command = || {
+        let mut command = Command::new(program);
+        command
+            .arg("--version")
+            .env_clear()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
+        command
+    };
+    // «Text file busy» (Linux, ETXTBSY): a file that some process holds
+    // open for writing cannot be run. A file just written (a runtime just
+    // installed, a test's stand-in) can be held that way for an instant by
+    // any process that forks meanwhile, until its child runs its own
+    // program (#180). Tried again a few times, 20 ms apart; any other
+    // failure is final.
+    let mut tries = 0;
+    let mut tree = loop {
+        match zajil_platform::process::spawn(command()) {
+            Ok(tree) => break tree,
+            Err(err) if err.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 25 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(_) => return None,
+        }
+    };
     let mut stdout = tree.take_stdout()?;
     let reader = std::thread::spawn(move || {
         let mut text = String::new();
