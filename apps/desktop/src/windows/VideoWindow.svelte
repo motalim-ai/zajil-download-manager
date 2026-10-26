@@ -151,6 +151,19 @@
     });
   }
 
+  /** One video joins the list, and its progress window takes over, as a
+   * download in IDM does. */
+  async function downloadOne(choice: Option["choice"], file: string) {
+    step = { kind: "downloading", label: file, done: 0, total: null, speed: null, id: null };
+    try {
+      const id = await api.videoDownload(url, choice, folder, file);
+      await api.openProgress(id, file);
+      await api.closeWindow();
+    } catch (e) {
+      step = { kind: "failed", error: String(e) };
+    }
+  }
+
   /** A playlist: its chosen items one after another, each at its best. */
   async function downloadList(info: Extract<VideoInfoView, { kind: "playlist" }>, chosen: boolean[]) {
     const items = info.entries.filter((e, i) => chosen[i] && e.url);
@@ -245,7 +258,7 @@
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       </div>
       <div class="actions">
-        <button class="btn primary" disabled={!name.trim() || !folder} onclick={() => void download(step.kind === "video" ? step.list[pick]!.choice : { kind: "audio_only" }, name.trim(), name.trim())}>
+        <button class="btn primary" disabled={!name.trim() || !folder} onclick={() => void downloadOne(step.kind === "video" ? step.list[pick]!.choice : { kind: "audio_only" }, name.trim())}>
           <Icon name="download" size={15} />{locale.t("add-start")}
         </button>
         <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>

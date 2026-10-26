@@ -1,10 +1,11 @@
 // @ts-check
-// The settings page: capture on or off, the file types, the excluded sites.
+// The settings page: capture on or off, the file types, the excluded sites,
+// the keys of a click.
 
 import { api } from "./compat.js";
 import { askForSites, dropSites, permissionView } from "./cookies.js";
 import { localize } from "./page.js";
-import { defaults, load, save } from "./settings.js";
+import { KEY_CHOICES, clickKeys, defaultKeys, defaults, isMac, load, save } from "./settings.js";
 
 /** @param {string} id */
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
@@ -28,8 +29,41 @@ $("drop").addEventListener("click", async () => {
 });
 await showCookies();
 
+const mac = isMac(/** @type {any} */ (navigator));
+
+/** Each choice of keys, named as on this system's keyboard: Option on a
+ * Mac, where Control+click is the right click, so not offered.
+ * @param {string} id */
+function fillKeys(id) {
+  const names = mac ? { ctrl: "Control", alt: "Option", shift: "Shift" } : { ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
+  for (const choice of KEY_CHOICES.filter((c) => !(mac && c.includes("ctrl")))) {
+    const option = document.createElement("option");
+    option.value = choice;
+    option.textContent =
+      choice === "off"
+        ? api.i18n.getMessage("keysOff")
+        : [...choice.split("+").map((k) => names[/** @type {keyof typeof names} */ (k)]), api.i18n.getMessage("keysClick")].join("+");
+    $(id).append(option);
+  }
+}
+fillKeys("send-keys");
+fillKeys("browser-keys");
+
+/** The keys are chosen only once they are turned on. */
+function showKeys() {
+  const off = !$("use-keys").checked;
+  $("send-keys").disabled = off;
+  $("browser-keys").disabled = off;
+}
+$("use-keys").addEventListener("change", showKeys);
+
 /** @param {import("./settings.js").Settings} settings */
 function show(settings) {
+  $("use-keys").checked = settings.useKeys;
+  showKeys();
+  const keys = clickKeys(settings, mac);
+  $("send-keys").value = keys.send;
+  $("browser-keys").value = keys.browser;
   $("capture").checked = settings.capture;
   $("extensions").value = settings.extensions.join(" ");
   $("sites").value = settings.excludedSites.join("\n");
@@ -46,6 +80,11 @@ $("settings").addEventListener("submit", async (/** @type {Event} */ event) => {
     capture: $("capture").checked,
     extensions: words($("extensions").value),
     excludedSites: lines($("sites").value),
+    useKeys: $("use-keys").checked,
+    // This system's default is kept as "the default" (null), so a later
+    // change of the defaults still reaches it (review of #169).
+    sendKeys: $("send-keys").value === defaultKeys(mac).send ? null : $("send-keys").value,
+    browserKeys: $("browser-keys").value === defaultKeys(mac).browser ? null : $("browser-keys").value,
   });
   show(await load(api));
   $("saved").textContent = api.i18n.getMessage("optionsSaved");

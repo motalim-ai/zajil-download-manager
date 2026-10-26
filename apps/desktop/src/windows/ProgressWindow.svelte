@@ -95,7 +95,8 @@
 
   // With the details, the window is taller; its width stays the user's.
   $effect(() => {
-    const height = more ? 640 : 430;
+    // A video has no parts to show (#149).
+    const height = more && !d?.video ? 640 : 430;
     // The page's own width is the window's, in logical pixels: no
     // permission to read the window (review of #111).
     void getCurrentWindow()
@@ -194,8 +195,10 @@
     ["limit", "progress-tab-limit"],
     ["finish", "progress-tab-finish"],
   ] as const;
+  // A video has no speed limit of its own (yt-dlp runs it, #149).
+  const tabs = $derived(TABS.filter(([key]) => key !== "limit" || !d?.video));
   function onTabKey(event: KeyboardEvent) {
-    const order = TABS.map(([t]) => t);
+    const order = tabs.map(([t]) => t);
     const at = order.indexOf(tab);
     const forward = locale.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
     const back = locale.dir === "rtl" ? "ArrowRight" : "ArrowLeft";
@@ -220,7 +223,7 @@
   {/if}
   <h1 id="progress-name" class="visually-hidden">{d ? d.name : locale.t("progress-title")}</h1>
   <div class="tabs" role="tablist" aria-label={locale.t("progress-title")}>
-    {#each TABS as [key, text] (key)}
+    {#each tabs as [key, text] (key)}
       <button
         id="tab-{key}"
         role="tab"
@@ -284,9 +287,11 @@
     {#if problem}<p class="problem" role="alert"><Icon name="alert" />{problem}</p>{/if}
 
     <div class="actions">
-      <button class="btn" aria-expanded={more} aria-controls="progress-more" onclick={() => (more = !more)}>
-        <Icon name={more ? "chevron-up" : "chevron-down"} size={15} />{locale.t(more ? "progress-less" : "progress-more")}
-      </button>
+      {#if !d?.video}
+        <button class="btn" aria-expanded={more} aria-controls="progress-more" onclick={() => (more = !more)}>
+          <Icon name={more ? "chevron-up" : "chevron-down"} size={15} />{locale.t(more ? "progress-less" : "progress-more")}
+        </button>
+      {/if}
       <span class="gap"></span>
       {#if gone}
         <!-- Nothing to pause or resume. -->
@@ -299,7 +304,7 @@
     </div>
   </div>
 
-  {#if more}
+  {#if more && !d?.video}
     <section id="progress-more" class="more" aria-labelledby="parts-title">
       <div class="head">
         <h2 id="parts-title">{locale.t("details-parts")}</h2>

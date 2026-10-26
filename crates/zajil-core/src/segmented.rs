@@ -81,6 +81,10 @@ const STALLED_AFTER: Duration = Duration::from_secs(1);
 /// split.
 const LOOK_AGAIN: Duration = Duration::from_millis(100);
 
+/// How long a connection waits before it looks again for a free slot of a
+/// limited site (`crate::sites`), which another download may give back.
+const SITE_LOOK_AGAIN: Duration = Duration::from_millis(250);
+
 /// The segments for a new download of `len` bytes over at most
 /// `connections` connections, none smaller than `min_segment` bytes; `None`
 /// when one connection is all it needs.
@@ -138,6 +142,9 @@ pub(crate) struct Job {
     pub stop: Stop,
     /// The speed limits every connection goes through.
     pub limits: Limits,
+    /// The counter of the download's site, if the user limited it
+    /// ([`crate::sites`]): every connection after the first takes a slot.
+    pub site: Option<Arc<tokio::sync::Semaphore>>,
     /// The URL range requests go to.
     pub url: Url,
     /// The `If-Range` value: a strong validator (see `if_range_value`).
@@ -167,6 +174,7 @@ pub(crate) async fn run(
         max_failures,
         stop: user_stop,
         limits,
+        site,
         url,
         if_range,
         final_path,
@@ -192,6 +200,7 @@ pub(crate) async fn run(
     }
     let ctx = Arc::new(Ctx {
         limits,
+        site,
         client,
         browser,
         url,
@@ -222,6 +231,8 @@ pub(crate) async fn run(
                 next: ctx.board().segment_write_position(start),
                 last: total - 1,
                 segment: start,
+                // The first connection is the download's own slot.
+                slot: None,
             }),
             (_, taken) => {
                 first = taken;
@@ -396,6 +407,8 @@ async fn checkpoint(
 /// What workers share.
 struct Ctx {
     limits: Limits,
+    /// See [`Job::site`].
+    site: Option<Arc<tokio::sync::Semaphore>>,
     client: Client,
     browser: Arc<crate::browser::FromBrowser>,
     url: Url,
@@ -787,6 +800,9 @@ struct Stream {
     last: u64,
     /// Start of the segment this stream writes.
     segment: u64,
+    /// This connection's slot of a limited site, if it needed one: given
+    /// back when the stream ends.
+    slot: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 /// One connection: reads its stream into the file, then asks for more work
@@ -826,16 +842,27 @@ enum Work {
 /// (`Board::active`) until its stream ends.
 async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
     let now = Instant::now();
-    let found = {
+    let (found, slot) = {
         let mut board = ctx.board();
         if board.ranges_refused || board.active >= board.limit {
             // Nothing to ask for, or the server allows fewer connections.
             return Work::Done;
         }
+        // On a site the user limited, a connection besides another one of
+        // this download needs a slot of its own (`crate::sites`). Without
+        // one it waits and looks again, as another download may give one
+        // back (review of #166: it used to end, so the download never grew
+        // again). Once this download's other connections have all ended, it
+        // needs none: so it never waits for nothing.
+        let slot = match (&ctx.site, board.active >= 1) {
+            (Some(site), true) => site.clone().try_acquire_owned().map(Some).ok(),
+            _ => Some(None),
+        };
         let paused = board.pause_until.filter(|&until| until > now);
-        let found = match paused {
-            Some(until) => Err(until),
-            None => match board.take_free(id, now) {
+        let found = match (&slot, paused) {
+            (None, _) => Err(now + SITE_LOOK_AGAIN),
+            (_, Some(until)) => Err(until),
+            (Some(_), None) => match board.take_free(id, now) {
                 Some(free) => Ok(free),
                 None => match board.soonest_retry() {
                     Some(at) => Err(at),
@@ -856,20 +883,21 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
         if found.is_ok() {
             board.active += 1;
         }
-        found
+        (found, slot.flatten())
     };
     let (start, from, to) = match found {
         Ok(work) => work,
         Err(until) => {
-            tokio::select! {
-                _ = tokio::time::sleep_until(until.into()) => {}
-                _ = ctx.stop_requested() => {}
-            }
-            return Work::Again;
+            // No slot of the site is held while waiting (review of #166).
+            drop(slot);
+            return wait_then_again(ctx, until).await;
         }
     };
     match request_range(ctx, id, start, from, to).await {
-        Some(stream) => Work::Stream(stream),
+        Some(mut stream) => {
+            stream.slot = slot;
+            Work::Stream(stream)
+        }
         None => {
             // The segment failed, waits or was given back: another one may
             // still need this connection.
@@ -877,6 +905,15 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
             Work::Again
         }
     }
+}
+
+/// Waits until `until` (or a stop), then looks for work again.
+async fn wait_then_again(ctx: &Arc<Ctx>, until: Instant) -> Work {
+    tokio::select! {
+        _ = tokio::time::sleep_until(until.into()) => {}
+        _ = ctx.stop_requested() => {}
+    }
+    Work::Again
 }
 
 /// Asks the server for bytes `from` to `to` of the segment starting at
@@ -927,6 +964,7 @@ async fn request_range(
                     next: from,
                     last: to,
                     segment: start,
+                    slot: None,
                 })
             } else {
                 ctx.board().fail(

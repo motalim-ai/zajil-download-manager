@@ -37,6 +37,26 @@ label {
   font-weight: 600;
   margin-top: 12px;
 }
+fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 8px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+legend {
+  font-weight: 600;
+}
+select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: inherit;
+  justify-self: start;
+}
 .choice {
   display: flex;
   gap: 8px;

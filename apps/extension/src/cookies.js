@@ -94,12 +94,19 @@ export const MAX_COOKIES = 16 * 1024;
  * ASCII and spaces: a line break would add a header). Then the download
  * goes without cookies, as without permission.
  *
+ * For a link clicked with Zajil's keys, `from` is the page it was clicked
+ * in, and its `SameSite=Strict` cookies go only if that page is of the
+ * same site, as the browser does (owner's decision; `strictGoes`).
+ * `noStrict`: none of them (a download asked for again whose link came
+ * from another site).
+ *
  * @param {any} browserApi
  * @param {string} url
  * @param {string} [storeId]
+ * @param {{ from?: string, noStrict?: boolean }} [how]
  * @returns {Promise<string | null>}
  */
-export async function cookieHeader(browserApi, url, storeId) {
+export async function cookieHeader(browserApi, url, storeId, how = {}) {
   if (!(await cookiesAllowed(browserApi))) return null;
   let cookies;
   try {
@@ -113,8 +120,48 @@ export async function cookieHeader(browserApi, url, storeId) {
   }
   const header = (cookies ?? [])
     .filter((/** @type {any} */ c) => typeof c?.name === "string" && typeof c?.value === "string")
+    .filter((/** @type {any} */ c) => c.sameSite !== "strict" || (!how.noStrict && (how.from === undefined || strictGoes(how.from, url, c))))
     .map((/** @type {any} */ c) => (c.name ? `${c.name}=${c.value}` : c.value))
     .join("; ");
   if (!header || header.length > MAX_COOKIES || !/^[\x20-\x7e]+$/.test(header)) return null;
   return header;
+}
+
+/**
+ * Whether a `SameSite=Strict` cookie of `url` goes with a link clicked in
+ * the page `from`: only when they are of the same site. Without the list
+ * of public suffixes, "same site" is proved by the cookie itself: `from`
+ * has the same scheme and its host is the cookie's domain or under it (a
+ * browser never sets a cookie on a public suffix, and `url`'s host is under
+ * it too, or the browser would not have given the cookie). So it never
+ * sends one the browser would not; it may keep back, rarely, one the
+ * browser would send (a host-only cookie of `files.example.com` from a
+ * page of `example.com`).
+ *
+ * @param {string} from @param {string} url @param {{ domain?: string }} cookie
+ */
+export function strictGoes(from, url, cookie) {
+  let page;
+  let link;
+  try {
+    [page, link] = [new URL(from), new URL(url)];
+  } catch {
+    return false;
+  }
+  if (page.protocol !== link.protocol) return false;
+  const domain = String(cookie.domain ?? "").replace(/^\./, "").toLowerCase();
+  const host = page.hostname.toLowerCase();
+  return domain !== "" && (host === domain || host.endsWith(`.${domain}`));
+}
+
+/** Whether a link clicked in `from` goes to another host or scheme: then
+ * a download asked for again later gets no strict cookie (`noStrict`).
+ * @param {string} from @param {string} url */
+export function otherSite(from, url) {
+  try {
+    const [page, link] = [new URL(from), new URL(url)];
+    return page.protocol !== link.protocol || page.hostname !== link.hostname;
+  } catch {
+    return true;
+  }
 }

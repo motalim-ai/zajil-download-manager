@@ -681,6 +681,9 @@ video-done = اكتمل تحميل الفيديو.
 video-drm = هذا الفيديو محمي، وزاجِل لا يحمّل المحتوى المحمي.
 video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّرت. افتح النافذة من جديد لتنزيلها.
 
+## Video downloads in the list (M6, #149)
+queue-video = فيديو
+
 ## Video tools in the settings and «About» (M6, #149)
 settings-video-tools = أدوات الفيديو
 settings-video-tools-hint = تُنزَّل بموافقتك أول مرة تحمّل فيها فيديو، وتُحفظ في مجلد بيانات زاجِل.

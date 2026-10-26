@@ -611,6 +611,9 @@ video-done = The video has downloaded.
 video-drm = This video is protected, and Zajil does not download protected content.
 video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.
 
+## Video downloads in the list (M6, #149)
+queue-video = Video
+
 ## Video tools in the settings and «About» (M6, #149)
 settings-video-tools = Video tools
 settings-video-tools-hint = They are downloaded with your agreement the first time you download a video, and kept in Zajil's data folder.

@@ -8,7 +8,7 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [], scripts: [], watched: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [], scripts: [], watched: [], tabOptions: [] };
   // What "Allow Zajil on sites" gave: the cookies, the video features.
   const have = new Set([...(granted ? ["cookies"] : []), ...(video ? ["scripting", "webRequest"] : [])]);
   const local = {};
@@ -57,9 +57,9 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
       : undefined,
     scripting: video
       ? {
-          getRegisteredContentScripts: async () => done.scripts,
+          getRegisteredContentScripts: async ({ ids }) => done.scripts.filter((s) => ids.includes(s.id)),
           registerContentScripts: async (list) => done.scripts.push(...list),
-          unregisterContentScripts: async () => done.scripts.splice(0),
+          unregisterContentScripts: async ({ ids }) => done.scripts.splice(0, done.scripts.length, ...done.scripts.filter((s) => !ids.includes(s.id))),
         }
       : undefined,
     cookies: {
@@ -80,7 +80,10 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
       },
     },
     tabs: {
-      create: async (tab) => done.tabs.push(tab.url),
+      create: async (tab) => {
+        done.tabs.push(tab.url);
+        done.tabOptions.push(tab);
+      },
       get: async (id) => tabs[id] ?? { id, incognito: false },
       onRemoved: on("tabRemoved"),
     },
@@ -368,6 +371,8 @@ describe("the background", () => {
     await flush();
     expect(fake.done.scripts).toEqual([
       { id: "zajil-video-button", js: ["video-button.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_idle", persistAcrossSessions: true },
+      // The keys of a click (owner's decision, 2026-10-26), from a page's start.
+      { id: "zajil-click-keys", js: ["click-keys.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_start", persistAcrossSessions: true },
     ]);
     expect(fake.done.watched).toHaveLength(1);
     expect(fake.done.watched[0].extra).toEqual(["responseHeaders"]);
@@ -509,5 +514,197 @@ describe("the background", () => {
     fake.listeners.clicked("n1");
     await flush();
     expect(fake.done.tabs).toEqual(["chrome-extension://zajil/welcome.html"]);
+  });
+  it("a link clicked with Zajil's keys goes to Zajil as from its menu, its page the browser's word (the frame's)", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    fake.local.settings = { useKeys: true };
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/" }, frameId: 2, url: "https://files.example/list" };
+    fake.listeners.message({ type: "click-link", href: "https://files.example/a.zip" }, sender);
+    await flush();
+    expect(fake.done.sent).toHaveLength(1);
+    expect(fake.done.sent[0]).toMatchObject({ type: "download", url: "https://files.example/a.zip", referrer: "https://files.example/list", cookies: "sid=abc" });
+    // Not a web link: refused before any cookie is read, as from the menu.
+    const reads = fake.done.cookieReads.length;
+    fake.listeners.message({ type: "click-link", href: "javascript:alert(1)" }, sender);
+    await flush();
+    expect(fake.done.sent).toHaveLength(1);
+    expect(fake.done.cookieReads).toHaveLength(reads);
+    expect(fake.done.notifications.at(-1).message).toBe("menuNotALink");
+    // From a private window: no cookies, marked private.
+    fake.listeners.message({ type: "click-link", href: "https://files.example/b.zip" }, { ...sender, tab: { id: 5, url: "https://example.com/", incognito: true } });
+    await flush();
+    expect(fake.done.sent[1]).toMatchObject({ url: "https://files.example/b.zip", private: true });
+    expect(fake.done.sent[1].cookies).toBeUndefined();
+  });
+
+  it("the keys do nothing without 'Allow Zajil on sites' (a script left from before), nor from another extension or no tab", async () => {
+    const fake = fakeChrome({ granted: true, video: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/" }, frameId: 0, url: "https://example.com/" };
+    fake.listeners.message({ type: "click-link", href: "https://example.com/a.zip" }, sender);
+    fake.have.add("scripting");
+    fake.have.add("webRequest");
+    fake.listeners.message({ type: "click-link", href: "https://example.com/a.zip" }, { ...sender, id: "other" });
+    fake.listeners.message({ type: "click-link", href: "https://example.com/a.zip" }, { id: "zajil", url: "https://example.com/" });
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+  });
+
+  it("a link clicked with the browser's keys stays the browser's: Zajil does not take its download, once", async () => {
+    const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/" }, frameId: 0, url: "https://example.com/" };
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/a.zip" }, sender);
+    await flush();
+    const item = (id, url) => ({ id, url, finalUrl: url, state: "in_progress" });
+    fake.listeners.filename(item(1, "https://example.com/a.zip"), () => {});
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+    // Another link is taken; and the same one, clicked again without the keys.
+    fake.listeners.filename(item(2, "https://example.com/b.zip"), () => {});
+    fake.listeners.filename(item(3, "https://example.com/a.zip"), () => {});
+    await flush();
+    expect(fake.done.sent.map((m) => m.url)).toEqual(["https://example.com/b.zip", "https://example.com/a.zip"]);
+    // Noted long ago: no longer the browser's.
+    fake.session.leave = [{ url: "https://example.com/c.zip", until: Date.now() - 1 }];
+    fake.listeners.filename(item(4, "https://example.com/c.zip"), () => {});
+    await flush();
+    expect(fake.done.sent.map((m) => m.url)).toContain("https://example.com/c.zip");
+    expect(fake.session.leave).toEqual([]);
+  });
+
+  it("a click left to the browser and its download arriving together: Zajil does not take it; two clicks at once are both kept (review of #169)", async () => {
+    const fake = fakeChrome({ granted: false, video: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/" }, frameId: 0, url: "https://example.com/" };
+    const item = (id, url) => ({ id, url, finalUrl: url, state: "in_progress" });
+    // The same tick, as when the background wakes for both; and without the
+    // permission, which leaving a link to the browser does not need.
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/a.zip" }, sender);
+    fake.listeners.filename(item(1, "https://example.com/a.zip"), () => {});
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/b.zip" }, sender);
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/c.zip" }, sender);
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+    expect(fake.session.leave.map((l) => l.url)).toEqual(["https://example.com/b.zip", "https://example.com/c.zip"]);
+  });
+
+  it("nothing of a private window is noted, nor what is not a web link", async () => {
+    const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const tab = { id: 4, url: "https://example.com/", incognito: true };
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/a.zip" }, { id: "zajil", tab, frameId: 0, url: tab.url });
+    fake.listeners.message({ type: "click-browser", href: "javascript:alert(1)" }, { id: "zajil", tab: { ...tab, incognito: false }, frameId: 0, url: tab.url });
+    fake.listeners.message({ type: "click-browser", href: "https://example.com/" + "x".repeat(9000) }, { id: "zajil", tab: { ...tab, incognito: false }, frameId: 0, url: tab.url });
+    await flush();
+    expect(fake.session.leave).toBeUndefined();
+  });
+
+  it("tells the keys' scripts in open tabs whether the permission is there", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    expect(fake.local.clickKeysOn).toBe(true);
+    fake.have.delete("scripting");
+    fake.listeners.permissionsRemoved({ permissions: ["scripting"] });
+    await flush();
+    expect(fake.local.clickKeysOn).toBe(false);
+  });
+
+  it("the keys are off until the user turns them on: a click sent by a script is not taken (owner's decision)", async () => {
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/" }, frameId: 0, url: "https://example.com/" };
+    fake.listeners.message({ type: "click-link", href: "https://example.com/a.zip" }, sender);
+    await flush();
+    expect(fake.done.sent).toEqual([]);
+  });
+
+  it("A: a link sent with the keys that Zajil finds to be a web page opens in a tab behind, as Ctrl+click would; from the menu it is said, as before", async () => {
+    const page = { protocol_version: 1, ok: false, error: "Zajil cannot download it: the server sent a web page (a sign-in page?), not the file" };
+    const fake = fakeChrome({ granted: true, video: true, answer: page });
+    await load(fake);
+    await flush();
+    fake.local.settings = { useKeys: true };
+    const tab = { id: 4, index: 2, windowId: 7, url: "https://news.example/" };
+    fake.listeners.message({ type: "click-link", href: "https://news.example/story" }, { id: "zajil", tab, frameId: 0, url: tab.url });
+    await flush();
+    expect(fake.done.tabOptions).toEqual([{ url: "https://news.example/story", active: false, windowId: 7, index: 3, openerTabId: 4 }]);
+    expect(fake.done.notifications).toEqual([]);
+    // In a Firefox container: the same container.
+    fake.listeners.message({ type: "click-link", href: "https://news.example/b" }, { id: "zajil", tab: { ...tab, cookieStoreId: "firefox-container-2" }, frameId: 0, url: tab.url });
+    await flush();
+    expect(fake.done.tabOptions[1].cookieStoreId).toBe("firefox-container-2");
+    // From the menu: no tab, Zajil's answer is said.
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://news.example/c", pageUrl: tab.url }, tab);
+    await flush();
+    expect(fake.done.tabOptions).toHaveLength(2);
+    expect(fake.done.notifications).toHaveLength(1);
+    // Another refusal from the keys is said, not opened.
+    const other = fakeChrome({ granted: true, video: true, answer: forbidden });
+    await load(other);
+    await flush();
+    other.local.settings = { useKeys: true };
+    other.listeners.message({ type: "click-link", href: "https://news.example/story" }, { id: "zajil", tab, frameId: 0, url: tab.url });
+    await flush();
+    expect(other.done.tabOptions).toEqual([]);
+    expect(other.done.notifications).toHaveLength(1);
+  });
+
+  it("A: the desktop app's answer for a web page is the one the extension knows", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { isPageRefusal } = await import("../src/capture.js");
+    const rust = readFileSync(new URL("../../desktop/src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const why = rust.match(/"(the server sent a web page[^"]*)"/)?.[1];
+    expect(why).toBeTruthy();
+    expect(isPageRefusal({ outcome: "refused", error: `Zajil cannot download it: ${why}` })).toBe(true);
+    expect(isPageRefusal({ outcome: "refused", error: "Zajil cannot download it: the server answered 403 Forbidden" })).toBe(false);
+  });
+
+  it("B: from the keys, strict cookies go only from a page of the same site, as in the browser; and not when Zajil asks again later", async () => {
+    const jar = () => [
+      { name: "s", value: "1", sameSite: "strict", domain: "files.example" },
+      { name: "l", value: "2", sameSite: "lax", domain: ".files.example" },
+      { name: "n", value: "3", sameSite: "no_restriction", domain: ".files.example" },
+    ];
+    const fake = fakeChrome({ granted: true, video: true, answer: { ok: true }, jar });
+    await load(fake);
+    await flush();
+    fake.local.settings = { useKeys: true };
+    const click = (page) => fake.listeners.message({ type: "click-link", href: "https://files.example/a.zip" }, { id: "zajil", tab: { id: 4, url: page }, frameId: 0, url: page });
+    // Another site's page: no strict cookie.
+    click("https://forum.example/thread");
+    await flush();
+    expect(fake.done.sent[0].cookies).toBe("l=2; n=3");
+    // The same site (the cookie's own domain, or under it): all of them.
+    click("https://files.example/list");
+    click("https://www.files.example/list");
+    await flush();
+    expect(fake.done.sent[1].cookies).toBe("s=1; l=2; n=3");
+    expect(fake.done.sent[2].cookies).toBe("s=1; l=2; n=3");
+    // Another scheme is another site; and a look-alike is not under it.
+    click("http://files.example/list");
+    click("https://evilfiles.example/");
+    await flush();
+    expect(fake.done.sent[3].cookies).toBe("l=2; n=3");
+    expect(fake.done.sent[4].cookies).toBe("l=2; n=3");
+    // From the menu, as before: all of them.
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://files.example/a.zip", pageUrl: "https://forum.example/thread" }, { id: 4 });
+    await flush();
+    expect(fake.done.sent[5].cookies).toBe("s=1; l=2; n=3");
+    // Asked again after a restart: the link from another site still gets
+    // no strict cookie; the one from the same site does.
+    const { answer } = await import("../src/link.js");
+    const again = async (ticket) => (await answer(fake.chrome, { type: "cookies_wanted", ask: 1, url: "https://files.example/a.zip", ticket })).cookies;
+    expect(await again(fake.done.sent[0].ticket)).toBe("l=2; n=3");
+    expect(await again(fake.done.sent[1].ticket)).toBe("s=1; l=2; n=3");
+    expect(await again(fake.done.sent[5].ticket)).toBe("s=1; l=2; n=3");
   });
 });

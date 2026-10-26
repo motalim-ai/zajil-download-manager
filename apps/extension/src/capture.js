@@ -163,6 +163,13 @@ export function videoMessage(info, extra = {}) {
   return message;
 }
 
+/** Whether Zajil refused because the link is a web page, not a file
+ * (the desktop app's `not_the_file`; a test reads its text there).
+ * @param {Result | null} result */
+export function isPageRefusal(result) {
+  return result?.outcome === "refused" && /the server sent a web page\b/.test(result.error ?? "");
+}
+
 /** Whether Zajil refused because the site wants a sign-in: the server
  * answered 401 or 403 to Zajil (`zajil_core::Error::Status`).
  * @param {Result | null} result */

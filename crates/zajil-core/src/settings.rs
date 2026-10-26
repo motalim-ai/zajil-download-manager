@@ -84,6 +84,12 @@ pub struct SettingsFile {
     /// as on.
     #[serde(default = "on")]
     pub update_check: bool,
+    /// The most connections at once to each listed site, shared by all its
+    /// downloads ([`crate::sites`], owner's decision of 2026-10-26). Empty
+    /// by default, and when absent: no site has a limit. Not written while
+    /// empty, so a file without limits stays as it was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub site_connections: Vec<SiteConnections>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -134,6 +140,7 @@ impl Default for SettingsFile {
             notifications: true,
             clipboard: false,
             update_check: true,
+            site_connections: Vec::new(),
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }
@@ -154,8 +161,57 @@ impl SettingsFile {
         if let Some(dir) = &self.download_dir {
             check_folder(dir).map_err(|e| e.to_string())?;
         }
+        if self.site_connections.len() > crate::sites::MAX_SITES {
+            return Err(format!(
+                "at most {} sites may have a connection limit",
+                crate::sites::MAX_SITES
+            ));
+        }
+        let mut seen = Vec::new();
+        for entry in &self.site_connections {
+            let site = entry.site.as_str();
+            let host = crate::Url::parse(&format!("http://{site}/"))
+                .ok()
+                .filter(|u| u.port().is_none() && u.path() == "/")
+                .and_then(|u| u.host_str().map(str::to_owned));
+            // Only what a host can be, so nothing that would never match
+            // (`*.example.com`) nor the same site twice (`example.com.`;
+            // review of #166).
+            let plain = site
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.:[]".contains(&b))
+                && !site.starts_with('.')
+                && !site.ends_with('.');
+            if host.as_deref() != Some(site) || !plain {
+                return Err(format!(
+                    "{site:?} is not a site name: write it in small letters, without http:// or a path, such as example.com (a name in other letters in its xn-- form)"
+                ));
+            }
+            if !(1..=crate::MAX_CONNECTIONS as u32).contains(&entry.connections) {
+                return Err(format!(
+                    "connections for {site} must be from 1 to {}, not {}",
+                    crate::MAX_CONNECTIONS,
+                    entry.connections
+                ));
+            }
+            if seen.contains(&site) {
+                return Err(format!("{site} is listed twice"));
+            }
+            seen.push(site);
+        }
         Ok(())
     }
+}
+
+/// One site's connection limit in [`SettingsFile::site_connections`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteConnections {
+    /// The site, such as `example.com` (its subdomains too).
+    pub site: String,
+    /// The most connections at once to it, from 1 to
+    /// [`crate::MAX_CONNECTIONS`].
+    pub connections: u32,
 }
 
 /// The settings file in one folder, and its lock.
