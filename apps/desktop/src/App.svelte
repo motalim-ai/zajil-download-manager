@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { openError } from "./lib/openError";
   import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
   import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
@@ -593,7 +594,7 @@
       }).catch(() => false);
       if (yes) await api.openDownload(id, folder, true);
     } catch (e) {
-      failed = String(e);
+      failed = openError(e, (k) => locale.t(k));
     }
   }
   async function copyLinks() {

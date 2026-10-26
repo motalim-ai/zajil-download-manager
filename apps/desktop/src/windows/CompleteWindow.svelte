@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { openError } from "../lib/openError";
   import { invoke } from "@tauri-apps/api/core";
   import { ask } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
@@ -50,7 +51,7 @@
       }
       await close();
     } catch (e) {
-      problem = String(e);
+      problem = openError(e, (k) => locale.t(k));
     }
   }
 

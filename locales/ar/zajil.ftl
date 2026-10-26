@@ -444,6 +444,8 @@ sys-zoom = تكبير
 row-menu = قائمة التحميل
 open-code-question = «{ $name }» برنامج أو ملف يمكنه تشغيل أوامر على جهازك. هل تفتحه؟
 open-code-ok = فتح
+open-no-file = الملف ليس في مكانه: ربما نُقل أو حُذف.
+open-no-folder = مجلد التحميل لم يعد موجودًا.
 
 ## M5.5: the add windows
 info-title = معلومات ملف التحميل

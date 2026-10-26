@@ -69,6 +69,12 @@ describe("the shortcuts", () => {
     expect(commandFor(key({ key: "Enter", altKey: true }), false)).toBe("properties");
     // The Arabic layout: «ح» is on P.
     expect(commandFor(key({ key: "ح", code: "KeyP", ctrlKey: true }), false)).toBe("pause");
+    // and «و» on the comma (#98): Ctrl+, opens the settings there too.
+    expect(commandFor(key({ key: "و", code: "Comma", ctrlKey: true }), false)).toBe("settings");
+    expect(commandFor(key({ key: "و", code: "Comma", metaKey: true }), true)).toBe("settings");
+    // A Latin layout's own character wins over the place: AZERTY's «;»
+    // is where a US comma is, and is not the settings.
+    expect(commandFor(key({ key: ";", code: "Comma", ctrlKey: true }), false)).toBeUndefined();
     expect(commandFor(key({ key: "x" }), false)).toBeUndefined();
   });
 });

@@ -96,15 +96,37 @@ export function accelerator(key: Key): string {
   return [key.mod && "CmdOrCtrl", key.alt && "Alt", key.shift && "Shift", name].filter(Boolean).join("+");
 }
 
+/** The place on the keyboard (`KeyboardEvent.code`) of a key's character
+ * on a US layout: a letter, a digit, or the punctuation a shortcut uses. */
+const PUNCTUATION: Record<string, string> = {
+  ",": "Comma",
+  ".": "Period",
+  "/": "Slash",
+  ";": "Semicolon",
+  "'": "Quote",
+  "[": "BracketLeft",
+  "]": "BracketRight",
+  "-": "Minus",
+  "=": "Equal",
+  "`": "Backquote",
+};
+function placeOf(key: string): string | undefined {
+  if (/^[a-z]$/.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  return PUNCTUATION[key];
+}
+
 /** Whether `event` is `key`: by the character, or by the key's place when
- * the layout gives no Latin letter (Arabic), with exactly its modifiers. */
+ * the layout gives no Latin letter (Arabic: its comma key gives «و», #98),
+ * with exactly its modifiers. */
 export function matches(event: KeyboardEvent, key: Key, mac = onMac()): boolean {
   const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   const none = !event.ctrlKey && !event.metaKey;
   if ((key.mod ? !mod : !none) || Boolean(key.shift) !== event.shiftKey || Boolean(key.alt) !== event.altKey) return false;
   if (key.key.length > 1) return event.key === key.key;
-  const latin = /^[a-z]$/i.test(event.key);
-  return event.key.toLowerCase() === key.key || (!latin && /^[a-z]$/.test(key.key) && event.code === `Key${key.key.toUpperCase()}`);
+  const latin = /^[\x21-\x7e]$/.test(event.key);
+  const place = placeOf(key.key);
+  return event.key.toLowerCase() === key.key || (!latin && place !== undefined && event.code === place);
 }
 
 /** The command `event` is the shortcut of, if any. */

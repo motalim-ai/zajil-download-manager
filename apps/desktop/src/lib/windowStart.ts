@@ -5,9 +5,9 @@ import { api } from "./api";
 import { locale, type Digits, type Lang } from "./i18n.svelte";
 import { setTheme } from "./theme";
 
-/** The macOS menu's commands that reach this window (it is in front):
- * Select all takes the text box's text; the others are the main window's
- * (Quit goes there, which asks first while downloads run). */
+/** The macOS menu's command that reaches this window when it is in
+ * front: Select all takes the text box's text. Every other command goes to
+ * the main window, which comes forward (#98). */
 function fromMenu(command: string) {
   const box = document.activeElement;
   if (command === "select-all" && (box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement)) box.select();
