@@ -3,7 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
-  import { licenseOf } from "../lib/about";
+  import { licenseOf, toolName, versionOf } from "../lib/about";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { size } from "../lib/format";
@@ -28,7 +28,7 @@
     | { kind: "failed"; error: VideoErrorView | string };
 
   // The UI test scenes («tools», «quality») start at a step, with demo
-  // data, and ask Rust nothing.
+  // data; «tools» asks Rust for the tools' real pins only.
   let { scene = null }: { scene?: "tools" | "quality" | null } = $props();
   let step = $state<Step>({ kind: "probing" });
   let url = $state("");
@@ -61,15 +61,13 @@
   function showScene(which: "tools" | "quality") {
     folder = "~/Downloads";
     if (which === "tools") {
-      step = {
-        kind: "consent",
-        tools: [
-          { tool: "yt-dlp", installed: false, version: "2026.10.10", host: "github.com", source: "https://github.com/yt-dlp/yt-dlp" },
-          { tool: "ffmpeg", installed: false, version: "7.1", host: "github.com", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
-          { tool: "ffprobe", installed: false, version: "7.1", host: "github.com", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
-          { tool: "qjs", installed: false, version: "0.10.1", host: "github.com", source: "https://github.com/quickjs-ng/quickjs" },
-        ],
-      };
+      // The real pins (the pictures may go on a release page): only the
+      // tools' status is asked, and they are shown as not downloaded.
+      step = { kind: "consent", tools: [] };
+      void api.videoToolsStatus().then(
+        (tools) => step.kind === "consent" && (step = { kind: "consent", tools: tools.map((t) => ({ ...t, installed: false })) }),
+        () => {},
+      );
       return;
     }
     const MIB = 1024 * 1024;
@@ -205,7 +203,7 @@
         <thead><tr><th scope="col">{locale.t("video-tool")}</th><th scope="col">{locale.t("video-version")}</th><th scope="col">{locale.t("video-source")}</th><th scope="col">{locale.t("video-license")}</th></tr></thead>
         <tbody>
           {#each step.tools.filter((t) => !t.installed) as t (t.tool)}
-            <tr><td dir="ltr">{t.tool}</td><td dir="ltr">{t.version ?? "—"}</td><td dir="ltr">{t.host ?? "—"}</td><td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td></tr>
+            <tr><td>{toolName(t.tool)}</td><td>{versionOf(t)}</td><td dir="ltr">{t.host ?? "—"}</td><td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -218,7 +216,7 @@
   {:else if step.kind === "installing"}
     <section class="col" aria-live="polite">
       <h2>{locale.t("video-installing")}</h2>
-      <p class="muted" dir="ltr">{step.tool}</p>
+      <p class="muted">{toolName(step.tool)}</p>
       <div class="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={step.total ? Math.round((step.done / step.total) * 100) : 0}>
         <b style:inline-size="{step.total ? (step.done / step.total) * 100 : 5}%"></b>
       </div>

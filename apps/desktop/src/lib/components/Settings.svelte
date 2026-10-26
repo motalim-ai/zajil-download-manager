@@ -11,7 +11,7 @@
   import CompleteSetting from "./CompleteSetting.svelte";
   import UpdateSetting from "./UpdateSetting.svelte";
   import type { ToolView } from "../bindings/ToolView";
-  import { licenseOf } from "../about";
+  import { licenseOf, toolName, versionOf } from "../about";
   import { ask } from "@tauri-apps/plugin-dialog";
 
   let {
@@ -359,8 +359,8 @@
         <tbody>
           {#each tools as t (t.tool)}
             <tr>
-              <td dir="ltr">{t.tool}</td>
-              <td dir="ltr">{t.version ?? "—"}</td>
+              <td>{toolName(t.tool)}</td>
+              <td>{versionOf(t)}</td>
               <td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td>
               <td class:ready={t.installed}>{locale.t(t.installed ? "settings-video-tools-ready" : "settings-video-tools-missing")}</td>
             </tr>

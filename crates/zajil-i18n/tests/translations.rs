@@ -787,6 +787,14 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("video-audio-only", &["format"]),
     ("about-ffmpeg", &["license"]),
     ("about-tool", &["license", "source", "tool", "version"]),
+    (
+        "about-tool-or-later",
+        &["license", "source", "tool", "version"],
+    ),
+    (
+        "about-tool-yt-dlp",
+        &["binary", "license", "source", "tool", "version"],
+    ),
     ("about-or-later", &["license"]),
     ("tool-license-yt-dlp", &["binary", "source"]),
     // A button's name.
@@ -1107,6 +1115,50 @@ const WHOLE_TEXTS: &[Whole] = &[
         en: (
             &[("binary", "GPLv3+"), ("source", "Unlicense")],
             "GPLv3+ for the file Zajil downloads (its source code: Unlicense)",
+        ),
+    },
+    Whole {
+        key: "about-tool-or-later",
+        ar: (
+            &[
+                ("tool", "FFmpeg"),
+                ("version", "VERSION"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "FFmpeg VERSION، بترخيص LICENSE أو أحدث. مصدره: SOURCE",
+        ),
+        en: (
+            &[
+                ("tool", "FFmpeg"),
+                ("version", "VERSION"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "FFmpeg VERSION, under the LICENSE or later. Its source: SOURCE",
+        ),
+    },
+    Whole {
+        key: "about-tool-yt-dlp",
+        ar: (
+            &[
+                ("tool", "yt-dlp"),
+                ("version", "VERSION"),
+                ("binary", "BINARY"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "yt-dlp VERSION، بترخيص BINARY للملف الذي ينزّله زاجِل (والكود المصدري بترخيص LICENSE). مصدره: SOURCE",
+        ),
+        en: (
+            &[
+                ("tool", "yt-dlp"),
+                ("version", "VERSION"),
+                ("binary", "BINARY"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "yt-dlp VERSION, under the BINARY for the file Zajil downloads (its source code: LICENSE). Its source: SOURCE",
         ),
     },
     Whole {
