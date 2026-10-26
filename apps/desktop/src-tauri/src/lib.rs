@@ -3171,6 +3171,47 @@ mod tests {
         );
     }
 
+    /// #165 (review): saving the settings gives their site list to the
+    /// engine that already runs (and its clones); a list the file refuses
+    /// changes neither the file nor the engine.
+    #[test]
+    fn saved_site_limits_reach_the_running_engine_and_a_refused_list_none() {
+        let data = tempfile::tempdir().unwrap();
+        let settings = SettingsStore::new(data.path());
+        let engine = Engine::new(Options::default()).unwrap();
+        let running = engine.clone();
+        let shown = view::settings(&settings.load().unwrap(), None, data.path());
+        let change = |list: Vec<view::SiteView>| view::SettingsChange {
+            language: shown.language,
+            theme: shown.theme,
+            digits: shown.digits,
+            download_dir: None,
+            connections: shown.connections,
+            notifications: shown.notifications,
+            clipboard: shown.clipboard,
+            update_check: shown.update_check,
+            site_connections: list,
+            speed_limit: None,
+        };
+        let site = |name: &str, n| view::SiteView {
+            site: name.into(),
+            connections: n,
+        };
+        assert_eq!(running.site_room("https://example.com/f"), None);
+        save_settings_file(&settings, &engine, &change(vec![site("example.com", 3)])).unwrap();
+        assert_eq!(
+            running.site_room("https://example.com/f").map(|r| r.1),
+            Some(3)
+        );
+        let refused = save_settings_file(&settings, &engine, &change(vec![site("*.bad", 2)]));
+        assert!(refused.is_err());
+        assert_eq!(
+            running.site_room("https://example.com/f").map(|r| r.1),
+            Some(3)
+        );
+        assert_eq!(settings.load().unwrap().site_connections.len(), 1);
+    }
+
     /// Security review #84: a file that can run code, from the browser, is
     /// never started by itself: it waits, paused, for the user (by the
     /// server's name, or the browser's); any other file starts at once.
@@ -3869,12 +3910,7 @@ async fn save_settings<R: tauri::Runtime>(
         if change.speed_limit == Some(0) {
             return Err("a speed limit must be more than 0".to_owned());
         }
-        let file = settings
-            .update(|file| {
-                view::apply_settings(file, &change);
-                Ok(file.clone())
-            })
-            .map_err(blocking_err)?;
+        let file = save_settings_file(&settings, &engine, &change)?;
         store
             .update(|queues| {
                 queues.settings.speed_limit = change.speed_limit;
@@ -3883,15 +3919,35 @@ async fn save_settings<R: tauri::Runtime>(
             .map_err(blocking_err)?;
         connections.store(file.connections as usize, Ordering::Relaxed);
         clipboard.store(file.clipboard, Ordering::Relaxed);
-        // The site limits, in place: the running downloads and the queue
-        // runner's engine see them at once (#165).
-        engine.site_limits().set_from_settings(&file);
         Ok(view::settings(&file, change.speed_limit, &system))
     })
     .await
     .map_err(blocking_err)??;
     let _ = handle.emit("downloads-changed", ());
     Ok(saved)
+}
+
+/// Writes `change` into the settings file and gives its site limits to
+/// `engine`, in place, so the running downloads and the queue runner's
+/// engine see them at once (#165). A list the file refuses changes
+/// neither. One save at a time, so the engine always has the file's list
+/// (review of #165: two saves at once could leave it on the older one).
+/// Blocking.
+fn save_settings_file(
+    settings: &SettingsStore,
+    engine: &Engine,
+    change: &SettingsChange,
+) -> Result<zajil_core::settings::SettingsFile, String> {
+    static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    let file = settings
+        .update(|file| {
+            view::apply_settings(file, change);
+            Ok(file.clone())
+        })
+        .map_err(blocking_err)?;
+    engine.site_limits().set_from_settings(&file);
+    Ok(file)
 }
 
 #[tauri::command]

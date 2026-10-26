@@ -64,12 +64,15 @@ impl SiteLimits {
 
     /// Changes the limits to `list`, in place (#165; #170, item 2): a site
     /// that stays keeps its counter, so its running downloads and the new
-    /// ones are counted together, never twice its limit. A higher limit
-    /// gives its slots at once; a lower one takes back the free ones now
-    /// and the others as running downloads give them back (in the
-    /// background, on the current runtime). A site no longer listed has no
-    /// limit for new downloads; one newly listed starts with all its
-    /// slots.
+    /// ones are counted together (no second counter). A higher limit gives
+    /// its slots at once. A lower one takes back the free slots now, and
+    /// the others as running downloads give them back (in the background,
+    /// on the current runtime; without one, only the free ones). A download
+    /// already waiting for its site may take a returned slot first, so the
+    /// site can have more than its new limit until enough come back. A
+    /// site no longer listed has no limit for new downloads (those still
+    /// waiting on it keep its old counter); one newly listed starts with
+    /// all its slots.
     pub fn set<'a>(&self, list: impl IntoIterator<Item = (&'a str, u32)>) {
         let mut sites = self.sites.write().unwrap_or_else(|e| e.into_inner());
         let next = plain(list)

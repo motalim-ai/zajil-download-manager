@@ -329,6 +329,18 @@ pub struct SettingsChange {
     pub speed_limit: Option<u64>,
 }
 
+/// `site` as the engine's URL parser writes a host, so the saved site is
+/// the one download addresses match (review of #165: the page's own URL
+/// parser could write an international name another way). Anything that
+/// is not a bare host stays as typed, for the file's check to refuse.
+fn canonical_site(site: &str) -> String {
+    zajil_core::Url::parse(&format!("http://{}/", site.trim()))
+        .ok()
+        .filter(|u| u.port().is_none() && u.path() == "/")
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| site.to_owned())
+}
+
 /// One site's connection limit (#165), as the settings screen edits it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -456,7 +468,7 @@ pub fn apply_settings(file: &mut SettingsFile, change: &SettingsChange) {
         .site_connections
         .iter()
         .map(|s| zajil_core::settings::SiteConnections {
-            site: s.site.clone(),
+            site: canonical_site(&s.site),
             connections: s.connections,
         })
         .collect();
@@ -1003,5 +1015,15 @@ mod tests {
         // What the file's own check refuses never reaches the engine.
         apply_settings(&mut file, &change(vec![site("http://bad/", 2)]));
         assert!(file.check().is_err());
+    }
+
+    /// Review of #165: a site is saved as the engine writes the host, and
+    /// what is not a bare host stays for the file's check to refuse.
+    #[test]
+    fn a_site_is_saved_as_the_engine_writes_it() {
+        assert_eq!(canonical_site("Example.COM"), "example.com");
+        assert_eq!(canonical_site("مثال.com"), "xn--mgbh0fb.com");
+        assert_eq!(canonical_site("http://bad/"), "http://bad/");
+        assert_eq!(canonical_site("a.com:8080"), "a.com:8080");
     }
 }
