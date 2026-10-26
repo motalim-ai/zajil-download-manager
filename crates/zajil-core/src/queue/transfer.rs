@@ -85,6 +85,10 @@ pub struct ExportItem {
     /// The user's description (#95).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Its own number of connections (#211): it describes the download, not
+    /// the computer, so it goes with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<u32>,
 }
 
 /// Where an exported download stands. A running or failed download is
@@ -173,6 +177,7 @@ impl QueuesFile {
                         name: i.name.clone(),
                         category: i.category.clone(),
                         description: i.description.clone(),
+                        connections: i.connections,
                     })
                     .collect(),
             })
@@ -298,6 +303,7 @@ impl QueuesFile {
                     description: ei.description.clone(),
                     failed_tries: 0,
                     last_try: None,
+                    connections: ei.connections,
                 };
                 self.queues[index[&eq.name]].items.push(item);
                 summary.items_added += 1;
@@ -457,6 +463,9 @@ fn check(export: &ExportFile) -> Result<(), String> {
             }
             if i.limit == Some(0) {
                 return Err(format!("{at} has a speed limit of 0"));
+            }
+            if let Some(n) = i.connections {
+                super::store::check_connections(n).map_err(|why| format!("{at} {why}"))?;
             }
             // The same rule as `QueuesFile::add`, so Zajil always imports
             // its own exports (review of #41, round 4: an emoji with

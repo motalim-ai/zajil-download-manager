@@ -359,6 +359,86 @@ fn the_queues_file_is_checked_and_a_damaged_one_is_never_overwritten() {
     }
 }
 
+/// #211: a download with its own number of connections uses it; the next
+/// one, without, takes the program's. Counted by the server.
+#[tokio::test]
+async fn a_download_s_own_connections_are_used_and_the_others_take_the_program_s() {
+    let server = TestServer::http();
+    let data = random_bytes(8 * MIB, 411);
+    for path in ["/one.bin", "/many.bin"] {
+        server.put(path, FileSpec::new(data.clone()).throttle(8 * MIB as u64));
+    }
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    set_max_active(&store, "main", 1);
+    let one = add(&store, "main", &server.url("/one.bin"), downloads.path());
+    add(&store, "main", &server.url("/many.bin"), downloads.path());
+    store.update(|q| q.set_connections(one, Some(1))).unwrap();
+    let engine = Engine::new(Options {
+        connections: 4,
+        ..Options::default()
+    })
+    .unwrap();
+
+    let summary = Runner::new(engine, store.clone())
+        .poll(Duration::from_millis(50))
+        .run(&Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(summary.finished, 2, "{summary:?}");
+    assert_eq!(server.most_concurrent("/one.bin"), 1);
+    assert_eq!(server.most_concurrent("/many.bin"), 4);
+    for name in ["one.bin", "many.bin"] {
+        assert_eq!(fs::read(downloads.path().join(name)).unwrap(), data);
+    }
+}
+
+/// #211: a download's own number of connections is 1 to `MAX_CONNECTIONS`:
+/// another is refused when set, never written, and refused in a file.
+#[test]
+fn impossible_connections_are_refused() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, "main", "http://h/f.bin", data_dir.path());
+    let path = store.path();
+    let before = fs::read_to_string(&path).unwrap();
+    for n in [0, zajil_core::MAX_CONNECTIONS as u32 + 1] {
+        let err = store.update(|q| q.set_connections(id, Some(n)));
+        assert!(matches!(err, Err(StoreError::Refused(_))), "{n}: {err:?}");
+        let err = store.update(|q| {
+            q.item_mut(id).unwrap().connections = Some(n);
+            Ok(())
+        });
+        assert!(matches!(err, Err(StoreError::Refused(_))), "{n}: {err:?}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), before, "left as it was");
+    }
+    store
+        .update(|q| q.set_connections(id, Some(zajil_core::MAX_CONNECTIONS as u32)))
+        .unwrap();
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"connections\"")
+    );
+    store.update(|q| q.set_connections(id, None)).unwrap();
+    assert!(
+        !fs::read_to_string(&path)
+            .unwrap()
+            .contains("\"connections\"")
+    );
+
+    // A file with 0, signed again, as a hand edit would leave it.
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    value["queues"][0]["items"][0]["connections"] = 0.into();
+    value["checksum"] = zajil_core::state::checksum_of(&value).into();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let err = store.load().unwrap_err();
+    assert!(matches!(err, StoreError::Corrupt { .. }), "{err:?}");
+    assert!(err.to_string().contains("connections"), "{err}");
+}
+
 /// #142 (review notes in #161): a queues file with tries out of range or a
 /// relative file to open is never written, and one found on disk is refused
 /// as damaged.

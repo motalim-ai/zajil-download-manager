@@ -1285,11 +1285,17 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
 /// `zajil-host` beside the program `exe` (the installers put it there; in a
 /// development build, `cargo build -p zajil-host` run in
 /// `apps/desktop/src-tauri` does), if a browser may safely be told to start
-/// it: `exe`'s real path (links resolved) is not in a place that goes away
-/// when the program closes, and on macOS and Linux the host is a program
-/// (an execute bit) that only its owner, the user or root, can change, in a
-/// folder only they can change.
-fn host_beside(exe: &Path) -> Result<PathBuf, view::HostProblemView> {
+/// it: on macOS and Linux the host is a program (an execute bit) that only
+/// its owner, the user or root, can change, in a folder only they can
+/// change.
+///
+/// `exe`'s real path (links resolved) must not be in a place that goes away
+/// when the program closes. From an AppImage (its mount, `.mount_…`, or
+/// `appimage`: `APPIMAGE` is set), the host beside it is copied to `fixed`
+/// in Zajil's data folder, and that copy is the one given to browsers,
+/// kept the same as the AppImage's (#129, `native_host::fixed_copy`).
+/// macOS's App Translocation is still refused: the user moves the app.
+fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view::HostProblemView> {
     use view::HostProblemView as Problem;
     // Links resolved on macOS and Linux (a CLI or Homebrew link). Not on
     // Windows: there the real path takes a `\\?\` form browsers may not
@@ -1298,13 +1304,14 @@ fn host_beside(exe: &Path) -> Result<PathBuf, view::HostProblemView> {
     let exe = std::fs::canonicalize(exe).map_err(|_| Problem::Missing)?;
     #[cfg(windows)]
     let exe = exe.to_path_buf();
-    let temporary = exe.components().any(|part| {
-        let part = part.as_os_str().to_string_lossy();
-        part.starts_with(".mount_") || part == "AppTranslocation"
-    });
-    if temporary || std::env::var_os("APPIMAGE").is_some() {
+    let part_named = |is: fn(&str) -> bool| {
+        exe.components()
+            .any(|part| is(&part.as_os_str().to_string_lossy()))
+    };
+    if part_named(|part| part == "AppTranslocation") {
         return Err(Problem::Temporary);
     }
+    let appimage = appimage || part_named(|part| part.starts_with(".mount_"));
     let dir = exe.parent().ok_or(Problem::Missing)?;
     let host = dir.join(if cfg!(windows) {
         "zajil-host.exe"
@@ -1325,6 +1332,17 @@ fn host_beside(exe: &Path) -> Result<PathBuf, view::HostProblemView> {
             return Err(Problem::Missing);
         }
     }
+    if appimage {
+        // The copy is checked instead (its folder, itself, its SHA-256).
+        return zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
+            eprintln!("zajil: the browsers' copy of zajil-host: {err}");
+            if err.kind() == std::io::ErrorKind::PermissionDenied {
+                Problem::Unsafe
+            } else {
+                Problem::Missing
+            }
+        });
+    }
     let safe =
         |path: &Path| zajil_platform::fs::only_user_or_root_can_change(path).unwrap_or(false);
     if !safe(&host) || !safe(dir) {
@@ -1340,9 +1358,11 @@ fn host_beside(exe: &Path) -> Result<PathBuf, view::HostProblemView> {
 fn integrate_browsers(data: &Path) -> view::IntegrationView {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let appimage = std::env::var_os("APPIMAGE").is_some();
+    let fixed = data.join(zajil_platform::native_host::FIXED_HOST_DIR);
     let host = std::env::current_exe()
         .map_err(|_| view::HostProblemView::Missing)
-        .and_then(|exe| host_beside(&exe));
+        .and_then(|exe| host_beside(&exe, appimage, &fixed));
     integrate_with(host, || SystemRegistrar::for_current_user(data))
 }
 
@@ -2575,6 +2595,47 @@ mod tests {
         assert_eq!(left, Vec::<PathBuf>::new());
     }
 
+    /// #129: from an AppImage, every browser is given the copy of
+    /// `zajil-host` in Zajil's data folder, never the mount that goes away.
+    #[cfg(unix)]
+    #[test]
+    fn from_an_appimage_browsers_are_given_the_lasting_copy() {
+        use std::os::unix::fs::PermissionsExt;
+        use zajil_platform::native_host::{Browser, FIXED_HOST_DIR};
+        let base = tempfile::tempdir().unwrap();
+        let mount = base.path().join("tmp/.mount_ZajilXy34/usr/bin");
+        std::fs::create_dir_all(&mount).unwrap();
+        let exe = mount.join("zajil-desktop");
+        std::fs::write(&exe, "app").unwrap();
+        let in_mount = mount.join("zajil-host");
+        std::fs::write(&in_mount, "zajil-host").unwrap();
+        std::fs::set_permissions(&in_mount, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let data = base.path().join("home/.local/share/zajil");
+        let fixed = data.join(FIXED_HOST_DIR);
+
+        let host = host_beside(&exe, true, &fixed);
+        let registrar = || {
+            SystemRegistrar::under(
+                &base.path().join("home"),
+                &data.join("native-messaging"),
+                "Software\\Unused",
+            )
+        };
+        let integration = integrate_with(host, || Ok(registrar()));
+        let registrar = registrar();
+        assert_eq!(integration.host_problem, None);
+        let copy = fixed.join("zajil-host");
+        for browser in Browser::ALL {
+            let manifest = std::fs::read_to_string(registrar.manifest_path(browser)).unwrap();
+            let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+            assert_eq!(manifest["path"], copy.to_str().unwrap(), "{browser:?}");
+        }
+        assert_eq!(std::fs::read(&copy).unwrap(), b"zajil-host");
+        // The mount goes away when Zajil closes; the copy stays.
+        std::fs::remove_dir_all(base.path().join("tmp")).unwrap();
+        assert!(copy.is_file());
+    }
+
     fn walk(dir: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -2598,6 +2659,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("zajil-desktop");
         std::fs::write(&exe, "app").unwrap();
+        let fixed = base.path().join("data").join("bin");
         let host = dir.join(if cfg!(windows) {
             "zajil-host.exe"
         } else {
@@ -2613,33 +2675,45 @@ mod tests {
             let _ = (path, yes);
         };
         executable(&dir, true);
-        assert_eq!(host_beside(&exe), Err(Problem::Missing), "no host");
+        assert_eq!(
+            host_beside(&exe, false, &fixed),
+            Err(Problem::Missing),
+            "no host"
+        );
         std::fs::create_dir(&host).unwrap();
-        assert_eq!(host_beside(&exe), Err(Problem::Missing), "a folder");
+        assert_eq!(
+            host_beside(&exe, false, &fixed),
+            Err(Problem::Missing),
+            "a folder"
+        );
         std::fs::remove_dir(&host).unwrap();
         std::fs::write(&host, "#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
             executable(&host, false);
-            assert_eq!(host_beside(&exe), Err(Problem::Missing), "not a program");
+            assert_eq!(
+                host_beside(&exe, false, &fixed),
+                Err(Problem::Missing),
+                "not a program"
+            );
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&host, std::fs::Permissions::from_mode(0o777)).unwrap();
             assert_eq!(
-                host_beside(&exe),
+                host_beside(&exe, false, &fixed),
                 Err(Problem::Unsafe),
                 "writable by others"
             );
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
             std::fs::set_permissions(&host, std::fs::Permissions::from_mode(0o755)).unwrap();
             assert_eq!(
-                host_beside(&exe),
+                host_beside(&exe, false, &fixed),
                 Err(Problem::Unsafe),
                 "folder writable by others"
             );
             executable(&dir, true);
         }
         executable(&host, true);
-        let found = host_beside(&exe).unwrap();
+        let found = host_beside(&exe, false, &fixed).unwrap();
         #[cfg(unix)]
         assert_eq!(found, std::fs::canonicalize(&host).unwrap());
         #[cfg(windows)]
@@ -2649,16 +2723,39 @@ mod tests {
         {
             let link = base.path().join("zajil");
             std::os::unix::fs::symlink(&exe, &link).unwrap();
-            assert_eq!(host_beside(&link), Ok(found.clone()));
+            assert_eq!(host_beside(&link, false, &fixed), Ok(found.clone()));
         }
-        // An AppImage's mount: refused.
-        let mount = base.path().join(".mount_ZajilAb12/usr/bin");
-        std::fs::create_dir_all(&mount).unwrap();
-        std::fs::write(mount.join("zajil-desktop"), "app").unwrap();
+        // macOS moving the app aside: refused.
+        let moved = base
+            .path()
+            .join("AppTranslocation/X/Zajil.app/Contents/MacOS");
+        std::fs::create_dir_all(&moved).unwrap();
+        std::fs::write(moved.join("zajil-desktop"), "app").unwrap();
         assert_eq!(
-            host_beside(&mount.join("zajil-desktop")),
+            host_beside(&moved.join("zajil-desktop"), false, &fixed),
             Err(Problem::Temporary)
         );
+        // An AppImage's mount (#129): its host is copied to the fixed place,
+        // and the copy is what browsers are given.
+        let mount = base.path().join(".mount_ZajilAb12/usr/bin");
+        std::fs::create_dir_all(&mount).unwrap();
+        let in_mount = mount.join("zajil-desktop");
+        std::fs::write(&in_mount, "app").unwrap();
+        assert_eq!(
+            host_beside(&in_mount, false, &fixed),
+            Err(Problem::Missing),
+            "no host in the AppImage"
+        );
+        let mounted_host = mount.join(host.file_name().unwrap());
+        std::fs::write(&mounted_host, "zajil-host 1").unwrap();
+        executable(&mounted_host, true);
+        let copy = fixed.join(host.file_name().unwrap());
+        assert_eq!(host_beside(&in_mount, false, &fixed), Ok(copy.clone()));
+        assert_eq!(std::fs::read(&copy).unwrap(), b"zajil-host 1");
+        // `APPIMAGE` set: the same, wherever it runs from.
+        std::fs::write(&mounted_host, "zajil-host 2").unwrap();
+        assert_eq!(host_beside(&in_mount, true, &fixed), Ok(copy.clone()));
+        assert_eq!(std::fs::read(&copy).unwrap(), b"zajil-host 2");
 
         for problem in [Problem::Missing, Problem::Temporary, Problem::Unsafe] {
             let integration =

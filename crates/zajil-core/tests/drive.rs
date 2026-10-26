@@ -429,33 +429,49 @@ async fn a_long_page_name_already_taken_is_numbered_within_the_limit_and_resumed
 
 /// #152: the hold (a file that runs code waits for the user) sees the
 /// server's name with its type's extension added, and the user's own name
-/// as given.
+/// as given; and (#196) the size the server announced, or none.
 #[tokio::test]
 async fn the_hold_sees_the_name_with_its_type_s_extension() {
     let server = TestServer::http();
+    let page = "<html><body>A page</body></html>";
+    server.put("/files/view", FileSpec::new(page).content_type("text/html"));
     server.put(
-        "/files/view",
-        FileSpec::new("<html><body>A page</body></html>").content_type("text/html"),
+        "/files/unsized",
+        FileSpec::new(page)
+            .content_type("text/html")
+            .without_length(),
     );
     let dir = tempfile::tempdir().unwrap();
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = seen.clone();
-    let result = Engine::new(Options::default())
+    let engine = Engine::new(Options::default())
         .unwrap()
         .named(Some("mine"))
-        .holding(std::sync::Arc::new(move |server: &str, name: &str| {
-            record
-                .lock()
-                .unwrap()
-                .push((server.to_owned(), name.to_owned()));
-            server.ends_with(".html")
-        }))
-        .download(&server.url("/files/view"), dir.path(), &mut |_| {})
-        .await;
-    assert!(matches!(result, Err(Error::Held(_))), "{result:?}");
+        .holding(std::sync::Arc::new(
+            move |server: &str, name: &str, size: Option<u64>| {
+                record
+                    .lock()
+                    .unwrap()
+                    .push((server.to_owned(), name.to_owned(), size));
+                server.ends_with(".html")
+            },
+        ));
+    for path in ["/files/view", "/files/unsized"] {
+        let result = engine
+            .download(&server.url(path), dir.path(), &mut |_| {})
+            .await;
+        assert!(matches!(result, Err(Error::Held(_))), "{result:?}");
+    }
     assert_eq!(
         *seen.lock().unwrap(),
-        [("view.html".to_owned(), "mine".to_owned())]
+        [
+            (
+                "view.html".to_owned(),
+                "mine".to_owned(),
+                Some(page.len() as u64)
+            ),
+            ("unsized.html".to_owned(), "mine".to_owned(), None),
+        ]
     );
     assert!(
         names_in(dir.path()).is_empty(),
