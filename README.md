@@ -5,7 +5,7 @@
 [![CI](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-> **الحالة: نسخة تجريبية.** [زاجِل 0.2.0](https://github.com/motalim-ai/zajil-download-manager/releases) أول نسخة منشورة للتجربة، لا للاستعمال اليومي بعد، وفيها تحميل الفيديو. وما يأتي بعدها في [ROADMAP](docs/ROADMAP.md).
+> **الحالة:** [زاجِل 1.0](https://github.com/motalim-ai/zajil-download-manager/releases) أول إصدار كامل. والتحديث التلقائي الموقّع يأتي في 1.1، وما بعده في [ROADMAP](docs/ROADMAP.md).
 
 **زاجِل** برنامج مجاني ومفتوح المصدر لإدارة التحميل. يعمل على **ويندوز وماك ولينكس**، وواجهته **عربية أولًا** (من اليمين إلى اليسار)، والإنجليزية بضغطة زر.
 
@@ -76,7 +76,7 @@ This software uses code of [FFmpeg](https://ffmpeg.org) licensed under the [LGPL
 
 **Zajil Download Manager** is a free, open-source (GPL-3.0-or-later) download manager for **Windows, macOS and Linux**, designed **Arabic-first (RTL)** with one-click English.
 
-**Status: test build.** [Zajil 0.2.0](https://github.com/motalim-ai/zajil-download-manager/releases) is the first published build to try, with video downloads; not for daily use yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** [Zajil 1.0](https://github.com/motalim-ai/zajil-download-manager/releases) is the first full release. Signed automatic updates come in 1.1; what comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Screenshots
 

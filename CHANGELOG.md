@@ -7,6 +7,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-27
+
+The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-27). This list is the titles of the pull requests merged after 0.2.0.
+
+### Features
+
+- feat: from an AppImage, browsers start a lasting copy of zajil-host (#129) (#210)
+- feat: a file announced over the grabber's limits is refused before a byte is written (#196) (#213)
+- feat(core): a queued download's own number of connections (#211) (#215)
+- feat(desktop): «Site grabber», as IDM's: check a site, choose its files, and queue them politely (#214)
+- feat(grab): each file refused over --max-total is counted as left out (#212) (#222)
+
+### Fixes
+
+- fix(desktop): at a Windows session end, end the process once everything is saved (#218)
+- fix(grab): robots.txt escapes and cut lines, more local forms, the https twin's port, the start URL (#199) (#227)
+- fix(grab): --max-pages counts every page request, the rate is per host, include/exclude match decoded paths, and more (#199) (#232)
+
+### Documentation
+
+- docs: a 0.2 test on macOS for the owner, under 20 minutes (#85) (#216)
+- docs: ADR-0011, signed self-updates with the project's own key (accepted, for 0.3) (#217)
+- docs: signed updates in 1.1, and SHA256SUMS signed by the update key, no GPG (#231)
+
+### Tests
+
+- test(core): the site-wait stop test stops the slow download once it has written (#224) (#225)
+
+### CI
+
+- ci: the GUI libraries come from the cache when it has them (#119) (#223)
+- ci(ffmpeg): no build for pins or README, a weekly run, cancel on PRs only, current comments (#173) (#228)
+
 ## [0.2.0] - 2026-10-26
 
 The first published build. 0.1.0 was a test draft that was never published (owner's decision of 2026-10-26): its changes are here too. This list is the titles of the pull requests merged before it; the notes each pull request wrote follow under «Details».
@@ -247,5 +280,6 @@ The first published build. 0.1.0 was a test draft that was never published (owne
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.0.0
 [0.2.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.2.0

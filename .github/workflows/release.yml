@@ -324,13 +324,23 @@ jobs:
           (cd "$r" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
           [ "$(wc -l < "$r/SHA256SUMS")" -eq 6 ] || { echo "::error::expected 6 files"; exit 1; }
       # A draft: visible to the repository's maintainers only, published by
-      # the owner by hand after trying it. A pre-release (0.x is a test
-      # build); the update check reads /releases, which lists those.
+      # the owner by hand after trying it. 0.x is a test build, so a
+      # pre-release; from 1.0 on a full release named "زاجِل 1.0" (owner's
+      # decision for 1.0). The update check reads /releases, which lists
+      # both.
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" --draft --prerelease --verify-tag \
-            --title "Zajil $VERSION (test build)" \
-            --notes-file "docs/releases/v$VERSION.md" "$RUNNER_TEMP"/release/*
+          if [[ "$VERSION" == 0.* ]]; then
+            gh release create "$GITHUB_REF_NAME" --draft --prerelease --verify-tag \
+              --title "Zajil $VERSION (test build)" \
+              --notes-file "docs/releases/v$VERSION.md" "$RUNNER_TEMP"/release/*
+          else
+            # 1.0.0 is "زاجِل 1.0"; a fix release keeps its third number.
+            title="${VERSION%.0}"
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "زاجِل $title" \
+              --notes-file "docs/releases/v$VERSION.md" "$RUNNER_TEMP"/release/*
+          fi
