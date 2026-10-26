@@ -371,9 +371,10 @@ pub struct IntegrationView {
 pub enum HostProblemView {
     /// Not there, or not a program (a development build).
     Missing,
-    /// The program runs from a place that goes away when it closes (an
-    /// AppImage's mount, macOS's App Translocation): a browser would later
-    /// start whatever another user put at that path.
+    /// The program runs from a place that goes away when it closes
+    /// (macOS's App Translocation): a browser would later start whatever
+    /// another user put at that path. An AppImage's host is copied to a
+    /// lasting place instead (#129).
     Temporary,
     /// Another user could change it: its folder or itself is writable by
     /// others, or owned by someone else.

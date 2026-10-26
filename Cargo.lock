@@ -2678,6 +2678,7 @@ dependencies = [
  "landlock",
  "libc",
  "objc2-app-kit",
+ "sha2",
  "tempfile",
  "thiserror",
  "windows-sys 0.61.2",

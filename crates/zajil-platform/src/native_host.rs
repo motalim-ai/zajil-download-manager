@@ -84,6 +84,89 @@ impl Browser {
     }
 }
 
+/// The folder in Zajil's data folder that holds the copy of `zajil-host`
+/// browsers start when Zajil runs from a place that goes away when it
+/// closes ([`fixed_copy`]).
+pub const FIXED_HOST_DIR: &str = "bin";
+
+/// Copies the host program `host` to `dir`, under its own file name, for
+/// browsers to start when `host` sits in a place that goes away when Zajil
+/// closes: an AppImage's mount (#129). Returns the copy's path.
+///
+/// `dir` is made a folder only this user can change
+/// ([`crate::fs::private_dir`]). A copy already there with the same SHA-256
+/// is kept, so the copy follows the AppImage when it is updated. Anything
+/// else there (another version, a link, a second name of another file) is
+/// replaced whole: the copy is written under a new name, made runnable by
+/// its owner only, and renamed over it, so nothing is written through a
+/// link. The copy is then opened as a program Zajil checks
+/// ([`crate::fs::open_private_tool`]: a regular file with one name, never a
+/// link, that only this user or root can change) and its SHA-256 checked
+/// again.
+pub fn fixed_copy(host: &Path, dir: &Path) -> io::Result<PathBuf> {
+    let name = host
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the host has no file name"))?;
+    let program = std::fs::read(host)?;
+    let digest = sha256(&program);
+    crate::fs::private_dir(dir)?;
+    let copy = dir.join(name);
+    if copy_digest(&copy).ok() == Some(digest) {
+        return Ok(copy);
+    }
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(io::Error::other)?;
+    let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
+    let new = dir.join(format!(".{}.{suffix}.new", name.to_string_lossy()));
+    let written = (|| {
+        let mut file = crate::fs::create_private(&new)?;
+        file.write_all(&program)?;
+        crate::fs::make_executable(&file)?;
+        file.sync_all()?;
+        drop(file);
+        crate::fs::replace_file(&new, &copy)?;
+        crate::fs::sync_dir(dir)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&new);
+    }
+    written?;
+    if copy_digest(&copy)? != digest {
+        return Err(io::Error::other(format!(
+            "{} is not the same as {}",
+            copy.display(),
+            host.display()
+        )));
+    }
+    Ok(copy)
+}
+
+/// The SHA-256 of the program at `path`, read as a program Zajil checks
+/// ([`crate::fs::open_private_tool`]); on macOS and Linux it must be one
+/// its owner can run.
+fn copy_digest(path: &Path) -> io::Result<[u8; 32]> {
+    use std::io::Read;
+    let mut file = crate::fs::open_private_tool(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if file.metadata()?.permissions().mode() & 0o100 == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} cannot be run", path.display()),
+            ));
+        }
+    }
+    let mut program = Vec::new();
+    file.read_to_end(&mut program)?;
+    Ok(sha256(&program))
+}
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).into()
+}
+
 /// Registers the host with a browser for the current user (ADR-0006).
 pub trait NativeHostRegistrar {
     /// Registers `host` (an absolute path) for the extension ids `allowed`
