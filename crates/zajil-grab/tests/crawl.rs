@@ -937,6 +937,87 @@ async fn the_rate_spaces_requests_to_one_origin() {
     assert_eq!(report.pages, 3);
 }
 
+/// The rate is per host (ADR-0010): two origins on one host, here two
+/// ports of 127.0.0.1, share it (review of #195: an http site and its
+/// https twin went twice as fast).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_rate_is_per_host() {
+    let site = server();
+    let other = server();
+    other.put("/p.html", links(&[]));
+    site.put("/index.html", links(&[&other.url("/p.html")]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.rate = crawl::DEFAULT_RATE;
+    let port = Url::parse(&other.url("/")).unwrap().port().unwrap();
+    plan.allowed = vec![format!("127.0.0.1:{port}").parse().unwrap()];
+    let (engine, clock) = engine_on_frozen_clock();
+    let scope = scope(&plan);
+    let task = spawn_grab(engine, plan, scope);
+
+    // Both robots.txt and both pages, one each second.
+    let asked = || site.requests().len() + other.requests().len();
+    until("robots.txt", || asked() == 1).await;
+    for n in 2..=4 {
+        clock.advance(Duration::from_millis(999));
+        settle().await;
+        assert_eq!(asked(), n - 1, "a request came early");
+        clock.advance(Duration::from_millis(1));
+        until("the next request", || asked() == n).await;
+    }
+    let (report, _) = task.await.unwrap();
+    assert_eq!(report.pages, 2);
+}
+
+/// `--max-pages` counts every page request, whatever the answer: a 404, a
+/// redirect or a file costs one too (review of #195).
+#[tokio::test(flavor = "multi_thread")]
+async fn max_pages_counts_every_page_request() {
+    let site = server();
+    site.put(
+        "/index.html",
+        links(&["gone1.html", "moved.html", "gone2.html", "a.html"]),
+    );
+    site.redirect("/moved.html", "/a.html", 301);
+    site.put("/a.html", links(&[]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.max_pages = 3;
+    let (report, events) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    let pages: Vec<_> = site
+        .requests()
+        .into_iter()
+        .map(|r| r.path)
+        .filter(|p| p != "/robots.txt")
+        .collect();
+    assert_eq!(pages, ["/index.html", "/gone1.html", "/moved.html"]);
+    assert_eq!(report.pages, 1);
+    assert!(report.limits.contains(&Limit::Pages), "{events:?}");
+}
+
+/// A start that redirects to another site (`example.com` to
+/// `www.example.com`) reads nothing, and the report says where it went, so
+/// the user can be told to allow it (review of #195).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_that_leaves_the_site_is_reported() {
+    let site = server();
+    let other = server();
+    other.put("/index.html", links(&[]));
+    site.redirect("/", &other.url("/index.html"), 301);
+    let dir = tempfile::tempdir().unwrap();
+    let plan = plan(&site.url("/"), dir.path());
+    let scope = scope(&plan).treat_as_public(&Url::parse(&other.url("/")).unwrap());
+    let (report, _) = grab(&engine(), &plan, &scope).await;
+
+    assert_eq!(report.pages, 0);
+    assert_eq!(
+        report.start_left_site,
+        Some(Url::parse(&other.url("/index.html")).unwrap())
+    );
+    assert!(other.requests().is_empty(), "{:?}", other.requests());
+}
+
 /// A `Crawl-delay` slower than the rate is respected, from the robots.txt
 /// request on.
 #[tokio::test(flavor = "multi_thread")]

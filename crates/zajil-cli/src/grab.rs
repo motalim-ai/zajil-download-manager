@@ -56,7 +56,8 @@ pub struct GrabArgs {
         value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..=crawl::MAX_FILES as u64)
     )]
     max_files: usize,
-    /// Most pages to read.
+    /// Most pages to ask for: every page request counts, whatever the
+    /// answer (a 404 or a redirect too).
     #[arg(
         long,
         value_name = "N",
@@ -71,7 +72,7 @@ pub struct GrabArgs {
     /// Files larger than this are left out, such as 100M.
     #[arg(long, value_name = "SIZE", value_parser = size)]
     max_file_size: Option<u64>,
-    /// Requests per second to one site, 0.1 to 10. A slower Crawl-delay in
+    /// Requests per second to one host, 0.1 to 10. A slower Crawl-delay in
     /// robots.txt is respected.
     #[arg(long, value_name = "R", default_value_t = crawl::DEFAULT_RATE, value_parser = rate)]
     rate: f64,
@@ -153,12 +154,7 @@ pub async fn run(engine: Engine, args: GrabArgs) -> ExitCode {
         );
     }
     let stop = Stop::new();
-    let on_ctrl_c = stop.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            on_ctrl_c.request();
-        }
-    });
+    crate::stop_on_ctrl_c(stop.clone());
 
     let dry_run = plan.dry_run;
     let mut resumable = Vec::new();
@@ -189,6 +185,17 @@ pub async fn run(engine: Engine, args: GrabArgs) -> ExitCode {
         // reached, its robots.txt allows nothing): a failure, not "done"
         // (review of #195).
         eprintln!("zajil: nothing could be read from the start page");
+        if let Some(to) = &report.start_left_site {
+            let host = match (to.host_str(), to.port()) {
+                (Some(host), Some(port)) => format!("{host}:{port}"),
+                (Some(host), None) => host.to_owned(),
+                (None, _) => String::new(),
+            };
+            eprintln!(
+                "zajil: the start redirects to {}, another site: to crawl it, add --allow-host {host}",
+                shown(to.as_str())
+            );
+        }
         ExitCode::FAILURE
     } else if report.failed > 0 || !resumable.is_empty() {
         ExitCode::FAILURE

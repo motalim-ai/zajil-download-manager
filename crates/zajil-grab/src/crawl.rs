@@ -206,7 +206,7 @@ impl fmt::Display for Limit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Limit::Files => "the most files (--max-files)",
-            Limit::Pages => "the most pages (--max-pages)",
+            Limit::Pages => "the most page requests (--max-pages)",
             Limit::Total => "the most bytes (--max-total)",
             Limit::Waiting => "the most links waiting at once (--max-pages and --max-files): later links were left out",
             Limit::Seen => "the most different links in one crawl",
@@ -281,6 +281,10 @@ pub struct Report {
     pub limits: Vec<Limit>,
     /// The crawl was stopped before its end.
     pub stopped: bool,
+    /// The start redirected out of the site (`example.com` to
+    /// `www.example.com`): its target, so the user can be told to allow it
+    /// (review of #195).
+    pub start_left_site: Option<Url>,
 }
 
 /// Why a plan cannot run.
@@ -338,6 +342,7 @@ pub async fn crawl(
         clock: engine.clock(),
         interval: Duration::from_secs_f64(1.0 / plan.rate),
         next_request: HashMap::new(),
+        page_requests: 0,
         robots: HashMap::new(),
         origins: HashSet::new(),
         queued: HashSet::new(),
@@ -388,8 +393,12 @@ struct Crawler<'a> {
     stop: &'a Stop,
     clock: Arc<dyn Clock>,
     interval: Duration,
-    /// When each origin may be asked again.
+    /// When each host may be asked again (ADR-0010: the rate is per host,
+    /// so a site and its https twin share it; review of #195).
     next_request: HashMap<String, Duration>,
+    /// Requests for pages, whatever their answer: what `--max-pages`
+    /// limits (review of #195: 404s, redirects and files were free).
+    page_requests: usize,
     robots: HashMap<String, Robots>,
     origins: HashSet<String>,
     /// A hash of every URL that entered the queue: each is asked for once.
@@ -403,6 +412,11 @@ struct Crawler<'a> {
 
 fn origin(url: &Url) -> String {
     url.origin().ascii_serialization()
+}
+
+/// The host a URL asks, for the rate.
+fn host(url: &Url) -> String {
+    url.host_str().unwrap_or_default().to_owned()
 }
 
 /// The path and query a rule looks at (`/a/b?c`).
@@ -435,6 +449,33 @@ fn remove_download(state_file: &std::path::Path) {
 
 /// Whether `text` matches `glob`, where `*` is any run of characters and
 /// the whole text must match.
+/// Whether `--include` or `--exclude` `glob` matches `path`, as written in
+/// the URL or decoded: `'/my files/*'` matches `/my%20files/a.zip`, and so
+/// does `'/my%20files/*'` (review of #195).
+fn path_matches(glob: &str, path: &str) -> bool {
+    glob_matches(glob, path) || (path.contains('%') && glob_matches(glob, &decoded(path)))
+}
+
+/// `path` with its percent escapes decoded (invalid UTF-8 replaced).
+fn decoded(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let hex = |b: Option<&u8>| b.and_then(|b| char::from(*b).to_digit(16));
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(high), Some(low)) = (hex(bytes.get(i + 1)), hex(bytes.get(i + 2)))
+        {
+            out.push((high << 4 | low) as u8);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub fn glob_matches(glob: &str, text: &str) -> bool {
     let (p, s) = (glob.as_bytes(), text.as_bytes());
     let (mut i, mut j) = (0, 0);
@@ -550,7 +591,7 @@ impl Crawler<'_> {
             }
         };
         let path = item.url.path();
-        if self.plan.exclude.iter().any(|g| glob_matches(g, path)) {
+        if self.plan.exclude.iter().any(|g| path_matches(g, path)) {
             self.skip(&item.url, Skip::Filtered, on_event);
             return None;
         }
@@ -568,7 +609,7 @@ impl Crawler<'_> {
                 // A slower Crawl-delay counts from the robots.txt request
                 // too, not only from the next one.
                 if let Some(delay) = robots.crawl_delay().filter(|d| *d > self.interval)
-                    && let Some(next) = self.next_request.get_mut(&origin)
+                    && let Some(next) = self.next_request.get_mut(&host(&item.url))
                 {
                     *next += delay - self.interval;
                 }
@@ -582,23 +623,24 @@ impl Crawler<'_> {
         Some(place)
     }
 
-    /// Waits until `url`'s origin may be asked again: the rate, or a
-    /// slower `Crawl-delay`. `None` when the crawl is stopped meanwhile.
+    /// Waits until `url`'s host may be asked again: the rate, or a slower
+    /// `Crawl-delay` of its origin. `None` when the crawl is stopped
+    /// meanwhile.
     async fn wait_turn(&mut self, url: &Url) -> Option<()> {
-        let origin = origin(url);
         let delay = self
             .robots
-            .get(&origin)
+            .get(&origin(url))
             .and_then(Robots::crawl_delay)
             .map_or(self.interval, |d| d.max(self.interval));
+        let host = host(url);
         let now = self.clock.now();
         let at = self
             .next_request
-            .get(&origin)
+            .get(&host)
             .copied()
             .unwrap_or(now)
             .max(now);
-        self.next_request.insert(origin, at + delay);
+        self.next_request.insert(host, at + delay);
         if at > now {
             tokio::select! {
                 () = self.clock.sleep_until(at) => {}
@@ -726,7 +768,7 @@ impl Crawler<'_> {
         if item.depth >= self.plan.depth {
             return;
         }
-        if self.report.pages >= self.plan.max_pages {
+        if self.page_requests >= self.plan.max_pages {
             self.limit(Limit::Pages, on_event);
             return;
         }
@@ -736,6 +778,7 @@ impl Crawler<'_> {
         if self.wait_turn(&item.url).await.is_none() {
             return;
         }
+        self.page_requests += 1;
         let (stop, timer) = self.request_stop();
         let result = self
             .engine_for(item.from.as_ref())
@@ -845,7 +888,9 @@ impl Crawler<'_> {
         location: Option<String>,
         on_event: &mut (dyn FnMut(Event) + Send),
     ) {
-        let Some(target) = location.and_then(|l| item.url.join(&l).ok()) else {
+        // Written as links are, so `/b#x` and a link to `/b` are one URL
+        // (review of #227).
+        let Some(target) = location.and_then(|l| item.url.join(&l).ok().map(links::tidy)) else {
             self.report.failed += 1;
             on_event(Event::Failed {
                 url: item.url,
@@ -868,6 +913,9 @@ impl Crawler<'_> {
                 return;
             }
         };
+        if !as_page && item.from.is_none() {
+            self.report.start_left_site = Some(target.clone());
+        }
         let kind = if as_page {
             Want::Page
         } else {
@@ -908,7 +956,7 @@ impl Crawler<'_> {
             return;
         }
         let path = item.url.path();
-        if !self.plan.include.is_empty() && !self.plan.include.iter().any(|g| glob_matches(g, path))
+        if !self.plan.include.is_empty() && !self.plan.include.iter().any(|g| path_matches(g, path))
         {
             self.skip(&item.url, Skip::Filtered, on_event);
             return;
@@ -1065,5 +1113,22 @@ impl Crawler<'_> {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn include_and_exclude_match_the_path_as_written_or_decoded() {
+        assert!(path_matches("/my files/*", "/my%20files/a.zip"));
+        assert!(path_matches("/my%20files/*", "/my%20files/a.zip"));
+        assert!(path_matches(
+            "/وثائق/*",
+            "/%D9%88%D8%AB%D8%A7%D8%A6%D9%82/a.pdf"
+        ));
+        assert!(!path_matches("/my files/*", "/other/a.zip"));
+        assert!(path_matches("/a.zip", "/a.zip"));
     }
 }

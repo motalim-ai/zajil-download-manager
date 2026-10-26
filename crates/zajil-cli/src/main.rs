@@ -368,6 +368,20 @@ fn download_dir_path(chosen: Option<&Path>) -> Result<PathBuf, String> {
     }
 }
 
+/// Ctrl+C asks `stop` to stop, so files in progress are saved to resume; a
+/// second Ctrl+C quits at once (review of #195: it did nothing).
+fn stop_on_ctrl_c(stop: zajil_core::Stop) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            stop.request();
+            eprintln!("zajil: stopping (Ctrl+C again to quit at once)");
+            if tokio::signal::ctrl_c().await.is_ok() {
+                std::process::exit(EXIT_RESUMABLE.into());
+            }
+        }
+    });
+}
+
 fn stopped(reason: &str, state_file: &Path) -> ExitCode {
     eprintln!("zajil: the download stopped: {reason}");
     // The file name comes from the server: quote it for each shell so the

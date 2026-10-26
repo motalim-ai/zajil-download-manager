@@ -65,6 +65,7 @@ pub fn extract(html: &str, page: &Url) -> Links {
 
     let mut out = Links {
         nofollow: found.nofollow,
+        truncated: found.cut,
         ..Links::default()
     };
     let mut seen = HashSet::new();
@@ -149,6 +150,8 @@ struct Found {
     raw: Vec<(String, LinkKind)>,
     base: Option<String>,
     nofollow: bool,
+    /// A link was left out once there were enough.
+    cut: bool,
 }
 
 #[derive(Default)]
@@ -167,9 +170,15 @@ impl TokenSink for Sink {
             return TokenSinkResult::Continue;
         }
         let mut found = self.found.borrow_mut();
-        // Stop gathering once there is more than enough: the page is cut.
+        // Stop gathering once there is more than enough: the page is cut,
+        // and said to be when a link is left out, even if the many before
+        // it were the same few links (review of #195).
         if found.raw.len() <= MAX_LINKS_PER_PAGE * 2 {
             read_tag(&tag, &mut found);
+        } else if !found.cut {
+            let mut rest = Found::default();
+            read_tag(&tag, &mut rest);
+            found.cut = !rest.raw.is_empty();
         }
         // The tokenizer alone does not switch to the raw text states a
         // browser's tree builder does: text inside these tags is never
@@ -500,6 +509,19 @@ mod tests {
         assert_eq!(found.links.len(), MAX_LINKS_PER_PAGE);
         assert!(found.truncated);
         assert_eq!(found.links[0].url.as_str(), "https://site.test/f0.zip");
+    }
+
+    /// Many copies of a few links fill what is gathered: a new link after
+    /// them is said to be left out (review of #195).
+    #[test]
+    fn a_page_cut_after_repeated_links_is_said() {
+        let page = Url::parse("https://site.test/").unwrap();
+        let same = "<a href=\"same.zip\"></a>".repeat(MAX_LINKS_PER_PAGE * 2 + 1);
+        let found = extract(&format!("{same}<a href=\"new.zip\"></a>"), &page);
+        assert_eq!(found.links.len(), 1);
+        assert!(found.truncated);
+        let found = extract(&format!("{same}<p>no link</p>"), &page);
+        assert!(!found.truncated, "nothing was left out");
     }
 
     #[test]
