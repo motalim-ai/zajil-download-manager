@@ -831,6 +831,17 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
+    ("grab-extensions-hint", &["example"]),
+    ("grab-sites-hint", &["example"]),
+    ("grab-files-hint", &["default", "max"]),
+    ("grab-total-hint", &["default"]),
+    ("grab-progress", &["files", "pages"]),
+    ("grab-chosen", &["all", "chosen"]),
+    ("grab-skipped", &["skipped"]),
+    ("grab-error-start", &["http", "https"]),
+    ("grab-error-depth", &["max", "min"]),
+    ("grab-error-max_files", &["max", "min"]),
+    ("grab-error-site", &["example", "site"]),
     ("batch-links-count", &["count"]),
     ("batch-pattern-hint", &["example"]),
     ("batch-width-hint", &["example"]),
@@ -885,6 +896,115 @@ struct Whole {
 }
 
 const WHOLE_TEXTS: &[Whole] = &[
+    Whole {
+        key: "grab-extensions-hint",
+        ar: (&[("example", "EXAMPLE")], "مفصولة بفواصل، مثل EXAMPLE."),
+        en: (
+            &[("example", "EXAMPLE")],
+            "Separated by commas, such as EXAMPLE.",
+        ),
+    },
+    Whole {
+        key: "grab-sites-hint",
+        ar: (
+            &[("example", "EXAMPLE")],
+            "اسم الموقع وحده، مفصولة بفواصل، مثل EXAMPLE.",
+        ),
+        en: (
+            &[("example", "EXAMPLE")],
+            "The site's name only, separated by commas, such as EXAMPLE.",
+        ),
+    },
+    Whole {
+        key: "grab-files-hint",
+        ar: (
+            &[("default", "DEFAULT"), ("max", "MAX")],
+            "الافتراضي DEFAULT، والأقصى MAX.",
+        ),
+        en: (
+            &[("default", "DEFAULT"), ("max", "MAX")],
+            "DEFAULT by default, at most MAX.",
+        ),
+    },
+    Whole {
+        key: "grab-total-hint",
+        ar: (&[("default", "DEFAULT")], "الافتراضي DEFAULT."),
+        en: (&[("default", "DEFAULT")], "DEFAULT by default."),
+    },
+    Whole {
+        key: "grab-progress",
+        ar: (
+            &[("files", "FILES"), ("pages", "PAGES")],
+            "صفحات: PAGES، ملفات: FILES",
+        ),
+        en: (
+            &[("files", "FILES"), ("pages", "PAGES")],
+            "Pages: PAGES, files: FILES",
+        ),
+    },
+    Whole {
+        key: "grab-chosen",
+        ar: (
+            &[("all", "ALL"), ("chosen", "CHOSEN")],
+            "المحدد: CHOSEN من ALL",
+        ),
+        en: (
+            &[("all", "ALL"), ("chosen", "CHOSEN")],
+            "Chosen: CHOSEN of ALL",
+        ),
+    },
+    Whole {
+        key: "grab-skipped",
+        ar: (
+            &[("skipped", "SKIPPED")],
+            "روابط تُركت: SKIPPED (خارج الموقع، أو ليست من الأنواع المطلوبة، أو منعها robots.txt).",
+        ),
+        en: (
+            &[("skipped", "SKIPPED")],
+            "Links left out: SKIPPED (outside the site, not a type asked for, or kept out by robots.txt).",
+        ),
+    },
+    Whole {
+        key: "grab-error-start",
+        ar: (
+            &[("http", "HTTP"), ("https", "HTTPS")],
+            "اكتب رابط صفحة يبدأ بـ HTTP أو HTTPS، بلا اسم مستخدم أو كلمة مرور.",
+        ),
+        en: (
+            &[("http", "HTTP"), ("https", "HTTPS")],
+            "Write a page's link starting with HTTP or HTTPS, without a user name or password.",
+        ),
+    },
+    Whole {
+        key: "grab-error-depth",
+        ar: (&[("max", "MAX"), ("min", "MIN")], "العمق من MIN إلى MAX."),
+        en: (
+            &[("max", "MAX"), ("min", "MIN")],
+            "The depth is from MIN to MAX.",
+        ),
+    },
+    Whole {
+        key: "grab-error-max_files",
+        ar: (
+            &[("max", "MAX"), ("min", "MIN")],
+            "عدد الملفات من MIN إلى MAX.",
+        ),
+        en: (
+            &[("max", "MAX"), ("min", "MIN")],
+            "The files are from MIN to MAX.",
+        ),
+    },
+    Whole {
+        key: "grab-error-site",
+        ar: (
+            &[("example", "EXAMPLE"), ("site", "SITE")],
+            "«SITE» ليس اسم موقع: اكتب الاسم وحده، مثل EXAMPLE.",
+        ),
+        en: (
+            &[("example", "EXAMPLE"), ("site", "SITE")],
+            "«SITE» is not a site's name: write the name alone, such as EXAMPLE.",
+        ),
+    },
     Whole {
         key: "batch-error-not_http",
         ar: (

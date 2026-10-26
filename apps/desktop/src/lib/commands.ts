@@ -8,6 +8,7 @@ export type Command =
   | "video"
   | "batch"
   | "batch-clipboard"
+  | "grab"
   | "import"
   | "export"
   | "quit"

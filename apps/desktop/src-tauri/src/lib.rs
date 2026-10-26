@@ -13,6 +13,7 @@ mod batch;
 mod closing;
 mod complete;
 mod dropbox;
+mod grab;
 mod live;
 mod menu;
 mod removal;
@@ -189,6 +190,7 @@ pub fn run() {
         .manage(windows::Shared::default())
         .manage(video::VideoState::default())
         .manage(batch::Pending::default())
+        .manage(grab::GrabState::default())
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
@@ -254,6 +256,7 @@ pub fn run() {
             tauri_app.add_capability(windows::CAPABILITY)?;
             tauri_app.add_capability(video::CAPABILITY)?;
             tauri_app.add_capability(batch::CAPABILITY)?;
+            tauri_app.add_capability(grab::CAPABILITY)?;
             // What a video run or a tools install left when Zajil stopped
             // (#149).
             {
@@ -385,6 +388,11 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         batch::batch_preview,
         batch::batch_add,
         batch::clipboard_link,
+        grab::open_grab,
+        grab::grab_pending,
+        grab::grab_check,
+        grab::grab_cancel,
+        grab::grab_add,
         video::video_folder,
         video::video_tools_status,
         video::video_tools_install,
@@ -473,6 +481,11 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         batch::batch_preview,
         batch::batch_add,
         batch::clipboard_link,
+        grab::open_grab,
+        grab::grab_pending,
+        grab::grab_check,
+        grab::grab_cancel,
+        grab::grab_add,
         video::video_folder,
         video::video_tools_status,
         video::video_tools_install,

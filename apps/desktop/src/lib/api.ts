@@ -13,6 +13,10 @@ import type { ProbeView } from "./bindings/ProbeView";
 import type { ToolView } from "./bindings/ToolView";
 import type { BatchRequest } from "./bindings/BatchRequest";
 import type { BatchPreview } from "./bindings/BatchPreview";
+import type { GrabRequest } from "./bindings/GrabRequest";
+import type { GrabScan } from "./bindings/GrabScan";
+import type { GrabProgress } from "./bindings/GrabProgress";
+import type { GrabAdded } from "./bindings/GrabAdded";
 import type { VideoInfoView } from "./bindings/VideoInfoView";
 import type { VideoErrorView } from "./bindings/VideoErrorView";
 import type { ChoiceView } from "./bindings/ChoiceView";
@@ -120,6 +124,17 @@ export const api = {
   batchPreview: (request: BatchRequest) => invoke<BatchPreview>("batch_preview", { request }),
   batchAdd: (request: BatchRequest, queue: string | null, folder: string | null, start: boolean) =>
     invoke<number>("batch_add", { request, queue, folder, start }),
+  /** «Site grabber» (M7): opened with a start link or none; «Check» lists
+   * the files (with `grab-progress` as it goes); the files kept go to the
+   * site's own queue, named by the check's id and the places taken out. */
+  openGrab: (url: string | null) => invoke<void>("open_grab", { url }),
+  grabPending: () => invoke<string | null>("grab_pending"),
+  grabCheck: (request: GrabRequest) => invoke<GrabScan>("grab_check", { request }),
+  grabCancel: () => invoke<void>("grab_cancel"),
+  grabAdd: (id: number, removed: number[], folder: string | null, start: boolean) =>
+    invoke<GrabAdded>("grab_add", { id, removed, folder, start }),
+  onGrabProgress: (handler: (p: GrabProgress) => void): Promise<UnlistenFn> =>
+    listen<GrabProgress>("grab-progress", (e) => handler(e.payload)),
   /** The clipboard's link, if it holds one. */
   clipboardLink: () => invoke<string | null>("clipboard_link"),
   videoPending: () => invoke<string | null>("video_pending"),

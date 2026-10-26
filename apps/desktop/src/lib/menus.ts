@@ -11,7 +11,7 @@ export type Item = { command: Command; danger?: boolean } | "-" | { queues: true
 export type Menu = { key: string; edit?: boolean; items: Item[] };
 
 export const MENU_BAR: Menu[] = [
-  { key: "menu-file", items: [{ command: "add" }, { command: "video" }, { command: "batch" }, { command: "batch-clipboard" }, "-", { command: "import" }, { command: "export" }, "-", { command: "quit" }] },
+  { key: "menu-file", items: [{ command: "add" }, { command: "video" }, { command: "batch" }, { command: "batch-clipboard" }, { command: "grab" }, "-", { command: "import" }, { command: "export" }, "-", { command: "quit" }] },
   {
     key: "menu-edit",
     edit: true,

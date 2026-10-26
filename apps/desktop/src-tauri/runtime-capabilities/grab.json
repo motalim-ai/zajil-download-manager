@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "grab",
+  "description": "Added from Rust when the app starts (grab.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the «Site grabber» window (M7) may do: Zajil's own commands and events, set its own title, and the system's folder picker (the user picks where the files go). Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "grab"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-set-title",
+    "dialog:allow-open"
+  ]
+}

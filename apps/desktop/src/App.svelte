@@ -501,6 +501,9 @@
       // empty one: the window says the clipboard has none).
       case "batch":
         return void api.openBatch(null).catch((e) => (failed = String(e)));
+      // «Site grabber» (M7).
+      case "grab":
+        return void api.openGrab(null).catch((e) => (failed = String(e)));
       case "batch-clipboard":
         return void api
           .clipboardLink()
