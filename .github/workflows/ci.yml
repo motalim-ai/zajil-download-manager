@@ -74,7 +74,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned toolchain
         run: rustup toolchain install && rustup show active-toolchain
+      # Saved from main only: PRs restore main's, and the repository's 10 GB
+      # of caches keep room for the testgen cache (review of #172).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # USB drives use FAT32 or exFAT, where hard links and (on macOS exFAT)
       # the no-replace rename are refused. Tests in zajil-platform and
       # zajil-core run on a small image of each and fail on CI without them.
@@ -189,6 +193,7 @@ jobs:
         timeout-minutes: 10
         env:
           TESTGEN_HIT: ${{ steps.testgen.outputs.cache-hit }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           t="$RUNNER_TEMP/video-tools"
@@ -196,6 +201,12 @@ jobs:
           "$ffmpeg"/ffmpeg -hide_banner -version | head -n 1
           if [ "$TESTGEN_HIT" = true ]; then
             echo "ZAJIL_TEST_FFMPEG_TESTGEN=$GITHUB_WORKSPACE/test-tools/ffmpeg-testgen" >> "$GITHUB_ENV"
+          elif [ "$EVENT" = schedule ]; then
+            # The weekly run on main: a cache gone (evicted, or never saved
+            # on main) would stop the real video tests for good, unseen.
+            # Red, so someone runs ffmpeg.yml on main (review of #172).
+            echo "::error::ffmpeg-testgen is not in main's cache: run the FFmpeg workflow on main (gh workflow run ffmpeg.yml --ref main)"
+            exit 1
           else
             echo "::warning::ffmpeg-testgen is not in the cache yet (ffmpeg.yml builds it): the real video tests do not run in this run"
             echo "ZAJIL_TEST_NO_TESTGEN=1" >> "$GITHUB_ENV"
@@ -290,6 +301,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: apps/desktop/src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"

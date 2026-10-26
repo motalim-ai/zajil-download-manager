@@ -28,7 +28,9 @@ mkdir -p "$dir"
 for tool in ffmpeg ffprobe; do
   pins="$root/tools/ffmpeg/pins-$tool.txt"
   version="$(awk '$1 == "version" { print $2 }' "$pins")"
-  read -r file sha256 < <(awk -v t="$os-$arch" '$1 == t { print $2, $3 }' "$pins")
+  # `|| true`: without a line for this machine, `read` fails, and the
+  # message below must still be said.
+  read -r file sha256 < <(awk -v t="$os-$arch" '$1 == t { print $2, $3 }' "$pins") || true
   [ -n "${file:-}" ] || { echo "no $tool is pinned for $os-$arch" >&2; exit 1; }
   name="$tool"
   [ "$os" = windows ] && name="$tool.exe"
