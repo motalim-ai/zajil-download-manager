@@ -25,6 +25,8 @@ pub mod update;
 pub mod video;
 
 pub use browser::FromBrowser;
+#[cfg(feature = "test-support")]
+pub use engine::engine_test_hooks;
 pub use engine::{
     Engine, Error, Event, FetchedPage, Finished, HoldCheck, Mismatch, Options, Probe,
     RestartReason, Stop, is_page_type,
