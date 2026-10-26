@@ -139,11 +139,7 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
                         entries.len()
                     );
                     for entry in entries {
-                        let url = entry
-                            .url
-                            .as_deref()
-                            .map(zajil_core::queue::shown_url)
-                            .unwrap_or_default();
+                        let url = entry.url.as_deref().map(item_link).unwrap_or_default();
                         println!(
                             "  {}  {url}",
                             one_line(entry.title.as_deref().unwrap_or(""))
@@ -390,6 +386,24 @@ fn print_formats(video: &Video) {
 /// Text from a page, safe to print on one terminal line: no control
 /// characters (they drive the terminal), no invisible direction marks
 /// (they reorder what is shown).
+/// A playlist item's link as `zajil video formats` lists it, to download
+/// it with `zajil video get` (#150: printed without its query, a YouTube
+/// item was `https://www.youtube.com/watch`, with nothing to download).
+/// Its query is kept, unlike the links Zajil prints elsewhere: these are
+/// the playlist's own page links, listed so the user can use them. A user
+/// name or password is never printed; a link that is not http or https is
+/// printed as the others are.
+fn item_link(url: &str) -> String {
+    match zajil_core::Url::parse(url) {
+        Ok(mut link) if matches!(link.scheme(), "http" | "https") => {
+            let _ = link.set_username("");
+            let _ = link.set_password(None);
+            one_line(link.as_str())
+        }
+        _ => zajil_core::queue::shown_url(url),
+    }
+}
+
 fn one_line(text: &str) -> String {
     text.chars()
         .filter(|c| {
@@ -446,5 +460,25 @@ impl Progress {
             eprintln!();
             self.shown = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #150: a playlist item's link keeps what makes it the item, never a
+    /// user name or password.
+    #[test]
+    fn a_playlist_item_is_listed_with_its_whole_link() {
+        assert_eq!(
+            item_link("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            item_link("https://me:secret@videos.example/v/7?list=x"),
+            "https://videos.example/v/7?list=x"
+        );
+        assert!(!item_link("https://me:secret@videos.example/v/7").contains("secret"));
     }
 }
