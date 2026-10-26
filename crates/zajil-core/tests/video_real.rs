@@ -10,7 +10,9 @@
 //!   ffprobe;
 //! - `ZAJIL_TEST_FFMPEG_TESTGEN`: the folder of `ffmpeg-testgen`.
 //!
-//! On the CI a missing tool fails these tests. On a developer's machine
+//! On the CI a missing tool fails these tests, except `ffmpeg-testgen`
+//! while the cache has none yet (`ZAJIL_TEST_NO_TESTGEN`, set by ci.yml
+//! with a warning: ffmpeg.yml builds it). On a developer's machine
 //! without them, each test says so on stderr and returns.
 
 use std::fs;
@@ -40,6 +42,12 @@ fn tools() -> Option<Tools> {
             ffmpeg_dir,
             testgen,
         }),
+        (Some(_), Some(_), None) if std::env::var_os("ZAJIL_TEST_NO_TESTGEN").is_some() => {
+            eprintln!(
+                "NOT RUN: ffmpeg-testgen is not in the CI's cache yet (ffmpeg.yml builds it)"
+            );
+            None
+        }
         _ if std::env::var_os("CI").is_some() => {
             panic!(
                 "the video tools are missing on the CI: ZAJIL_TEST_YT_DLP, ZAJIL_TEST_FFMPEG_DIR and ZAJIL_TEST_FFMPEG_TESTGEN must be set"

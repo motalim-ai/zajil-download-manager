@@ -63,18 +63,8 @@ jobs:
           bash scripts/test-check-no-private-keys.sh
           bash scripts/check-no-private-keys.sh
 
-  # Our LGPL ffmpeg and ffprobe, and the test-only ffmpeg-testgen, for the
-  # video tests (ADR-0009, section 8). Only ffmpeg-testgen is cached there;
-  # ffmpeg and ffprobe are built again on every run, on all five platforms
-  # (caching them, and building only the three test platforms from here,
-  # is a follow-up issue).
-  video-tools:
-    name: Video tools
-    uses: ./.github/workflows/ffmpeg.yml
-
   build-test:
     name: Build & test (${{ matrix.os }})
-    needs: video-tools
     strategy:
       fail-fast: false
       matrix:
@@ -176,25 +166,40 @@ jobs:
           if ((Get-Volume -DriveLetter Z).FileSystemType -ne 'exFAT') { throw 'Z: is not exFAT' }
           'ZAJIL_TEST_FAT32=Y:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           'ZAJIL_TEST_EXFAT=Z:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      # The real tools for crates/zajil-core/tests/video_real.rs: our builds
-      # from the job above, and yt-dlp by its pin (the same pins.txt Zajil
-      # reads). The tests fail on the CI if any is missing.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      # The real tools for crates/zajil-core/tests/video_real.rs, each by its
+      # pin (the same pins files Zajil reads): yt-dlp, QuickJS-NG, and our
+      # ffmpeg and ffprobe from the published tools-ffmpeg release, never
+      # built here (owner's decision: building them on five systems held
+      # every PR). ffmpeg.yml builds them only when tools/ffmpeg/** or
+      # itself change.
+      #
+      # The test-only ffmpeg-testgen is never released: it comes from the
+      # cache ffmpeg.yml fills (same key, same folder), and ffmpeg.yml runs
+      # whenever that key would change. Without it (a change of those files
+      # in this PR, or a cache gone after a week unused) the tests do not
+      # wait for a build: video_real says NOT RUN, with a warning here.
+      - name: Restore ffmpeg-testgen
+        id: testgen
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: ffmpeg-${{ matrix.os == 'windows-latest' && 'windows-x86_64' || matrix.os == 'macos-latest' && 'macos-universal' || 'linux-x86_64' }}
-          path: ${{ runner.temp }}/video-tools/ffmpeg
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: testgen-${{ matrix.os == 'windows-latest' && 'windows-x86_64' || matrix.os == 'macos-latest' && 'macos-universal' || 'linux-x86_64' }}
-          path: ${{ runner.temp }}/video-tools/testgen
+          path: test-tools/ffmpeg-testgen
+          key: ffmpeg-testgen-${{ matrix.os == 'windows-latest' && 'windows-x86_64' || matrix.os == 'macos-latest' && 'macos-universal' || 'linux-x86_64' }}-${{ hashFiles('tools/ffmpeg/source.env', 'tools/ffmpeg/configure-testgen.txt', 'tools/ffmpeg/build.sh', '.github/workflows/ffmpeg.yml') }}
       - name: Video tools for the tests
         shell: bash
         timeout-minutes: 10
+        env:
+          TESTGEN_HIT: ${{ steps.testgen.outputs.cache-hit }}
         run: |
           set -euo pipefail
           t="$RUNNER_TEMP/video-tools"
-          # Artifacts do not keep the executable bit.
-          chmod 755 "$t"/ffmpeg/ffmpeg* "$t"/ffmpeg/ffprobe* "$t"/testgen/ffmpeg-testgen* "$t"/testgen/ffprobe-testgen*
+          ffmpeg="$(bash scripts/get-ffmpeg.sh "$t/ffmpeg")"
+          "$ffmpeg"/ffmpeg -hide_banner -version | head -n 1
+          if [ "$TESTGEN_HIT" = true ]; then
+            echo "ZAJIL_TEST_FFMPEG_TESTGEN=$GITHUB_WORKSPACE/test-tools/ffmpeg-testgen" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ffmpeg-testgen is not in the cache yet (ffmpeg.yml builds it): the real video tests do not run in this run"
+            echo "ZAJIL_TEST_NO_TESTGEN=1" >> "$GITHUB_ENV"
+          fi
           ytdlp="$(bash scripts/get-yt-dlp.sh "$t/yt-dlp")"
           "$ytdlp" --version
           qjs="$(bash scripts/get-qjs.sh "$t/quickjs")"
@@ -203,8 +208,7 @@ jobs:
           {
             echo "ZAJIL_TEST_YT_DLP=$ytdlp"
             echo "ZAJIL_TEST_QJS=$qjs"
-            echo "ZAJIL_TEST_FFMPEG_DIR=$t/ffmpeg"
-            echo "ZAJIL_TEST_FFMPEG_TESTGEN=$t/testgen"
+            echo "ZAJIL_TEST_FFMPEG_DIR=$ffmpeg"
           } >> "$GITHUB_ENV"
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
