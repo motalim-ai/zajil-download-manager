@@ -263,6 +263,7 @@ settings-limit-none = بلا حد
 settings-limit-set = حدد سرعة
 settings-autostart = عند بدء النظام
 settings-autostart-label = شغّل زاجِل مع بدء النظام
+settings-autostart-failed = تعذّر تغيير التشغيل مع بدء النظام.
 settings-notifications = الإشعارات
 settings-notifications-label = أخبرني عندما يكتمل تحميل أو يفشل
 settings-browser = المتصفح

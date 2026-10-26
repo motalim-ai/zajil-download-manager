@@ -1983,6 +1983,7 @@ fn read_snapshot(
         }
     };
     let mut snapshot = view::snapshot(&queues, &categories, live);
+    snapshot.categories_problem = problem.clone();
     snapshot.problem = snapshot.problem.or(problem);
     Ok(snapshot)
 }
@@ -3442,6 +3443,27 @@ mod tests {
         let item = store.load().unwrap().item(id).unwrap().clone();
         assert_eq!(item.url, "https://example.com/new.iso");
         assert_eq!(item.status, Status::Waiting);
+    }
+
+    /// #58: a categories file that cannot be read says why on the
+    /// categories screen (it showed an empty list with no reason), apart
+    /// from the queues' own problem.
+    #[test]
+    fn a_damaged_categories_file_says_why() {
+        let data = tempfile::tempdir().unwrap();
+        let (store, categories, live) = (
+            QueueStore::new(data.path()),
+            CategoryStore::new(data.path()),
+            Live::default(),
+        );
+        let fine = read_snapshot(&store, &categories, &live).unwrap();
+        assert_eq!(fine.categories_problem, None);
+        assert!(!fine.categories.is_empty());
+        std::fs::write(categories.path(), b"not a categories file").unwrap();
+        let damaged = read_snapshot(&store, &categories, &live).unwrap();
+        assert!(damaged.categories.is_empty());
+        assert!(damaged.categories_problem.is_some());
+        assert_eq!(damaged.problem, damaged.categories_problem);
     }
 
     /// Owner's decision on the Drive links: a Drive file's page link from
