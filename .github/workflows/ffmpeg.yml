@@ -6,27 +6,43 @@ name: FFmpeg
 # builds the test-only ffmpeg-testgen, cached and never released.
 #
 # Publishing a release is .github/workflows/ffmpeg-release.yml, which
-# calls this one; so is ci.yml, whose video tests use these builds
-# (ADR-0009, section 8): cached, they are rebuilt only when the FFmpeg
-# source, options or build script change.
+# calls this one. ci.yml's video tests take the released ffmpeg and
+# ffprobe, and ffmpeg-testgen from the cache this workflow fills (ADR-0009,
+# section 8): it is rebuilt only when the FFmpeg source, options or build
+# script change.
 on:
-  # main; a PR is built through `pull_request`, once.
+  # main; a PR is built through `pull_request`, once. The pins and the
+  # README change no build (review of #172).
   push:
     branches: [main]
-    paths: [tools/ffmpeg/**, .github/workflows/ffmpeg.yml]
+    paths:
+      - tools/ffmpeg/**
+      - "!tools/ffmpeg/pins-*.txt"
+      - "!tools/ffmpeg/README.md"
+      - .github/workflows/ffmpeg.yml
   pull_request:
-    paths: [tools/ffmpeg/**, .github/workflows/ffmpeg.yml]
+    paths:
+      - tools/ffmpeg/**
+      - "!tools/ffmpeg/pins-*.txt"
+      - "!tools/ffmpeg/README.md"
+      - .github/workflows/ffmpeg.yml
+  # Weekly on main, the day before ci.yml's weekly run: ffmpeg-testgen is
+  # built again if main's cache lost it, and the build is checked on the
+  # runners' new images (review of #172).
+  schedule:
+    - cron: "17 3 * * 0"
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
 
-# Called by ci.yml or the release, `github.workflow` is the caller's: its
-# runs never cancel this workflow's own run for the same branch.
+# Called by the release, `github.workflow` is the caller's: its runs never
+# cancel this workflow's own run for the same branch. Only a PR's newer
+# commit cancels a run: main's runs fill the cache, and go to the end.
 concurrency:
   group: ffmpeg-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   source:
@@ -196,8 +212,9 @@ jobs:
           name: ffmpeg-${{ matrix.platform }}
           path: out
           if-no-files-found: error
-      # The test-only build, for the video tests of ci.yml: never in a
-      # release (ffmpeg-release.yml takes only the ffmpeg-* artifacts).
+      # The test-only build, to look at (ci.yml takes it from the cache):
+      # never in a release (ffmpeg-release.yml takes only the ffmpeg-*
+      # artifacts).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: testgen-${{ matrix.platform }}
