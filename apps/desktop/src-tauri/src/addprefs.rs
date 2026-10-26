@@ -85,6 +85,21 @@ mod tests {
         assert_eq!(some.progress_window, ProgressShow::Minimized);
     }
 
+    /// A new install's defaults, as decided: only the finished download's
+    /// sound, the progress window shown (as in IDM), and the clipboard not
+    /// watched (M5).
+    #[test]
+    fn a_new_install_has_the_decided_defaults() {
+        let prefs = crate::closing::WindowPrefs::default();
+        assert_eq!(
+            (prefs.sounds.done, prefs.sounds.failed, prefs.sounds.queue),
+            (true, false, false)
+        );
+        assert_eq!(prefs.add.progress_window, ProgressShow::Shown);
+        assert!(!prefs.add.start_while_open);
+        assert!(!zajil_core::settings::SettingsFile::default().clipboard);
+    }
+
     /// Only an unfinished download's files are deleted: a finished file
     /// stays.
     #[test]
