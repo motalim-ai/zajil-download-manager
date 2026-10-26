@@ -581,6 +581,17 @@ impl Engine {
     /// This engine, counting the connections to each site in `sites` (the
     /// settings file's `site_connections`) across all its downloads and
     /// those of its clones made after this.
+    /// Room on the site of `url` (#170): `None` when its site has no
+    /// limit; else the site's counter (the same number for every URL of
+    /// that site) and the connections free on it now. A queue runner leaves
+    /// a download waiting while its site has no room, so it takes no place
+    /// in its queue.
+    pub fn site_room(&self, url: &str) -> Option<(usize, usize)> {
+        let url = Url::parse(url).ok()?;
+        let counter = self.sites.counter_for(&url)?;
+        Some((Arc::as_ptr(&counter) as usize, counter.available_permits()))
+    }
+
     pub fn with_site_limits(&self, sites: crate::sites::SiteLimits) -> Engine {
         let mut engine = self.clone();
         engine.sites = Arc::new(sites);

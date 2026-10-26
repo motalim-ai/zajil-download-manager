@@ -60,6 +60,11 @@ pub enum QueueEvent {
     QueueDone {
         queue: String,
     },
+    /// Item `item` waits for a free connection on its site (#170): it
+    /// takes no place in its queue meanwhile. Said once per wait.
+    WaitingForSite {
+        item: u64,
+    },
     /// The download of `item` failed with `error`, and its queue gives it
     /// another try (#142): it waits at the end of its queue, after a pause.
     Retrying {
@@ -128,6 +133,8 @@ pub struct Runner {
     /// Items that failed and wait for another try (#142): not started
     /// before this time of the engine's clock.
     retry_at: Arc<std::sync::Mutex<HashMap<u64, Duration>>>,
+    /// Items said to wait for their site (#170), until they start.
+    site_said: Arc<std::sync::Mutex<HashSet<u64>>>,
 }
 
 /// Queues the user started now (#125, «Start now»): each runs as if its
@@ -170,6 +177,7 @@ impl Runner {
             from_browser: None,
             run_now: None,
             retry_at: Arc::default(),
+            site_said: Arc::default(),
         }
     }
 
@@ -514,6 +522,9 @@ impl Runner {
         events: &mpsc::UnboundedSender<(u64, Event)>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
+        // Connections taken on each site by the downloads started in this
+        // look: their own slots come only once they run (#170).
+        let mut site_taken: HashMap<usize, usize> = HashMap::new();
         for queue in queues.queues.iter().filter(|q| !closed.contains(&q.name)) {
             let busy = queue
                 .items
@@ -556,18 +567,36 @@ impl Runner {
                     None => false,
                 }
             };
-            let next: Vec<_> = queue
-                .items
-                .iter()
-                .filter(|i| {
-                    i.status == Status::Waiting
-                        && !running.contains_key(&i.id)
-                        && !needs_browser(i)
-                        && !pausing(i)
-                })
-                .take(room)
-                .map(|i| i.id)
-                .collect();
+            // In order, while the queue has room; one whose site has no
+            // free connection waits, taking no room, and the next goes
+            // (#170).
+            let mut next = Vec::new();
+            for i in queue.items.iter().filter(|i| {
+                i.status == Status::Waiting
+                    && !running.contains_key(&i.id)
+                    && !needs_browser(i)
+                    && !pausing(i)
+            }) {
+                if next.len() >= room {
+                    break;
+                }
+                if let Some((site, free)) = engine.site_room(&i.url) {
+                    let taken = site_taken.entry(site).or_default();
+                    if *taken >= free {
+                        let first = self
+                            .site_said
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(i.id);
+                        if first {
+                            on_event(QueueEvent::WaitingForSite { item: i.id });
+                        }
+                        continue;
+                    }
+                    *taken += 1;
+                }
+                next.push(i.id);
+            }
             for id in next {
                 // Marked active first: if the user changed it meanwhile,
                 // it is not started.
@@ -593,6 +622,10 @@ impl Runner {
                     Ok(None) | Err(StoreError::NoSuchItem(_)) => continue,
                     Err(err) => return Err(err),
                 };
+                self.site_said
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&id);
                 on_event(QueueEvent::Started {
                     queue: queue.name.clone(),
                     item: id,

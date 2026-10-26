@@ -201,6 +201,8 @@
         <span class="st paused"><Icon name="circle-alert" size={14} />{locale.t("status-needs-ok")}</span>
       {:else if d.waits_for_browser}
         <span class="st paused"><Icon name="link-2" size={14} />{locale.t("status-open-browser")}</span>
+      {:else if d.waits_for_site}
+        <span class="st"><Icon name="clock" size={14} />{locale.t("status-waiting-site")}</span>
       {:else if d.status === "active"}
         <span class="st">
           <span class="mini" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>

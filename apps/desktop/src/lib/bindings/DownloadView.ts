@@ -39,6 +39,10 @@ segments: number, error: string | null,
  */
 waits_for_browser: boolean, 
 /**
+ * It waits for a free connection on its site (#170): «ينتظر الموقع».
+ */
+waits_for_site: boolean, 
+/**
  * The user's description (#95).
  */
 description: string | null, 

@@ -64,6 +64,7 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             QueueEvent::Download { .. }
             | QueueEvent::Waiting { .. }
             | QueueEvent::NeedsBrowser { .. }
+            | QueueEvent::WaitingForSite { .. }
             | QueueEvent::QueueDone { .. } => {}
         })
         .await
@@ -1269,4 +1270,71 @@ async fn a_queue_is_said_done_once_when_all_of_it_is_done() {
         .await
         .unwrap();
     assert!(again.is_empty(), "{again:?}");
+}
+
+/// #170, item 1: in a queue of 3 at once whose site A allows 1
+/// connection, A2 and A3 wait for their site without taking places in
+/// the queue, so B1 (another site) runs beside A1; each is said to wait
+/// for its site once, and A never has two downloads at once.
+#[tokio::test]
+async fn a_download_waiting_for_its_site_takes_no_place_in_its_queue() {
+    use zajil_core::sites::SiteLimits;
+    let server = TestServer::http();
+    // Slow enough for the others to be looked at while A1 runs. One path
+    // for A's three downloads: the server counts the bodies it sends at
+    // once on it, whatever order the runner says things in.
+    server.put(
+        "/a.bin",
+        FileSpec::new(random_bytes(200_000, 410)).throttle(400_000),
+    );
+    server.put("/b1.bin", FileSpec::new(random_bytes(10_000, 411)));
+    let data_dir = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    set_max_active(&store, "main", 3);
+    let a: Vec<u64> = (0..3)
+        .map(|_| add(&store, "main", &server.url("/a.bin"), downloads.path()))
+        .collect();
+    // The same server, as another site: `localhost` has no limit.
+    let b1_url = server.url("/b1.bin").replacen("127.0.0.1", "localhost", 1);
+    let b1 = add(&store, "main", &b1_url, downloads.path());
+    let engine = Engine::new(Options::default())
+        .unwrap()
+        .with_site_limits(SiteLimits::new([("127.0.0.1", 1)]));
+    let mut seen = Vec::new();
+    Runner::new(engine, store.clone())
+        .poll(Duration::from_millis(20))
+        .run(&Stop::new(), &mut |event| match event {
+            QueueEvent::Started { item, .. } => seen.push(("start", item)),
+            QueueEvent::WaitingForSite { item } => seen.push(("site", item)),
+            QueueEvent::Finished { item, .. } => seen.push(("done", item)),
+            _ => {}
+        })
+        .await
+        .unwrap();
+
+    let at = |e: (&str, u64)| seen.iter().position(|x| *x == e).unwrap();
+    // B1 started while A1 ran, before A2 did.
+    assert!(at(("start", b1)) < at(("done", a[0])), "{seen:?}");
+    assert!(at(("start", b1)) < at(("start", a[1])), "{seen:?}");
+    for id in &a[1..] {
+        assert_eq!(
+            seen.iter().filter(|e| **e == ("site", *id)).count(),
+            1,
+            "{seen:?}"
+        );
+    }
+    assert!(!seen.contains(&("site", b1)), "{seen:?}");
+    // A had one download at a time, by the server's own count.
+    assert_eq!(server.most_concurrent("/a.bin"), 1, "{seen:?}");
+    let queues = store.load().unwrap();
+    assert!(
+        queues
+            .queue("main")
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.status == Status::Done),
+        "{seen:?}"
+    );
 }

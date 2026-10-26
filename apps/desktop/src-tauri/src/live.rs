@@ -44,6 +44,8 @@ struct Inner {
     /// Downloads that wait for their browser's cookies, which is not open
     /// or did not answer (M5): «افتح المتصفح ليكمل».
     waiting_for_browser: std::collections::HashSet<u64>,
+    /// Downloads that wait for a free connection on their site (#170).
+    waiting_for_site: std::collections::HashSet<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +72,7 @@ impl Live {
             QueueEvent::Started { item, .. } => {
                 inner.items.insert(*item, ItemLive::default());
                 inner.waiting_for_browser.remove(item);
+                inner.waiting_for_site.remove(item);
                 inner.urgent = true;
             }
             QueueEvent::Download { item, event } => {
@@ -121,13 +124,22 @@ impl Live {
             | QueueEvent::Retrying { item, .. }
             | QueueEvent::Stopped { item } => {
                 inner.items.remove(item);
+                inner.waiting_for_site.remove(item);
                 inner.urgent = true;
+            }
+            QueueEvent::WaitingForSite { item } => {
+                inner.waiting_for_site.insert(*item);
             }
             // The app decides, once it has asked the browser.
             QueueEvent::Waiting { .. }
             | QueueEvent::NeedsBrowser { .. }
             | QueueEvent::QueueDone { .. } => {}
         }
+    }
+
+    /// Whether download `id` waits for a free connection on its site.
+    pub fn waiting_for_site(&self, id: u64) -> bool {
+        self.inner().waiting_for_site.contains(&id)
     }
 
     /// Marks download `id` as waiting for its browser, or not; whether
@@ -274,5 +286,19 @@ mod tests {
         // Cleared when the runner stops with an error.
         live.clear();
         assert!(live.item(1).is_none());
+    }
+
+    /// #170: a download waiting for its site is marked so until it starts.
+    #[test]
+    fn waiting_for_its_site_lasts_until_it_starts() {
+        let live = Live::default();
+        assert!(!live.waiting_for_site(7));
+        live.record(&QueueEvent::WaitingForSite { item: 7 });
+        assert!(live.waiting_for_site(7));
+        live.record(&QueueEvent::Started {
+            queue: "main".into(),
+            item: 7,
+        });
+        assert!(!live.waiting_for_site(7));
     }
 }

@@ -73,6 +73,8 @@ pub struct DownloadView {
     /// It waits for its browser's cookies after a restart, and that
     /// browser is not open (M5): «افتح المتصفح ليكمل».
     pub waits_for_browser: bool,
+    /// It waits for a free connection on its site (#170): «ينتظر الموقع».
+    pub waits_for_site: bool,
     /// The user's description (#95).
     pub description: Option<String>,
     /// When it last started or resumed (#95): RFC 3339 in UTC.
@@ -602,6 +604,7 @@ pub fn download(
         }),
         error: item.error.clone(),
         waits_for_browser: item.status == Status::Waiting && live.waiting_for_browser(item.id),
+        waits_for_site: item.status == Status::Waiting && live.waiting_for_site(item.id),
         needs_ok: item.needs_ok && item.status == Status::Paused,
     }
 }

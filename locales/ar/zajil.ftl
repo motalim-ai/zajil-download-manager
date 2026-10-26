@@ -548,6 +548,10 @@ update-setting-title = التحديثات
 update-setting = ابحث عن نسخة جديدة عند التشغيل
 update-setting-hint = يسأل GitHub فقط، ولا يُنزَّل شيء.
 
+## حد كل موقع
+
+status-waiting-site = ينتظر الموقع
+
 ## الفيديو (M6)
 
 video-soon = تحميل الفيديو قادم قريبًا.

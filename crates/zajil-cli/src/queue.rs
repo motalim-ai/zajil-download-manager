@@ -658,6 +658,9 @@ fn show(event: QueueEvent) {
             eprintln!("[{item}] waiting for the browser's cookies (open the browser)")
         }
         QueueEvent::QueueDone { queue } => eprintln!("queue {queue} is done"),
+        QueueEvent::WaitingForSite { item } => {
+            eprintln!("[{item}] waits for a free connection on its site")
+        }
         QueueEvent::Retrying { item, error } => {
             eprintln!("[{item}] failed: {error}; its queue tries it again later")
         }
