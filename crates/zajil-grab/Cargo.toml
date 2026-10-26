@@ -8,4 +8,18 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+html5ever.workspace = true
+tokio.workspace = true
 zajil-core.workspace = true
+
+[features]
+# Lets tests treat a local origin as public (`Scope::treat_as_public`): two
+# test servers are both on 127.0.0.1. It turns on zajil-core's own, so the
+# CI check that keeps `test-support` out of release builds sees it too.
+test-support = ["zajil-core/test-support"]
+
+[dev-dependencies]
+jiff.workspace = true
+zajil-grab = { path = ".", features = ["test-support"] }
+zajil-testserver.workspace = true
+tempfile.workspace = true

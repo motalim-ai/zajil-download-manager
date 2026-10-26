@@ -213,7 +213,7 @@ fn summary(saved: usize, failed: usize, total: usize) {
 
 /// `url` as it may be printed: without a user name, password, query or
 /// fragment, which may hold a token (owner's decision on #28).
-fn shown(url: &str) -> String {
+pub(crate) fn shown(url: &str) -> String {
     match Url::parse(url) {
         Ok(mut url) => {
             url.set_query(None);

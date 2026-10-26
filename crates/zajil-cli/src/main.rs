@@ -11,6 +11,7 @@
 
 mod batch;
 mod category;
+mod grab;
 mod queue;
 mod video;
 
@@ -19,7 +20,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use clap::{Parser, Subcommand};
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use zajil_core::{
     DEFAULT_CONNECTIONS, DEFAULT_TRIES, Engine, Error, Event, Finished, MAX_CONNECTIONS, Options,
     RestartReason,
@@ -126,10 +128,25 @@ enum Command {
                       wrong pattern, 3 stopped with Ctrl+C during a file that can be resumed."
     )]
     Batch(batch::BatchArgs),
+    /// Download a site's files: from one page, down to a depth, within the
+    /// site, respecting its robots.txt. One connection per file unless
+    /// --connections is given.
+    #[command(
+        after_help = "Exit codes: 0 done, 1 a file failed or stopped at a limit (the resume \
+                      command is printed), 2 a wrong request, 3 stopped with Ctrl+C."
+    )]
+    Grab(grab::GrabArgs),
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    // `zajil grab` uses one connection per file unless asked for more, not
+    // to press on the site (ADR-0010, owner's decision).
+    let connections_given = matches.value_source("connections") == Some(ValueSource::CommandLine);
+    let cli = match Cli::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
+    };
     let data_dir = match data_dir(cli.data_dir.as_deref()) {
         Ok(dir) => dir,
         Err(message) => return fail(&message),
@@ -169,8 +186,15 @@ fn main() -> ExitCode {
         Ok(runtime) => runtime,
         Err(err) => return fail(&format!("could not start: {err}")),
     };
-    if matches!(cli.command, Command::Video { .. } | Command::Batch(_)) {
-        let engine = match Engine::new(options(cli.connections.into(), cli.tries)) {
+    if matches!(
+        cli.command,
+        Command::Video { .. } | Command::Batch(_) | Command::Grab(_)
+    ) {
+        let connections = match cli.command {
+            Command::Grab(_) if !connections_given => 1,
+            _ => cli.connections.into(),
+        };
+        let engine = match Engine::new(options(connections, cli.tries)) {
             Ok(engine) => engine,
             Err(err) => return fail(&err.to_string()),
         };
@@ -179,6 +203,7 @@ fn main() -> ExitCode {
                 return runtime.block_on(video::run(command, &data_dir, engine));
             }
             Command::Batch(args) => return runtime.block_on(batch::run(engine, args)),
+            Command::Grab(args) => return runtime.block_on(grab::run(engine, args)),
             _ => unreachable!("matched above"),
         }
     }
@@ -286,7 +311,8 @@ async fn run(
             Command::Queue { .. }
             | Command::Category { .. }
             | Command::Video { .. }
-            | Command::Batch(_) => {
+            | Command::Batch(_)
+            | Command::Grab(_) => {
                 unreachable!("handled in main")
             }
         }
