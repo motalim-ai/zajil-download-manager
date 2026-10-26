@@ -60,6 +60,10 @@ fn main() -> ExitCode {
         let answer = match parse(&message) {
             Err(why) => write_json(&mut output, &Response::refused(why)),
             Ok(Request::Ping { .. }) => write_json(&mut output, &Response::ok()),
+            // Only another start of Zajil asks for its window (#60).
+            Ok(Request::ShowWindow { .. }) => {
+                write_json(&mut output, &Response::refused("not from the browser"))
+            }
             Ok(Request::Link { .. }) => {
                 drop(input);
                 return link(&data_dir, &message, output);

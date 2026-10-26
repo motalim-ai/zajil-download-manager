@@ -65,6 +65,10 @@ pub const LINK_ANSWER: Duration = Duration::from_secs(10);
 pub enum Request {
     /// Is the host there, and of which version?
     Ping { protocol_version: u32 },
+    /// Show the app's window: sent by Zajil started a second time on the
+    /// same data folder, on macOS (#60: instead of a socket at a fixed
+    /// path in `/tmp`), never by the extension (`zajil-host` refuses it).
+    ShowWindow { protocol_version: u32 },
     /// Download this.
     Download {
         protocol_version: u32,
@@ -376,6 +380,7 @@ fn check_cookies(cookies: &str) -> Result<(), String> {
 fn check(request: &Request) -> Result<(), String> {
     let version = match request {
         Request::Ping { protocol_version }
+        | Request::ShowWindow { protocol_version }
         | Request::PrivateClosed { protocol_version }
         | Request::Download {
             protocol_version, ..

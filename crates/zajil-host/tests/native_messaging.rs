@@ -159,6 +159,18 @@ fn without_the_app_a_download_is_refused_clearly() {
     assert_eq!(answer(&mut host), Response::ok());
 }
 
+/// #60: only another start of Zajil asks for its window; from the
+/// browser, `zajil-host` refuses it, and the app is never asked.
+#[test]
+fn the_browser_cannot_ask_for_the_window() {
+    let data = tempfile::tempdir().unwrap();
+    let mut host = start_host(data.path());
+    send(&mut host, br#"{"type":"show_window","protocol_version":1}"#);
+    let response = answer(&mut host);
+    assert!(!response.ok);
+    assert_eq!(response.error.as_deref(), Some("not from the browser"));
+}
+
 /// The browser closing the connection ends the host cleanly.
 #[test]
 fn the_host_ends_when_the_browser_closes() {
