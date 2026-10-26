@@ -221,6 +221,7 @@ settings-limit-none = None
 settings-limit-set = Set a speed
 settings-autostart = When the computer starts
 settings-autostart-label = Start Zajil with the computer
+settings-autostart-failed = Starting with the computer could not be changed.
 settings-notifications = Notifications
 settings-notifications-label = Tell me when a download finishes or fails
 settings-browser = Browser

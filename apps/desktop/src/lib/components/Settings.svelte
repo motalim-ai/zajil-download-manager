@@ -178,14 +178,17 @@
   onMount(() => {
     isEnabled().then((on) => (autostart = on), (e) => (autostartProblem = String(e)));
   });
-  async function setAutostart(on: boolean) {
+  async function setAutostart(box: HTMLInputElement) {
     autostartProblem = null;
     try {
-      await (on ? enable() : disable());
-      autostart = await isEnabled();
+      await (box.checked ? enable() : disable());
     } catch (e) {
-      autostartProblem = String(e);
+      autostartProblem = `${locale.t("settings-autostart-failed")} ${String(e)}`;
     }
+    // What the system holds now, whatever happened: a change that failed
+    // left the box as clicked (#60).
+    autostart = await isEnabled().catch(() => autostart);
+    box.checked = autostart === true;
   }
 
   // The video tools (M6, #149): what is installed, and deleting them.
@@ -455,7 +458,7 @@
   <fieldset>
     <legend>{locale.t("settings-autostart")}</legend>
     <label class="choice">
-      <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget.checked)} />
+      <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget)} />
       <span>{locale.t("settings-autostart-label")}</span>
     </label>
     {#if autostartProblem}<p class="hint problem" role="alert">{autostartProblem}</p>{/if}
