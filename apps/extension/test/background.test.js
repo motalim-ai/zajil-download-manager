@@ -173,6 +173,26 @@ describe("the background", () => {
     expect(tickets(fake)).toEqual([]);
   });
 
+  it("keeps the ticket before Zajil is asked, and while no answer came back (#158)", async () => {
+    // Zajil asks for the file's download address's cookies while it takes
+    // the download (a Google Drive link): the ticket must be there by then.
+    const kept = [];
+    const fake = fakeChrome({ granted: true, answer: { ok: false, error: "Zajil did not answer in time" } });
+    await load(fake);
+    fake.chrome.runtime.sendNativeMessage.mockImplementation(async (_host, message) => {
+      fake.done.sent.push(message);
+      kept.push(Object.keys(fake.local.linkTickets ?? {}).includes(message.ticket));
+      return { ok: false, error: "Zajil did not answer in time" };
+    });
+    fake.listeners.filename({ id: 7, url: "https://example.com/e.zip", finalUrl: "https://example.com/e.zip", state: "in_progress" }, () => {});
+    await flush();
+    fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://example.com/d.zip" });
+    await flush();
+    expect(kept).toEqual([true, true]);
+    // No answer: Zajil may have taken them, so both tickets stay.
+    expect(Object.keys(fake.local.linkTickets ?? {}).sort()).toEqual(fake.done.sent.map((m) => m.ticket).sort());
+  });
+
   it("opens the welcome page once, at install", async () => {
     const fake = fakeChrome({ granted: false, answer: { ok: true } });
     await load(fake);

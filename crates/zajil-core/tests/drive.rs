@@ -293,13 +293,22 @@ async fn a_drive_page_that_is_not_the_file_is_never_saved() {
         "{:?}",
         names_in(dir.path())
     );
-    assert!(
-        server
-            .requests()
-            .iter()
-            .all(|r| !r.path.starts_with("/elsewhere") && !r.path.starts_with("/signin")),
-        "a link Drive did not make was followed"
-    );
+    // Exactly the addresses Drive gave: never one a page made up (#158:
+    // the check here allowed anything but two paths before).
+    let mut asked: Vec<String> = server.requests().into_iter().map(|r| r.path).collect();
+    asked.sort();
+    asked.dedup();
+    let mut expected = vec![
+        direct_path("1PrivateFile0123456789"),
+        direct_path("1ElsewhereFile0123456789"),
+        direct_path("1PageAgain0123456789"),
+        format!("{}{CONFIRMED_QUERY}", direct_path("1PageAgain0123456789")),
+        direct_path("1SignInFile0123456789"),
+        "/ServiceLogin".to_owned(),
+        direct_path("1HugePage0123456789"),
+    ];
+    expected.sort();
+    assert_eq!(asked, expected, "a link Drive did not make was followed");
 }
 
 /// A web page is said to be one before it is downloaded (the interface
@@ -386,32 +395,35 @@ async fn nothing_follows_a_page_that_is_not_drive_s() {
     assert!(names_in(dir.path()).is_empty());
 }
 
-/// The older page Drive made: a link on its file pages' address
-/// (`/uc?export=download&amp;confirm=…&amp;id=…`), followed to the
-/// download address.
+/// The older page Drive made: a link written in full on its file pages'
+/// address (`https://drive.google.com/uc?export=download&amp;confirm=…`),
+/// followed to the download address, never to `/uc` itself. A relative
+/// `/uc` link is not followed: the page comes from the download address,
+/// so it would point there, not to Drive's file pages. Two servers play
+/// the two addresses, so a link cannot pass for the other's (#158).
 #[tokio::test]
 async fn drive_s_older_page_with_a_link_leads_to_the_file() {
-    let server = TestServer::http();
+    let pages = TestServer::http();
+    let download = TestServer::http();
     let data = random_bytes(30_000, 806);
-    server.put(
-        &direct_path(ID),
+    let older_page = |href: &str| {
         FileSpec::new(format!(
-            r#"<html><body><a id="uc-download-link" href="{}?export=download&amp;confirm=AbCd&amp;id={ID}">Download anyway</a></body></html>"#,
-            server.path("/uc")
+            r#"<html><body><a id="uc-download-link" href="{href}?export=download&amp;confirm=AbCd&amp;id={ID}">Download anyway</a></body></html>"#
         ))
-        .content_type("text/html"),
-    );
-    server.put(
+        .content_type("text/html")
+    };
+    download.put(&direct_path(ID), older_page(&pages.url("/uc")));
+    download.put(
         &format!("/download?export=download&confirm=AbCd&id={ID}"),
         FileSpec::new(data.clone()).content_disposition("attachment; filename=\"old.bin\""),
     );
+    let engine = Engine::new(Options::default())
+        .unwrap()
+        .with_test_drive(&pages.url("/"), &download.url("/download"));
     let dir = tempfile::tempdir().unwrap();
-    let finished = engine(&server)
-        .download(
-            &server.url(&format!("/open?id={ID}")),
-            dir.path(),
-            &mut |_| {},
-        )
+    let link = pages.url(&format!("/open?id={ID}"));
+    let finished = engine
+        .download(&link, dir.path(), &mut |_| {})
         .await
         .unwrap();
     assert_eq!(finished.file.file_name().unwrap(), "old.bin");
@@ -419,10 +431,15 @@ async fn drive_s_older_page_with_a_link_leads_to_the_file() {
         sha256_hex(&fs::read(&finished.file).unwrap()),
         sha256_hex(&data)
     );
-    assert!(
-        server.gets("/uc").is_empty(),
-        "the page's own address was asked"
-    );
+    assert!(pages.requests().is_empty(), "{:?}", pages.requests());
+
+    // The same page with a relative link: not the file, and not followed.
+    download.put(&direct_path(ID), older_page("/uc"));
+    let elsewhere = tempfile::tempdir().unwrap();
+    let result = engine.download(&link, elsewhere.path(), &mut |_| {}).await;
+    assert!(matches!(result, Err(Error::DrivePage)), "{result:?}");
+    assert!(names_in(elsewhere.path()).is_empty());
+    assert!(download.gets("/uc").is_empty() && pages.requests().is_empty());
 }
 
 /// Review of the Drive links: a connection of a split download that Drive

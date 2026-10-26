@@ -934,17 +934,11 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 // A Drive file's download address's cookies, asked of the
                 // browser the download came from, on its link (the
                 // extension has its ticket already).
-                let drive_cookies = |file: &str| match &request {
-                    zajil_host::Request::Download {
-                        instance: Some(instance),
-                        ticket: Some(ticket),
-                        store,
-                        private: false,
-                        ..
-                    } => ask_links
-                        .ask(instance, file, store.as_deref(), ticket, DRIVE_ASK_PATIENCE)
-                        .flatten(),
-                    _ => None,
+                let drive_cookies = |file: &str| {
+                    let (instance, store, ticket) = drive_ask_of(&request)?;
+                    ask_links
+                        .ask(instance, file, store, ticket, DRIVE_ASK_PATIENCE)
+                        .flatten()
                 };
                 let answer = from_extension_with(
                     &app.store,
@@ -1178,18 +1172,17 @@ fn ask_browser(
                 );
                 // A Drive file's link: its download address's own cookies
                 // too, as when it came from the browser.
-                if let Some(file) = zajil_core::drive::download_link(&url) {
-                    let more = links
+                from = with_drive_cookies(from, &url, |file| {
+                    links
                         .ask(
                             &source.instance,
-                            &file,
+                            file,
                             source.store.as_deref(),
                             &ticket,
                             ASK_PATIENCE,
                         )
-                        .flatten();
-                    from = from.and_cookies_for(&file, more.as_deref());
-                }
+                        .flatten()
+                });
                 // The cookies the extension gave with the download itself
                 // are never replaced (review of #80: a look just after the
                 // item was written asked, and got none).
@@ -1612,6 +1605,40 @@ fn from_extension(
     reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
 ) -> zajil_host::Response {
     from_extension_with(store, request, given, headers, lang, reach, |_| None)
+}
+
+/// Who to ask for a Drive file's download address's cookies, for a
+/// download from the browser: its extension instance, cookie store and
+/// ticket. None for a private window's download (nothing of it is asked
+/// again), or from an extension too old to have a ticket.
+fn drive_ask_of(request: &zajil_host::Request) -> Option<(&str, Option<&str>, &str)> {
+    match request {
+        zajil_host::Request::Download {
+            instance: Some(instance),
+            ticket: Some(ticket),
+            store,
+            private: false,
+            ..
+        } => Some((instance, store.as_deref(), ticket)),
+        _ => None,
+    }
+}
+
+/// `from` for `url`, with the cookies `ask` gives for its Google Drive
+/// download address when `url` is a Drive file's link; nothing is asked
+/// for another link.
+fn with_drive_cookies(
+    from: zajil_core::FromBrowser,
+    url: &str,
+    ask: impl FnOnce(&str) -> Option<String>,
+) -> zajil_core::FromBrowser {
+    match zajil_core::drive::download_link(url) {
+        Some(file) => {
+            let more = ask(&file);
+            from.and_cookies_for(&file, more.as_deref())
+        }
+        None => from,
+    }
 }
 
 /// [`from_extension`], with `drive_cookies`: the browser's cookies for a
@@ -3196,6 +3223,64 @@ mod tests {
         assert!(
             add("https://example.com/report.pdf", Some("site=1")).is_empty(),
             "not Drive: nothing asked"
+        );
+    }
+
+    /// #158: a Drive file's download address's cookies are asked of the
+    /// browser the download came from, with its ticket, never for a
+    /// private window's download, nor without a ticket.
+    #[test]
+    fn only_a_normal_window_s_download_with_a_ticket_is_asked_again() {
+        let request = |private: bool, instance: Option<&str>, ticket: Option<&str>| {
+            zajil_host::Request::Download {
+                protocol_version: 1,
+                url: "https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view"
+                    .into(),
+                referrer: None,
+                filename: None,
+                cookies: Some("page=1".into()),
+                instance: instance.map(str::to_owned),
+                store: Some("firefox-container-1".into()),
+                ticket: ticket.map(str::to_owned),
+                private,
+            }
+        };
+        assert_eq!(
+            drive_ask_of(&request(false, Some("i"), Some("t"))),
+            Some(("i", Some("firefox-container-1"), "t"))
+        );
+        assert_eq!(drive_ask_of(&request(true, Some("i"), Some("t"))), None);
+        assert_eq!(drive_ask_of(&request(false, None, Some("t"))), None);
+        assert_eq!(drive_ask_of(&request(false, Some("i"), None)), None);
+        assert_eq!(
+            drive_ask_of(&zajil_host::Request::Ping {
+                protocol_version: 1
+            }),
+            None
+        );
+    }
+
+    /// #158: asked again after a restart, a Drive link's browser is asked a
+    /// second time, for its download address; another link is not.
+    #[test]
+    fn a_drive_link_asked_again_gets_its_download_address_s_cookies_too() {
+        let id = "1AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+        let page = format!("https://drive.google.com/file/d/{id}/view");
+        let file = format!("https://drive.usercontent.google.com/download?id={id}&export=download");
+        let ask = |url: &str, answer: Option<&str>| {
+            let mut asked = Vec::new();
+            let from =
+                with_drive_cookies(zajil_core::FromBrowser::new(url, None, None), url, |f| {
+                    asked.push(f.to_owned());
+                    answer.map(str::to_owned)
+                });
+            (from.has_cookies(), asked)
+        };
+        assert_eq!(ask(&page, Some("file=1")), (true, vec![file.clone()]));
+        assert_eq!(ask(&page, None), (false, vec![file]));
+        assert_eq!(
+            ask("https://example.com/a.zip", Some("x=1")),
+            (false, vec![])
         );
     }
 
