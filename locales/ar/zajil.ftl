@@ -551,6 +551,18 @@ update-setting-hint = يسأل GitHub فقط، ولا يُنزَّل شيء.
 ## حد كل موقع
 
 status-waiting-site = ينتظر الموقع
+sites-title = عدد الاتصالات لكل موقع
+sites-hint = بلا حد افتراضيًا. والموقع في القائمة يشمل مواقعه الفرعية، وعدده مشترك بين كل تحميلاته.
+sites-empty = لا مواقع في القائمة: لا حد لأي موقع.
+sites-site = الموقع
+sites-connections = الاتصالات
+sites-add = أضف موقعًا
+sites-remove = احذف الموقع
+sites-save = احفظ القائمة
+sites-bad-site = ليس اسم موقع:
+sites-twice = موقع مكرر:
+sites-bad-number = عدد الاتصالات خارج حدوده لهذا الموقع:
+sites-too-many = القائمة أطول مما يُسمح به.
 
 ## الفيديو (M6)
 

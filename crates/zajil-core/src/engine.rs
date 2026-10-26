@@ -619,6 +619,12 @@ impl Engine {
         Some((Arc::as_ptr(&counter) as usize, limit))
     }
 
+    /// The site limits of this engine and its clones, changed in place by
+    /// [`crate::sites::SiteLimits::set`] (#165).
+    pub fn site_limits(&self) -> &crate::sites::SiteLimits {
+        &self.sites
+    }
+
     /// This engine, counting the connections to each site in `sites` (the
     /// settings file's `site_connections`) across all its downloads and
     /// those of its clones made after this.
