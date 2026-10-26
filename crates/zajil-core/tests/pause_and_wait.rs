@@ -173,15 +173,25 @@ async fn stop_during_a_slow_save_then_resume_at_once(connections: usize) {
     // Resume at once, in the same process: it starts from the newest state
     // and finishes with the right file.
     let mut from = None;
+    let mut seen = Vec::new();
     let done = engine(connections)
         .resume_until(&state_file, &Stop::new(), &mut |event| {
             if let Event::Started { from: f, .. } = event {
                 from.get_or_insert(f);
             }
+            seen.push(format!("{event:?}"));
         })
         .await
         .unwrap();
-    assert_eq!(from, Some(stopped_at));
+    // Said in full if it fails (#130, #136: the resume once said no
+    // Started at all): how far the stopped state was, of how much, and
+    // every event of the resume.
+    assert_eq!(
+        from,
+        Some(stopped_at),
+        "stopped at {stopped_at} of {} bytes; the resume said: {seen:?}",
+        data.len()
+    );
     assert_eq!(sha256_hex(&fs::read(done.file).unwrap()), sha256_hex(&data));
 }
 

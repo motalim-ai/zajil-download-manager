@@ -646,3 +646,10 @@ about-tool-yt-dlp = { $tool } { $version }, under the { $binary } for the file Z
 about-or-later = { $license } or later
 about-not-ours = Zajil does not own these tools; they belong to their projects:
 tool-license-yt-dlp = { $binary } for the file Zajil downloads (its source code: { $source })
+
+## Sounds (M5.5, an IDM touch)
+settings-sounds = Sounds
+settings-sound-done = A sound when a download finishes
+settings-sound-failed = A sound when a download fails
+settings-sound-queue = A sound when a queue finishes
+settings-sound-try = Play the sound

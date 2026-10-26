@@ -24,6 +24,8 @@
   import Icon from "./lib/components/Icon.svelte";
   import { toolLines } from "./lib/about";
   import { api } from "./lib/api";
+  import { finishedQueues, play, type Sound } from "./lib/sounds";
+  import type { DownloadView } from "./lib/bindings/DownloadView";
   import { scheduleApi } from "./lib/scheduleApi";
   import { showTrayTip, trayTip } from "./lib/trayTip";
   import { setTheme } from "./lib/theme";
@@ -75,7 +77,8 @@
   let keepFolders = $state(false);
   // Said to screen readers when a download ends: not each progress event.
   let announcement = $state("");
-  let lastStatus = new Map<number, string>();
+  let lastStatus = new Map<number, DownloadView["status"]>();
+  let lastQueue = new Map<number, string>();
   // The names test page, loaded only in a ui-test build.
   let NamesPage = $state<typeof import("./uitest/Names.svelte").default | null>(null);
 
@@ -194,10 +197,17 @@
   /// Tells screen readers about downloads that just finished or failed.
   function announce(downloads: Snapshot["downloads"]) {
     const said: string[] = [];
+    // The sounds (M5.5): what finished, failed, and which queues finished,
+    // since the last look.
+    const before = new Map(downloads.filter((d) => lastStatus.has(d.id)).map((d) => [d.id, { queue: lastQueue.get(d.id) ?? d.queue, status: lastStatus.get(d.id)! }]));
+    const heard = new Set<Sound>();
+    for (const q of finishedQueues(before, downloads)) if (q) heard.add("queue");
     for (const d of downloads) {
+      lastQueue.set(d.id, d.queue);
       const before = lastStatus.get(d.id);
       if (before && before !== d.status && (d.status === "done" || d.status === "failed")) {
         said.push(`${locale.t(d.status === "done" ? "notify-done-title" : "notify-failed-title")}: ${d.name}`);
+        heard.add(d.status === "done" ? "done" : "failed");
       }
       lastStatus.set(d.id, d.status);
     }
@@ -205,6 +215,17 @@
       announcement = said.join(". ");
       if (settings?.notifications) void notify(said);
     }
+    if (heard.size) void sound(heard);
+  }
+
+  // One sound for what happened, as the user chose: the queue's over the
+  // download's, a failure's over a success's.
+  async function sound(heard: Set<Sound>) {
+    const on = await api.soundPrefs().catch(() => null);
+    if (!on) return;
+    const order: Sound[] = ["queue", "failed", "done"];
+    const which = order.find((s) => heard.has(s) && on[s]);
+    if (which) play(which);
   }
 
   // Snapshots can come back out of order: only the latest asked counts

@@ -7,6 +7,8 @@
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { onMount } from "svelte";
   import { api } from "../api";
+  import { play } from "../sounds";
+  import type { Sounds } from "../bindings/Sounds";
   import type { IntegrationView } from "../bindings/IntegrationView";
   import CompleteSetting from "./CompleteSetting.svelte";
   import UpdateSetting from "./UpdateSetting.svelte";
@@ -104,6 +106,24 @@
     const before = dropBox;
     dropBox = shown;
     await api.setDropBox(shown).catch(() => (dropBox = before));
+  }
+  // The sounds (M5.5): at first only the finished download's.
+  const SOUNDS = [
+    ["done", "settings-sound-done"],
+    ["failed", "settings-sound-failed"],
+    ["queue", "settings-sound-queue"],
+  ] as const;
+  let sounds = $state<Sounds>({ done: true, failed: false, queue: false });
+  onMount(() => {
+    api.soundPrefs().then(
+      (s) => (sounds = s),
+      () => {},
+    );
+  });
+  async function setSound(key: "done" | "failed" | "queue", on: boolean) {
+    const before = sounds;
+    sounds = { ...sounds, [key]: on };
+    await api.setSoundPrefs(sounds).catch(() => (sounds = before));
   }
 
   async function setCloseQuits(quits: boolean) {
@@ -320,6 +340,19 @@
   </fieldset>
 
   <fieldset>
+    <legend>{locale.t("settings-sounds")}</legend>
+    {#each SOUNDS as [key, text] (key)}
+      <label class="choice">
+        <input type="checkbox" checked={sounds[key]} onchange={(e) => void setSound(key, e.currentTarget.checked)} />
+        <span>{locale.t(text)}</span>
+        <button class="btn quiet hear" type="button" aria-label={locale.t("settings-sound-try")} title={locale.t("settings-sound-try")} onclick={() => play(key)}>
+          <Icon name="play" size={13} />
+        </button>
+      </label>
+    {/each}
+  </fieldset>
+
+  <fieldset>
     <legend>{locale.t("settings-clipboard")}</legend>
     <label class="choice">
       <input type="checkbox" checked={settings.clipboard} onchange={(e) => change({ clipboard: e.currentTarget.checked })} />
@@ -415,6 +448,10 @@
 </section>
 
 <style>
+  .hear {
+    margin-inline-start: 4px;
+    padding: 2px 6px;
+  }
   .page {
     overflow: auto;
     padding: 20px 28px 32px;
