@@ -10,6 +10,9 @@
   import type { IntegrationView } from "../bindings/IntegrationView";
   import CompleteSetting from "./CompleteSetting.svelte";
   import UpdateSetting from "./UpdateSetting.svelte";
+  import type { ToolView } from "../bindings/ToolView";
+  import { licenseOf, toolName, versionOf } from "../about";
+  import { ask } from "@tauri-apps/plugin-dialog";
 
   let {
     settings,
@@ -141,6 +144,29 @@
     } catch (e) {
       autostartProblem = String(e);
     }
+  }
+
+  // The video tools (M6, #149): what is installed, and deleting them.
+  let tools = $state<ToolView[]>([]);
+  let toolsSaid = $state<{ text: string; problem: boolean } | null>(null);
+  onMount(() => {
+    void api.videoToolsStatus().then((t) => (tools = t), (e) => (toolsSaid = { text: String(e), problem: true }));
+  });
+  async function removeTools() {
+    const yes = await ask(locale.t("settings-video-tools-remove-question"), {
+      title: locale.t("settings-video-tools"),
+      kind: "warning",
+      okLabel: locale.t("settings-video-tools-remove"),
+      cancelLabel: locale.t("confirm-cancel"),
+    }).catch(() => false);
+    if (!yes) return;
+    try {
+      await api.videoToolsRemove();
+      toolsSaid = { text: locale.t("settings-video-tools-removed"), problem: false };
+    } catch (e) {
+      toolsSaid = { text: String(e), problem: true };
+    }
+    tools = await api.videoToolsStatus().catch(() => tools);
   }
 
   function setLimit() {
@@ -323,6 +349,34 @@
   </fieldset>
 
   <fieldset>
+    <legend>{locale.t("settings-video-tools")}</legend>
+    <p class="hint">{locale.t("settings-video-tools-hint")}</p>
+    {#if tools.length > 0}
+      <table class="tools">
+        <thead>
+          <tr><th scope="col">{locale.t("video-tool")}</th><th scope="col">{locale.t("video-version")}</th><th scope="col">{locale.t("video-license")}</th><th scope="col">{locale.t("progress-status")}</th></tr>
+        </thead>
+        <tbody>
+          {#each tools as t (t.tool)}
+            <tr>
+              <td>{toolName(t.tool)}</td>
+              <td>{versionOf(t)}</td>
+              <td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td>
+              <td class:ready={t.installed}>{locale.t(t.installed ? "settings-video-tools-ready" : "settings-video-tools-missing")}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+    {#if tools.some((t) => t.installed)}
+      <div class="row">
+        <button class="btn" onclick={() => void removeTools()}><Icon name="trash" />{locale.t("settings-video-tools-remove")}</button>
+      </div>
+    {/if}
+    {#if toolsSaid}<p class={toolsSaid.problem ? "problem" : "done"} role="status">{toolsSaid.text}</p>{/if}
+  </fieldset>
+
+  <fieldset>
     <legend>{locale.t("settings-autostart")}</legend>
     <label class="choice">
       <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget.checked)} />
@@ -469,6 +523,24 @@
   }
   .done {
     background: var(--green-bg);
+    color: var(--green);
+  }
+  .tools {
+    margin: 10px 0 0;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .tools th,
+  .tools td {
+    padding: 5px 14px 5px 0;
+    text-align: start;
+    border-bottom: 1px solid var(--line);
+  }
+  .tools th {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tools .ready {
     color: var(--green);
   }
 </style>

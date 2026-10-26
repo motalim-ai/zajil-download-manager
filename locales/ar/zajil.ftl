@@ -684,6 +684,23 @@ video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّ�
 ## Video downloads in the list (M6, #149)
 queue-video = فيديو
 
+## Video tools in the settings and «About» (M6, #149)
+settings-video-tools = أدوات الفيديو
+settings-video-tools-hint = تُنزَّل بموافقتك أول مرة تحمّل فيها فيديو، وتُحفظ في مجلد بيانات زاجِل.
+settings-video-tools-ready = جاهزة
+settings-video-tools-missing = غير منزّلة
+settings-video-tools-remove = حذف أدوات الفيديو
+settings-video-tools-remove-question = تُحذف أدوات الفيديو، وتُنزَّل من جديد بموافقتك حين تحمّل فيديو. هل تحذفها؟
+settings-video-tools-removed = حُذفت أدوات الفيديو.
+about-video-tools = يحمّل زاجِل الفيديو بأدوات حرة، تُنزَّل من مصادرها:
+about-ffmpeg = يستعمل هذا البرنامج مكتبات من مشروع FFmpeg بترخيص { $license }.
+about-tool = { $tool } { $version }، بترخيص { $license }. مصدره: { $source }
+about-tool-or-later = { $tool } { $version }، بترخيص { $license } أو أحدث. مصدره: { $source }
+about-tool-yt-dlp = { $tool } { $version }، بترخيص { $binary } للملف الذي ينزّله زاجِل (والكود المصدري بترخيص { $license }). مصدره: { $source }
+about-or-later = { $license } أو أحدث
+about-not-ours = زاجِل لا يملك هذه الأدوات، وهي لأصحابها:
+tool-license-yt-dlp = { $binary } للملف الذي ينزّله زاجِل (والكود المصدري بترخيص { $source })
+
 ## Waiting for the site (#170)
 status-waiting-site = بانتظار الموقع
 status-waiting-site-hint = وصل موقعه إلى أقصى عدد اتصالات حددته له في الإعدادات، فهو ينتظر دوره دون أن يأخذ مكانًا في الطابور.

@@ -614,6 +614,23 @@ video-tools-missing = The video tools are not installed or have changed. Open th
 ## Video downloads in the list (M6, #149)
 queue-video = Video
 
+## Video tools in the settings and «About» (M6, #149)
+settings-video-tools = Video tools
+settings-video-tools-hint = They are downloaded with your agreement the first time you download a video, and kept in Zajil's data folder.
+settings-video-tools-ready = Ready
+settings-video-tools-missing = Not downloaded
+settings-video-tools-remove = Delete the video tools
+settings-video-tools-remove-question = The video tools are deleted, and downloaded again with your agreement when you download a video. Delete them?
+settings-video-tools-removed = The video tools were deleted.
+about-video-tools = Zajil downloads videos with free tools, downloaded from their sources:
+about-ffmpeg = This software uses libraries from the FFmpeg project under the { $license }.
+about-tool = { $tool } { $version }, under the { $license }. Its source: { $source }
+about-tool-or-later = { $tool } { $version }, under the { $license } or later. Its source: { $source }
+about-tool-yt-dlp = { $tool } { $version }, under the { $binary } for the file Zajil downloads (its source code: { $license }). Its source: { $source }
+about-or-later = { $license } or later
+about-not-ours = Zajil does not own these tools; they belong to their projects:
+tool-license-yt-dlp = { $binary } for the file Zajil downloads (its source code: { $source })
+
 ## Waiting for the site (#170)
 status-waiting-site = Waiting for its site
 status-waiting-site-hint = Its site has reached the most connections you set for it in the settings, so it waits for its turn without taking a place in the queue.
