@@ -1,16 +1,17 @@
 <div dir="rtl">
 
-# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (M8، ويبدأ في 0.3)
+# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (1.1)
 
 | البند | القيمة |
 |---|---|
-| الحالة | **مقبول** (قرارات المالك في 2026-10-26، في آخر الورقة) |
+| الحالة | **مقبول، والتنفيذ في 1.1** (قرارات المالك في 2026-10-26، في آخر الورقة) |
 | التاريخ | 2026-10-26 |
 | صاحب القرار | Motalim (@motalim-ai) |
 
 > **English summary.**
 > - **Signed by the project's own key, never by Apple or Microsoft** (owner's decision, 2026-10-25). The signature proves an update comes from us; the operating systems' warnings on first install stay as they are.
-> - **When:** before 1.0, in 0.3 (owner's decision, 2026-10-26).
+> - **When:** in 1.1. 1.0 ships with the update check's notice and link only (owner's decision, 2026-10-26, which replaces «in 0.3»).
+> - **`SHA256SUMS`:** no GPG. In 1.1 it is signed with the update key (Ed25519), and the release page says how to check it.
 > - **Zajil itself:** Tauri 2's updater (`tauri-plugin-updater`, minisign, Ed25519). Two public keys are built into Zajil: the signing key and an offline emergency key. Our own check accepts either before Tauri's runs. An update is downloaded and installed only after the user says yes. Nothing is silent. TLS is always fully checked. The `.deb` gets a notice and a link only; an apt repository comes after 1.0.
 > - **The video tools** (yt-dlp, FFmpeg, QuickJS-NG, ADR-0009) get a signed list, `tools.json`, under the same keys. It holds each tool's version, address and SHA-256, so a tool can be updated without a full Zajil release. A list is never older than the one Zajil has (no rollback), and the tools keep being checked by SHA-256 before every run.
 > - **The private key** is a GitHub secret in an environment named `release`. Each run needs the owner's approval, only on a `vX.Y.Z` tag from `main`. Only the owner and the release workflow reach it. The emergency key stays offline with the owner.
@@ -38,7 +39,7 @@
 |---|---|---|
 | **أ. updater بتاع Tauri** (minisign، Ed25519) | جاهز في إطارنا: التحقق من التوقيع، والتنزيل، والتثبيت على الأنظمة الثلاثة، وأداة `tauri signer` لصنع المفتاح والتوقيع. ومفتاح عام قصير يوضع في الإعدادات | مفتاح عام واحد في الإعدادات (لا قائمة مفاتيح). وفي لينكس يحدّث الـ AppImage فقط، لا الـ `.deb` |
 | ب. minisign أو Ed25519 بكود منّا للتطبيق كله | تحكّم كامل، وقائمة مفاتيح | نعيد كتابة التنزيل والتثبيت والاستبدال على كل نظام، وهو صعب ومليء بالحالات |
-| ج. GPG | معروف، وM8 يطلبه أصلًا لملفات لينكس | مكتبة كبيرة في البرنامج، وصيغ كثيرة، وسطح هجوم أوسع من Ed25519 |
+| ج. GPG (**مرفوض**، قرار المالك) | معروف | مكتبة كبيرة في البرنامج، وصيغ كثيرة، وسطح هجوم أوسع من Ed25519 |
 | د. TUF (مثل `tough`) | يحمي من الإرجاع والتجميد وسرقة مفتاح واحد بعدة أدوار | ثقيل لمشروع بهذا الحجم، وتشغيله أصعب |
 
 ### قائمة الأدوات
@@ -162,7 +163,11 @@
 5. **عند التسرّب:** الخطة في القسم 4، ومعها تنبيه أمني واضح في البرنامج نفسه حين يُعلن التسرّب.
 6. **الـ `.deb`:** إشعار ورابط فقط، ومستودع apt بعد 1.0.
 7. **«تخطَّ هذه النسخة» و«لم يُفحص منذ مدة»:** الاثنان نعم.
-8. **متى:** قبل 1.0، في 0.3.
+8. **متى:** في 1.1. والإصدار 1.0 يطلع بالتحديث «إشعار ورابط» فقط (فحص التحديث، #124). (قرار ثانٍ للمالك في نفس اليوم، بدل «في 0.3».)
+9. **`SHA256SUMS`، بلا GPG:**
+   - في 1.1 يُوقَّع `SHA256SUMS` نفسه بمفتاح التحديث (Ed25519)، في ملف بجانبه (`SHA256SUMS.minisig`).
+   - وصفحة الإصدار تشرح التحقق منه بأداة minisign والمفتاح العام المنشور: `minisign -Vm SHA256SUMS -P <المفتاح العام>`، ثم التحقق من البصمات كما اليوم.
+   - وحتى 1.1، `SHA256SUMS` بلا توقيع كما في 0.2.
 
 ## المصادر
 
