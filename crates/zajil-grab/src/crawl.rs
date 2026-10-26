@@ -151,6 +151,8 @@ pub enum Skip {
     Credentials,
     /// The crawl already asks [`MAX_ORIGINS`] origins.
     TooManyOrigins,
+    /// Not an http or https link.
+    Scheme,
 }
 
 impl fmt::Display for Skip {
@@ -169,6 +171,7 @@ impl fmt::Display for Skip {
             Skip::TooManyRedirects => "too many redirects",
             Skip::Credentials => "a user name or password in the link",
             Skip::TooManyOrigins => "too many different sites",
+            Skip::Scheme => "not an http or https link",
         })
     }
 }
@@ -181,6 +184,7 @@ impl From<Refusal> for Skip {
             Refusal::Downgrade => Skip::Downgrade,
             Refusal::PathTrap => Skip::PathTrap,
             Refusal::Credentials => Skip::Credentials,
+            Refusal::Scheme => Skip::Scheme,
         }
     }
 }
@@ -344,7 +348,7 @@ pub async fn crawl(
     };
     crawler.push(
         Item {
-            url: plan.start.clone(),
+            url: links::tidy(plan.start.clone()),
             depth: 0,
             kind: Want::Page,
             from: None,
@@ -676,7 +680,16 @@ impl Crawler<'_> {
                 Err(err) => break Err(err.to_string()),
             };
             match page.status {
-                200..=299 => break Ok(Robots::parse(&page.body.unwrap_or_default())),
+                200..=299 => {
+                    let body = page.body.unwrap_or_default();
+                    // A file cut at the limit loses its cut last line.
+                    let body = if page.truncated {
+                        crate::robots::without_cut_line(&body)
+                    } else {
+                        &body
+                    };
+                    break Ok(Robots::parse(body));
+                }
                 // More redirects than RFC 9309 asks to follow, or one
                 // without a usable target: as if unavailable.
                 300..=399 => {

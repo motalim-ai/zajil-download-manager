@@ -529,7 +529,8 @@ async fn a_redirect_from_https_to_http_is_refused() {
 
 /// Loops: two pages that link each other, and a page that links itself
 /// with a fragment, a scheme in capitals and needless percent-encoding:
-/// each page is asked for once and the crawl ends.
+/// each page is asked for once and the crawl ends. The start is written
+/// so too (review of #195), so the link back to it is the same page.
 #[tokio::test(flavor = "multi_thread")]
 async fn pages_that_link_each_other_are_asked_for_once() {
     let site = server();
@@ -553,7 +554,8 @@ async fn pages_that_link_each_other_are_asked_for_once() {
         );
     }
     let dir = tempfile::tempdir().unwrap();
-    let mut plan = plan(&site.url("/index.html"), dir.path());
+    let start = format!("{}#top", site.url("/ind%65x.html"));
+    let mut plan = plan(&start, dir.path());
     plan.depth = crawl::MAX_DEPTH;
     let (report, events) = grab(&engine(), &plan, &scope(&plan)).await;
 

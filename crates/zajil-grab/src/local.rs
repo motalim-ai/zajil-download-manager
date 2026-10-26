@@ -27,7 +27,8 @@ pub fn is_local(url: &Url) -> bool {
     if let Ok(v4) = host.parse() {
         return is_local_v4(v4);
     }
-    let name = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
+    // Every trailing dot (`localhost..`, review of #195).
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
     name == "localhost" || name.ends_with(".localhost")
 }
 
@@ -50,14 +51,27 @@ fn is_local_v6(ip: Ipv6Addr) -> bool {
     if first & 0xffc0 == 0xfe80 || first & 0xfe00 == 0xfc00 {
         return true; // fe80::/10 link-local, fc00::/7 unique local
     }
-    // An IPv4 address inside IPv6: `::ffff:a.b.c.d` (mapped) and the old
-    // `::a.b.c.d` (compatible).
+    // An IPv4 address inside IPv6 is as local as that address.
     let s = ip.segments();
-    if s[..5] == [0; 5] && (s[5] == 0xffff || s[5] == 0) {
-        let v4 = Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8);
-        return is_local_v4(v4);
-    }
-    false
+    let v4 = |high: u16, low: u16| {
+        Ipv4Addr::new((high >> 8) as u8, high as u8, (low >> 8) as u8, low as u8)
+    };
+    let embedded = if s[..5] == [0; 5] && (s[5] == 0xffff || s[5] == 0) {
+        // `::ffff:a.b.c.d` (mapped) and the old `::a.b.c.d` (compatible).
+        Some(v4(s[6], s[7]))
+    } else if s[..4] == [0; 4] && s[4] == 0xffff && s[5] == 0 {
+        // `::ffff:0:a.b.c.d` (translated, RFC 2765).
+        Some(v4(s[6], s[7]))
+    } else if s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0; 4] {
+        // NAT64: `64:ff9b::a.b.c.d` (RFC 6052).
+        Some(v4(s[6], s[7]))
+    } else if s[0] == 0x2002 {
+        // 6to4: `2002:AABB:CCDD::` holds a.b.c.d (RFC 3056).
+        Some(v4(s[1], s[2]))
+    } else {
+        None
+    };
+    embedded.is_some_and(is_local_v4)
 }
 
 #[cfg(test)]
@@ -155,6 +169,16 @@ mod tests {
         assert!(local("http://[::ffff:10.0.0.1]/"));
         assert!(local("http://[::127.0.0.1]/"), "IPv4-compatible");
         assert!(!local("http://[::ffff:8.8.8.8]/"));
+        // Translated, NAT64 and 6to4 (review of #195).
+        assert!(local("http://[::ffff:0:127.0.0.1]/"));
+        assert!(local("http://[::ffff:0:10.1.2.3]/"));
+        assert!(!local("http://[::ffff:0:8.8.8.8]/"));
+        assert!(local("http://[64:ff9b::7f00:1]/"));
+        assert!(local("http://[64:ff9b::192.168.1.1]/"));
+        assert!(!local("http://[64:ff9b::8.8.8.8]/"));
+        assert!(local("http://[2002:7f00:1::]/"));
+        assert!(local("http://[2002:c0a8:101::1]/"));
+        assert!(!local("http://[2002:808:808::1]/"));
     }
 
     /// Odd numeric forms, read as a browser reads them.
@@ -187,6 +211,7 @@ mod tests {
         assert!(local("http://localhost/"));
         assert!(local("http://LOCALHOST:8080/"));
         assert!(local("http://localhost./"));
+        assert!(local("http://localhost../"));
         assert!(local("http://a.b.localhost/"));
         assert!(!local("http://localhost.example.com/"));
         assert!(!local("http://notlocalhost/"));

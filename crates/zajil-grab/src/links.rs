@@ -91,18 +91,26 @@ fn resolve(base: &Url, raw: &str) -> Option<Url> {
     if raw.is_empty() || raw.len() > MAX_URL_BYTES {
         return None;
     }
-    let mut url = base.join(raw).ok()?;
+    let url = base.join(raw).ok()?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return None;
     }
     if !url.username().is_empty() || url.password().is_some() {
         return None;
     }
+    let url = tidy(url);
+    (url.as_str().len() <= MAX_URL_BYTES).then_some(url)
+}
+
+/// `url` as the crawl writes it, so one page has one URL: no fragment and
+/// no needless escapes. The start is written so too (review of #195:
+/// `/#top` and `/` were asked for twice).
+pub(crate) fn tidy(mut url: Url) -> Url {
     url.set_fragment(None);
     if let Some(path) = tidy_escapes(url.path()) {
         url.set_path(&path);
     }
-    (url.as_str().len() <= MAX_URL_BYTES).then_some(url)
+    url
 }
 
 /// `path` without needless percent-encoding (ADR-0010 section 6), so one
@@ -440,6 +448,15 @@ mod tests {
                <a href="/real.zip">real</a><plaintext><a href="/pt.zip">"#,
         );
         assert_eq!(found, ["https://site.test/real.zip"]);
+    }
+
+    #[test]
+    fn tidy_drops_the_fragment_and_needless_escapes() {
+        let url = Url::parse("https://site.test/%7euser/s%65lf%2fx.html?q=%41#top").unwrap();
+        assert_eq!(
+            tidy(url).as_str(),
+            "https://site.test/~user/self%2Fx.html?q=%41"
+        );
     }
 
     #[test]
