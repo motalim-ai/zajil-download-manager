@@ -117,7 +117,9 @@ async fn a_stop_during_a_slow_save_saves_no_more(connections: usize, seed: u64) 
                 std::thread::sleep(Duration::from_millis(400));
             }
         })));
-        let engine = engine(connections, Duration::from_millis(100), 1024 * KIB);
+        // Parts of 256 KiB at least, so four connections really split the
+        // file (review of #208: with 1 MiB, 1.5 MB was one part).
+        let engine = engine(connections, Duration::from_millis(100), 256 * KIB);
         let err = engine
             .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |_| {})
             .await
@@ -134,7 +136,15 @@ async fn a_stop_during_a_slow_save_saves_no_more(connections: usize, seed: u64) 
             2,
             "round {round}: a save after the stop"
         );
-        resumes_from_the_last_save(&engine, &state_file, &data).await;
+        let parts = DownloadState::load(&state_file).unwrap().segments.len();
+        if connections > 1 {
+            assert!(parts > 1, "round {round}: not split ({parts} part)");
+        }
+        // The resume, once: it is slow (the file stays throttled, as a
+        // new copy would be another file to the resume).
+        if round == 0 {
+            resumes_from_the_last_save(&engine, &state_file, &data).await;
+        }
     }
 }
 

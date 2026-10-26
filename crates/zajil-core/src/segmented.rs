@@ -265,6 +265,29 @@ pub(crate) async fn run(
                 stopped_by_user = true;
                 let _ = stop.send(true);
             }
+            // No periodic save once the download stops (asked by the user,
+            // or for a restart): the workers are ending, and a save then
+            // is the one #132 leaves out (#194). Before the messages, so a
+            // steady flow of them cannot hold the save back.
+            _ = tick.tick(), if !stopped_by_user && restart.is_none() => {
+                // A stop asked during a slow save reaches the workers at
+                // once, not when the save is done (review of #208: they
+                // wrote on for the whole save).
+                let save = checkpoint(&ctx, &state_file, cleanup.as_ref());
+                tokio::pin!(save);
+                let result = loop {
+                    tokio::select! {
+                        biased;
+                        () = user_stop.requested(), if !stopped_by_user => {
+                            stopped_by_user = true;
+                            let _ = stop.send(true);
+                        }
+                        result = &mut save => break result,
+                    }
+                };
+                result?;
+                saved = true;
+            }
             message = messages.recv() => match message {
                 Some(Message::Wrote(bytes)) => {
                     done += bytes;
@@ -296,13 +319,6 @@ pub(crate) async fn run(
                 }
                 None => break,
             },
-            // No periodic save once the download stops (asked by the user,
-            // or for a restart): the workers are ending, and a save then
-            // is the one #132 leaves out (#194).
-            _ = tick.tick(), if !stopped_by_user && restart.is_none() => {
-                checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
-                saved = true;
-            }
         }
     }
     // Messages sent just before the last worker ended.

@@ -1594,6 +1594,10 @@ impl Engine {
                     .interrupt(format!("{reason} (gave up after {failures} tries)"))
                     .await);
             }
+            // Asked meanwhile: the stop's own rule on saving applies (#132).
+            if stop.is_requested() {
+                return Err(transfer.stopped().await);
+            }
             // A new download with no data yet has nothing to record.
             if transfer.cleanup.is_none()
                 && let Err(err) = transfer.checkpoint().await
@@ -2058,9 +2062,9 @@ impl Transfer {
                 () = stop.requested() => return Err(Halt::Requested),
                 () = limits.take(chunk.len() as u64) => {}
             }
-            // No periodic save once a stop is asked (#194): one asked
-            // during the last save is seen here, before a slow disk makes
-            // the next save due at once.
+            // No periodic save once a stop is asked (#194). The biased
+            // select above sees a stop asked before it; this closes the
+            // short window after it.
             if stop.is_requested() {
                 return Err(Halt::Requested);
             }
