@@ -16,6 +16,7 @@
 
 - النسخة: FFmpeg 8.1.3، من بناء زاجِل (`8.1.3-1`)، من المصدر الرسمي دون أي تعديل، وبلا `--enable-gpl` ولا `--enable-nonfree` ولا أي مكتبة خارجية.
 - FFmpeg ملك أصحابه، وليس ملكًا لزاجِل: [ffmpeg.org](https://ffmpeg.org).
+- حقوق النشر © مطوّرو FFmpeg. ويأتي FFmpeg **بلا أي ضمان** (انظر `LGPL-2.1.txt`).
 
 ### yt-dlp
 
@@ -45,6 +46,7 @@ This software uses code of FFmpeg licensed under the LGPLv2.1 (or later; the tex
 
 - Version: FFmpeg 8.1.3, Zajil's build `8.1.3-1`, from the official source unchanged, without `--enable-gpl`, `--enable-nonfree` or any outside library.
 - FFmpeg belongs to its authors, not to Zajil: [ffmpeg.org](https://ffmpeg.org).
+- Copyright © the FFmpeg developers. FFmpeg comes with **absolutely no warranty** (see `LGPL-2.1.txt`).
 
 ### yt-dlp
 
