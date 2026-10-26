@@ -372,7 +372,9 @@ jobs:
           done
           exit 1
       - name: Save the GUI libraries' packages (Linux)
-        if: runner.os == 'Linux' && steps.gui-debs.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        # TEMPORARY (#119): also from this PR, to measure the cache before
+        # the merge; removed before it.
+        if: runner.os == 'Linux' && steps.gui-debs.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.head_ref == 'ci/gui-libraries-cache')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.GUI_DEBS }}
