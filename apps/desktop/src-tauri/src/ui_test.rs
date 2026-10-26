@@ -140,6 +140,7 @@ fn d(
         waits_for_browser: id == 5,
         waits_for_site: false,
         needs_ok: false,
+        video: false,
     }
 }
 

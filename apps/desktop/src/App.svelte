@@ -447,12 +447,12 @@
       case "properties":
         return tableShown && one !== undefined;
       case "refresh-link":
-        return tableShown && one !== undefined && one.status !== "done";
+        return tableShown && one !== undefined && one.status !== "done" && !one.video;
       case "copy-link":
         return tableShown && chosen.length > 0;
       // Back to the main queue: only what is in another one.
       case "remove-from-queue":
-        return tableShown && chosen.some((d) => d.queue !== "main");
+        return tableShown && chosen.some((d) => !d.video && d.queue !== "main");
       default:
         return true;
     }
@@ -492,7 +492,7 @@
       case "copy-link":
         return void copyLinks();
       case "remove-from-queue":
-        return void moveTo("main", chosen.filter((d) => d.queue !== "main").map((d) => d.id));
+        return void moveTo("main", chosen.filter((d) => !d.video && d.queue !== "main").map((d) => d.id));
       case "categories":
         details = null;
         view = "categories";
@@ -570,7 +570,8 @@
       failed = String(e);
     }
   }
-  async function moveTo(queue: string, ids: number[] = selected) {
+  // A video download has no queue (#149).
+  async function moveTo(queue: string, ids: number[] = chosen.filter((d) => !d.video).map((d) => d.id)) {
     failed = null;
     try {
       await api.moveToQueue(ids, queue);

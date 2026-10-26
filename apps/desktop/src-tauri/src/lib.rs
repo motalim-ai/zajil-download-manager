@@ -254,6 +254,7 @@ pub fn run() {
             {
                 let app = tauri_app.state::<App>();
                 video::clean_leftovers(&app);
+                video::load_rows(&app, &tauri_app.state::<video::VideoState>());
             }
             tauri_app.add_capability(dropbox::CAPABILITY)?;
             // The drop box, if the user left it shown.
@@ -787,12 +788,22 @@ async fn snapshot<R: tauri::Runtime>(
     if let Some(snapshot) = handle.state::<ui_test::UiTest>().demo() {
         return Ok(snapshot);
     }
-    #[cfg(not(feature = "ui-test"))]
-    let _ = handle;
     let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
-    tokio::task::spawn_blocking(move || read_snapshot(&store, &categories, &live))
-        .await
-        .map_err(blocking_err)?
+    let mut snapshot =
+        tokio::task::spawn_blocking(move || read_snapshot(&store, &categories, &live))
+            .await
+            .map_err(blocking_err)??;
+    // The video downloads, after the queues' (#149).
+    let categories = view::categories_from(&snapshot.categories);
+    let categories = CategoriesFile {
+        categories,
+        ..no_categories()
+    };
+    snapshot.downloads.extend(video::views(
+        &handle.state::<video::VideoState>(),
+        &categories,
+    ));
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -1880,6 +1891,8 @@ async fn pause<R: tauri::Runtime>(
     ids: Vec<u64>,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    let (videos, ids) = video::split(ids);
+    video::pause(&handle.state::<video::VideoState>(), &videos);
     change(&app, &handle, move |q| set_status(q, &ids, Status::Paused)).await
 }
 
@@ -1891,6 +1904,8 @@ async fn resume<R: tauri::Runtime>(
 ) -> Result<(), String> {
     // A download whose link is being refreshed waits for the refresh: it
     // would otherwise start from the old link, or start over.
+    let (videos, ids) = video::split(ids);
+    video::resume(&handle, &videos);
     let ids = app.refreshing.without(ids);
     change(&app, &handle, move |q| set_status(q, &ids, Status::Waiting)).await
 }
@@ -2094,13 +2109,18 @@ async fn open_download<R: tauri::Runtime>(
     if in_scene(&handle) {
         return Ok(true);
     }
-    let store = app.store.clone();
-    let queues = tokio::task::spawn_blocking(move || store.load())
-        .await
-        .map_err(blocking_err)?
-        .map_err(|e| e.to_string())?;
-    let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
-    let file = item.file.clone().filter(|f| f.is_file());
+    let (file, dir) = if video::is_video(id) {
+        video::file_of(&handle.state::<video::VideoState>(), id)
+            .ok_or_else(|| format!("no download {id}"))?
+    } else {
+        let store = app.store.clone();
+        let queues = tokio::task::spawn_blocking(move || store.load())
+            .await
+            .map_err(blocking_err)?
+            .map_err(|e| e.to_string())?;
+        let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
+        (item.file.clone().filter(|f| f.is_file()), item.dir.clone())
+    };
     let opener = handle.opener();
     match (folder, file) {
         (false, Some(file)) if !sure && asks_before_opening(&file) => Ok(false),
@@ -2113,8 +2133,8 @@ async fn open_download<R: tauri::Runtime>(
             .reveal_item_in_dir(&file)
             .map(|()| true)
             .map_err(|e| e.to_string()),
-        (true, None) if item.dir.is_dir() => opener
-            .reveal_item_in_dir(&item.dir)
+        (true, None) if dir.is_dir() => opener
+            .reveal_item_in_dir(&dir)
             .map(|()| true)
             .map_err(|e| e.to_string()),
         (true, None) => Err(format!("download {id} has no folder")),
@@ -2190,7 +2210,13 @@ async fn copy_links<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     let links: Vec<String> = ids
         .iter()
-        .filter_map(|id| queues.item(*id).map(|i| i.url.clone()))
+        .filter_map(|&id| {
+            if video::is_video(id) {
+                video::url_of(&handle.state::<video::VideoState>(), id)
+            } else {
+                queues.item(id).map(|i| i.url.clone())
+            }
+        })
         .collect();
     if links.is_empty() || in_scene(&handle) {
         return Ok(links.len());
@@ -2224,6 +2250,9 @@ async fn remove_with_files<R: tauri::Runtime>(
     ids: Vec<u64>,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    // A stopped video leaves no file of its own (its run is swept).
+    let (videos, ids) = video::split(ids);
+    video::remove(&handle, &videos);
     let store = app.store.clone();
     let files = {
         let ids = ids.clone();
@@ -2244,6 +2273,8 @@ async fn remove<R: tauri::Runtime>(
     ids: Vec<u64>,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    let (videos, ids) = video::split(ids);
+    video::remove(&handle, &videos);
     change(&app, &handle, move |q| remove_items(q, &ids)).await?;
     // Removed downloads: their browsers forget their tickets at once.
     send_keep(&app.links, &app.store, None);
@@ -3806,9 +3837,12 @@ async fn details<R: tauri::Runtime>(
     if handle.state::<ui_test::UiTest>().scenario.is_some() {
         return ui_test::demo_details(id).ok_or_else(|| format!("no download {id}"));
     }
-    #[cfg(not(feature = "ui-test"))]
-    let _ = handle;
     let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
+    if video::is_video(id) {
+        let categories = categories.load().unwrap_or_else(|_| no_categories());
+        return video::details(&handle.state::<video::VideoState>(), &categories, id)
+            .ok_or_else(|| format!("no download {id}"));
+    }
     tokio::task::spawn_blocking(move || {
         let queues = store.load().map_err(blocking_err)?;
         let (queue, item) = queues

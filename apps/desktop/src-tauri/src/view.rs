@@ -82,6 +82,9 @@ pub struct DownloadView {
     /// A file that can run code, from the browser: it waits for the user
     /// to start it (security review #84).
     pub needs_ok: bool,
+    /// A video download (#149): no queue, no parts; «pause» stops it, and
+    /// it starts over.
+    pub video: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -512,7 +515,7 @@ fn name_from_url(url: &str) -> String {
         .unwrap_or_else(|_| "download".to_owned())
 }
 
-fn host_of(url: &str) -> Option<String> {
+pub(crate) fn host_of(url: &str) -> Option<String> {
     zajil_core::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
@@ -647,6 +650,7 @@ pub fn download(
         waits_for_browser: item.status == Status::Waiting && live.waiting_for_browser(item.id),
         waits_for_site: item.status == Status::Waiting && live.waiting_for_site(item.id),
         needs_ok: item.needs_ok && item.status == Status::Paused,
+        video: false,
     }
 }
 

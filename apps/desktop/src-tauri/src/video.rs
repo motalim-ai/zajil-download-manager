@@ -13,11 +13,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 use ts_rs::TS;
 use zajil_core::Stop;
+
+use crate::view::{DetailsView, DownloadView, StatusView};
 use zajil_core::tools::{Tool, Toolbox};
 use zajil_core::video::{
     Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner,
@@ -39,6 +42,236 @@ pub struct VideoState {
     probing: Mutex<Option<Stop>>,
     downloads: Mutex<HashMap<u64, Stop>>,
     next: AtomicU64,
+    /// The video downloads of the list (#149): kept in `videos.json`.
+    rows: Mutex<Vec<Row>>,
+    /// When each running one last told the list (at most four times a
+    /// second, as the queues' downloads).
+    told: Mutex<HashMap<u64, Instant>>,
+}
+
+/// Video downloads' ids start here, far above the queues' (JavaScript's
+/// numbers stay exact up to 2^53), so one list holds both.
+pub const FIRST_ID: u64 = 1 << 52;
+
+pub fn is_video(id: u64) -> bool {
+    id >= FIRST_ID
+}
+
+/// Splits ids into the videos' and the queues'.
+pub fn split(ids: Vec<u64>) -> (Vec<u64>, Vec<u64>) {
+    ids.into_iter().partition(|&id| is_video(id))
+}
+
+const ROWS_FILE: &str = "videos.json";
+
+/// One video download of the list. A stopped one starts over (yt-dlp's
+/// run folder is swept), so «resume» asks the page again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Row {
+    id: u64,
+    /// The page's link (never shown in a log).
+    url: String,
+    /// The name without extension, as asked; the file's once finished.
+    name: String,
+    folder: String,
+    choice: ChoiceView,
+    status: StatusView,
+    size: Option<u64>,
+    done: u64,
+    #[serde(skip)]
+    speed: u64,
+    error: Option<String>,
+    file: Option<String>,
+}
+
+fn rows_file(app: &crate::App) -> PathBuf {
+    app.data_dir.join(ROWS_FILE)
+}
+
+/// At start: the list's video downloads. One that was running when Zajil
+/// stopped is paused (its run was swept).
+pub fn load_rows(app: &crate::App, state: &VideoState) {
+    let rows = read_rows(&rows_file(app));
+    let last = rows.iter().map(|r| r.id - FIRST_ID).max().unwrap_or(0);
+    state.next.store(last, Ordering::SeqCst);
+    *state.rows.lock().unwrap() = rows;
+}
+
+fn read_rows(path: &std::path::Path) -> Vec<Row> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(mut rows) = serde_json::from_str::<Vec<Row>>(&text) else {
+        eprintln!("zajil: {ROWS_FILE} could not be read; the video downloads start empty");
+        return Vec::new();
+    };
+    // Never an id of the queues' (a file changed by hand).
+    rows.retain(|r| is_video(r.id));
+    for row in &mut rows {
+        if matches!(row.status, StatusView::Active | StatusView::Waiting) {
+            row.status = StatusView::Paused;
+            row.done = 0;
+        }
+    }
+    rows
+}
+
+/// Writes the list's video downloads whole (a new file, then renamed).
+fn save_rows(app: &crate::App, state: &VideoState) {
+    let rows = state.rows.lock().unwrap().clone();
+    let path = rows_file(app);
+    let saved = serde_json::to_vec_pretty(&rows)
+        .map_err(std::io::Error::other)
+        .and_then(|bytes| {
+            let new = path.with_extension("json.new");
+            std::fs::write(&new, bytes)?;
+            std::fs::rename(&new, &path)
+        });
+    if let Err(e) = saved {
+        eprintln!("zajil: {ROWS_FILE} could not be saved: {e}");
+    }
+}
+
+fn with_row<T>(state: &VideoState, id: u64, f: impl FnOnce(&mut Row) -> T) -> Option<T> {
+    state
+        .rows
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|r| r.id == id)
+        .map(f)
+}
+
+/// The list's rows for the video downloads, newest last.
+pub fn views(
+    state: &VideoState,
+    categories: &zajil_core::category::CategoriesFile,
+) -> Vec<DownloadView> {
+    state
+        .rows
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|row| view_of(row, categories))
+        .collect()
+}
+
+fn view_of(row: &Row, categories: &zajil_core::category::CategoriesFile) -> DownloadView {
+    let host = crate::view::host_of(&row.url);
+    let name = row
+        .file
+        .as_deref()
+        .and_then(|f| std::path::Path::new(f).file_name())
+        .map_or_else(|| row.name.clone(), |n| n.to_string_lossy().into_owned());
+    // Its category is the videos' (or the sounds' for «audio only»), as
+    // a name with an extension would give.
+    let probe = match (&row.file, &row.choice) {
+        (Some(_), _) => name.clone(),
+        (None, ChoiceView::AudioOnly) => format!("{name}.m4a"),
+        (None, _) => format!("{name}.mp4"),
+    };
+    DownloadView {
+        id: row.id,
+        category: categories
+            .classify(&probe, host.as_deref())
+            .map(|c| c.id.clone()),
+        name,
+        host,
+        size: row.size,
+        done: row.done,
+        speed: if row.status == StatusView::Active {
+            row.speed as f64
+        } else {
+            0.0
+        },
+        status: row.status,
+        queue: String::new(),
+        folder: row.folder.clone(),
+        parts: Vec::new(),
+        segments: 0,
+        error: row.error.clone(),
+        waits_for_browser: false,
+        waits_for_site: false,
+        description: None,
+        last_try: None,
+        needs_ok: false,
+        video: true,
+    }
+}
+
+/// The progress window's view of a video download.
+pub fn details(
+    state: &VideoState,
+    categories: &zajil_core::category::CategoriesFile,
+    id: u64,
+) -> Option<DetailsView> {
+    let rows = state.rows.lock().unwrap();
+    let row = rows.iter().find(|r| r.id == id)?;
+    Some(DetailsView {
+        download: view_of(row, categories),
+        url: row.url.clone(),
+        segments: Vec::new(),
+        // A stopped video starts over.
+        resumable: Some(false),
+        limit: None,
+    })
+}
+
+/// A finished video's file, and its folder.
+pub fn file_of(state: &VideoState, id: u64) -> Option<(Option<PathBuf>, PathBuf)> {
+    with_row(state, id, |row| {
+        (
+            row.file.as_ref().map(PathBuf::from).filter(|f| f.is_file()),
+            PathBuf::from(&row.folder),
+        )
+    })
+}
+
+/// A video download's page link («Copy link»).
+pub fn url_of(state: &VideoState, id: u64) -> Option<String> {
+    with_row(state, id, |row| row.url.clone())
+}
+
+/// «Pause»: a running video stops (it starts over when resumed).
+pub fn pause(state: &VideoState, ids: &[u64]) {
+    let downloads = state.downloads.lock().unwrap();
+    for id in ids {
+        if let Some(stop) = downloads.get(id) {
+            stop.request();
+        }
+    }
+}
+
+/// «Resume»: a stopped or failed video starts again, from asking its page.
+pub fn resume<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
+    let state = handle.state::<VideoState>();
+    for &id in ids {
+        let again = with_row(&state, id, |row| {
+            let again = matches!(row.status, StatusView::Paused | StatusView::Failed);
+            if again {
+                row.status = StatusView::Waiting;
+                row.error = None;
+                row.done = 0;
+                row.size = None;
+            }
+            again
+        });
+        if again == Some(true) {
+            start(handle.clone(), id, true);
+        }
+    }
+    save_rows(&handle.state::<crate::App>(), &state);
+    let _ = handle.emit("downloads-changed", ());
+}
+
+/// Takes video downloads off the list; a running one stops first. A
+/// finished file stays; a stopped run leaves nothing.
+pub fn remove<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
+    let state = handle.state::<VideoState>();
+    pause(&state, ids);
+    state.rows.lock().unwrap().retain(|r| !ids.contains(&r.id));
+    save_rows(&handle.state::<crate::App>(), &state);
+    let _ = handle.emit("downloads-changed", ());
 }
 
 fn folders(app: &crate::App) -> (PathBuf, PathBuf) {
@@ -419,10 +652,12 @@ struct Progress {
     speed: Option<u64>,
 }
 
-/// Downloads a probed video into `dest` as `name`; its id at once, then
-/// `video-progress`, and `video-finished` or `video-failed`.
+/// Downloads a probed video into `dest` as `name`: it joins the list, and
+/// its id comes at once; then `video-progress`, and `video-finished` or
+/// `video-failed`.
 #[tauri::command]
 pub fn video_download<R: tauri::Runtime>(
+    app: State<'_, crate::App>,
     state: State<'_, VideoState>,
     url: String,
     choice: ChoiceView,
@@ -430,52 +665,98 @@ pub fn video_download<R: tauri::Runtime>(
     name: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<u64, String> {
-    let id = state.next.fetch_add(1, Ordering::SeqCst) + 1;
+    let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
+    state.rows.lock().unwrap().push(Row {
+        id,
+        url,
+        name,
+        folder: dest,
+        choice,
+        status: StatusView::Waiting,
+        size: None,
+        done: 0,
+        speed: 0,
+        error: None,
+        file: None,
+    });
+    save_rows(&app, &state);
+    let _ = handle.emit("downloads-changed", ());
+    start(handle, id, false);
+    Ok(id)
+}
+
+/// Runs video download `id` of the list; `ask` asks its page first (a
+/// resumed one: the formats of the last probe may be gone, or stale).
+fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
+    let state = handle.state::<VideoState>();
+    let Some(row) = with_row(&state, id, |row| {
+        row.status = StatusView::Active;
+        row.clone()
+    }) else {
+        return;
+    };
     let stop = Stop::new();
     state.downloads.lock().unwrap().insert(id, stop.clone());
-    let formats = state
-        .formats
-        .lock()
-        .unwrap()
-        .get(&url)
-        .cloned()
-        .unwrap_or_default();
-    let cookies = state.cookies.lock().unwrap().get(&url).cloned();
+    let cookies = state.cookies.lock().unwrap().get(&row.url).cloned();
+    let known = state.formats.lock().unwrap().get(&row.url).cloned();
     tauri::async_runtime::spawn(async move {
         let runner = runner(&handle.state::<crate::App>()).await;
-        let choice = Choice::from(choice);
-        let request = Download {
-            url: &url,
-            choice: &choice,
-            formats: &formats,
-            cookies: cookies.as_deref(),
-            dest: std::path::Path::new(&dest),
-            name: &name,
+        let formats = match known.filter(|_| !ask) {
+            Some(formats) => Ok(formats),
+            None => match runner.probe(&row.url, cookies.as_deref(), &stop).await {
+                Ok(Probed::Video(video)) => Ok(video.formats),
+                Ok(Probed::Playlist { .. }) => {
+                    Err(VideoError::Refused("the page is a playlist now".into()))
+                }
+                Err(e) => Err(e),
+            },
         };
-        let events = handle.clone();
-        let result = runner
-            .download(
-                &request,
-                &stop,
-                &mut |VideoEvent::Progress { done, total, speed }| {
-                    let _ = events.emit(
-                        "video-progress",
-                        Progress {
-                            id,
-                            done,
-                            total,
-                            speed,
+        let choice = Choice::from(row.choice.clone());
+        let result = match formats {
+            Ok(formats) => {
+                let request = Download {
+                    url: &row.url,
+                    choice: &choice,
+                    formats: &formats,
+                    cookies: cookies.as_deref(),
+                    dest: std::path::Path::new(&row.folder),
+                    name: &row.name,
+                };
+                let events = handle.clone();
+                runner
+                    .download(
+                        &request,
+                        &stop,
+                        &mut |VideoEvent::Progress { done, total, speed }| {
+                            progressed(&events, id, done, total, speed);
                         },
-                    );
-                },
-            )
-            .await;
-        handle
-            .state::<VideoState>()
-            .downloads
-            .lock()
-            .unwrap()
-            .remove(&id);
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        let state = handle.state::<VideoState>();
+        state.downloads.lock().unwrap().remove(&id);
+        state.told.lock().unwrap().remove(&id);
+        let result = result.map_err(VideoErrorView::from);
+        with_row(&state, id, |row| match &result {
+            Ok(file) => {
+                row.status = StatusView::Done;
+                row.file = Some(file.display().to_string());
+                row.size = std::fs::metadata(file).ok().map(|m| m.len()).or(row.size);
+                row.done = row.size.unwrap_or(row.done);
+            }
+            Err(e) if e.kind == "stopped" => {
+                row.status = StatusView::Paused;
+                row.done = 0;
+            }
+            Err(e) => {
+                row.status = StatusView::Failed;
+                row.error = Some(e.message.clone());
+            }
+        });
+        save_rows(&handle.state::<crate::App>(), &state);
+        let _ = handle.emit("downloads-changed", ());
         match result {
             Ok(file) => {
                 let _ = handle.emit(
@@ -483,15 +764,49 @@ pub fn video_download<R: tauri::Runtime>(
                     serde_json::json!({ "id": id, "file": file.display().to_string() }),
                 );
             }
-            Err(e) => {
+            Err(error) => {
                 let _ = handle.emit(
                     "video-failed",
-                    serde_json::json!({ "id": id, "error": VideoErrorView::from(e) }),
+                    serde_json::json!({ "id": id, "error": error }),
                 );
             }
         }
     });
-    Ok(id)
+}
+
+/// A running video's progress: to «Video quality» each time, and to the
+/// list at most four times a second.
+fn progressed<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    id: u64,
+    done: u64,
+    total: Option<u64>,
+    speed: Option<u64>,
+) {
+    let _ = handle.emit(
+        "video-progress",
+        Progress {
+            id,
+            done,
+            total,
+            speed,
+        },
+    );
+    let state = handle.state::<VideoState>();
+    with_row(&state, id, |row| {
+        row.done = done;
+        row.size = total;
+        row.speed = speed.unwrap_or(0);
+    });
+    let now = Instant::now();
+    let mut told = state.told.lock().unwrap();
+    if told
+        .get(&id)
+        .is_none_or(|at| now.duration_since(*at) >= Duration::from_millis(250))
+    {
+        told.insert(id, now);
+        let _ = handle.emit("downloads-changed", ());
+    }
 }
 
 /// Stops a video download (yt-dlp and what it started end).
@@ -505,6 +820,78 @@ pub fn video_cancel(state: State<'_, VideoState>, id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row(id: u64, status: StatusView) -> Row {
+        Row {
+            id,
+            url: "https://videos.example.org/watch/1?t=secret".into(),
+            name: "درس".into(),
+            folder: "/tmp".into(),
+            choice: ChoiceView::Merge {
+                video: "137".into(),
+                audio: "140".into(),
+            },
+            status,
+            size: Some(100),
+            done: 40,
+            speed: 9,
+            error: None,
+            file: None,
+        }
+    }
+
+    /// Videos' ids never meet the queues', and stay exact in JavaScript.
+    #[test]
+    fn video_ids_are_their_own() {
+        assert!(!is_video(1) && !is_video(FIRST_ID - 1) && is_video(FIRST_ID + 1));
+        const { assert!(FIRST_ID * 2 <= 1 << 53) };
+        let (videos, queues) = split(vec![3, FIRST_ID + 2, 7]);
+        assert_eq!((videos, queues), (vec![FIRST_ID + 2], vec![3, 7]));
+    }
+
+    /// After a restart, a video that ran is paused from zero (its run was
+    /// swept); a file changed by hand never takes a queue's id.
+    #[test]
+    fn the_list_comes_back_paused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(ROWS_FILE);
+        let rows = vec![
+            row(FIRST_ID + 1, StatusView::Active),
+            row(FIRST_ID + 2, StatusView::Done),
+            row(5, StatusView::Done),
+        ];
+        std::fs::write(&path, serde_json::to_vec(&rows).unwrap()).unwrap();
+        let back = read_rows(&path);
+        assert_eq!(back.len(), 2);
+        assert_eq!((back[0].status, back[0].done), (StatusView::Paused, 0));
+        assert_eq!((back[1].status, back[1].done), (StatusView::Done, 40));
+        // The speed is not kept.
+        assert_eq!(back[1].speed, 0);
+        std::fs::write(&path, "not json").unwrap();
+        assert!(read_rows(&path).is_empty());
+    }
+
+    /// A video's row: the host only, the videos' category (the sounds' for
+    /// «audio only»), no queue, and a speed only while it runs.
+    #[test]
+    fn a_video_row_in_the_list() {
+        let categories = zajil_core::category::CategoriesFile::built_in();
+        let view = view_of(&row(FIRST_ID + 1, StatusView::Active), &categories);
+        assert_eq!(view.host.as_deref(), Some("videos.example.org"));
+        assert_eq!(view.name, "درس");
+        assert!(view.video && view.queue.is_empty() && view.parts.is_empty());
+        assert_eq!(view.speed, 9.0);
+        let video = view.category.clone();
+        assert!(video.is_some());
+        let mut audio = row(FIRST_ID + 2, StatusView::Paused);
+        audio.choice = ChoiceView::AudioOnly;
+        let audio = view_of(&audio, &categories);
+        assert_eq!(audio.speed, 0.0);
+        assert!(audio.category.is_some() && audio.category != video);
+        let mut done = row(FIRST_ID + 3, StatusView::Done);
+        done.file = Some("/tmp/درس.mp4".into());
+        assert_eq!(view_of(&done, &categories).name, "درس.mp4");
+    }
 
     /// The page's names for what can go wrong, one per kind.
     #[test]

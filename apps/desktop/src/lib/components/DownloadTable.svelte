@@ -224,7 +224,7 @@
   {:else if id === "speed"}
     <td class="num">{d.status === "active" ? speed(locale.lang, locale.digits, d.speed) : ""}</td>
   {:else if id === "queue"}
-    <td class="muted"><bdi>{d.queue === "main" ? locale.t("queue-main") : d.queue}</bdi></td>
+    <td class="muted"><bdi>{d.video ? locale.t("queue-video") : d.queue === "main" ? locale.t("queue-main") : d.queue}</bdi></td>
   {:else if id === "last"}
     <td class="num muted">{d.last_try ? lastTry(locale.lang, locale.digits, d.last_try, locale.t) : ""}</td>
   {:else}
