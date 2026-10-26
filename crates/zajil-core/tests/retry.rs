@@ -165,6 +165,12 @@ async fn a_server_that_always_breaks_at_the_same_place_is_given_up() {
     // Without ranges every try starts from byte 0 and breaks at the same
     // byte: no progress, so the download stops after five tries instead
     // of trying forever, and can be resumed later.
+    //
+    // The client does not always see the same byte, though: when the test
+    // server aborts, what is still in its write buffer may be lost, so a
+    // try ends at 262 144 or at 300 000 bytes (#154). A try that reaches
+    // further than every try before it is progress and starts the count
+    // again; the test counts the tries by that same rule.
     let server = TestServer::http();
     server.put(
         "/f.bin",
@@ -174,8 +180,18 @@ async fn a_server_that_always_breaks_at_the_same_place_is_given_up() {
     );
     let dir = tempfile::tempdir().unwrap();
 
+    // How far each try got.
+    let mut reached = vec![0];
     let err = engine()
-        .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
+        .download(
+            &server.url("/f.bin"),
+            dir.path(),
+            &mut |event| match event {
+                Event::Progress { done, .. } => *reached.last_mut().unwrap() = done,
+                Event::Retrying { .. } => reached.push(0),
+                _ => {}
+            },
+        )
         .await
         .unwrap_err();
 
@@ -183,7 +199,18 @@ async fn a_server_that_always_breaks_at_the_same_place_is_given_up() {
         panic!("{err}");
     };
     assert!(reason.contains("gave up after 5 tries"), "{reason}");
-    assert_eq!(server.gets("/f.bin").len(), 5);
+    let further = reached
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|&(i, done)| reached[..i].iter().all(|before| done > before))
+        .count();
+    assert_eq!(reached.len(), 5 + further, "each try reached {reached:?}");
+    assert!(
+        reached.iter().all(|&done| done <= 300_000),
+        "each try reached {reached:?}"
+    );
+    assert_eq!(server.gets("/f.bin").len(), reached.len());
     DownloadState::load(&state_file).unwrap();
 }
 
