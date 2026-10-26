@@ -19,6 +19,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import { locale } from "../i18n.svelte";
+  import { categoryName as nameOf } from "../categoryName";
   import { num } from "../format";
   import type { Snapshot } from "../bindings/Snapshot";
 
@@ -45,7 +46,7 @@
   const count = (pick: (d: Download) => boolean) => num(locale.lang, locale.digits, snapshot.downloads.filter(pick).length, 0);
   const same = (a: Filter, b: Filter) => JSON.stringify(a) === JSON.stringify(b);
   const current = (f: Filter) => (view === "list" && same(filter, f) ? "page" : undefined);
-  const categoryName = (c: Snapshot["categories"][number]) => c.name ?? locale.t(`category-${c.id}`);
+  const categoryName = (c: Snapshot["categories"][number]) => nameOf(c.id, c.name, (k) => locale.t(k));
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
 </script>
 

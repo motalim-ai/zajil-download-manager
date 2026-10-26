@@ -2,6 +2,7 @@
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
   import { locale } from "../i18n.svelte";
+  import { BUILT_IN, categoryName } from "../categoryName";
   import type { CategoryView } from "../bindings/CategoryView";
 
   let {
@@ -29,8 +30,7 @@
   let tryName = $state("");
   let tried = $state<{ name: string; id: string | null } | null>(null);
 
-  const nameOf = (c: CategoryView) => c.name ?? locale.t(`category-${c.id}`);
-  const BUILT_IN = ["programs", "video", "music", "documents", "archives"];
+  const nameOf = (c: CategoryView) => categoryName(c.id, c.name, (k) => locale.t(k));
 
   async function save(next: CategoryView[]) {
     error = await onsave(next);
