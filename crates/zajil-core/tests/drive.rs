@@ -352,6 +352,109 @@ async fn a_web_page_is_said_and_named_as_one() {
     );
 }
 
+/// #152: a page whose name from its address has no extension and is 199
+/// bytes long takes `.html` within the name limit; the name is taken, so
+/// it is numbered, still within the limit; the download stops midway and
+/// is resumed from its state file into the same file (AGENTS §10.7).
+#[tokio::test]
+async fn a_long_page_name_already_taken_is_numbered_within_the_limit_and_resumed() {
+    use zajil_core::naming::with_type_extension;
+    use zajil_core::sanitize::MAX_NAME_BYTES;
+    let server = TestServer::http();
+    let stem = "n".repeat(199);
+    let body = format!("<html><body>{}</body></html>", "p".repeat(300_000)).into_bytes();
+    server.put(
+        &format!("/files/{stem}"),
+        FileSpec::new(body.clone())
+            .content_type("text/html")
+            .cut_after(100_000, 1),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let taken = with_type_extension(stem.clone(), Some("text/html"));
+    assert!(
+        taken.len() <= MAX_NAME_BYTES && taken.ends_with(".html"),
+        "{taken}"
+    );
+    fs::write(dir.path().join(&taken), b"mine").unwrap();
+
+    let once = Engine::new(Options {
+        max_failures: 1,
+        ..Options::default()
+    })
+    .unwrap();
+    let err = once
+        .download(
+            &server.url(&format!("/files/{stem}")),
+            dir.path(),
+            &mut |_| {},
+        )
+        .await
+        .unwrap_err();
+    let Error::Interrupted { state_file, .. } = err else {
+        panic!("{err}");
+    };
+    let finished = Engine::new(Options::default())
+        .unwrap()
+        .resume(&state_file, &mut |_| {})
+        .await
+        .unwrap();
+    let name = finished
+        .file
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        name.len() <= MAX_NAME_BYTES && name.ends_with(".html") && name != taken,
+        "{name}"
+    );
+    assert_eq!(fs::read(&finished.file).unwrap(), body);
+    assert_eq!(fs::read(dir.path().join(&taken)).unwrap(), b"mine");
+    let mut names = names_in(dir.path());
+    names.sort();
+    let mut expected = vec![taken, name];
+    expected.sort();
+    assert_eq!(names, expected);
+}
+
+/// #152: the hold (a file that runs code waits for the user) sees the
+/// server's name with its type's extension added, and the user's own name
+/// as given.
+#[tokio::test]
+async fn the_hold_sees_the_name_with_its_type_s_extension() {
+    let server = TestServer::http();
+    server.put(
+        "/files/view",
+        FileSpec::new("<html><body>A page</body></html>").content_type("text/html"),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = seen.clone();
+    let result = Engine::new(Options::default())
+        .unwrap()
+        .named(Some("mine"))
+        .holding(std::sync::Arc::new(move |server: &str, name: &str| {
+            record
+                .lock()
+                .unwrap()
+                .push((server.to_owned(), name.to_owned()));
+            server.ends_with(".html")
+        }))
+        .download(&server.url("/files/view"), dir.path(), &mut |_| {})
+        .await;
+    assert!(matches!(result, Err(Error::Held(_))), "{result:?}");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [("view.html".to_owned(), "mine".to_owned())]
+    );
+    assert!(
+        names_in(dir.path()).is_empty(),
+        "{:?}",
+        names_in(dir.path())
+    );
+}
+
 /// No request follows a sign-in page's form, nor a too large page's.
 #[tokio::test]
 async fn nothing_follows_a_page_that_is_not_drive_s() {
