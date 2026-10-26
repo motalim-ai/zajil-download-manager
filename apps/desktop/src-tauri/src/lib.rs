@@ -555,7 +555,9 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::open_release_page,
         complete::drag_out,
         ui_test::ui_test_scenario,
-        ui_test::ui_test_report
+        ui_test::ui_test_report,
+        ui_test::ui_test_e2e,
+        ui_test::ui_test_step
     ]
 }
 
@@ -2243,6 +2245,17 @@ async fn open_download<R: tauri::Runtime>(
         let item = queues.item(id).ok_or_else(|| format!("no download {id}"))?;
         (item.file.clone().filter(|f| f.is_file()), item.dir.clone())
     };
+    // The end-to-end test: what would be opened is written down (no file
+    // manager on the CI machines' screens).
+    #[cfg(feature = "ui-test")]
+    if handle.state::<ui_test::UiTest>().is_e2e() {
+        let shown = file.as_deref().unwrap_or(&dir);
+        handle.state::<ui_test::UiTest>().step(
+            "open",
+            serde_json::json!({ "folder": folder, "path": shown }),
+        )?;
+        return Ok(true);
+    }
     let opener = handle.opener();
     match (folder, file) {
         (false, Some(file)) if !sure && asks_before_opening(&file) => Ok(false),
@@ -4045,8 +4058,13 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        for cmd in ["ui_test_scenario", "ui_test_report"] {
-            let body = serde_json::json!({ "report": {} });
+        for cmd in [
+            "ui_test_scenario",
+            "ui_test_report",
+            "ui_test_e2e",
+            "ui_test_step",
+        ] {
+            let body = serde_json::json!({ "report": {}, "step": "link", "detail": {} });
             let answer = tauri::test::get_ipc_response(
                 &webview,
                 tauri::webview::InvokeRequest {

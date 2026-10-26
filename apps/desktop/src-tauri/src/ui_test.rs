@@ -8,8 +8,17 @@
 //! [`ui_test_report`], which writes `<folder>/<scenario>.json`. The CI
 //! script waits for that file, takes a screenshot of the window with the
 //! system's own tool, and closes the program.
+//!
+//! `zajil-desktop --ui-test-e2e <link> --ui-test-out <folder>`: not a scene,
+//! the real program with its real data, whose windows each click their own
+//! button (`src/uitest/e2e.ts`): «Add link» with `<link>`, «Download file
+//! info»'s «Start download», then «Download complete»'s «Open folder»,
+//! which is written down instead of opening a file manager. Each window
+//! says its step with [`ui_test_step`], into `<folder>/e2e-<step>.json`
+//! (M5.5's end-to-end test, `tests/end_to_end.rs`).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tauri::State;
 
@@ -18,6 +27,10 @@ use crate::view::{DetailsView, DownloadView, QueueView, SegmentView, Snapshot, S
 pub struct UiTest {
     pub scenario: Option<String>,
     out: Option<PathBuf>,
+    /// The end-to-end test's link, if this run is that test.
+    e2e: Option<String>,
+    /// The steps said so far, which numbers them.
+    steps: AtomicU64,
 }
 
 impl UiTest {
@@ -31,7 +44,29 @@ impl UiTest {
         UiTest {
             scenario: value("--ui-test"),
             out: value("--ui-test-out").map(PathBuf::from),
+            e2e: value("--ui-test-e2e"),
+            steps: AtomicU64::new(0),
         }
+    }
+
+    /// Writes step `step` of the end-to-end test, numbered, with `detail`.
+    /// Nothing outside that test.
+    pub fn step(&self, step: &str, detail: serde_json::Value) -> Result<(), String> {
+        let (Some(out), Some(_)) = (&self.out, &self.e2e) else {
+            return Ok(());
+        };
+        // A file name of its own: lowercase letters only.
+        if step.is_empty() || !step.bytes().all(|b| b.is_ascii_lowercase()) {
+            return Err(format!("not a step: {step}"));
+        }
+        let n = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
+        let report = serde_json::json!({ "n": n, "step": step, "detail": detail });
+        write_report(out, &format!("e2e-{step}"), &report)
+    }
+
+    /// This run is the end-to-end test.
+    pub fn is_e2e(&self) -> bool {
+        self.e2e.is_some()
     }
 }
 
@@ -78,6 +113,22 @@ pub fn ui_test_scenario(test: State<'_, UiTest>) -> Option<String> {
     test.scenario.clone()
 }
 
+/// The end-to-end test's link, or `None` outside that test.
+#[tauri::command]
+pub fn ui_test_e2e(test: State<'_, UiTest>) -> Option<String> {
+    test.e2e.clone()
+}
+
+/// A window of the end-to-end test says what it did.
+#[tauri::command]
+pub fn ui_test_step(
+    test: State<'_, UiTest>,
+    step: String,
+    detail: serde_json::Value,
+) -> Result<(), String> {
+    test.step(&step, detail)
+}
+
 /// Writes what the page reports (where it drew the rows, the language,
 /// the device pixel ratio) next to the screenshot.
 #[tauri::command]
@@ -85,12 +136,20 @@ pub fn ui_test_report(test: State<'_, UiTest>, report: serde_json::Value) -> Res
     let (Some(out), Some(scenario)) = (&test.out, &test.scenario) else {
         return Ok(());
     };
+    write_report(out, scenario, &report)
+}
+
+fn write_report(
+    out: &std::path::Path,
+    name: &str,
+    report: &serde_json::Value,
+) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
-    let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(report).map_err(|e| e.to_string())?;
     // Written then renamed, so the script never reads half a file.
-    let tmp = out.join(format!("{scenario}.json.tmp"));
+    let tmp = out.join(format!("{name}.json.tmp"));
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, out.join(format!("{scenario}.json"))).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, out.join(format!("{name}.json"))).map_err(|e| e.to_string())
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -336,5 +395,38 @@ mod tests {
         );
         let scene = UiTest::from_args(&args(&["zajil-desktop", "--ui-test", "names"]));
         assert!(!scene.demo().expect("the demo list").downloads.is_empty());
+        // The end-to-end test is the real program: no demo list.
+        let e2e = UiTest::from_args(&args(&[
+            "zajil-desktop",
+            "--ui-test-e2e",
+            "http://127.0.0.1:1/a.bin",
+        ]));
+        assert!(e2e.demo().is_none() && e2e.is_e2e());
+    }
+
+    #[test]
+    fn the_end_to_end_steps_are_written_numbered_and_only_in_that_test() {
+        let out = tempfile::tempdir().unwrap();
+        let dir = out.path().to_str().unwrap();
+        let plain = UiTest::from_args(&args(&["zajil-desktop", "--ui-test-out", dir]));
+        plain.step("link", serde_json::json!({})).unwrap();
+        assert!(!out.path().join("e2e-link.json").exists());
+        let e2e = UiTest::from_args(&args(&[
+            "zajil-desktop",
+            "--ui-test-e2e",
+            "http://127.0.0.1:1/a.bin",
+            "--ui-test-out",
+            dir,
+        ]));
+        e2e.step("link", serde_json::json!({})).unwrap();
+        e2e.step("info", serde_json::json!({ "name": "a.bin" }))
+            .unwrap();
+        let read = |name: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(out.path().join(name)).unwrap()).unwrap()
+        };
+        assert_eq!(read("e2e-link.json")["n"], 1);
+        assert_eq!(read("e2e-info.json")["n"], 2);
+        assert_eq!(read("e2e-info.json")["detail"]["name"], "a.bin");
+        assert!(e2e.step("../x", serde_json::json!({})).is_err());
     }
 }
