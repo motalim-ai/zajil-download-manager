@@ -40,6 +40,9 @@ pub const MIN_RATE: f64 = 0.1;
 pub const MAX_RATE: f64 = 10.0;
 /// Redirects followed for one page.
 pub const MAX_REDIRECTS: u8 = 10;
+/// Different links one crawl remembers (as 64-bit hashes): each is asked
+/// for once, and the memory stays bounded (review of #195).
+pub const MAX_SEEN: usize = 1_000_000;
 /// The longest one page or robots.txt may take, whatever the server sends
 /// (review of #187: a byte now and then would otherwise hold the crawl).
 pub const PAGE_TIME_LIMIT: Duration = Duration::from_secs(60);
@@ -141,6 +144,8 @@ pub enum Skip {
     TooLarge,
     /// Too many redirects.
     TooManyRedirects,
+    /// A user name or password in the link.
+    Credentials,
     /// The crawl already asks [`MAX_ORIGINS`] origins.
     TooManyOrigins,
 }
@@ -158,6 +163,7 @@ impl fmt::Display for Skip {
             Skip::NoFollow => "the page asks not to follow its links",
             Skip::TooLarge => "larger than --max-file-size",
             Skip::TooManyRedirects => "too many redirects",
+            Skip::Credentials => "a user name or password in the link",
             Skip::TooManyOrigins => "too many different sites",
         })
     }
@@ -170,6 +176,7 @@ impl From<Refusal> for Skip {
             Refusal::LocalAddress => Skip::LocalAddress,
             Refusal::Downgrade => Skip::Downgrade,
             Refusal::PathTrap => Skip::PathTrap,
+            Refusal::Credentials => Skip::Credentials,
         }
     }
 }
@@ -180,6 +187,11 @@ pub enum Limit {
     Files,
     Pages,
     Total,
+    /// More links waiting than pages and files may still be taken: the
+    /// later ones were left out (review of #195: they were dropped unsaid).
+    Waiting,
+    /// [`MAX_SEEN`] different links in one crawl.
+    Seen,
 }
 
 impl fmt::Display for Limit {
@@ -188,6 +200,8 @@ impl fmt::Display for Limit {
             Limit::Files => "the most files (--max-files)",
             Limit::Pages => "the most pages (--max-pages)",
             Limit::Total => "the most bytes (--max-total)",
+            Limit::Waiting => "the most links waiting at once (--max-pages and --max-files): later links were left out",
+            Limit::Seen => "the most different links in one crawl",
         })
     }
 }
@@ -319,18 +333,22 @@ pub async fn crawl(
         robots: HashMap::new(),
         origins: HashSet::new(),
         queued: HashSet::new(),
+        hasher: std::collections::hash_map::RandomState::new(),
         queue: VecDeque::new(),
         files_found: 0,
         report: Report::default(),
     };
-    crawler.push(Item {
-        url: plan.start.clone(),
-        depth: 0,
-        kind: Want::Page,
-        from: None,
-        redirected_from: None,
-        hops: 0,
-    });
+    crawler.push(
+        Item {
+            url: plan.start.clone(),
+            depth: 0,
+            kind: Want::Page,
+            from: None,
+            redirected_from: None,
+            hops: 0,
+        },
+        on_event,
+    );
     crawler.run(on_event).await;
     Ok(crawler.report)
 }
@@ -366,8 +384,10 @@ struct Crawler<'a> {
     next_request: HashMap<String, Duration>,
     robots: HashMap<String, Robots>,
     origins: HashSet<String>,
-    /// Every URL that entered the queue: each is asked for once.
-    queued: HashSet<String>,
+    /// A hash of every URL that entered the queue: each is asked for once.
+    /// At most [`MAX_SEEN`].
+    queued: HashSet<u64>,
+    hasher: std::collections::hash_map::RandomState,
     queue: VecDeque<Item>,
     files_found: usize,
     report: Report,
@@ -394,6 +414,15 @@ fn extension_of(name: &str) -> Option<String> {
     let (_, ext) = name.rsplit_once('.')?;
     (!ext.is_empty() && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric()))
         .then(|| ext.to_ascii_lowercase())
+}
+
+/// Removes a stopped download's files: its state file and the part file
+/// next to it.
+fn remove_download(state_file: &std::path::Path) {
+    if let Some(final_path) = zajil_core::state::final_path_for_state(state_file) {
+        let _ = std::fs::remove_file(zajil_core::state::part_path(&final_path));
+    }
+    let _ = std::fs::remove_file(state_file);
 }
 
 /// Whether `text` matches `glob`, where `*` is any run of characters and
@@ -436,17 +465,34 @@ impl Crawler<'_> {
         }
     }
 
-    /// Adds `item` to the queue, unless its URL was queued before or the
-    /// queue is full (it never holds more than the page and file limits).
-    fn push(&mut self, item: Item) -> bool {
+    /// Whether `url` is new to the crawl; it is remembered if so. `None`
+    /// once [`MAX_SEEN`] links are remembered.
+    fn first_time(&mut self, url: &Url) -> Option<bool> {
+        use std::hash::BuildHasher;
+        let hash = self.hasher.hash_one(url.as_str());
+        if self.queued.contains(&hash) {
+            return Some(false);
+        }
+        if self.queued.len() >= MAX_SEEN {
+            return None;
+        }
+        self.queued.insert(hash);
+        Some(true)
+    }
+
+    /// Adds `item` to the queue, unless its URL was queued before. A full
+    /// queue (it never holds more than the page and file limits) or too
+    /// many links seen is said as a limit.
+    fn push(&mut self, item: Item, on_event: &mut (dyn FnMut(Event) + Send)) {
         if self.queue.len() >= self.plan.max_pages + self.plan.max_files {
-            return false;
+            self.limit(Limit::Waiting, on_event);
+            return;
         }
-        if !self.queued.insert(item.url.as_str().to_owned()) {
-            return false;
+        match self.first_time(&item.url) {
+            Some(true) => self.queue.push_back(item),
+            Some(false) => {}
+            None => self.limit(Limit::Seen, on_event),
         }
-        self.queue.push_back(item);
-        true
     }
 
     async fn run(&mut self, on_event: &mut (dyn FnMut(Event) + Send)) {
@@ -745,18 +791,32 @@ impl Crawler<'_> {
             let to_page = kind == Want::Page
                 || (kind == Want::Either
                     && !extension(&link.url).is_some_and(|e| self.plan.types.contains(&e)));
+            // A page one link deeper than the depth would never be read:
+            // not kept at all (review of #195: the memory grew with them).
+            if to_page && item.depth + 1 >= self.plan.depth {
+                continue;
+            }
             if found.nofollow && to_page {
                 self.skip(&link.url, Skip::NoFollow, on_event);
                 continue;
             }
-            self.push(Item {
-                url: link.url,
-                depth: item.depth + 1,
-                kind,
-                from: Some(item.url.clone()),
-                redirected_from: None,
-                hops: 0,
-            });
+            // What the scope refuses anyway is not kept either; it is
+            // checked again before any request.
+            if let Err(refusal) = self.scope.check(&link.url, to_page, None, false) {
+                self.skip(&link.url, refusal.into(), on_event);
+                continue;
+            }
+            self.push(
+                Item {
+                    url: link.url,
+                    depth: item.depth + 1,
+                    kind,
+                    from: Some(item.url.clone()),
+                    redirected_from: None,
+                    hops: 0,
+                },
+                on_event,
+            );
         }
     }
 
@@ -780,10 +840,17 @@ impl Crawler<'_> {
             self.skip(&target, Skip::TooManyRedirects, on_event);
             return;
         }
-        let as_page = self
-            .scope
-            .check(&target, true, Some(&item.url), false)
-            .is_ok();
+        // Of another site, the target may still be a file (decision 3);
+        // any other refusal is said as itself (review of #195: a target
+        // with credentials was said to be outside the site).
+        let as_page = match self.scope.check(&target, true, Some(&item.url), false) {
+            Ok(_) => true,
+            Err(Refusal::OtherSite) => false,
+            Err(refusal) => {
+                self.skip(&target, refusal.into(), on_event);
+                return;
+            }
+        };
         let kind = if as_page {
             Want::Page
         } else {
@@ -796,7 +863,7 @@ impl Crawler<'_> {
             return;
         }
         // A redirect target goes first, so A → B → A ends at once.
-        if self.queued.insert(target.as_str().to_owned()) {
+        if self.first_time(&target) == Some(true) {
             self.queue.push_front(Item {
                 url: target,
                 depth: item.depth,
@@ -928,7 +995,13 @@ impl Crawler<'_> {
                     .bytes
                     .saturating_add(written.load(Ordering::Relaxed));
                 if let Some(why) = why_stopped {
+                    // Left out, not paused: nothing of it stays to resume
+                    // (review of #195).
+                    if let Some(state_file) = &state_file {
+                        remove_download(state_file);
+                    }
                     self.skip(&item.url, why, on_event);
+                    return;
                 } else if over_total {
                     self.limit(Limit::Total, on_event);
                 } else {

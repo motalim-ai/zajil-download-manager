@@ -68,6 +68,9 @@ pub enum Refusal {
     Downgrade,
     /// Too many path segments, or one repeated too often.
     PathTrap,
+    /// A user name or password in the URL: a crawl never sends one (a
+    /// redirect could carry them, review of #195).
+    Credentials,
 }
 
 impl fmt::Display for Refusal {
@@ -77,6 +80,7 @@ impl fmt::Display for Refusal {
             Refusal::LocalAddress => "a local address",
             Refusal::Downgrade => "a redirect from https to http",
             Refusal::PathTrap => "a path that repeats itself",
+            Refusal::Credentials => "a user name or password in the link",
         })
     }
 }
@@ -175,6 +179,9 @@ impl Scope {
         redirected_from: Option<&Url>,
         any_origin_file: bool,
     ) -> Result<Place, Refusal> {
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(Refusal::Credentials);
+        }
         if redirected_from.is_some_and(|from| from.scheme() == "https") && url.scheme() != "https" {
             return Err(Refusal::Downgrade);
         }

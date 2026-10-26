@@ -116,7 +116,8 @@ fn a_grab_saves_the_files_into_dir() {
 }
 
 /// `--ignore-robots` prints its warning and asks for what robots.txt
-/// disallows; without it, the same site gives nothing.
+/// disallows; without it, the same site gives nothing, which is a failure
+/// (review of #195: it used to end as "done").
 #[test]
 fn ignore_robots_prints_its_warning() {
     let site = server();
@@ -129,7 +130,7 @@ fn ignore_robots_prints_its_warning() {
 
     let dir = tempfile::tempdir().unwrap();
     let out = grab(&site.url("/index.html"), dir.path(), &[]);
-    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
     assert!(!text(&out.stderr).contains("warning"));
     assert!(site.gets("/index.html").is_empty());
 
@@ -212,4 +213,22 @@ fn grab_uses_one_connection_per_file_unless_asked() {
     assert_eq!(most(&[]), 1);
     let asked = most(&["--connections", "4"]);
     assert!(asked > 1, "{asked} connections with --connections 4");
+}
+
+/// Review of #195: a site that cannot be reached is a failure, not "done".
+#[test]
+fn an_unreachable_site_is_a_failure() {
+    // A port nothing listens on: the server is gone once dropped.
+    let url = {
+        let gone = TestServer::http();
+        gone.url("/index.html")
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let out = zajil(&["grab", &url, "--dir", dir.path().to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stderr).contains("nothing could be read from the start page"),
+        "{}",
+        text(&out.stderr)
+    );
 }

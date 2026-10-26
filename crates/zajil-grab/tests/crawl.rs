@@ -1095,3 +1095,87 @@ async fn a_dry_run_reports_the_files_and_downloads_none() {
     }
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
+
+/// Review of #195: a redirect to a URL with a user name and password is
+/// refused like a link with them; nothing is sent with `Authorization`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redirect_with_credentials_is_refused() {
+    let site = server();
+    let target = site
+        .url("/next.html")
+        .replacen("http://", "http://victim:hunter2@", 1);
+    site.redirect("/go", &target, 302);
+    site.put("/next.html", links(&["n.zip"]));
+    site.put("/index.html", links(&["go"]));
+    let dir = tempfile::tempdir().unwrap();
+    let plan = plan(&site.url("/index.html"), dir.path());
+    let (_, events) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    assert_eq!(skipped(&events, Skip::Credentials).len(), 1);
+    assert!(site.gets("/next.html").is_empty());
+    assert!(site.requests().iter().all(|r| r.authorization.is_none()));
+}
+
+/// Review of #195: links beyond what the queue may hold are said as a
+/// limit, never dropped unsaid.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_full_queue_is_said() {
+    let site = server();
+    let names: Vec<String> = (0..5).map(|n| format!("q{n}.zip")).collect();
+    let hrefs: Vec<&str> = names.iter().map(String::as_str).collect();
+    site.put("/index.html", links(&hrefs));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.max_pages = 1;
+    plan.max_files = 1;
+    plan.dry_run = true;
+    let (report, _) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    assert!(
+        report.limits.contains(&Limit::Waiting),
+        "{:?}",
+        report.limits
+    );
+}
+
+/// Review of #195: a file over `--max-file-size` is left out, not paused:
+/// nothing of it stays in the folder, and it is not offered for resuming.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_over_the_size_limit_leaves_nothing() {
+    let site = server();
+    site.put("/big.zip", FileSpec::new(random_bytes(2_000_000, 31)));
+    site.put("/small.zip", FileSpec::new(random_bytes(500, 32)));
+    site.put("/index.html", links(&["big.zip", "small.zip"]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.max_file_size = Some(1000);
+    let (report, events) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    assert_eq!(saved(&events), ["small.zip"]);
+    assert_eq!(skipped(&events, Skip::TooLarge).len(), 1);
+    assert!(!events.iter().any(|e| matches!(e, Event::Stopped { .. })));
+    assert!(!report.stopped);
+    let left: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["small.zip"]);
+}
+
+/// Review of #195: links to pages one level deeper than the depth are
+/// never kept nor asked for (they would never be read).
+#[tokio::test(flavor = "multi_thread")]
+async fn pages_past_the_depth_are_not_kept() {
+    let site = server();
+    site.put("/index.html", links(&["deeper.html", "f.zip"]));
+    site.put("/deeper.html", links(&["g.zip"]));
+    site.put("/f.zip", FileSpec::new(random_bytes(300, 33)));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.depth = 1;
+    let (report, events) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    assert_eq!(saved(&events), ["f.zip"]);
+    assert_eq!(report.pages, 1);
+    assert!(site.gets("/deeper.html").is_empty());
+}

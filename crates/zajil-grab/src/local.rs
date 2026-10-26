@@ -175,6 +175,7 @@ mod tests {
             "http://0300.0250.1.1/",   // 192.168.1.1, octal
             "http://%31%32%37.0.0.1/", // percent-encoded 127.0.0.1
             "http://127.0.0.1./",      // trailing dot
+            "http://１２７.０.０.１/", // full-width digits (#112, item 2)
         ] {
             assert!(local(url), "{url}");
         }

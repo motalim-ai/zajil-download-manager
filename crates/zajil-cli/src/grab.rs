@@ -184,6 +184,12 @@ pub async fn run(engine: Engine, args: GrabArgs) -> ExitCode {
     if report.stopped {
         eprintln!("zajil: stopped");
         ExitCode::from(EXIT_STOPPED)
+    } else if report.pages == 0 && report.files == 0 {
+        // Nothing could be read from the start page (the site cannot be
+        // reached, its robots.txt allows nothing): a failure, not "done"
+        // (review of #195).
+        eprintln!("zajil: nothing could be read from the start page");
+        ExitCode::FAILURE
     } else if report.failed > 0 || !resumable.is_empty() {
         ExitCode::FAILURE
     } else {
