@@ -139,6 +139,7 @@ fn d(
         // not open (M5).
         waits_for_browser: id == 5,
         needs_ok: false,
+        video: false,
     }
 }
 
