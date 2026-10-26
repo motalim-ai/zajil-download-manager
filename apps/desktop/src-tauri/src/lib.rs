@@ -193,8 +193,6 @@ pub fn run() {
     } else {
         builder
     };
-    #[cfg(target_os = "macos")]
-    let _ = one_zajil;
     let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -1399,10 +1397,11 @@ fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view
 }
 
 /// Whether a Zajil already runs on the data folder `data`: then it is
-/// asked, over its private channel, to show its window (#60). The channel
-/// is in the data folder, which only this user can reach, and the client
-/// checks who serves it. Nothing answering, or anything going wrong: this
-/// one starts.
+/// asked, over its private channel, to show its window (#60). On macOS and
+/// Linux the channel is a socket in a folder of the data folder that only
+/// this user owns and can enter (checked at every connect); on Windows the
+/// client checks who serves the pipe. Nothing answering, or anything going
+/// wrong: this one starts.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn show_running(data: &Path) -> bool {
     let Ok(mut stream) = zajil_platform::ipc::connect(data, Duration::from_millis(300)) else {
@@ -2999,7 +2998,17 @@ mod tests {
                 Default::default(),
             );
         });
-        assert!(show_running(data.path()));
+        // On Windows the pipe exists once the serving thread waits on it:
+        // asked a few times, not once (review of #243).
+        let mut shown = false;
+        for _ in 0..50 {
+            shown = show_running(data.path());
+            if shown {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(shown);
         assert_eq!(
             saw.recv_timeout(Duration::from_secs(5)).unwrap(),
             zajil_host::Request::ShowWindow {
