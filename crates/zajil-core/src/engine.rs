@@ -965,8 +965,9 @@ impl Engine {
         let mut body = Vec::new();
         loop {
             let chunk = tokio::select! {
-                chunk = response.chunk() => chunk.map_err(|err| Error::Http(without_secrets(err)))?,
+                biased;
                 () = stop.requested() => return Err(Error::Stopped { state_file: None }),
+                chunk = response.chunk() => chunk.map_err(|err| Error::Http(without_secrets(err)))?,
             };
             let Some(chunk) = chunk else { break };
             let room = max_bytes.saturating_sub(body.len());
@@ -2024,8 +2025,11 @@ impl Transfer {
         let total = self.state.content_length;
         loop {
             let chunk = tokio::select! {
-                chunk = response.chunk() => chunk,
+                // A stop wins over data that is also ready (#194: from a
+                // fast server there is nearly always more).
+                biased;
                 () = stop.requested() => return Err(Halt::Requested),
+                chunk = response.chunk() => chunk,
             };
             let chunk = match chunk {
                 Ok(Some(chunk)) => chunk,
@@ -2050,8 +2054,15 @@ impl Transfer {
             });
             // The speed limits: wait before reading more.
             tokio::select! {
-                () = limits.take(chunk.len() as u64) => {}
+                biased;
                 () = stop.requested() => return Err(Halt::Requested),
+                () = limits.take(chunk.len() as u64) => {}
+            }
+            // No periodic save once a stop is asked (#194): one asked
+            // during the last save is seen here, before a slow disk makes
+            // the next save due at once.
+            if stop.is_requested() {
+                return Err(Halt::Requested);
             }
             if self.last_save.elapsed() >= self.save_interval
                 && let Err(err) = self.checkpoint().await
