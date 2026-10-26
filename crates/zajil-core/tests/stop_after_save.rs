@@ -95,6 +95,69 @@ async fn stops_after_a_save_without_saving_again(connections: usize, seed: u64) 
     resumes_from_the_last_save(&engine, &state_file, &data).await;
 }
 
+/// #194: the stop is asked during a save that takes longer than the save
+/// interval (a slow disk, as on Windows CI). The next save is then due at
+/// once, but none may come after the stop. Several rounds, as the save that
+/// slipped through came only when it won a race.
+async fn a_stop_during_a_slow_save_saves_no_more(connections: usize, seed: u64) {
+    let _one = ONE.lock().await;
+    for round in 0..5 {
+        let server = TestServer::http();
+        let data = random_bytes(1_500_000, seed + round);
+        server.put("/f.bin", FileSpec::new(data.clone()).throttle(500_000));
+        let dir = tempfile::tempdir().unwrap();
+        let stop = Stop::new();
+        // Save 2, the first periodic one, asks the stop, then takes 400 ms:
+        // four save intervals.
+        let saves = Arc::new(AtomicUsize::new(0));
+        let (seen, asked) = (saves.clone(), stop.clone());
+        test_hooks::set_after_temporary_written(Some(Box::new(move |_| {
+            if seen.fetch_add(1, Ordering::SeqCst) + 1 == 2 {
+                asked.request();
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        })));
+        // Parts of 256 KiB at least, so four connections really split the
+        // file (review of #208: with 1 MiB, 1.5 MB was one part).
+        let engine = engine(connections, Duration::from_millis(100), 256 * KIB);
+        let err = engine
+            .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |_| {})
+            .await
+            .unwrap_err();
+        test_hooks::set_after_temporary_written(None);
+        let Error::Stopped {
+            state_file: Some(state_file),
+        } = err
+        else {
+            panic!("round {round}: {err:?}");
+        };
+        assert_eq!(
+            saves.load(Ordering::SeqCst),
+            2,
+            "round {round}: a save after the stop"
+        );
+        let parts = DownloadState::load(&state_file).unwrap().segments.len();
+        if connections > 1 {
+            assert!(parts > 1, "round {round}: not split ({parts} part)");
+        }
+        // The resume, once: it is slow (the file stays throttled, as a
+        // new copy would be another file to the resume).
+        if round == 0 {
+            resumes_from_the_last_save(&engine, &state_file, &data).await;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_split_download_stopped_during_a_slow_save_saves_no_more() {
+    a_stop_during_a_slow_save_saves_no_more(4, 140).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_single_connection_stopped_during_a_slow_save_saves_no_more() {
+    a_stop_during_a_slow_save_saves_no_more(1, 150).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_split_download_stopped_after_a_save_does_not_save_again_and_resumes_whole() {
     stops_after_a_save_without_saving_again(4, 132).await;

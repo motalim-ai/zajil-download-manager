@@ -965,8 +965,9 @@ impl Engine {
         let mut body = Vec::new();
         loop {
             let chunk = tokio::select! {
-                chunk = response.chunk() => chunk.map_err(|err| Error::Http(without_secrets(err)))?,
+                biased;
                 () = stop.requested() => return Err(Error::Stopped { state_file: None }),
+                chunk = response.chunk() => chunk.map_err(|err| Error::Http(without_secrets(err)))?,
             };
             let Some(chunk) = chunk else { break };
             let room = max_bytes.saturating_sub(body.len());
@@ -1593,6 +1594,10 @@ impl Engine {
                     .interrupt(format!("{reason} (gave up after {failures} tries)"))
                     .await);
             }
+            // Asked meanwhile: the stop's own rule on saving applies (#132).
+            if stop.is_requested() {
+                return Err(transfer.stopped().await);
+            }
             // A new download with no data yet has nothing to record.
             if transfer.cleanup.is_none()
                 && let Err(err) = transfer.checkpoint().await
@@ -2024,8 +2029,11 @@ impl Transfer {
         let total = self.state.content_length;
         loop {
             let chunk = tokio::select! {
-                chunk = response.chunk() => chunk,
+                // A stop wins over data that is also ready (#194: from a
+                // fast server there is nearly always more).
+                biased;
                 () = stop.requested() => return Err(Halt::Requested),
+                chunk = response.chunk() => chunk,
             };
             let chunk = match chunk {
                 Ok(Some(chunk)) => chunk,
@@ -2050,8 +2058,15 @@ impl Transfer {
             });
             // The speed limits: wait before reading more.
             tokio::select! {
-                () = limits.take(chunk.len() as u64) => {}
+                biased;
                 () = stop.requested() => return Err(Halt::Requested),
+                () = limits.take(chunk.len() as u64) => {}
+            }
+            // No periodic save once a stop is asked (#194). The biased
+            // select above sees a stop asked before it; this closes the
+            // short window after it.
+            if stop.is_requested() {
+                return Err(Halt::Requested);
             }
             if self.last_save.elapsed() >= self.save_interval
                 && let Err(err) = self.checkpoint().await

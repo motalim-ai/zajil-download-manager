@@ -258,6 +258,13 @@ pub(crate) async fn run(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
+            // A stop asked wins over a save that is also due (#194: with a
+            // slow disk both were ready, and the save could be picked).
+            biased;
+            () = user_stop.requested(), if !stopped_by_user => {
+                stopped_by_user = true;
+                let _ = stop.send(true);
+            }
             message = messages.recv() => match message {
                 Some(Message::Wrote(bytes)) => {
                     done += bytes;
@@ -289,12 +296,28 @@ pub(crate) async fn run(
                 }
                 None => break,
             },
-            () = user_stop.requested(), if !stopped_by_user => {
-                stopped_by_user = true;
-                let _ = stop.send(true);
-            }
-            _ = tick.tick() => {
-                checkpoint(&ctx, &state_file, cleanup.as_ref()).await?;
+            // No periodic save once the download stops (asked by the user,
+            // or for a restart): the workers are ending, and a save then
+            // is the one #132 leaves out (#194). After the messages: an
+            // event (a split) is said before the save that holds it (a
+            // test stopping on a split's event relies on it).
+            _ = tick.tick(), if !stopped_by_user && restart.is_none() => {
+                // A stop asked during a slow save reaches the workers at
+                // once, not when the save is done (review of #208: they
+                // wrote on for the whole save).
+                let save = checkpoint(&ctx, &state_file, cleanup.as_ref());
+                tokio::pin!(save);
+                let result = loop {
+                    tokio::select! {
+                        biased;
+                        () = user_stop.requested(), if !stopped_by_user => {
+                            stopped_by_user = true;
+                            let _ = stop.send(true);
+                        }
+                        result = &mut save => break result,
+                    }
+                };
+                result?;
                 saved = true;
             }
         }
@@ -932,11 +955,13 @@ async fn request_range(
         .header(header::IF_RANGE, &ctx.if_range)
         .send();
     let response = tokio::select! {
-        response = request => response,
+        // A stop wins over an answer that is also ready (#194).
+        biased;
         _ = ctx.stop_requested() => {
             ctx.board().release(id, start);
             return None;
         }
+        response = request => response,
     };
     let response = match response {
         Ok(response) => response,
@@ -1094,12 +1119,16 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
     let mut last_write = Instant::now();
     loop {
         let chunk = tokio::select! {
-            chunk = stream.response.chunk() => chunk,
+            // A stop wins over data that is also ready: from a fast server
+            // there is nearly always more, and a connection that took it
+            // went on downloading after the stop (#130, #136, #194).
+            biased;
             _ = ctx.stop_requested() => {
                 let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
                 ctx.board().release(id, stream.segment);
                 return Ok(());
             }
+            chunk = stream.response.chunk() => chunk,
         };
         let chunk = match chunk {
             Ok(Some(chunk)) => chunk,
@@ -1142,12 +1171,13 @@ async fn read_into_file(ctx: &Arc<Ctx>, id: usize, stream: &mut Stream) -> Resul
         // was written let every connection's first batch through at full
         // speed). Bytes later dropped, not written, are given back.
         tokio::select! {
-            () = ctx.limits.take(chunk.len() as u64) => {}
+            biased;
             _ = ctx.stop_requested() => {
                 let _ = write_batch(ctx, id, stream, &mut batch, &mut batch_at).await;
                 ctx.board().release(id, stream.segment);
                 return Ok(());
             }
+            () = ctx.limits.take(chunk.len() as u64) => {}
         }
         // Under a speed limit every piece is written at once: a batch that
         // a split leaves behind is dropped, and near the end of a download

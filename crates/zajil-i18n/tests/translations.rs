@@ -138,6 +138,17 @@ fn text(lang: Lang, key: &str, count: f64) -> String {
 /// or `$count` shown without `PLURAL`).
 const ARABIC: &[(&str, [&str; 6])] = &[
     (
+        "batch-links-count",
+        [
+            "لا روابط",
+            "رابط واحد",
+            "رابطان",
+            "3 روابط",
+            "11 رابطًا",
+            "100 رابط",
+        ],
+    ),
+    (
         "import-done",
         [
             "لم يُضف أي تحميل.",
@@ -327,6 +338,7 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 ];
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
+    ("batch-links-count", ["1 link", "2 links"]),
     ("downloads-count", ["1 download", "2 downloads"]),
     (
         "delete-unfinished",
@@ -819,6 +831,14 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("details-failed", &["error"]),
     ("refresh-size", &["ours", "theirs"]),
     ("downloads-count", &["count"]),
+    ("batch-links-count", &["count"]),
+    ("batch-pattern-hint", &["example"]),
+    ("batch-width-hint", &["example"]),
+    ("batch-max", &["max"]),
+    ("batch-shown", &["shown"]),
+    ("batch-error-at", &["at"]),
+    ("batch-error-too_many", &["max"]),
+    ("batch-error-not_http", &["http", "https"]),
     ("delete-unfinished", &["count"]),
     ("delete-also-finished", &["count"]),
     ("video-playlist", &["count"]),
@@ -865,6 +885,56 @@ struct Whole {
 }
 
 const WHOLE_TEXTS: &[Whole] = &[
+    Whole {
+        key: "batch-error-not_http",
+        ar: (
+            &[("http", "HTTP"), ("https", "HTTPS")],
+            "الرابط يجب أن يبدأ بـ HTTP أو HTTPS.",
+        ),
+        en: (
+            &[("http", "HTTP"), ("https", "HTTPS")],
+            "The link must start with HTTP or HTTPS.",
+        ),
+    },
+    Whole {
+        key: "batch-pattern-hint",
+        ar: (
+            &[("example", "EXAMPLE")],
+            "ضع نجمة مكان الجزء الذي يتغيّر في الرابط، مثل EXAMPLE. ويمكن أيضًا نطاق بين قوسين مربعين أو قائمة بين قوسين معقوفين.",
+        ),
+        en: (
+            &[("example", "EXAMPLE")],
+            "Put a star where the link changes, such as EXAMPLE. A range in square brackets or a list in braces works too.",
+        ),
+    },
+    Whole {
+        key: "batch-width-hint",
+        ar: (&[("example", "EXAMPLE")], "بأصفار على اليسار، مثل EXAMPLE."),
+        en: (
+            &[("example", "EXAMPLE")],
+            "With zeros on the left, such as EXAMPLE.",
+        ),
+    },
+    Whole {
+        key: "batch-max",
+        ar: (&[("max", "MAX")], "الحد الأقصى في المرة الواحدة: MAX."),
+        en: (&[("max", "MAX")], "At most at once: MAX."),
+    },
+    Whole {
+        key: "batch-shown",
+        ar: (&[("shown", "SHOWN")], "تظهر هنا أول SHOWN منها."),
+        en: (&[("shown", "SHOWN")], "The first SHOWN are shown here."),
+    },
+    Whole {
+        key: "batch-error-at",
+        ar: (&[("at", "AT")], "عند الحرف AT من الرابط."),
+        en: (&[("at", "AT")], "At character AT of the link."),
+    },
+    Whole {
+        key: "batch-error-too_many",
+        ar: (&[("max", "MAX")], "عدد الروابط أكبر من الحد الأقصى (MAX)."),
+        en: (&[("max", "MAX")], "More links than the most allowed (MAX)."),
+    },
     Whole {
         key: "add-category-extension",
         ar: (

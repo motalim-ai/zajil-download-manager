@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { Menu, PredefinedMenuItem } from "@tauri-apps/api/menu";
   import Mark from "../lib/components/Mark.svelte";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
@@ -8,7 +9,8 @@
 
   // The drop box (M5.5, an IDM touch): a link dropped here opens
   // «Download file info» (or «Add a link» while one is open for another
-  // link); a right-click hides it; it is moved by dragging it.
+  // link); a right-click offers «Batch download» (M7) and hiding it; it
+  // is moved by dragging it.
   let over = $state(false);
   let missed = $state(false);
 
@@ -16,6 +18,27 @@
     document.body.classList.add("drop");
     void startWindow();
   });
+
+  async function menu() {
+    const items = [
+      { id: "batch", text: locale.t("cmd-batch"), action: () => void api.openBatch(null).catch(() => {}) },
+      {
+        id: "batch-clipboard",
+        text: locale.t("cmd-batch-clipboard"),
+        action: () =>
+          void api
+            .clipboardLink()
+            .then((link) => api.openBatch(link ?? ""))
+            .catch(() => {}),
+      },
+      await PredefinedMenuItem.new({ item: "Separator" }),
+      { id: "hide", text: locale.t("drop-menu-hide"), action: () => void api.setDropBox(false) },
+    ];
+    // Without a menu (none on this system): a right-click hides it, as before.
+    await Menu.new({ items })
+      .then((m) => m.popup())
+      .catch(() => api.setDropBox(false));
+  }
 
   async function drop(event: DragEvent) {
     event.preventDefault();
@@ -52,7 +75,7 @@
   ondrop={(e) => void drop(e)}
   oncontextmenu={(e) => {
     e.preventDefault();
-    void api.setDropBox(false);
+    void menu();
   }}
 >
   <Mark size={38} />

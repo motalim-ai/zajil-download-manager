@@ -639,10 +639,10 @@ tb-done = تم
 
 ## The drop box (M5.5, an IDM touch)
 drop-box = سلة الإسقاط
-drop-hint = اسحب رابطًا هنا لتحميله. كليك يمين يخفيها.
+drop-hint = اسحب رابطًا هنا لتحميله. وبكليك يمين: تحميل بالجملة، أو إخفاؤها.
 tray-drop-box = إظهار سلة الإسقاط
 settings-drop-box-label = إظهار سلة الإسقاط فوق كل النوافذ
-settings-drop-box-hint = مربع صغير بشعار زاجِل، تسحب عليه رابطًا من المتصفح فيفتح «معلومات ملف التحميل». تحرّكه بسحبه، وكليك يمين عليه يخفيه.
+settings-drop-box-hint = مربع صغير بشعار زاجِل، تسحب عليه رابطًا من المتصفح فيفتح «معلومات ملف التحميل». تحرّكه بسحبه، وبكليك يمين عليه: تحميل بالجملة، أو إخفاؤه.
 
 ## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
 col-queue = الطابور
@@ -733,3 +733,58 @@ settings-progress-hidden = لا تظهر
 settings-start-while-open = ابدأ التحميل والنافذة مفتوحة
 settings-start-while-open-hint = يبدأ التحميل في الخلفية بمجرد أن يرد السيرفر، وأنت ما زلت في «معلومات ملف التحميل». و«إلغاء» يحذفه ويحذف ملفه الناقص.
 add-started-note = بدأ التحميل في الخلفية، فاسمه ومجلده لم يعودا يتغيّران. الفئة والوصف يتغيّران.
+
+## Batch download (M7)
+cmd-batch = تحميل بالجملة…
+cmd-batch-clipboard = تحميل بالجملة من الحافظة
+batch-title = تحميل بالجملة
+batch-pattern = الرابط بنمط
+batch-pattern-hint = ضع نجمة مكان الجزء الذي يتغيّر في الرابط، مثل { $example }. ويمكن أيضًا نطاق بين قوسين مربعين أو قائمة بين قوسين معقوفين.
+batch-kind = يتغيّر بـ
+batch-numbers = أرقام
+batch-letters = حروف
+batch-from = من
+batch-to = إلى
+batch-width = عدد الخانات
+batch-width-hint = بأصفار على اليسار، مثل { $example }.
+batch-links = الروابط
+batch-links-count =
+    { PLURAL($count) ->
+        [zero] لا روابط
+        [one] رابط واحد
+        [two] رابطان
+        [few] { $count } روابط
+        [many] { $count } رابطًا
+       *[other] { $count } رابط
+    }
+batch-max = الحد الأقصى في المرة الواحدة: { $max }.
+batch-shown = تظهر هنا أول { $shown } منها.
+batch-empty = اكتب رابطًا بنمط لترى الروابط التي سيصنعها.
+batch-clipboard-empty = لا يوجد رابط في الحافظة.
+batch-folder-category = حسب الفئة
+batch-error-at = عند الحرف { $at } من الرابط.
+batch-error-too_many = عدد الروابط أكبر من الحد الأقصى ({ $max }).
+drop-menu-hide = إخفاء السلة
+batch-error-not_http = الرابط يجب أن يبدأ بـ { $http } أو { $https }.
+batch-error-too_long = الرابط أطول من اللازم.
+batch-error-hidden = في الرابط حرف مخفي أو سطر جديد.
+batch-error-no_host = الرابط بلا اسم موقع.
+batch-error-in_host = النمط في مسار الرابط فقط، لا في اسم الموقع.
+batch-error-in_fragment = النمط لا يعمل بعد علامة #.
+batch-error-backslash = الشرطة المائلة العكسية مسموحة قبل الأقواس والنجمة والفاصلة فقط.
+batch-error-unclosed = قوس مفتوح لم يُغلق.
+batch-error-unopened = قوس يُغلق ولم يُفتح.
+batch-error-nested = نمط داخل نمط.
+batch-error-empty = نطاق أو قائمة فارغة.
+batch-error-bad_range = النطاق يُكتب: البداية، ثم شرطة، ثم النهاية.
+batch-error-mixed = النطاق يخلط أرقامًا وحروفًا، أو حروفًا كبيرة وصغيرة.
+batch-error-descending = النطاق ينزل: بدايته بعد نهايته.
+batch-error-zero_step = الخطوة لا تكون صفرًا.
+batch-error-width = عدد الخانات لا يناسب الأرقام.
+batch-error-too_large = رقم أكبر من اللازم.
+batch-error-bad_counter = «من» و«إلى» يكونان رقمين أو حرفين.
+batch-error-star_needs_range = اكتب «من» و«إلى» للنجمة.
+batch-error-second_star = نجمة واحدة فقط في الرابط.
+batch-error-no_star = «من» و«إلى» تعملان مع نجمة في الرابط.
+batch-error-no_pattern = الرابط بلا نمط: ضع نجمة أو نطاقًا مكان الجزء الذي يتغيّر.
+batch-error-bad_url = أحد الروابط التي يصنعها النمط غير صالح.

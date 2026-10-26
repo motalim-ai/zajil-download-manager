@@ -497,6 +497,15 @@
       // «Download a video…» (M6): «Video quality» asks for the page.
       case "video":
         return void api.openVideo(null).catch((e) => (failed = String(e)));
+      // «Batch download» (M7): empty, or with the clipboard's link (an
+      // empty one: the window says the clipboard has none).
+      case "batch":
+        return void api.openBatch(null).catch((e) => (failed = String(e)));
+      case "batch-clipboard":
+        return void api
+          .clipboardLink()
+          .then((link) => api.openBatch(link ?? ""))
+          .catch((e) => (failed = String(e)));
       case "import":
         return void importQueues();
       case "export":

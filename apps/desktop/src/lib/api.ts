@@ -11,6 +11,8 @@ import type { Sounds } from "./bindings/Sounds";
 import type { AddPrefs } from "./bindings/AddPrefs";
 import type { ProbeView } from "./bindings/ProbeView";
 import type { ToolView } from "./bindings/ToolView";
+import type { BatchRequest } from "./bindings/BatchRequest";
+import type { BatchPreview } from "./bindings/BatchPreview";
 import type { VideoInfoView } from "./bindings/VideoInfoView";
 import type { VideoErrorView } from "./bindings/VideoErrorView";
 import type { ChoiceView } from "./bindings/ChoiceView";
@@ -111,6 +113,15 @@ export const api = {
     listen<string>("main-view", (event) => handler(event.payload)),
   /** Video downloads (M6, #149). */
   openVideo: (url: string | null) => invoke<void>("open_video", { url }),
+  /** «Batch download» (M7): opened with a link or none; its links shown
+   * before anything is added; then added to a queue, started or not. */
+  openBatch: (url: string | null) => invoke<void>("open_batch", { url }),
+  batchPending: () => invoke<string | null>("batch_pending"),
+  batchPreview: (request: BatchRequest) => invoke<BatchPreview>("batch_preview", { request }),
+  batchAdd: (request: BatchRequest, queue: string | null, folder: string | null, start: boolean) =>
+    invoke<number>("batch_add", { request, queue, folder, start }),
+  /** The clipboard's link, if it holds one. */
+  clipboardLink: () => invoke<string | null>("clipboard_link"),
   videoPending: () => invoke<string | null>("video_pending"),
   videoFolder: () => invoke<string>("video_folder"),
   videoToolsStatus: () => invoke<ToolView[]>("video_tools_status"),
