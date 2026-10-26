@@ -359,6 +359,57 @@ fn the_queues_file_is_checked_and_a_damaged_one_is_never_overwritten() {
     }
 }
 
+/// #142 (review notes in #161): a queues file with tries out of range or a
+/// relative file to open is never written, and one found on disk is refused
+/// as damaged.
+#[test]
+fn impossible_tries_and_a_relative_file_to_open_are_refused() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    add(&store, "main", "http://h/f.bin", data_dir.path());
+    let path = store.path();
+    let before = fs::read_to_string(&path).unwrap();
+    let program = std::path::absolute(data_dir.path().join("after.sh")).unwrap();
+    let relative = Path::new("after.sh").to_path_buf();
+
+    for (tries, open) in [
+        (Some(0), None),
+        (Some(zajil_core::queue::MAX_TRIES + 1), None),
+        (None, Some(relative.clone())),
+    ] {
+        let err = store.update(|q| {
+            let main = q.queue_mut("main").unwrap();
+            main.max_tries = tries;
+            main.after_open = open.clone();
+            Ok(())
+        });
+        assert!(
+            matches!(err, Err(StoreError::Refused(_))),
+            "{tries:?} {open:?}: {err:?}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), before, "left as it was");
+    }
+
+    store
+        .update(|q| {
+            let main = q.queue_mut("main").unwrap();
+            main.max_tries = Some(zajil_core::queue::MAX_TRIES);
+            main.after_open = Some(program.clone());
+            Ok(())
+        })
+        .unwrap();
+    // The same file with a relative path, signed again, as a hand edit or
+    // another program would leave it.
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    value["queues"][0]["after_open"] = "after.sh".into();
+    value["checksum"] = zajil_core::state::checksum_of(&value).into();
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let err = store.load().unwrap_err();
+    assert!(matches!(err, StoreError::Corrupt { .. }), "{err:?}");
+    assert!(err.to_string().contains("relative after_open"), "{err}");
+}
+
 /// AGENTS.md §10.1: the queues file is never read through a link, and a
 /// link planted at its temporary path is removed, not followed.
 #[test]

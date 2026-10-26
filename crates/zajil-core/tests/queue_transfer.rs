@@ -725,3 +725,49 @@ fn a_refused_file_never_sends_its_escape_codes_to_the_terminal() {
         assert!(err.contains("\\u{1b}"), "{err}");
     }
 }
+
+/// #142 (review notes in #161): a queue's tries and its file to open after
+/// it are this computer's own. They never go into an export, an imported
+/// queue starts without them, a queue that exists keeps its own, and a file
+/// that carries a file to open is refused, not followed.
+#[test]
+fn a_queue_s_tries_and_file_to_open_never_come_from_an_import() {
+    let program = std::path::absolute(dir("after.sh")).unwrap();
+    let mut original = sample();
+    for queue in &mut original.queues {
+        queue.max_tries = Some(5);
+        queue.after_open = Some(program.clone());
+    }
+    let (tmp, path) = exported(&original);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("max_tries") && !text.contains("after_open"),
+        "{text}"
+    );
+
+    let export = read_export(&path).unwrap();
+    let mut elsewhere = QueuesFile::empty();
+    elsewhere.queue_mut("main").unwrap().max_tries = Some(3);
+    elsewhere.queue_mut("main").unwrap().after_open = Some(program.clone());
+    elsewhere.import(&export, &Folders::Keep).unwrap();
+    for queue in &elsewhere.queues {
+        if queue.name == "main" {
+            assert_eq!(queue.max_tries, Some(3));
+            assert_eq!(queue.after_open.as_ref(), Some(&program));
+        } else {
+            assert_eq!(
+                (queue.max_tries, &queue.after_open),
+                (None, &None),
+                "{}",
+                queue.name
+            );
+        }
+    }
+
+    let mut carried: serde_json::Value = serde_json::from_str(&text).unwrap();
+    carried["queues"][0]["after_open"] = program.to_string_lossy().into_owned().into();
+    let bad = tmp.path().join("carried.json");
+    write_signed(&bad, carried);
+    let err = read_export(&bad).unwrap_err().to_string();
+    assert!(err.contains("after_open"), "{err}");
+}

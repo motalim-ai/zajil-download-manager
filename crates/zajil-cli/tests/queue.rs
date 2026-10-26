@@ -218,8 +218,16 @@ fn queue_commands_change_the_queues_file() {
     assert!(queues.item(1).unwrap().url.contains("SECRET-TOKEN"));
     assert!(zajil_platform::fs::only_owner_can_access(&store.path()).unwrap());
 
+    // Resumed by the user: its queue's tries count from 0 again (#142).
+    store
+        .update(|q| {
+            q.item_mut(1).unwrap().failed_tries = 2;
+            Ok(())
+        })
+        .unwrap();
     let out = zajil(data.path(), &["queue", "resume", "1"]);
     assert!(printed(&out).contains("1 is waiting"), "{}", printed(&out));
+    assert_eq!(store.load().unwrap().item(1).unwrap().failed_tries, 0);
     for (args, code) in [
         (&["queue", "pause", "99"][..], 1),
         (&["queue", "set", "--max-active", "0"], 2),

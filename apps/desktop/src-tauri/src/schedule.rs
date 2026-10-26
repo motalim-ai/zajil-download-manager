@@ -267,24 +267,30 @@ pub async fn save_queue<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let schedule = schedule_of(&change)?;
-    crate::change(&app, &handle, move |q| {
-        if !(1..=MAX_ACTIVE).contains(&change.max_active) {
-            return Err(StoreError::InvalidMaxActive(change.max_active));
-        }
-        if !(1..=MAX_TRIES).contains(&change.max_tries) {
-            return Err(StoreError::Refused(format!(
-                "tries for each download must be from 1 to {MAX_TRIES}"
-            )));
-        }
-        let queue = q
-            .queue_mut(&name)
-            .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?;
-        queue.schedule = schedule;
-        queue.max_active = change.max_active;
-        queue.max_tries = (change.max_tries > 1).then_some(change.max_tries);
-        Ok(())
-    })
-    .await
+    crate::change(&app, &handle, move |q| plan(q, &name, &change, schedule)).await
+}
+
+fn plan(
+    queues: &mut QueuesFile,
+    name: &str,
+    change: &PlanChange,
+    schedule: Option<Schedule>,
+) -> Result<(), StoreError> {
+    if !(1..=MAX_ACTIVE).contains(&change.max_active) {
+        return Err(StoreError::InvalidMaxActive(change.max_active));
+    }
+    if !(1..=MAX_TRIES).contains(&change.max_tries) {
+        return Err(StoreError::Refused(format!(
+            "tries for each download must be from 1 to {MAX_TRIES}"
+        )));
+    }
+    let queue = queues
+        .queue_mut(name)
+        .ok_or_else(|| StoreError::NoSuchQueue(name.to_owned()))?;
+    queue.schedule = schedule;
+    queue.max_active = change.max_active;
+    queue.max_tries = (change.max_tries > 1).then_some(change.max_tries);
+    Ok(())
 }
 
 /// The texts of the confirmation, in the page's language.
@@ -721,6 +727,34 @@ mod tests {
         assert!(create(&mut q, "two words").is_err());
         assert!(create(&mut q, "").is_err());
         assert_eq!(q.queues.len(), 3);
+    }
+
+    /// #142 (review notes in #161): tries out of range change nothing; one
+    /// try is saved as none of the queue's own.
+    #[test]
+    fn a_plan_with_tries_out_of_range_changes_nothing() {
+        let mut q = queues();
+        let change = |max_tries| PlanChange {
+            max_active: 2,
+            start: None,
+            stop: None,
+            days: Vec::new(),
+            max_tries,
+        };
+        let before = q.clone();
+        for tries in [0, MAX_TRIES + 1] {
+            assert!(
+                plan(&mut q, "night", &change(tries), None).is_err(),
+                "{tries}"
+            );
+            assert_eq!(q, before, "{tries}");
+        }
+        plan(&mut q, "night", &change(MAX_TRIES), None).unwrap();
+        assert_eq!(q.queue("night").unwrap().max_tries, Some(MAX_TRIES));
+        assert_eq!(q.queue("night").unwrap().max_active, 2);
+        plan(&mut q, "night", &change(1), None).unwrap();
+        assert_eq!(q.queue("night").unwrap().max_tries, None);
+        assert!(plan(&mut q, "nowhere", &change(3), None).is_err());
     }
 
     #[test]

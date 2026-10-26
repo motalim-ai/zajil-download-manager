@@ -2423,10 +2423,13 @@ mod tests {
         assert_eq!(q.item(3).unwrap().status, Status::Done);
         q.item_mut(2).unwrap().status = Status::Failed;
         q.item_mut(2).unwrap().error = Some("404".into());
+        q.item_mut(2).unwrap().failed_tries = 2;
         set_status(&mut q, &[1, 2], Status::Waiting).unwrap();
         assert_eq!(q.item(1).unwrap().status, Status::Waiting);
         assert_eq!(q.item(2).unwrap().status, Status::Waiting);
         assert!(q.item(2).unwrap().error.is_none());
+        // Resumed by the user: its queue's tries count from 0 again (#142).
+        assert_eq!(q.item(2).unwrap().failed_tries, 0);
     }
 
     /// M5: every browser is registered with `zajil-host`, each allowing
