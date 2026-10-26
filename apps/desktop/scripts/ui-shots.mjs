@@ -7,12 +7,14 @@
 //
 //   node scripts/ui-shots.mjs <app> <out-folder> <scenario>...
 //   scenario: <view>-<lang>-<theme>, e.g. list-ar-light, or names; view is
-//   list, add, link, progress, tools, quality, details, refresh, settings,
-//   categories, or switch (the language changes in the same session,
-//   checked here)
+//   list, add, link, progress, complete, schedule, batch, grab, tools,
+//   quality, details, refresh, settings, categories, or switch (the
+//   language changes in the same session, checked here)
 //
 // Each scenario also carries an axe-core check of the page: a critical or
-// serious problem fails the run.
+// serious problem fails the run. And every file name a scene shows must
+// be drawn as the FileName component draws it (M5.5: mixed names right
+// in every window); the views below must show at least one.
 //
 // macOS: screencapture (needs the Screen Recording permission); Linux:
 // ImageMagick `import` on the X display (Xvfb in CI); Windows: .NET
@@ -28,6 +30,8 @@ if (!app || !out || scenarios.length === 0) {
   process.exit(2);
 }
 mkdirSync(out, { recursive: true });
+
+const SHOW_NAMES = ["list", "add", "progress", "complete", "schedule", "quality", "details", "refresh"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // No system call may hang the job.
@@ -102,13 +106,20 @@ for (const scenario of scenarios) {
   else {
     // Let the window manager finish drawing the frame.
     await sleep(800);
-    const { window, accessibility = [], languageSwitch } = JSON.parse(readFileSync(report, "utf8"));
+    const { window, accessibility = [], languageSwitch, names } = JSON.parse(readFileSync(report, "utf8"));
     // Any critical or serious accessibility problem fails (M4 criterion);
     // the others are listed.
     for (const v of accessibility) {
       const blocking = v.impact === "critical" || v.impact === "serious";
       (blocking ? console.error : console.log)(`${scenario}: accessibility ${v.impact}: ${v.id} (${v.help}) at ${v.nodes.join(", ")}`);
       if (blocking) failed = true;
+    }
+    if (scenario !== "names") {
+      const view = scenario.split("-")[0];
+      for (const why of names?.raw ?? []) fail(`a file name not drawn as FileName draws it: ${why}`);
+      if (!names) fail("the page did not say which file names it drew");
+      else if (SHOW_NAMES.includes(view) && names.drawn === 0) fail("no mixed file name shown, so none was checked");
+      else console.log(`${scenario}: ${names.drawn} mixed file names drawn as FileName draws them`);
     }
     if (scenario.startsWith("switch-")) {
       const { before, after } = languageSwitch ?? {};

@@ -26,6 +26,8 @@
   const GIB = 1024 * 1024 * 1024;
   const KINDS = ["archives", "documents", "audio", "video", "programs", "images"] as const;
 
+  // A UI test scene shows its demo check (`src/uitest`): no site is read.
+  let { scene = null }: { scene?: { start: string; scan: GrabScan } | null } = $props();
   let start = $state("");
   let depth = $state(DEPTH);
   let kinds = $state<Record<string, boolean>>({ archives: true, documents: true, audio: true, video: true, programs: true, images: false });
@@ -46,6 +48,13 @@
   const chosenCount = $derived(chosen.filter(Boolean).length);
 
   onMount(() => {
+    if (scene) {
+      start = scene.start;
+      scan = scene.scan;
+      // One taken out, as the user would.
+      chosen = scene.scan.files.map((_, i) => i !== 3);
+      return;
+    }
     let unlisten: (() => void) | undefined;
     void (async () => {
       await startWindow();

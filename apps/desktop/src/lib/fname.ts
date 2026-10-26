@@ -26,6 +26,17 @@ const OPENING = /[(\[{"'«]/;
 const STUCK = /[0-9_.\-]/;
 const JOINER = /[_.\-]/;
 
+/// The direction a name box gives the name, by its first strong letter
+/// (as `dir="auto"`, which looks through no isolate): what is drawn over
+/// the box lines up with it.
+export function nameDir(name: string): "rtl" | "ltr" {
+  for (const c of name) {
+    if (RTL.test(c)) return "rtl";
+    if (LATIN.test(c)) return "ltr";
+  }
+  return "ltr";
+}
+
 export function nameParts(name: string): NameParts {
   const match = /^(.*?)((?:\.tar)?\.[A-Za-z0-9]{1,8})$/.exec(name);
   if (!match) return { head: name, tail: "" };

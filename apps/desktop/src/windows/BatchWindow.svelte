@@ -16,6 +16,8 @@
   // queue, started now or later, as «Download file info» adds one. Rust
   // makes the links again when they are added: this list is only shown.
 
+  // A UI test scene starts with its demo pattern (`src/uitest`).
+  let { scene = null }: { scene?: string | null } = $props();
   let pattern = $state("");
   let kind = $state<"numbers" | "letters">("numbers");
   let from = $state("1");
@@ -39,6 +41,10 @@
   });
 
   onMount(() => {
+    if (scene) {
+      pattern = scene;
+      return;
+    }
     void (async () => {
       await startWindow();
       void getCurrentWindow()
@@ -152,7 +158,10 @@
     {#if problem}
       <div class="problem" role="alert"><Icon name="alert" size={16} /><span>{#each problem as line (line)}<span class="line">{line}</span>{/each}</span></div>
     {:else if preview}
-      <ol class="links" dir="ltr" aria-label={locale.t("batch-links")}>
+      <!-- Focusable, so the keyboard can scroll it (axe
+           «scrollable-region-focusable»). -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <ol class="links" dir="ltr" aria-label={locale.t("batch-links")} tabindex="0">
         {#each preview.shown as link (link)}<li>{link}</li>{/each}
       </ol>
       {#if preview.count > preview.shown.length}

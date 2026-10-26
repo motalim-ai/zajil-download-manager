@@ -298,6 +298,10 @@ pub fn run() {
                         Some("link") => Some(windows::LINK_SIZE),
                         Some("progress") => Some(windows::PROGRESS_SIZE),
                         Some("tools" | "quality") => Some(video::SIZE),
+                        Some("complete") => Some(complete::SIZE),
+                        Some("schedule") => Some(schedule::SIZE),
+                        Some("batch") => Some(batch::SIZE),
+                        Some("grab") => Some(grab::SIZE),
                         _ => None,
                     };
                     // macOS: the system's title bar is drawn by the page in

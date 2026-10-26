@@ -16,6 +16,9 @@
   // The schedule window (M5.5): the queues on the side, the chosen queue's
   // schedule and downloads. The schedule and the number at once are saved
   // with «Save»; what happens after the queue is kept for this run only.
+  // A UI test scene shows its demo queues instead (`src/uitest`), the
+  // timed one chosen.
+  let { scene = null }: { scene?: QueuePlan[] | null } = $props();
   let plans = $state<QueuePlan[]>([]);
   let downloads = $state<DownloadView[]>([]);
   let chosen = $state("main");
@@ -79,6 +82,13 @@
   }
 
   onMount(() => {
+    if (scene) {
+      plans = scene;
+      chosen = scene.find((p) => p.start !== null)?.name ?? "main";
+      fill(plans.find((p) => p.name === chosen));
+      void api.snapshot().then((s) => (downloads = s.downloads), () => {});
+      return;
+    }
     const unlisten: (() => void)[] = [];
     void (async () => {
       await startWindow();

@@ -14,12 +14,18 @@
   // «Download complete» (the design of #83, window 5): what finished and
   // where, «Open» (a program only once the user agrees, #84), «Open
   // folder», «Close», and «Don't show this window again».
-  const id = Number(new URLSearchParams(location.search).get("id"));
+  // A UI test scene shows its demo download instead (`src/uitest`).
+  let { scene = null }: { scene?: CompleteView | null } = $props();
+  const id = $derived(Number(scene?.id ?? new URLSearchParams(location.search).get("id")));
   let done = $state<CompleteView | null>(null);
   let problem = $state<string | null>(null);
   let never = $state(false);
 
   onMount(() => {
+    if (scene) {
+      done = scene;
+      return;
+    }
     void (async () => {
       await startWindow();
       try {

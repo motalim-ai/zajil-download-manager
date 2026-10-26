@@ -3,6 +3,8 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import FileName from "../lib/components/FileName.svelte";
+  import { nameDir } from "../lib/fname";
   import { licenseOf, toolName, versionOf } from "../lib/about";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
@@ -35,6 +37,9 @@
   let typed = $state("");
   let folder = $state("");
   let name = $state("");
+  // The name box is being edited: until then the name is drawn as
+  // FileName draws it (as in «Download file info»).
+  let editing = $state(false);
   let pick = $state(0);
   let unlisten: (() => void)[] = [];
 
@@ -253,7 +258,18 @@
       </fieldset>
       <div class="grid">
         <label class="label" for="video-name">{locale.t("add-file-name")}</label>
-        <input id="video-name" class="box" dir="auto" bind:value={name} />
+        <div class="namebox">
+          <input
+            id="video-name"
+            class="box"
+            class:quiet={!editing && name !== ""}
+            dir="auto"
+            bind:value={name}
+            onfocus={() => (editing = true)}
+            onblur={() => (editing = false)}
+          />
+          {#if !editing && name !== ""}<span class="box shown" dir={nameDir(name)} aria-hidden="true"><FileName {name} /></span>{/if}
+        </div>
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       </div>
@@ -331,6 +347,24 @@
   .label {
     font-size: 13px;
     color: var(--muted);
+  }
+  .namebox {
+    display: grid;
+    min-width: 0;
+  }
+  .namebox > * {
+    grid-area: 1 / 1;
+  }
+  .box.quiet {
+    color: transparent;
+  }
+  .box.shown {
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    background: transparent;
+    border-color: transparent;
+    overflow: hidden;
   }
   .box {
     border: 1px solid var(--line);

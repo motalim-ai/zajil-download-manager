@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nameParts } from "../src/lib/fname";
+import { nameDir, nameParts } from "../src/lib/fname";
 
 // The rule of the approved design (owner's review): what goes in the
 // inner left-to-right isolate.
@@ -61,5 +61,14 @@ describe("nameParts", () => {
       const { head, tail } = nameParts(name);
       expect(head + tail, name).toBe(name);
     }
+  });
+});
+
+describe("nameDir", () => {
+  it("is the direction of the first strong letter, as a name box gives it", () => {
+    expect(nameDir("محاضرة 12 - الخوارزميات (Part 2).mp4")).toBe("rtl");
+    expect(nameDir("Blender 4.5 تعليم النمذجة.mkv")).toBe("ltr");
+    expect(nameDir("2026 تقرير.pdf")).toBe("rtl");
+    expect(nameDir("12345")).toBe("ltr");
   });
 });

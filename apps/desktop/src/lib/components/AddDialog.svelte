@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
+  import FileName from "./FileName.svelte";
+  import { nameDir } from "../fname";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
   import { probeSentence, sizeText } from "../probeText";
@@ -83,6 +85,10 @@
 
   // The name and the description as the user leaves them (#103, #95).
   let name = $state("");
+  // The name box is being edited: until then the name is drawn as
+  // FileName draws it (a box orders a mixed name as one paragraph, the
+  // rendering the owner rejected in M4).
+  let editing = $state(false);
   let description = $state("");
   $effect(() => {
     if (probe) name = probe.name;
@@ -177,7 +183,23 @@
         <label class="label" for="add-name">{locale.t("add-file-name")}</label>
         <!-- The name it is saved under: the server's, or the user's own
              (#103); never empty (an emptied box means the server's). -->
-        <input id="add-name" class="value name" dir="auto" autocomplete="off" spellcheck="false" bind:value={name} readonly={started} />
+        <div class="namebox">
+          <input
+            id="add-name"
+            class="value name"
+            class:quiet={!editing && name !== ""}
+            dir="auto"
+            autocomplete="off"
+            spellcheck="false"
+            bind:value={name}
+            readonly={started}
+            onfocus={() => (editing = true)}
+            onblur={() => (editing = false)}
+          />
+          <!-- Only drawn: the box holds the name for the keyboard and
+               screen readers, and clicks go through to it. -->
+          {#if !editing && name !== ""}<span class="value name shown" dir={nameDir(name)} aria-hidden="true"><FileName {name} /></span>{/if}
+        </div>
 
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with">
@@ -330,6 +352,22 @@
   .name:focus {
     border-color: var(--accent);
     background: var(--surface);
+  }
+  .namebox {
+    display: grid;
+    min-width: 0;
+  }
+  .namebox > * {
+    grid-area: 1 / 1;
+  }
+  .name.quiet {
+    color: transparent;
+  }
+  .name.shown {
+    pointer-events: none;
+    background: transparent;
+    border-color: transparent;
+    overflow: hidden;
   }
   .name::placeholder {
     color: var(--faint);

@@ -474,7 +474,7 @@ jobs:
           # Every screen in Arabic and English, light and dark, each with
           # its axe-core check, and the language switched in one session.
           scenarios="names switch-ar-light switch-en-dark"
-          for screen in list add link progress tools quality details refresh settings categories; do
+          for screen in list add link progress complete schedule batch grab tools quality details refresh settings categories; do
             for lang in ar en; do
               for theme in light dark; do scenarios="$scenarios $screen-$lang-$theme"; done
             done

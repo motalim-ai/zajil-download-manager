@@ -18,6 +18,10 @@
   import AddLink from "./lib/components/AddLink.svelte";
   import ProgressWindow from "./windows/ProgressWindow.svelte";
   import VideoWindow from "./windows/VideoWindow.svelte";
+  import CompleteWindow from "./windows/CompleteWindow.svelte";
+  import ScheduleWindow from "./windows/ScheduleWindow.svelte";
+  import BatchWindow from "./windows/BatchWindow.svelte";
+  import GrabWindow from "./windows/GrabWindow.svelte";
   import Details from "./lib/components/Details.svelte";
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
@@ -60,6 +64,9 @@
   let linkScene = $state(false);
   // The «tools» and «quality» scenes: «Video quality» at that step.
   let videoScene = $state<"tools" | "quality" | null>(null);
+  /// `ui-test` builds only: a window's scene, with its demo data.
+  let windowScene = $state<typeof import("./uitest/scenes") | null>(null);
+  let windowSceneName = $state<"complete" | "schedule" | "batch" | "grab" | null>(null);
   // The "refresh the download link" dialog (M5): its download, and why the
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
@@ -754,16 +761,18 @@
         },
       };
     else if (screen === "add")
+      // A name mixing Arabic and Latin, as the list's (M5.5: mixed names
+      // right in every window, its name box too).
       addScene = {
-        url: "https://releases.ubuntu.com/24.04.3/ubuntu-24.04.3-desktop-amd64.iso",
+        url: "https://lectures.example.edu/algorithms/lecture-12-part-2.mp4",
         probe: {
-          name: "ubuntu-24.04.3-desktop-amd64.iso",
-          size: 6.1 * 1024 ** 3,
+          name: "محاضرة 12 - الخوارزميات (Part 2).mp4",
+          size: 1400 * 1024 ** 2,
           resumable: true,
           ranges: true,
-          category: "programs",
+          category: "video",
           category_site: null,
-          category_extension: "iso",
+          category_extension: "mp4",
           folder: "~/Downloads",
           page: false,
           download_folder: "~/Downloads",
@@ -773,12 +782,22 @@
     if (screen === "link") linkScene = true;
     if (screen === "tools" || screen === "quality") videoScene = screen;
     if (screen === "names") NamesPage = (await import("./uitest/Names.svelte")).default;
+    if (screen === "complete" || screen === "schedule" || screen === "batch" || screen === "grab") {
+      windowScene = await import("./uitest/scenes");
+      windowSceneName = screen;
+    }
     const settle = async () => {
       await tick();
       await document.fonts.ready;
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     };
     await settle();
+    // «Batch download» shows its links a moment after the pattern (Rust
+    // makes them): the picture waits for them, 5 s at most.
+    if (screen === "batch") {
+      for (let i = 0; i < 50 && !document.querySelector("ol.links li"); i++) await new Promise((r) => setTimeout(r, 100));
+      await settle();
+    }
     // The language changes in the same session, through the settings'
     // own code path: the direction and the texts change, nothing restarts.
     let languageSwitch: unknown = undefined;
@@ -800,7 +819,11 @@
         help: v.help,
         nodes: v.nodes.slice(0, 5).map((n) => n.target.join(" ")),
       }));
-      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch });
+      // Every file name it shows drawn as FileName draws it (M5.5).
+      const { checkNames } = await import("./uitest/names");
+      const known = [...snapshot.downloads.map((d) => d.name), ...(windowScene ? [windowScene.complete.name] : [])];
+      const names = checkNames(document.body, known);
+      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch, names });
     }
     return true;
   }
@@ -851,12 +874,19 @@
 
 {#if NamesPage}
   <NamesPage />
+{:else if windowScene && windowSceneName}
+  <div class="scene" class:mac={onMac()}>
+    {#if windowSceneName === "complete"}<CompleteWindow scene={windowScene.complete} />
+    {:else if windowSceneName === "schedule"}<ScheduleWindow scene={windowScene.schedule} />
+    {:else if windowSceneName === "batch"}<BatchWindow scene={windowScene.batch} />
+    {:else}<GrabWindow scene={windowScene.grab} />{/if}
+  </div>
 {:else if videoScene}
   <div class="scene" class:mac={onMac()}><VideoWindow scene={videoScene} /></div>
 {:else if linkScene}
   <div class="scene" class:mac={onMac()}><AddLink url="https://cdn.example.org/courses/rust/part-2.mp4" fromClipboard={true} onok={() => {}} oncancel={() => {}} /></div>
 {:else if progressScene}
-  <div class="scene" class:mac={onMac()}><ProgressWindow id={1} /></div>
+  <div class="scene" class:mac={onMac()}><ProgressWindow id={2} /></div>
 {:else if addScene}
   <div class="scene" class:mac={onMac()}><AddDialog
     url={addScene.url}
