@@ -195,14 +195,22 @@ onNewDownload(api, (item) => {
     if (await leftToBrowser(item)) return;
     const pause = pausesSafely(api);
     const url = item.finalUrl || item.url;
-    const cookies = await cookieHeader(api, url, item.cookieStoreId);
+    // Strict cookies (`SameSite=Strict`) go only as the browser sends them:
+    // from a page of the same site (#92: a link from another site, which
+    // the browser fetches without them, got them in Zajil). With no page
+    // to tell by (no referrer), none.
+    const page = typeof item.referrer === "string" && item.referrer ? item.referrer : undefined;
+    const strict = { from: page, noStrict: page === undefined };
+    const cookies = await cookieHeader(api, url, item.cookieStoreId, strict);
     const ticket = newTicket();
     // While it is open, Zajil may ask for its cookies again after a
     // restart, and for its file's download address while taking it (a
-    // Google Drive link): kept before Zajil is asked.
-    if (cookies) await rememberTicket(api, ticket, url, plainStore(item.cookieStoreId));
+    // Google Drive link): kept before Zajil is asked, without the strict
+    // ones when they did not go now.
+    const how = { noStrict: page === undefined || otherSite(page, url) };
+    if (cookies) await rememberTicket(api, ticket, url, plainStore(item.cookieStoreId), undefined, how);
     const result = await takeOver(api, item, { pause, cookies, instance: await instanceId(api), ticket });
-    if (cookies) await settleTicket(result, ticket, url, plainStore(item.cookieStoreId));
+    if (cookies) await settleTicket(result, ticket, url, plainStore(item.cookieStoreId), how);
     await report(result, pause ? "paused" : "running", { sentCookies: Boolean(cookies) });
   })();
 });

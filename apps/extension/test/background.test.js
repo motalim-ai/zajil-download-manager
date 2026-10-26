@@ -688,6 +688,38 @@ describe("the background", () => {
     expect(isPageRefusal({ outcome: "refused", error: "Zajil cannot download it: the server answered 403 Forbidden" })).toBe(false);
   });
 
+  it("a captured download: strict cookies go only from a page of the same site, and with no page, none (#92)", async () => {
+    const jar = () => [
+      { name: "s", value: "1", sameSite: "strict", domain: "files.example" },
+      { name: "l", value: "2", sameSite: "lax", domain: ".files.example" },
+    ];
+    const fake = fakeChrome({ granted: true, answer: { ok: true }, jar });
+    await load(fake);
+    const download = async (id, referrer) => {
+      const item = { id, url: "https://files.example/a.zip", finalUrl: "https://files.example/a.zip", state: "in_progress" };
+      if (referrer !== undefined) item.referrer = referrer;
+      fake.listeners.filename(item, () => {});
+      await flush();
+      return fake.done.sent.at(-1);
+    };
+    const { answer } = await import("../src/link.js");
+    const again = async (ticket) => (await answer(fake.chrome, { type: "cookies_wanted", ask: 1, url: "https://files.example/a.zip", ticket })).cookies;
+    // From another site's page: the browser sends no strict cookie, nor Zajil, now or later.
+    const other = await download(1, "https://forum.example/thread");
+    expect(other.cookies).toBe("l=2");
+    expect(await again(other.ticket)).toBe("l=2");
+    // From the same site: all of them, now and later.
+    const same = await download(2, "https://files.example/list");
+    expect(same.cookies).toBe("s=1; l=2");
+    expect(await again(same.ticket)).toBe("s=1; l=2");
+    // With no page to tell by: none of the strict ones.
+    const none = await download(3, undefined);
+    expect(none.cookies).toBe("l=2");
+    expect(await again(none.ticket)).toBe("l=2");
+    const empty = await download(4, "");
+    expect(empty.cookies).toBe("l=2");
+  });
+
   it("B: from the keys, strict cookies go only from a page of the same site, as in the browser; and not when Zajil asks again later", async () => {
     const jar = () => [
       { name: "s", value: "1", sameSite: "strict", domain: "files.example" },
