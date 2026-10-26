@@ -263,7 +263,6 @@ fn ask_to_close(child: &Child, how: Close) {
                        public static void Send(uint pid) {{ \
                          var all = new List<IntPtr>(); \
                          EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
-                         IntPtr r; \
                          Console.WriteLine(\"sending the session end to \" + all.Count + \" top-level windows\"); \
                          foreach (var h in all) Timed(\"WM_QUERYENDSESSION\", h, 0x11, IntPtr.Zero, 5000); \
                          foreach (var h in all) Timed(\"WM_ENDSESSION\", h, 0x16, (IntPtr)1, 10000); \
