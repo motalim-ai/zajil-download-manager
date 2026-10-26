@@ -13,7 +13,7 @@
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
   import { lastTry, left, percent, size, speed } from "../format";
-  import { COLUMNS, clampWidth, load, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
+  import { COLUMNS, clampWidth, load, minTableWidth, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
   import type { DownloadView } from "../bindings/DownloadView";
 
   let {
@@ -231,7 +231,13 @@
 {/snippet}
 
 <div class="scroll">
-  <table class="grid" aria-label={label} aria-multiselectable="true" role="grid">
+  <table
+    class="grid"
+    aria-label={label}
+    aria-multiselectable="true"
+    role="grid"
+    style:min-width={`${minTableWidth(shownColumns)}px`}
+  >
     <colgroup>
       {#each shownColumns as c (c.id)}<col style:width={c.width === null ? undefined : `${c.width}px`} />{/each}
       <col class="c-cols" />
@@ -338,7 +344,6 @@
   }
   table.grid {
     width: 100%;
-    min-width: 640px;
     border-collapse: collapse;
     table-layout: fixed;
     font-size: 13px;

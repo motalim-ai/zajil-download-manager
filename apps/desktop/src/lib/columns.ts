@@ -20,6 +20,12 @@ export const COLUMNS: { id: ColumnId; key: string; width: number | null }[] = [
 
 export const MIN_WIDTH = 56;
 export const MAX_WIDTH = 600;
+/** The least the name column gets: when the window is narrower than the
+ * other columns and this, the table scrolls sideways instead (#184: at
+ * 1024 px, with the queue column, the names had no room left). */
+export const NAME_MIN_WIDTH = 220;
+/** The column of the columns menu, at the row's end. */
+export const MENU_COLUMN_WIDTH = 34;
 
 export type Columns = { order: ColumnId[]; hidden: ColumnId[]; widths: Partial<Record<ColumnId, number>> };
 
@@ -84,6 +90,12 @@ export function toggle(columns: Columns, id: ColumnId): Columns {
   if (id === "name") return columns;
   const hidden = columns.hidden.includes(id) ? columns.hidden.filter((c) => c !== id) : [...columns.hidden, id];
   return { ...columns, hidden };
+}
+
+/** The least width of the table drawing `shown`: its fixed columns, the
+ * columns menu, and the name's least width. */
+export function minTableWidth(shown: { width: number | null }[]): number {
+  return shown.reduce((sum, c) => sum + (c.width ?? NAME_MIN_WIDTH), MENU_COLUMN_WIDTH);
 }
 
 /** The columns to draw, in order. */
