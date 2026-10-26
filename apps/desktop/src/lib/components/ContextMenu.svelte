@@ -38,6 +38,7 @@
     "refresh-link": "rotate-ccw",
     delete: "trash-2",
     properties: "info",
+    "remove-from-queue": "list-x",
   };
 
   let menu: HTMLDivElement | undefined = $state();

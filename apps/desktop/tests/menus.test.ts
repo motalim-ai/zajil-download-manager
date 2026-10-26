@@ -84,7 +84,7 @@ describe("the columns", () => {
     const changed = toggle(move({ ...DEFAULT, widths: { size: 140 } }, "speed", "name"), "left");
     save(changed, storage);
     expect(load(storage)).toEqual(changed);
-    expect(visible(load(storage)).map((c) => c.id)).toEqual(["speed", "name", "size", "status", "last", "desc"]);
+    expect(visible(load(storage)).map((c) => c.id)).toEqual(["speed", "name", "size", "status", "last", "desc", "queue"]);
     expect(visible(load(storage)).find((c) => c.id === "size")?.width).toBe(140);
   });
 

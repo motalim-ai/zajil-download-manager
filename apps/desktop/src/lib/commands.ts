@@ -27,6 +27,7 @@ export type Command =
   | "progress"
   | "refresh-link"
   | "properties"
+  | "remove-from-queue"
   | "about";
 
 /** A key, as `KeyboardEvent.key` names it (one letter in lower case), and

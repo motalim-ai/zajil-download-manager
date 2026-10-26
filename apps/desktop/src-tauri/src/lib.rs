@@ -13,11 +13,13 @@ mod complete;
 mod dropbox;
 mod live;
 mod menu;
+mod removal;
 mod schedule;
 mod tray;
 #[cfg(feature = "ui-test")]
 mod ui_test;
 mod update;
+mod video;
 pub mod view;
 mod windows;
 
@@ -174,6 +176,7 @@ pub fn run() {
         ))
         .manage(app)
         .manage(windows::Shared::default())
+        .manage(video::VideoState::default())
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
@@ -237,6 +240,12 @@ pub fn run() {
             // The add windows' own permissions (`windows.rs`), and they
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
+            // What a video run or a tools install left when Zajil stopped
+            // (#149).
+            {
+                let app = tauri_app.state::<App>();
+                video::clean_leftovers(&app);
+            }
             tauri_app.add_capability(dropbox::CAPABILITY)?;
             // The drop box, if the user left it shown.
             if tauri_app.state::<closing::Closing>().prefs().drop_box {
@@ -341,11 +350,21 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pause,
         resume,
         remove,
+        remove_with_files,
         details,
         set_tray_texts,
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        video::video_pending,
+        video::video_tools_status,
+        video::video_tools_install,
+        video::video_tools_cancel,
+        video::video_tools_remove,
+        video::video_probe,
+        video::video_probe_cancel,
+        video::video_download,
+        video::video_cancel,
         dropbox::drop_box_shown,
         dropbox::set_drop_box,
         quit_heard,
@@ -406,11 +425,21 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pause,
         resume,
         remove,
+        remove_with_files,
         details,
         set_tray_texts,
         tray::set_tray_tooltip,
         close_quits,
         set_close_quits,
+        video::video_pending,
+        video::video_tools_status,
+        video::video_tools_install,
+        video::video_tools_cancel,
+        video::video_tools_remove,
+        video::video_probe,
+        video::video_probe_cancel,
+        video::video_download,
+        video::video_cancel,
         dropbox::drop_box_shown,
         dropbox::set_drop_box,
         quit_heard,
@@ -2093,6 +2122,29 @@ async fn copy_links<R: tauri::Runtime>(
     .map_err(blocking_err)?
     .map_err(|e| e.to_string())?;
     Ok(links.len())
+}
+
+/// Takes downloads off the list and deletes their unfinished files (the
+/// part and state files; a finished file stays): deleting downloads that
+/// have not finished, when the user asks for their files too.
+#[tauri::command]
+async fn remove_with_files<R: tauri::Runtime>(
+    app: State<'_, App>,
+    ids: Vec<u64>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let store = app.store.clone();
+    let files = {
+        let ids = ids.clone();
+        tokio::task::spawn_blocking(move || store.load().map(|q| removal::files_of(&q, &ids)))
+            .await
+            .map_err(blocking_err)?
+            .map_err(|e| e.to_string())?
+    };
+    change(&app, &handle, move |q| remove_items(q, &ids)).await?;
+    send_keep(&app.links, &app.store, None);
+    removal::delete_soon(files);
+    Ok(())
 }
 
 #[tauri::command]

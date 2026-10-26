@@ -372,7 +372,7 @@ cmd-progress = Progress window
 cmd-refresh-link = Refresh link…
 cmd-properties = Properties
 cmd-about = About Zajil
-cmd-move-to-queue = Move to queue
+cmd-move-to-queue = Add to queue
 about-text = Zajil, version { $version }
 table-label = Downloads
 col-resize = { $column } column width
@@ -569,3 +569,18 @@ drop-hint = Drag a link here to download it. A right-click hides it.
 tray-drop-box = Show the drop box
 settings-drop-box-label = Show the drop box above all windows
 settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; a right-click hides it.
+
+## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
+col-queue = Queue
+cmd-remove-from-queue = Remove from queue
+delete-unfinished =
+    { PLURAL($count) ->
+        [one] This download has not finished. Delete it?
+       *[other] These { $count } downloads have not finished. Delete them?
+    }
+delete-also-finished =
+    { PLURAL($count) ->
+        [one] With them, { $count } finished download, whose file stays where it is.
+       *[other] With them, { $count } finished downloads, whose files stay where they are.
+    }
+delete-unfinished-files = Delete the unfinished files too

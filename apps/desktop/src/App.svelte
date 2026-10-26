@@ -10,6 +10,7 @@
   import MenuBar from "./lib/components/MenuBar.svelte";
   import TitleBar from "./lib/components/TitleBar.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import DeleteAsk from "./lib/components/DeleteAsk.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import Categories from "./lib/components/Categories.svelte";
   import DownloadTable from "./lib/components/DownloadTable.svelte";
@@ -311,7 +312,23 @@
 
   // A dialog is open: the toolbar waits (review of #96: a second dialog
   // lost the first one's link).
-  const dialogOpen = $derived(Boolean(refreshing));
+  // Deleting downloads that have not finished: which, and how many.
+  let deleteAsk = $state<{ ids: number[]; unfinished: number } | null>(null);
+  async function deleteAnswered(withFiles: boolean | null) {
+    const ask = deleteAsk;
+    deleteAsk = null;
+    void tick().then(() => document.getElementById("tb-delete")?.focus());
+    if (!ask || withFiles === null) return;
+    if (!withFiles) return act("remove", ask.ids);
+    failed = null;
+    try {
+      await api.removeWithFiles(ask.ids);
+    } catch (e) {
+      failed = String(e);
+    }
+    await refresh();
+  }
+  const dialogOpen = $derived(Boolean(refreshing || deleteAsk));
   // The table is on screen: what the selection buttons act on is seen
   // (review of #96: Delete removed rows hidden behind the settings).
   const tableShown = $derived(view === "list" && !details);
@@ -354,9 +371,14 @@
       case "pause":
         void act("pause");
         break;
-      case "delete":
-        void confirmThen(locale.t("confirm-delete", { count: selected.length }), selected.length > 1, () => act("remove"));
+      // A download that has not finished asks first, and whether its
+      // unfinished file goes too (an IDM touch).
+      case "delete": {
+        const unfinished = chosen.filter((d) => d.status !== "done").length;
+        if (unfinished > 0) deleteAsk = { ids: [...selected], unfinished };
+        else void confirmThen(locale.t("confirm-delete", { count: selected.length }), selected.length > 1, () => act("remove"));
         break;
+      }
       case "pause-all":
         void act("pause", idsOf((d) => d.status === "active" || d.status === "waiting"));
         break;
@@ -425,6 +447,9 @@
         return tableShown && one !== undefined && one.status !== "done";
       case "copy-link":
         return tableShown && chosen.length > 0;
+      // Back to the main queue: only what is in another one.
+      case "remove-from-queue":
+        return tableShown && chosen.some((d) => d.queue !== "main");
       default:
         return true;
     }
@@ -460,6 +485,8 @@
         return;
       case "copy-link":
         return void copyLinks();
+      case "remove-from-queue":
+        return void moveTo("main", chosen.filter((d) => d.queue !== "main").map((d) => d.id));
       case "categories":
         details = null;
         view = "categories";
@@ -537,10 +564,10 @@
       failed = String(e);
     }
   }
-  async function moveTo(queue: string) {
+  async function moveTo(queue: string, ids: number[] = selected) {
     failed = null;
     try {
-      await api.moveToQueue(selected, queue);
+      await api.moveToQueue(ids, queue);
     } catch (e) {
       failed = String(e);
     }
@@ -867,6 +894,9 @@
             if (refocus) document.querySelector<HTMLElement>('tr[tabindex="0"]')?.focus();
           }}
         />
+      {/if}
+      {#if deleteAsk}
+        <DeleteAsk unfinished={deleteAsk.unfinished} total={deleteAsk.ids.length} onanswer={(withFiles) => void deleteAnswered(withFiles)} />
       {/if}
       {#if refreshing}
         <RefreshDialog

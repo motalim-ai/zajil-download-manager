@@ -45,6 +45,7 @@ export const ROW_MENU: Item[] = [
   { command: "progress" },
   "-",
   { queues: true },
+  { command: "remove-from-queue" },
   "-",
   { command: "copy-link" },
   { command: "refresh-link" },

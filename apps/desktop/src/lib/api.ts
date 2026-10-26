@@ -66,6 +66,8 @@ export const api = {
   /** `false`: the file can run code, and opens only once the user is
    * `sure`. */
   openDownload: (id: number, folder: boolean, sure = false) => invoke<boolean>("open_download", { id, folder, sure }),
+  /** Takes downloads off the list and deletes their unfinished files. */
+  removeWithFiles: (ids: number[]) => invoke<void>("remove_with_files", { ids }),
   moveToQueue: (ids: number[], queue: string) => invoke<void>("move_to_queue", { ids, queue }),
   /** «Copy link»: the downloads' links on the clipboard; how many went. */
   copyLinks: (ids: number[]) => invoke<number>("copy_links", { ids }),
