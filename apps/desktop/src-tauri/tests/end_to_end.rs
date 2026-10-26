@@ -49,12 +49,33 @@ fn step(out: &Path, app: &mut App, name: &str, within: Duration) -> serde_json::
         if let Some(status) = app.0.try_wait().expect("the app's status") {
             panic!("waiting for step {name}, the app ended: {status:?}");
         }
-        assert!(
-            Instant::now() < deadline,
-            "step {name}: not within {within:?}"
-        );
+        if Instant::now() >= deadline {
+            screen(out);
+            panic!("step {name}: not within {within:?}");
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// Windows: a picture of the whole screen, next to the steps (#220: the
+/// page did not load there, and nothing said why).
+fn screen(out: &Path) {
+    if !cfg!(windows) {
+        return;
+    }
+    let file = out.join("e2e-screen.png");
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms, System.Drawing; \
+         $s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \
+         $b = New-Object System.Drawing.Bitmap $s.Width, $s.Height; \
+         [System.Drawing.Graphics]::FromImage($b).CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size); \
+         $b.Save('{}', [System.Drawing.Imaging.ImageFormat]::Png)",
+        file.display().to_string().replace('\'', "''")
+    );
+    let saved = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .status();
+    println!("the screen: {} ({saved:?})", file.display());
 }
 
 #[test]
@@ -67,11 +88,13 @@ fn a_link_goes_from_add_link_to_open_folder() {
         FileSpec::new(body.clone()).throttle(256 * 1024),
     );
     let link = server.url("/lecture.bin");
-    let (data, downloads, out) = (
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-        tempfile::tempdir().unwrap(),
-    );
+    let (data, downloads) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    // The steps (and a picture of the screen if one does not come): in
+    // ZAJIL_E2E_OUT if set (CI uploads it), otherwise a folder of its own.
+    let own = tempfile::tempdir().unwrap();
+    let out = std::env::var_os("ZAJIL_E2E_OUT")
+        .map_or_else(|| own.path().to_path_buf(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&out).unwrap();
     // The download folder: never the CI machine's own.
     SettingsStore::new(data.path())
         .update(|s| {
@@ -88,26 +111,27 @@ fn a_link_goes_from_add_link_to_open_folder() {
         .arg("--ui-test-e2e")
         .arg(&link)
         .arg("--ui-test-out")
-        .arg(out.path())
+        .arg(&out)
         .spawn()
         .expect("the app starts"));
 
     let minute = Duration::from_secs(60);
-    let link_step = step(out.path(), &mut app, "link", 2 * minute);
+    step(&out, &mut app, "start", 2 * minute);
+    let link_step = step(&out, &mut app, "link", minute);
     assert_eq!(link_step["detail"]["url"], link.as_str());
-    let info = step(out.path(), &mut app, "info", minute);
+    let info = step(&out, &mut app, "info", minute);
     assert_eq!(info["detail"]["name"], "lecture.bin");
-    let progress = step(out.path(), &mut app, "progress", minute);
+    let progress = step(&out, &mut app, "progress", minute);
     assert_eq!(progress["detail"]["name"], "lecture.bin");
-    let complete = step(out.path(), &mut app, "complete", 2 * minute);
+    let complete = step(&out, &mut app, "complete", 2 * minute);
     assert_eq!(complete["detail"]["name"], "lecture.bin");
-    let open = step(out.path(), &mut app, "open", minute);
+    let open = step(&out, &mut app, "open", minute);
     // In that order, each once.
     let order: Vec<_> = [&link_step, &info, &progress, &complete, &open]
         .iter()
         .map(|s| s["n"].as_u64().unwrap())
         .collect();
-    assert_eq!(order, [1, 2, 3, 4, 5]);
+    assert_eq!(order, [2, 3, 4, 5, 6]);
 
     // The file is whole, where the settings said, and «Open folder» shows it.
     let queues = QueueStore::new(data.path())

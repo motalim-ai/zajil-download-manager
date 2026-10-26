@@ -499,6 +499,8 @@ jobs:
             *) built=target/debug/zajil-desktop; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-e2e" ;;
           esac
           cp "$built" "$ZAJIL_DESKTOP_APP"
+          # Its steps go up with the screenshots.
+          export ZAJIL_E2E_OUT="$RUNNER_TEMP/ui-shots/e2e"
           # Windows: Zajil's and WebView2's processes, before the test and
           # if it fails (its page did not load there: is a WebView2 of the
           # screenshots step still running?).

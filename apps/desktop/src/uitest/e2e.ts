@@ -33,6 +33,8 @@ const shownName = () => document.querySelector<HTMLElement>("bdi.fn")?.title ?? 
 export async function drive(win: string | null): Promise<void> {
   const link = await invoke<string | null>("ui_test_e2e").catch(() => null);
   if (!link) return;
+  // The window's page runs (Windows: the main one's did not, #220).
+  if (win === null) await step("start");
   if (win === null) {
     (await until("«Add link» in the toolbar", () => button("tb-add"))).click();
   } else if (win === "add-link") {
