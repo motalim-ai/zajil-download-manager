@@ -16,6 +16,7 @@ mod dropbox;
 mod live;
 mod menu;
 mod removal;
+mod saving;
 mod schedule;
 mod sounds;
 mod tray;
@@ -52,6 +53,13 @@ use crate::view::{
 /// How long the program waits for the downloads to record their progress
 /// when it is closed.
 const STOP_WAIT: Duration = Duration::from_secs(5);
+/// At the end of a Windows session, how long Zajil waits at most for its
+/// downloads to stop and its writes to end before ending its process
+/// (#81). Usually far less (the downloads stopped within 0.2 s in #81's
+/// runs); past it, a write is not waited for: every file is replaced in
+/// one step (ADR-0004), so the one before stays whole.
+#[cfg(windows)]
+const SESSION_END_WAIT: Duration = Duration::from_secs(10);
 
 /// Everything the commands share.
 pub struct App {
@@ -329,7 +337,7 @@ pub fn run() {
                 let stopped = app.stopped.subscribe();
                 let handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    wait_for_queues(stopped).await;
+                    wait_for_queues(stopped, STOP_WAIT).await;
                     handle.exit(0);
                 });
             }
@@ -346,7 +354,7 @@ pub fn run() {
                 }
                 app.exiting.store(true, Ordering::SeqCst);
                 app.stop.request();
-                tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
+                tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe(), STOP_WAIT));
             }
             // macOS: a click on the Dock icon shows the window it hid.
             #[cfg(target_os = "macos")]
@@ -534,24 +542,29 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
     ]
 }
 
-/// Waits for the queues to stop, [`STOP_WAIT`] at most, and says how it
-/// ended. After that it gives up: every download's progress is in its state
-/// file, at most a second old (ADR-0004), and the next start resumes there.
-async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>) {
+/// Waits for the queues to stop, `limit` at most, says how it ended, and
+/// whether they stopped. After that it gives up: every download's progress
+/// is in its state file, at most a second old (ADR-0004), and the next
+/// start resumes there.
+async fn wait_for_queues(mut stopped: tokio::sync::watch::Receiver<bool>, limit: Duration) -> bool {
     // How long the stop took, said every time (#132: on Windows it ran
     // out a few times; the time shows how near the limit it usually is).
     let asked = std::time::Instant::now();
     let wait = stopped.wait_for(|stopped| *stopped);
-    match tokio::time::timeout(STOP_WAIT, wait).await {
-        Ok(_) => eprintln!(
+    let ended = tokio::time::timeout(limit, wait).await.is_ok();
+    if ended {
+        eprintln!(
             "zajil: the downloads stopped; exiting (after {} ms)",
             asked.elapsed().as_millis()
-        ),
-        Err(_) => eprintln!(
-            "zajil: the downloads did not stop within 5 s; exiting, to resume from their state files (after {} ms)",
+        );
+    } else {
+        eprintln!(
+            "zajil: the downloads did not stop within {} s; exiting, to resume from their state files (after {} ms)",
+            limit.as_secs(),
             asked.elapsed().as_millis()
-        ),
+        );
     }
+    ended
 }
 
 /// The signals that ask a program to stop (SIGTERM: a shutdown on Linux,
@@ -609,7 +622,9 @@ async fn exit_on_signal(handle: tauri::AppHandle, mut signals: StopSignals) {
 /// Windows has no SIGTERM: at a shutdown, restart or logoff it sends the
 /// window `WM_ENDSESSION`, and may end the process once that is answered
 /// (#49). The downloads stop there, after recording their progress, as
-/// when the window is closed; then the program exits.
+/// when the window is closed; then, once nothing is being written, the
+/// process is ended at once: its usual exit waited seconds for WebView2
+/// (#81). Only here: the other ways of quitting exit as before.
 #[cfg(windows)]
 fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
     let Some(window) = tauri_app.get_webview_window("main") else {
@@ -625,8 +640,24 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
             if !app.exiting.swap(true, Ordering::SeqCst) {
                 app.stop.request();
             }
-            tauri::async_runtime::block_on(wait_for_queues(app.stopped.subscribe()));
-            std::process::exit(0);
+            let asked = std::time::Instant::now();
+            let stopped = tauri::async_runtime::block_on(wait_for_queues(
+                app.stopped.subscribe(),
+                SESSION_END_WAIT,
+            ));
+            // Kept until the end: no write starts after.
+            let (_held, late) = saving::hold(&app.data_dir, asked + SESSION_END_WAIT);
+            let still: Vec<_> = (!stopped).then_some("downloads").into_iter().chain(late).collect();
+            if still.is_empty() {
+                eprintln!("zajil: saved; terminating to finish the session end");
+            } else {
+                eprintln!(
+                    "zajil: not everything saved within {} s (still writing: {}); terminating to finish the session end",
+                    SESSION_END_WAIT.as_secs(),
+                    still.join(", ")
+                );
+            }
+            saving::terminate();
         }),
     )
     .map_err(tauri::Error::Io)

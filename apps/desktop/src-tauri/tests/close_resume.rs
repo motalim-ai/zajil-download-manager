@@ -27,15 +27,26 @@ const MIB: u64 = 1024 * 1024;
 /// connections, so the app can be closed in the middle.
 const SIZE: u64 = 24 * MIB;
 
-/// The running app, and everything it has written to stderr so far.
+/// The running app, and everything it has written to stderr so far, with
+/// when each piece came (its length so far, and the time).
 struct App {
     child: Child,
     stderr: Arc<Mutex<String>>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    heard: Arc<Mutex<Vec<(usize, Instant)>>>,
 }
 
 impl App {
     fn said(&self, line: &str) -> bool {
         self.stderr.lock().unwrap().contains(line)
+    }
+
+    /// When the app said `line` (first), if it did.
+    #[cfg(windows)]
+    fn said_at(&self, line: &str) -> Option<Instant> {
+        let end = self.stderr.lock().unwrap().find(line)? + line.len();
+        let heard = self.heard.lock().unwrap();
+        heard.iter().find(|(len, _)| *len >= end).map(|(_, at)| *at)
     }
 }
 
@@ -72,7 +83,8 @@ fn start_with(data: &Path, close_quits: bool) -> App {
         .spawn()
         .expect("the app starts");
     let stderr = Arc::new(Mutex::new(String::new()));
-    let (mut pipe, sink) = (child.stderr.take().unwrap(), stderr.clone());
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let (mut pipe, sink, times) = (child.stderr.take().unwrap(), stderr.clone(), heard.clone());
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         while let Ok(n) = pipe.read(&mut buf) {
@@ -81,10 +93,16 @@ fn start_with(data: &Path, close_quits: bool) -> App {
             }
             let text = String::from_utf8_lossy(&buf[..n]);
             eprint!("{text}");
-            sink.lock().unwrap().push_str(&text);
+            let mut all = sink.lock().unwrap();
+            all.push_str(&text);
+            times.lock().unwrap().push((all.len(), Instant::now()));
         }
     });
-    let app = App { child, stderr };
+    let app = App {
+        child,
+        stderr,
+        heard,
+    };
     // The page has loaded: a build without its page would otherwise pass
     // (review of #45).
     wait_until("the window is ready", Duration::from_secs(60), || {
@@ -100,6 +118,8 @@ fn close_cleanly(app: &mut App, how: Close, store: &QueueStore) {
     let asked = Instant::now();
     ask_to_close(&app.child, how);
     let status = wait_exit(&mut app.child, Duration::from_secs(30));
+    #[cfg(windows)]
+    let exited = Instant::now();
     let took = asked.elapsed();
     // Let the reader thread take the last lines.
     std::thread::sleep(Duration::from_millis(200));
@@ -122,14 +142,27 @@ fn close_cleanly(app: &mut App, how: Close, store: &QueueStore) {
     // CI log (the step runs with --nocapture; review of #59).
     #[cfg(windows)]
     if matches!(how, Close::SessionEnd) {
-        let hook = app.said("asked to stop (the Windows session is ending)");
+        let hook = app.said_at("asked to stop (the Windows session is ending)");
         println!(
             "the Windows session end was handled by {}",
-            if hook {
+            if hook.is_some() {
                 "zajil_platform::session"
             } else {
                 "tao (RunEvent::Exit)"
             }
+        );
+        // Once everything is saved, the process is ended at once, not
+        // after WebView2 comes down (#81: that took seconds). Measured
+        // from the app's own line, so PowerShell's start is not counted.
+        assert!(
+            app.said("zajil: saved; terminating to finish the session end"),
+            "it did not say that everything was saved before ending"
+        );
+        let ended = exited.duration_since(hook.expect("Zajil's own hook ran"));
+        println!("from the session end to the exit: {ended:?}");
+        assert!(
+            ended < Duration::from_millis(1500),
+            "the session end took {ended:?}"
         );
     }
 }

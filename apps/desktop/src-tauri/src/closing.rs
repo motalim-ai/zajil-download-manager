@@ -135,12 +135,11 @@ fn load(path: &Path) -> WindowPrefs {
 
 /// Written whole, then put in place.
 fn save(path: &Path, prefs: &WindowPrefs) -> std::io::Result<()> {
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(
-        &tmp,
-        serde_json::to_vec_pretty(prefs).map_err(std::io::Error::other)?,
-    )?;
-    std::fs::rename(&tmp, path)
+    crate::saving::write_whole(
+        path,
+        &path.with_extension("json.tmp"),
+        &serde_json::to_vec_pretty(prefs).map_err(std::io::Error::other)?,
+    )
 }
 
 /// What closing the main window does.

@@ -123,9 +123,7 @@ fn save_rows(app: &crate::App, state: &VideoState) {
     let saved = serde_json::to_vec_pretty(&rows)
         .map_err(std::io::Error::other)
         .and_then(|bytes| {
-            let new = path.with_extension("json.new");
-            std::fs::write(&new, bytes)?;
-            std::fs::rename(&new, &path)
+            crate::saving::write_whole(&path, &path.with_extension("json.new"), &bytes)
         });
     if let Err(e) = saved {
         eprintln!("zajil: {ROWS_FILE} could not be saved: {e}");
