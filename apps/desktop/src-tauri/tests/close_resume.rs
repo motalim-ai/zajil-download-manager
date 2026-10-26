@@ -127,6 +127,18 @@ fn close_cleanly(app: &mut App, how: Close, store: &QueueStore) {
     // usually is (#132).
     println!("closing took {took:?}");
     let stopped = app.said("zajil: the downloads stopped; exiting");
+    // Windows session end: how much of it was Zajil's own, said before the
+    // check of the whole (#244: the seconds came before its hook).
+    #[cfg(windows)]
+    if matches!(how, Close::SessionEnd)
+        && let Some(hook) = app.said_at("asked to stop (the Windows session is ending)")
+    {
+        println!(
+            "before Zajil's hook: {:?}; from it to the exit: {:?}",
+            hook.saturating_duration_since(asked),
+            exited.saturating_duration_since(hook)
+        );
+    }
     if !(status.success() && stopped && took < Duration::from_millis(4500)) {
         report(app, store, took);
     }
@@ -240,15 +252,21 @@ fn ask_to_close(child: &Child, how: Close) {
                     "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; \
                      public static class ZajilSession {{ \
                        public delegate bool EnumProc(IntPtr h, IntPtr l); \
+                       [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n); \
                        [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); \
                        [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); \
                        [DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r); \
+                       static void Timed(string name, IntPtr h, uint m, IntPtr w, uint limit) {{ \
+                         var c = new System.Text.StringBuilder(256); GetClassNameW(h, c, 256); uint p; uint t = GetWindowThreadProcessId(h, out p); \
+                         var clock = System.Diagnostics.Stopwatch.StartNew(); IntPtr r; IntPtr ok = SendMessageTimeoutW(h, m, w, IntPtr.Zero, 2, limit, out r); \
+                         Console.WriteLine(\"  \" + name + \" to \" + h + \" (\" + c + \", thread \" + t + \"): \" + clock.ElapsedMilliseconds + \" ms, \" + (ok == IntPtr.Zero ? \"no answer\" : \"answered \" + r)); }} \
                        public static void Send(uint pid) {{ \
                          var all = new List<IntPtr>(); \
                          EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
                          IntPtr r; \
-                         foreach (var h in all) SendMessageTimeoutW(h, 0x11, IntPtr.Zero, IntPtr.Zero, 2, 5000, out r); \
-                         foreach (var h in all) SendMessageTimeoutW(h, 0x16, (IntPtr)1, IntPtr.Zero, 2, 10000, out r); \
+                         Console.WriteLine(\"sending the session end to \" + all.Count + \" top-level windows\"); \
+                         foreach (var h in all) Timed(\"WM_QUERYENDSESSION\", h, 0x11, IntPtr.Zero, 5000); \
+                         foreach (var h in all) Timed(\"WM_ENDSESSION\", h, 0x16, (IntPtr)1, 10000); \
                          Console.WriteLine(\"session end sent to \" + all.Count + \" top-level windows\"); if (all.Count == 0) Environment.Exit(1); }} }}'; \
                      [ZajilSession]::Send({pid})"
                 ),
