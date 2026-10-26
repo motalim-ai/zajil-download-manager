@@ -716,12 +716,18 @@ async fn max_files_stops_new_files() {
 #[tokio::test(flavor = "multi_thread")]
 async fn max_total_stops_a_file_announced_larger_than_what_is_left() {
     let site = server();
-    for n in 0..3 {
+    for n in 0..2 {
         site.put(
             &format!("/f{n}.zip"),
             FileSpec::new(random_bytes(100_000, n)),
         );
     }
+    // Large and slow, so the stop always comes before its end (CI run of
+    // #195 on Windows: a 100 KB file could finish first).
+    site.put(
+        "/f2.zip",
+        FileSpec::new(random_bytes(2_000_000, 2)).throttle(500_000),
+    );
     site.put("/index.html", links(&["f0.zip", "f1.zip", "f2.zip"]));
     let dir = tempfile::tempdir().unwrap();
     let mut plan = plan(&site.url("/index.html"), dir.path());
