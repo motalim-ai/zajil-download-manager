@@ -278,6 +278,7 @@ pub fn demo_snapshot() -> Snapshot {
             .collect(),
         speed_limit: None,
         problem: None,
+        categories_problem: None,
     }
 }
 

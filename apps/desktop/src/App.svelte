@@ -41,7 +41,7 @@
   import type { SettingsChange } from "./lib/bindings/SettingsChange";
   import type { CategoryView } from "./lib/bindings/CategoryView";
 
-  let snapshot = $state<Snapshot>({ downloads: [], queues: [], categories: [], speed_limit: null, problem: null });
+  let snapshot = $state<Snapshot>({ downloads: [], queues: [], categories: [], speed_limit: null, problem: null, categories_problem: null });
   let filter = $state<Filter>({ kind: "all" });
   // The selected downloads, in table order (M5.5: several at once).
   let selected = $state<number[]>([]);
@@ -906,7 +906,7 @@
           onsave={saveCategories}
           onchoosefolder={chooseFolder}
           ontry={(c, name) => api.tryCategory(c, name)}
-          problem={null}
+          problem={snapshot.categories_problem}
         />
       {:else if details}
         {#if failed}<p class="problem" role="alert"><Icon name="alert" />{failed}</p>{/if}

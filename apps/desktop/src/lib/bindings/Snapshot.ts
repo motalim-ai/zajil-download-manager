@@ -7,4 +7,9 @@ export type Snapshot = { downloads: Array<DownloadView>, queues: Array<QueueView
 /**
  * Why the queues cannot run now (a damaged queues file), if so.
  */
-problem: string | null, };
+problem: string | null, 
+/**
+ * Why the categories file could not be read (#58: the categories
+ * screen showed an empty list with no reason).
+ */
+categories_problem: string | null, };
