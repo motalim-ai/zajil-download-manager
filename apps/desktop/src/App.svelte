@@ -733,7 +733,8 @@
       if (screen === "settings") view = "settings";
     }
     if (screen === "categories") view = "categories";
-    if (screen === "details") details = await api.details(1);
+    // Download 2: its name is mixed (M5.5: mixed names in every window).
+    if (screen === "details") details = await api.details(2);
     // The failed download, its new link refused as another file's (M5).
     if (screen === "refresh") {
       details = await api.details(6);

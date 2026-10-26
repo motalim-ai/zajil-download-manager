@@ -28,7 +28,9 @@ export function checkNames(root: HTMLElement, names: string[]): NamesSeen {
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent ?? "";
     const parent = node.parentElement;
-    if (!parent || parent.closest("bdi.fn")) continue;
+    // Drawn by FileName; only for screen readers; or a link, whose path
+    // may hold the name and which is shown left to right whole.
+    if (!parent || parent.closest("bdi.fn, .visually-hidden") || /^\s*[a-z]+:\/\//i.test(text)) continue;
     for (const name of mixed) if (text.includes(name)) raw.push(`${name} in <${parent.tagName.toLowerCase()} class="${parent.className}">`);
   }
   // A name box: its name is drawn over it by FileName while not edited.

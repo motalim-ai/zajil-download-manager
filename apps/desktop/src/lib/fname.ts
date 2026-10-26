@@ -37,6 +37,14 @@ export function nameDir(name: string): "rtl" | "ltr" {
   return "ltr";
 }
 
+/// A name for a text the page does not draw (a window's title, which the
+/// system draws): FileName's two isolates as Unicode isolate marks, so the
+/// system orders it as FileName does (M5.5).
+export function isolatedName(name: string): string {
+  const { head, tail } = nameParts(name);
+  return `\u2068${head}${tail ? `\u2066${tail}\u2069` : ""}\u2069`;
+}
+
 export function nameParts(name: string): NameParts {
   const match = /^(.*?)((?:\.tar)?\.[A-Za-z0-9]{1,8})$/.exec(name);
   if (!match) return { head: name, tail: "" };

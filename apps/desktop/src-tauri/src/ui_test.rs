@@ -265,7 +265,8 @@ pub fn demo_snapshot() -> Snapshot {
         ),
         d(
             6,
-            "zajil-0.4.0-arm64.dmg",
+            // Mixed, as the refresh scene shows its name (M5.5).
+            "زاجل 0.4.0 arm64.dmg",
             14 * MIB,
             0.12,
             0.0,

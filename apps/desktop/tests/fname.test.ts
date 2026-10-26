@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nameDir, nameParts } from "../src/lib/fname";
+import { isolatedName, nameDir, nameParts } from "../src/lib/fname";
 
 // The rule of the approved design (owner's review): what goes in the
 // inner left-to-right isolate.
@@ -70,5 +70,12 @@ describe("nameDir", () => {
     expect(nameDir("Blender 4.5 تعليم النمذجة.mkv")).toBe("ltr");
     expect(nameDir("2026 تقرير.pdf")).toBe("rtl");
     expect(nameDir("12345")).toBe("ltr");
+  });
+});
+
+describe("isolatedName", () => {
+  it("gives a window's title FileName's two isolates as marks", () => {
+    expect(isolatedName("محاضرة 12 - الخوارزميات (Part 2).mp4")).toBe("⁨محاضرة 12 - الخوارزميات ⁦(Part 2).mp4⁩⁩");
+    expect(isolatedName("report.pdf")).toBe("⁨report.pdf⁩");
   });
 });

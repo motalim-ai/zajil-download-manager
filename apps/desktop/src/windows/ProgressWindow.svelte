@@ -3,7 +3,7 @@
   import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { ask } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
-  import FileName from "../lib/components/FileName.svelte";
+  import { isolatedName } from "../lib/fname";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { counted, left, num, percent, size, speed } from "../lib/format";
@@ -85,7 +85,7 @@
   $effect(() => {
     if (!d) return;
     const shown = d.status === "done" ? locale.t("status-done") : percent(locale.lang, locale.digits, fraction);
-    const next = `${shown} ${d.name}`;
+    const next = `${shown} ${isolatedName(d.name)}`;
     if (next === title) return;
     title = next;
     void getCurrentWindow()

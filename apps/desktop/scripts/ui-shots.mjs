@@ -31,7 +31,10 @@ if (!app || !out || scenarios.length === 0) {
 }
 mkdirSync(out, { recursive: true });
 
-const SHOW_NAMES = ["list", "add", "progress", "complete", "schedule", "quality", "details", "refresh"];
+// The dark «Download file info» shows a Google Drive link named «download»;
+// the progress window shows its name only in its title bar, which the
+// system draws.
+const SHOW_NAMES = ["list", "add-light", "complete", "schedule", "quality", "details", "refresh"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // No system call may hang the job.
@@ -115,10 +118,10 @@ for (const scenario of scenarios) {
       if (blocking) failed = true;
     }
     if (scenario !== "names") {
-      const view = scenario.split("-")[0];
+      const [view, , theme] = scenario.split("-");
       for (const why of names?.raw ?? []) fail(`a file name not drawn as FileName draws it: ${why}`);
       if (!names) fail("the page did not say which file names it drew");
-      else if (SHOW_NAMES.includes(view) && names.drawn === 0) fail("no mixed file name shown, so none was checked");
+      else if ((SHOW_NAMES.includes(view) || SHOW_NAMES.includes(`${view}-${theme}`)) && names.drawn === 0) fail("no mixed file name shown, so none was checked");
       else console.log(`${scenario}: ${names.drawn} mixed file names drawn as FileName draws them`);
     }
     if (scenario.startsWith("switch-")) {
