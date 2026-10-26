@@ -959,11 +959,14 @@ async fn a_private_window_s_download_leaves_nothing_once_done() {
     let server = TestServer::http();
     let data_bytes = random_bytes(50_000, 97);
     server.put("/private.bin", FileSpec::new(data_bytes.clone()));
+    // Its own address: with the same one, whichever finished first took
+    // `private.bin`, and the other's own name held it (#133).
+    server.put("/other.bin", FileSpec::new(data_bytes.clone()));
     let data = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data.path());
     let id = add(&store, "main", &server.url("/private.bin"), dir.path());
-    let other = add(&store, "main", &server.url("/private.bin"), dir.path());
+    let other = add(&store, "main", &server.url("/other.bin"), dir.path());
     store
         .update(|q| {
             q.item_mut(id).unwrap().private = true;
@@ -985,7 +988,7 @@ async fn a_private_window_s_download_leaves_nothing_once_done() {
     assert!(queues.item(id).is_none(), "the private one stayed");
     assert_eq!(queues.item(other).unwrap().status, Status::Done);
     let text = fs::read_to_string(data.path().join("queues.json")).unwrap();
-    assert_eq!(text.matches("private.bin").count(), 1, "{text}");
+    assert!(!text.contains("private.bin"), "{text}");
     assert_eq!(
         fs::read(dir.path().join("private.bin")).unwrap(),
         data_bytes
