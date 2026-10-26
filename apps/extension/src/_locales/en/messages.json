@@ -102,13 +102,13 @@
     "message": "Not allowed: downloads go to Zajil without cookies, and videos have the right-click menu only."
   },
   "signInNeedsCookies": {
-    "message": "This site needs a sign-in, so the browser went on with the download. For Zajil to take downloads like this, allow the cookie permission."
+    "message": "This site needs a sign-in, so the browser went on with the download. For Zajil to take downloads like this, choose “Allow Zajil on sites”."
   },
   "signInEvenWithCookies": {
     "message": "This site refused Zajil even with the cookies, so the browser went on with the download."
   },
   "menuSignInNeedsCookies": {
-    "message": "This site needs a sign-in. Allow the cookie permission for Zajil to download it, or download it with the browser."
+    "message": "This site needs a sign-in. Choose “Allow Zajil on sites” for Zajil to download it, or download it with the browser."
   },
   "menuSignInEvenWithCookies": {
     "message": "This site refused Zajil even with the cookies. Download it with the browser."
