@@ -93,12 +93,14 @@ pub fn ui_test_windows(test: State<'_, UiTest>) -> bool {
     test.windows
 }
 
-/// Window `label`'s page ran (or, with `why`, opening it was refused).
+/// Window `label`'s page ran (or, with `why`, opening it was refused); the
+/// main window hears it, and opens the next one.
 #[tauri::command]
-pub fn ui_test_loaded(
+pub fn ui_test_loaded<R: tauri::Runtime>(
     test: State<'_, UiTest>,
     label: String,
     why: Option<String>,
+    handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let Some(out) = test.out.as_ref().filter(|_| test.windows) else {
         return Ok(());
@@ -116,7 +118,11 @@ pub fn ui_test_loaded(
     // Written then renamed, so the test never reads half a file.
     let tmp = out.join(format!("loaded-{label}.json.tmp"));
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, out.join(format!("loaded-{label}.json"))).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, out.join(format!("loaded-{label}.json"))).map_err(|e| e.to_string())?;
+    use tauri::Emitter;
+    handle
+        .emit_to("main", "ui-test-loaded", label)
+        .map_err(|e| e.to_string())
 }
 
 /// Writes what the page reports (where it drew the rows, the language,
