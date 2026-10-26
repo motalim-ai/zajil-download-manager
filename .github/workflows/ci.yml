@@ -232,18 +232,6 @@ jobs:
         run: cargo build --workspace --all-targets --locked
       - name: Test
         run: cargo test --workspace --locked
-      # TEMPORARY (#194): the stop tests 20 times on Windows; removed before
-      # the merge.
-      - name: The stop tests, 20 times (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 20); do
-            echo "::group::run $i"
-            cargo test --locked -p zajil-core --test stop_after_save
-            echo "::endgroup::"
-          done
       # Clipboard monitoring (M5) reads the real clipboard: the test that
       # puts text there and reads it back is ignored by default, because it
       # replaces the clipboard of whoever runs it. Linux needs a display.
