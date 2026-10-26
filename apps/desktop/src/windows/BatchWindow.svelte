@@ -199,11 +199,17 @@
     padding: 18px 22px;
     background: var(--surface);
     overflow: auto;
+    display: flex;
+    flex-direction: column;
   }
+  /* The links take what the window leaves, so the window fits without
+     scrolling at its size; smaller, it scrolls. */
   .col {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1;
+    min-height: min-content;
   }
   .label {
     font-size: 13px;
@@ -269,7 +275,8 @@
     margin: 0;
     padding: 6px 10px 6px 0;
     padding-inline-start: 2.6em;
-    height: 170px;
+    flex: 1 1 0;
+    min-height: 96px;
     overflow: auto;
     border: 1px solid var(--line);
     border-radius: 8px;

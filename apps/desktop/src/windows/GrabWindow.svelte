@@ -53,6 +53,7 @@
       scan = scene.scan;
       // One taken out, as the user would.
       chosen = scene.scan.files.map((_, i) => i !== 3);
+      void showResults();
       return;
     }
     let unlisten: (() => void) | undefined;
@@ -88,11 +89,19 @@
       });
       scan = found;
       chosen = found.files.map(() => true);
+      void showResults();
     } catch (e) {
       problem = refusalText((k, a) => locale.t(k, a), String(e), { maxDepth: MAX_DEPTH, maxFiles: MAX_FILES });
     } finally {
       checking = false;
     }
+  }
+
+  /** The form and the files found are taller than the window: the files
+   * come into sight, under the form, above the pinned buttons. */
+  async function showResults() {
+    await tick();
+    document.getElementById("grab-results")?.scrollIntoView({ block: "start" });
   }
 
   async function chooseFolder() {
@@ -180,7 +189,7 @@
     {#if problem}<p class="problem" role="alert"><Icon name="alert" size={16} />{problem}</p>{/if}
 
     {#if scan}
-      <div class="head">
+      <div class="head" id="grab-results">
         <strong>{counted(locale.lang, locale.digits, "files-count", scan.files.length)}</strong>
         {#if scan.files.length > 0}
           <span class="muted">{locale.t("grab-chosen", { chosen: num(locale.lang, locale.digits, chosenCount, 0), all: num(locale.lang, locale.digits, scan.files.length, 0) })}</span>
@@ -205,6 +214,9 @@
       </ul>
 
       {#if scan.files.length > 0}
+        <!-- Kept in sight at the bottom: the form and the list above it
+             are taller than the window once a check has found files. -->
+        <div class="footer">
         <div class="grid">
           <span class="label">{locale.t("add-folder")}</span>
           <div class="with">
@@ -218,6 +230,7 @@
           <button class="btn" disabled={chosenCount === 0 || busy} onclick={() => void add(false)}>{locale.t("add-later")}</button>
           <span class="end"></span>
           <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>
+        </div>
         </div>
       {/if}
     {/if}
@@ -323,6 +336,17 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .footer {
+    position: sticky;
+    bottom: -18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0 -22px -18px;
+    padding: 12px 22px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
   }
   .notes {
     margin: 0;
