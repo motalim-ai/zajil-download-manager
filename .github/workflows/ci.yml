@@ -499,11 +499,21 @@ jobs:
             *) built=target/debug/zajil-desktop; export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-e2e" ;;
           esac
           cp "$built" "$ZAJIL_DESKTOP_APP"
+          # Windows: Zajil's and WebView2's processes, before the test and
+          # if it fails (its page did not load there: is a WebView2 of the
+          # screenshots step still running?).
+          processes() {
+            if [ "$RUNNER_OS" = Windows ]; then
+              echo "processes ($1):"
+              powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.Name -match 'zajil|msedgewebview2' } | ForEach-Object { '  {0} parent={1} {2} started {3}' -f \$_.ProcessId, \$_.ParentProcessId, \$_.Name, \$_.CreationDate }"
+            fi
+          }
+          processes "before the test"
           test=(cargo test --locked --test end_to_end -- --ignored --nocapture)
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s "-screen 0 1600x1000x24" "${test[@]}"
           else
-            "${test[@]}"
+            "${test[@]}" || { processes "after the failure"; exit 1; }
           fi
       - name: Upload the screenshots
         if: always()
