@@ -12,11 +12,13 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request cancels its older run. On main every
-# commit's run goes to its end: a cancelled run shows as a red cross, as if
-# main were broken (owner's decision, 2026-10-26).
+# A newer push to a pull request cancels its older run. Each run on main
+# (push or schedule) has its own group, so none is cancelled or kept waiting:
+# a cancelled run shows as a red cross, as if main were broken (owner's
+# decision, 2026-10-26; with one group for main, a waiting run is still
+# cancelled by the next push).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -317,21 +319,24 @@ jobs:
       # its own time limit, and it is tried up to three times.
       - name: Install the GUI libraries (Linux)
         if: runner.os == 'Linux'
-        timeout-minutes: 30
+        timeout-minutes: 40
         env:
-          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60
         run: |
           set -euo pipefail
           for try in 1 2 3; do
-            # A try cut off in the middle can leave dpkg half done.
-            [ "$try" = 1 ] || sudo dpkg --configure -a || true
-            if sudo timeout 300 apt-get $APT_OPTIONS update -q \
-              && sudo timeout 240 apt-get $APT_OPTIONS install -y -q --no-install-recommends \
+            if [ "$try" != 1 ]; then
+              sleep 15
+              # A try cut off in the middle can leave dpkg half done.
+              sudo timeout -k 20 120 dpkg --configure -a || true
+              sudo timeout -k 20 120 apt-get $APT_OPTIONS -f install -y -q || true
+            fi
+            if sudo timeout -k 20 300 apt-get $APT_OPTIONS update -q \
+              && sudo timeout -k 20 240 apt-get $APT_OPTIONS install -y -q --no-install-recommends \
                 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick; then
               exit 0
             fi
             echo "::warning::installing the GUI libraries failed (try $try of 3)"
-            sleep 15
           done
           exit 1
       - name: Install npm packages (from the lock file only)
