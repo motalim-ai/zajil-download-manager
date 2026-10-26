@@ -13,7 +13,9 @@
 # sets the version, puts zajil-host (the app looks for it there, lib.rs
 # `host_beside`) and the `zajil` command next to the program as Tauri
 # sidecars, ships the GPL licence as a file in every installer (not as a
-# licence to agree to: the GPL asks for no acceptance), asks for the ad-hoc signature on macOS
+# licence to agree to: the GPL asks for no acceptance) with the notices of
+# the tools Zajil downloads, FFmpeg's LGPL among them (THIRD-PARTY-NOTICES.md
+# and LGPL-2.1.txt, ADR-0009's LGPL checklist, item 11), asks for the ad-hoc signature on macOS
 # and a per-user installer on Windows.
 
 name: Release
@@ -191,7 +193,7 @@ jobs:
           ls -l "$app/Contents/MacOS"
           test -x "$app/Contents/MacOS/zajil-host"
           test -x "$app/Contents/MacOS/zajil"
-          test -f "$app/Contents/Resources/LICENSE"
+          for f in LICENSE THIRD-PARTY-NOTICES.md LGPL-2.1.txt; do test -f "$app/Contents/Resources/$f"; done
           "$app/Contents/MacOS/zajil" --version
           # Every program in the bundle runs on both processors.
           for f in "$app"/Contents/MacOS/*; do
@@ -213,7 +215,7 @@ jobs:
           # A per-user install goes to %LOCALAPPDATA%\Zajil.
           $dir = Join-Path $env:LOCALAPPDATA 'Zajil'
           Get-ChildItem $dir | Format-Table Name, Length
-          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'LICENSE')) {
+          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'LGPL-2.1.txt')) {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "$f is not in $dir" }
           }
           & (Join-Path $dir 'zajil.exe') --version
@@ -233,7 +235,7 @@ jobs:
           test -x /usr/bin/zajil-host
           test -x /usr/bin/zajil
           /usr/bin/zajil --version
-          dpkg -L "$package" | grep -q '/LICENSE$'
+          for f in LICENSE THIRD-PARTY-NOTICES.md LGPL-2.1.txt; do dpkg -L "$package" | grep -q "/$f\$"; done
           sudo apt-get remove -y -q "$package"
           test ! -e /usr/bin/zajil-host
           appimage=$(ls "$RUNNER_TEMP"/installers/*.AppImage)

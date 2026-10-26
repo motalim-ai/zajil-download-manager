@@ -733,6 +733,15 @@ mod tests {
             include_str!("../../../README.md").contains(&release),
             "README.md: {release}"
         );
+        // And the notices file in every installer (item 11), in both
+        // languages.
+        let notices = include_str!("../../../scripts/release/licenses/THIRD-PARTY-NOTICES.md");
+        assert_eq!(notices.matches(&release).count(), 2, "{release}");
+        assert_eq!(
+            notices.matches(&format!("`{version}`")).count(),
+            2,
+            "{version}"
+        );
         let mac = |tool, arch| {
             pinned(
                 tool,

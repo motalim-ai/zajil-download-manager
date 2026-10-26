@@ -4,7 +4,9 @@
     "externalBin": ["binaries/zajil-host", "binaries/zajil"],
     "license": "GPL-3.0-or-later",
     "resources": {
-      "../../../LICENSE": "LICENSE"
+      "../../../LICENSE": "LICENSE",
+      "../../../scripts/release/licenses/THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
+      "../../../scripts/release/licenses/LGPL-2.1.txt": "LGPL-2.1.txt"
     },
     "macOS": {
       "signingIdentity": "-",
