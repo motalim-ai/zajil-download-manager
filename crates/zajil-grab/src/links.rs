@@ -65,6 +65,7 @@ pub fn extract(html: &str, page: &Url) -> Links {
 
     let mut out = Links {
         nofollow: found.nofollow,
+        truncated: found.cut,
         ..Links::default()
     };
     let mut seen = HashSet::new();
@@ -91,18 +92,26 @@ fn resolve(base: &Url, raw: &str) -> Option<Url> {
     if raw.is_empty() || raw.len() > MAX_URL_BYTES {
         return None;
     }
-    let mut url = base.join(raw).ok()?;
+    let url = base.join(raw).ok()?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return None;
     }
     if !url.username().is_empty() || url.password().is_some() {
         return None;
     }
+    let url = tidy(url);
+    (url.as_str().len() <= MAX_URL_BYTES).then_some(url)
+}
+
+/// `url` as the crawl writes it, so one page has one URL: no fragment and
+/// no needless escapes. The start is written so too (review of #195:
+/// `/#top` and `/` were asked for twice).
+pub(crate) fn tidy(mut url: Url) -> Url {
     url.set_fragment(None);
     if let Some(path) = tidy_escapes(url.path()) {
         url.set_path(&path);
     }
-    (url.as_str().len() <= MAX_URL_BYTES).then_some(url)
+    url
 }
 
 /// `path` without needless percent-encoding (ADR-0010 section 6), so one
@@ -141,6 +150,8 @@ struct Found {
     raw: Vec<(String, LinkKind)>,
     base: Option<String>,
     nofollow: bool,
+    /// A link was left out once there were enough.
+    cut: bool,
 }
 
 #[derive(Default)]
@@ -159,9 +170,15 @@ impl TokenSink for Sink {
             return TokenSinkResult::Continue;
         }
         let mut found = self.found.borrow_mut();
-        // Stop gathering once there is more than enough: the page is cut.
+        // Stop gathering once there is more than enough: the page is cut,
+        // and said to be when a link is left out, even if the many before
+        // it were the same few links (review of #195).
         if found.raw.len() <= MAX_LINKS_PER_PAGE * 2 {
             read_tag(&tag, &mut found);
+        } else if !found.cut {
+            let mut rest = Found::default();
+            read_tag(&tag, &mut rest);
+            found.cut = !rest.raw.is_empty();
         }
         // The tokenizer alone does not switch to the raw text states a
         // browser's tree builder does: text inside these tags is never
@@ -443,6 +460,15 @@ mod tests {
     }
 
     #[test]
+    fn tidy_drops_the_fragment_and_needless_escapes() {
+        let url = Url::parse("https://site.test/%7euser/s%65lf%2fx.html?q=%41#top").unwrap();
+        assert_eq!(
+            tidy(url).as_str(),
+            "https://site.test/~user/self%2Fx.html?q=%41"
+        );
+    }
+
+    #[test]
     fn only_http_links_without_credentials_or_fragments_each_once() {
         assert_eq!(
             urls(
@@ -483,6 +509,19 @@ mod tests {
         assert_eq!(found.links.len(), MAX_LINKS_PER_PAGE);
         assert!(found.truncated);
         assert_eq!(found.links[0].url.as_str(), "https://site.test/f0.zip");
+    }
+
+    /// Many copies of a few links fill what is gathered: a new link after
+    /// them is said to be left out (review of #195).
+    #[test]
+    fn a_page_cut_after_repeated_links_is_said() {
+        let page = Url::parse("https://site.test/").unwrap();
+        let same = "<a href=\"same.zip\"></a>".repeat(MAX_LINKS_PER_PAGE * 2 + 1);
+        let found = extract(&format!("{same}<a href=\"new.zip\"></a>"), &page);
+        assert_eq!(found.links.len(), 1);
+        assert!(found.truncated);
+        let found = extract(&format!("{same}<p>no link</p>"), &page);
+        assert!(!found.truncated, "nothing was left out");
     }
 
     #[test]

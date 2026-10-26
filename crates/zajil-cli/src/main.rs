@@ -31,6 +31,9 @@ use zajil_platform::{AppPaths, SystemPaths};
 
 /// Exit code when the download stopped but can be resumed.
 const EXIT_RESUMABLE: u8 = 3;
+/// Quit at once with a second Ctrl+C, as a shell says of a process ended by
+/// Ctrl+C (128 + SIGINT).
+const EXIT_QUIT: u8 = 130;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -125,7 +128,8 @@ enum Command {
     #[command(
         after_help = "Exit codes: 0 every file saved, 1 a file failed (a file that stopped but \
                       can be resumed counts as failed; the resume command is printed), 2 a \
-                      wrong pattern, 3 stopped with Ctrl+C during a file that can be resumed."
+                      wrong pattern, 3 stopped with Ctrl+C during a file that can be resumed, \
+                      130 quit at once with a second Ctrl+C."
     )]
     Batch(batch::BatchArgs),
     /// Download a site's files: from one page, down to a depth, within the
@@ -133,7 +137,8 @@ enum Command {
     /// --connections is given.
     #[command(
         after_help = "Exit codes: 0 done, 1 a file failed or stopped at a limit (the resume \
-                      command is printed), 2 a wrong request, 3 stopped with Ctrl+C."
+                      command is printed), 2 a wrong request, 3 stopped with Ctrl+C, 130 quit at \
+                      once with a second Ctrl+C."
     )]
     Grab(grab::GrabArgs),
 }
@@ -366,6 +371,32 @@ fn download_dir_path(chosen: Option<&Path>) -> Result<PathBuf, String> {
             .download_dir()
             .to_path_buf()),
     }
+}
+
+/// Ctrl+C asks `stop` to stop, so files in progress are saved to resume; a
+/// second Ctrl+C quits at once with [`EXIT_QUIT`] (review of #195: it did
+/// nothing). One listener for both, so no press is missed between them
+/// (review of #232).
+fn stop_on_ctrl_c(stop: zajil_core::Stop) {
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        let Ok(mut presses) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        else {
+            return;
+        };
+        #[cfg(windows)]
+        let Ok(mut presses) = tokio::signal::windows::ctrl_c() else {
+            return;
+        };
+        if presses.recv().await.is_some() {
+            stop.request();
+            eprintln!("zajil: stopping (Ctrl+C again to quit at once)");
+            if presses.recv().await.is_some() {
+                std::process::exit(EXIT_QUIT.into());
+            }
+        }
+    });
 }
 
 fn stopped(reason: &str, state_file: &Path) -> ExitCode {

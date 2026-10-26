@@ -363,7 +363,7 @@ fn add_to_site_queue(
 
 /// Opens «Site grabber», with `url` as its start if one is given.
 #[tauri::command]
-pub fn open_grab<R: tauri::Runtime>(
+pub async fn open_grab<R: tauri::Runtime>(
     state: State<'_, GrabState>,
     url: Option<String>,
     handle: tauri::AppHandle<R>,

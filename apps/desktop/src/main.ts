@@ -23,6 +23,9 @@ const progress = /^progress-(\d+)$/.exec(win ?? "");
 // ui-test builds only: M5.5's end-to-end test drives each window
 // (`src/uitest/e2e.ts`); a release build has none of it.
 if (__UI_TEST__) void import("./uitest/e2e").then((test) => test.drive(win));
+// ui-test builds only: the test that opens every window
+// (`src/uitest/windows.ts`); a release build has none of it.
+if (__UI_TEST__) void import("./uitest/windows").then((test) => test.run(win));
 export default progress
   ? mount(ProgressWindow, { target, props: { id: Number(progress[1]) } })
   : mount(

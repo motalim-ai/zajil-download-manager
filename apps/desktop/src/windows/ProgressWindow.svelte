@@ -174,7 +174,7 @@
     }
     try {
       await api.setLimit(id, limited ? Math.round(kb) * 1024 : null);
-      limitSaid = locale.t(running ? "progress-limit-next" : "progress-limit-saved");
+      limitSaid = locale.t(running ? "progress-limit-now" : "progress-limit-saved");
       await load();
     } catch (e) {
       limitSaid = String(e);

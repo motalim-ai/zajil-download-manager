@@ -69,12 +69,7 @@ pub async fn run(engine: Engine, args: BatchArgs) -> ExitCode {
     };
 
     let stop = Stop::new();
-    let on_ctrl_c = stop.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            on_ctrl_c.request();
-        }
-    });
+    crate::stop_on_ctrl_c(stop.clone());
 
     let total = urls.len();
     let outcome = download_all(&engine, &urls, &dir, &stop, &mut |_, _| {}).await;

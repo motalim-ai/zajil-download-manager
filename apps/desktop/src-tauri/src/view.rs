@@ -119,6 +119,9 @@ pub struct Snapshot {
     pub speed_limit: Option<u64>,
     /// Why the queues cannot run now (a damaged queues file), if so.
     pub problem: Option<String>,
+    /// Why the categories file could not be read (#58: the categories
+    /// screen showed an empty list with no reason).
+    pub categories_problem: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -687,6 +690,7 @@ pub fn snapshot(queues: &QueuesFile, categories: &CategoriesFile, live: &Live) -
         categories: category_views(categories),
         speed_limit: queues.settings.speed_limit,
         problem: live.problem(),
+        categories_problem: None,
     }
 }
 

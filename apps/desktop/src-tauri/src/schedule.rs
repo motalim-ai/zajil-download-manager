@@ -135,7 +135,7 @@ pub type SharedAfter = Arc<After>;
 
 /// Opens the schedule window titled `title`, or brings it to the front.
 #[tauri::command]
-pub fn open_schedule<R: tauri::Runtime>(
+pub async fn open_schedule<R: tauri::Runtime>(
     after: State<'_, SharedAfter>,
     title: String,
     handle: tauri::AppHandle<R>,

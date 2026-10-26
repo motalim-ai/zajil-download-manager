@@ -71,6 +71,9 @@ pub enum Refusal {
     /// A user name or password in the URL: a crawl never sends one (a
     /// redirect could carry them, review of #195).
     Credentials,
+    /// Not http or https (review of #195: the engine refuses the others
+    /// too, but the scope says so first).
+    Scheme,
 }
 
 impl fmt::Display for Refusal {
@@ -81,6 +84,7 @@ impl fmt::Display for Refusal {
             Refusal::Downgrade => "a redirect from https to http",
             Refusal::PathTrap => "a path that repeats itself",
             Refusal::Credentials => "a user name or password in the link",
+            Refusal::Scheme => "not an http or https link",
         })
     }
 }
@@ -144,12 +148,14 @@ impl Scope {
     }
 
     /// Whether `url` is of the site: the start's origin, and its https
-    /// twin when the start is plain http.
+    /// twin when the start is plain http on the default port (review of
+    /// #195: `http://host:8080` says nothing about `https://host`).
     pub fn in_site(&self, url: &Url) -> bool {
         if origin(url) == origin(&self.start) {
             return true;
         }
         self.start.scheme() == "http"
+            && self.start.port().is_none()
             && url.scheme() == "https"
             && url.host_str() == self.start.host_str()
             && url.port().is_none()
@@ -179,6 +185,9 @@ impl Scope {
         redirected_from: Option<&Url>,
         any_origin_file: bool,
     ) -> Result<Place, Refusal> {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(Refusal::Scheme);
+        }
         if !url.username().is_empty() || url.password().is_some() {
             return Err(Refusal::Credentials);
         }
@@ -281,6 +290,34 @@ mod tests {
             s.check(&url("http://example.com/a"), true, None, false),
             Err(Refusal::OtherSite)
         );
+        // A start on another port has no twin (review of #195).
+        let s = scope("http://example.com:8080/", &[], false);
+        for other in ["https://example.com/a", "https://example.com:8080/a"] {
+            assert_eq!(
+                s.check(&url(other), true, None, false),
+                Err(Refusal::OtherSite),
+                "{other}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_http_and_https_are_asked_for() {
+        let s = scope("https://example.com/", &[], true);
+        for other in [
+            "ftp://example.com/x.zip",
+            "file:///etc/passwd",
+            "data:text/plain,x",
+            "ws://example.com/x",
+        ] {
+            for as_page in [true, false] {
+                assert_eq!(
+                    s.check(&url(other), as_page, None, true),
+                    Err(Refusal::Scheme),
+                    "{other}"
+                );
+            }
+        }
     }
 
     #[test]

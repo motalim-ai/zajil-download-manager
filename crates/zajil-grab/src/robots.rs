@@ -50,7 +50,11 @@ impl Robots {
     /// else the `*` groups, else none. Only the first
     /// [`MAX_ROBOTS_BYTES`] are read.
     pub fn parse(body: &[u8]) -> Self {
-        let body = &body[..body.len().min(MAX_ROBOTS_BYTES)];
+        let body = if body.len() > MAX_ROBOTS_BYTES {
+            without_cut_line(&body[..MAX_ROBOTS_BYTES])
+        } else {
+            body
+        };
         let text = String::from_utf8_lossy(body);
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
 
@@ -153,13 +157,27 @@ impl Robots {
     }
 }
 
-/// `path` with the same percent-encoding as every other: characters that
-/// need no encoding are decoded (`%7E` → `~`), the others are encoded with
-/// capital hex digits (`%c3%a9` and `é` → `%C3%A9`). `*` and `$` stay, as
-/// they may be wildcards.
+/// `body` without its last line when that line was cut (no line end after
+/// it): `Allow: /private/pub` cut to `Allow: /` would allow everything
+/// (review of #195).
+pub fn without_cut_line(body: &[u8]) -> &[u8] {
+    match body.iter().rposition(|b| matches!(b, b'\n' | b'\r')) {
+        Some(end) => &body[..=end],
+        None => &[],
+    }
+}
+
+/// `path` with the same percent-encoding as every other (RFC 3986 §6.2.2):
+/// an escaped unreserved character is decoded (`%7E` → `~`); any other
+/// escape stays, with capital hex digits (`%2f` → `%2F`: an escaped `/` or
+/// `?` is not a path or query separator, RFC 9309 §2.2.2); and what needs
+/// encoding is encoded (`é` → `%C3%A9`). `*` and `$` stay, as they may be
+/// wildcards. A `'` in the query is `%27`, as the URL parser writes it in
+/// every link (review of #227).
 fn normalise(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut out = String::with_capacity(path.len());
+    let mut in_query = false;
     let mut i = 0;
     while i < bytes.len() {
         let mut byte = bytes[i];
@@ -174,9 +192,12 @@ fn normalise(path: &str) -> String {
             escaped = true;
             i += 2;
         }
-        let plain = byte.is_ascii_alphanumeric()
-            || b"-._~!&'()+,;=:@/?".contains(&byte)
-            || (!escaped && matches!(byte, b'*' | b'$' | b'%'));
+        let unreserved = byte.is_ascii_alphanumeric() || b"-._~".contains(&byte);
+        let plain = unreserved
+            || (!escaped
+                && !(in_query && byte == b'\'')
+                && (b"!&'()+,;=:@/?".contains(&byte) || matches!(byte, b'*' | b'$' | b'%')));
+        in_query |= !escaped && byte == b'?';
         if plain {
             out.push(char::from(byte));
         } else {
@@ -193,39 +214,36 @@ fn hex(b: u8) -> Option<u8> {
 
 /// Whether the rule `pattern` matches `path` from its start: `*` is any
 /// run of characters, and a final `$` ends the match at the end of the
-/// path; otherwise the pattern is a prefix.
+/// path; otherwise the pattern is a prefix. The pieces between the `*`s
+/// are found one after the other, each as early as it can be: linear in
+/// the path for each piece, so a long or hostile rule costs no more than a
+/// search (review of #195: backtracking was O(len(pattern) * len(path))).
+/// Both are normalised (ASCII only), so slicing never splits a character.
 fn matches(pattern: &str, path: &str) -> bool {
     let (pattern, anchored) = match pattern.strip_suffix('$') {
         Some(p) => (p, true),
         None => (pattern, false),
     };
-    let (p, s) = (pattern.as_bytes(), path.as_bytes());
-    // Greedy wildcard matching with backtracking to the last `*`: linear
-    // in practice, O(len(p) * len(s)) at worst.
-    let (mut i, mut j) = (0, 0);
-    let mut star: Option<(usize, usize)> = None;
-    loop {
-        if i == p.len() {
-            if !anchored || j == s.len() {
-                return true;
-            }
-        } else if p[i] == b'*' {
-            star = Some((i, j));
-            i += 1;
-            continue;
-        } else if j < s.len() && p[i] == s[j] {
-            i += 1;
-            j += 1;
-            continue;
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or("");
+    let Some(mut rest) = path.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    let Some((last, middle)) = pieces.split_last() else {
+        // No `*`: a prefix, or the whole path when anchored.
+        return !anchored || rest.is_empty();
+    };
+    for piece in middle {
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
         }
-        match star {
-            Some((si, sj)) if sj < s.len() => {
-                star = Some((si, sj + 1));
-                i = si + 1;
-                j = sj + 1;
-            }
-            _ => return false,
-        }
+    }
+    if anchored {
+        rest.ends_with(last)
+    } else {
+        rest.contains(last)
     }
 }
 
@@ -321,6 +339,79 @@ mod tests {
         assert!(!r.allows("/~user/files"));
         let r = robots("User-agent: *\nDisallow: /ملفات/\n");
         assert!(!r.allows("/%D9%85%D9%84%D9%81%D8%A7%D8%AA/a.zip"));
+    }
+
+    /// RFC 9309 §2.2.2: an escaped `/` or `?` is not a separator, so it is
+    /// not decoded (review of #195: `/private%2Fpub` was allowed by
+    /// `Allow: /private/pub`).
+    #[test]
+    fn escaped_separators_stay_escaped() {
+        // The URL parser writes `'` in a query as `%27`: the rule must too.
+        let r = robots("User-agent: *\nDisallow: /search?q='x'\n");
+        assert!(!r.allows("/search?q=%27x%27"));
+        let r = robots("User-agent: *\nDisallow: /it's\n");
+        assert!(!r.allows("/it's"), "a `'` in the path stays as it is");
+        let r = robots("User-agent: *\nDisallow: /private\nAllow: /private/pub\n");
+        assert!(r.allows("/private/pub/a.zip"));
+        assert!(!r.allows("/private%2Fpub/a.zip"));
+        assert!(!r.allows("/private%2fpub/a.zip"));
+        let r = robots("User-agent: *\nDisallow: /a%3Fb\n");
+        assert!(!r.allows("/a%3fb"));
+        assert!(r.allows("/a?b"));
+    }
+
+    /// A file cut at the size limit loses its cut last line (review of
+    /// #195): `Allow: /private/pub` cut to `Allow: /` would win a tie
+    /// against `Disallow: /`.
+    #[test]
+    fn a_cut_last_line_is_dropped() {
+        let mut text = String::from("User-agent: *\nDisallow: /\n");
+        // Cut right after `Allow: /`, which would win its tie with
+        // `Disallow: /` (review of #227: the cut was one byte short).
+        text.push_str(&"#".repeat(MAX_ROBOTS_BYTES - text.len() - 1 - "Allow: /".len()));
+        text.push('\n');
+        text.push_str("Allow: /private/pub\n");
+        assert!(text[..MAX_ROBOTS_BYTES].ends_with("\nAllow: /"));
+        let r = robots(&text);
+        assert!(!r.allows("/anything"), "the cut `Allow: /` was read");
+        assert_eq!(without_cut_line(b"a\nb\nAll"), b"a\nb\n");
+        assert_eq!(without_cut_line(b"no line end"), b"");
+    }
+
+    /// Wildcards match as before: pieces in order, `$` at the end.
+    #[test]
+    fn wildcard_pieces_are_found_in_order() {
+        assert!(matches("/a*b*c", "/aXbYc/more"));
+        assert!(!matches("/a*c*b", "/aXbYc"));
+        assert!(matches("/*.pdf$", "/docs/x.pdf"));
+        assert!(!matches("/*.pdf$", "/docs/x.pdf?y"));
+        assert!(matches("/a**b", "/ab"));
+        assert!(matches("/a$", "/a"));
+        assert!(!matches("/a$", "/ab"));
+        assert!(matches("*", "/anything"));
+    }
+
+    /// A hostile robots.txt: long rules with many `*`, against long paths,
+    /// costs no more than a search each.
+    #[test]
+    fn long_hostile_rules_stay_fast() {
+        // One `*` and a long piece that almost matches everywhere: slow
+        // for a matcher that tries every length of the `*` (review of
+        // #227: `/*a*a…` was not).
+        let rule = format!("/*{}b", "a".repeat(2000));
+        let mut text = String::from("User-agent: *\n");
+        for _ in 0..100 {
+            text.push_str(&format!("Disallow: {rule}\n"));
+        }
+        let r = robots(&text);
+        let path = format!("/{}", "a".repeat(4000));
+        let started = std::time::Instant::now();
+        assert!(r.allows(&path));
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

@@ -89,17 +89,36 @@ async fn a_download_waiting_for_its_site_stops_when_asked() {
     let engine = engine(Some(1));
     let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let holder = Stop::new();
+    let started = std::time::Instant::now();
+    // What the slow one has written: a new download stopped before its
+    // first byte leaves nothing at all, by design (#224: the server's log
+    // counts what it handed to its buffers, not what the client wrote).
+    let written = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let slow = {
-        let (engine, url, dir, stop) = (
+        let (engine, url, dir, stop, seen) = (
             engine.clone(),
             server.url("/slow.bin"),
             a.path().to_owned(),
             holder.clone(),
+            written.clone(),
         );
-        tokio::spawn(async move { engine.download_until(&url, &dir, &stop, &mut |_| {}).await })
+        tokio::spawn(async move {
+            engine
+                .download_until(&url, &dir, &stop, &mut |event| {
+                    if let zajil_core::Event::Progress { done, .. } = event {
+                        seen.store(done, std::sync::atomic::Ordering::Relaxed);
+                    }
+                })
+                .await
+        })
     };
-    // Until the slow one has its slot and is sending.
-    while server.gets("/slow.bin").is_empty() {
+    // Until the slow one has its slot and has written some of the file.
+    let deadline = started + Duration::from_secs(20);
+    while written.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the slow download wrote nothing in 20 s"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let stop = Stop::new();
@@ -124,12 +143,18 @@ async fn a_download_waiting_for_its_site_stops_when_asked() {
 
     // The slow one, stopped, resumes later: while another holds the slot,
     // its resume waits, and stops resumable.
+    let asked_at = started.elapsed();
     holder.request();
+    let result = slow.await.unwrap();
     let Err(Error::Stopped {
         state_file: Some(state_file),
-    }) = slow.await.unwrap()
+    }) = result
     else {
-        panic!("the slow download did not stop with a state file");
+        panic!(
+            "the slow download did not stop with a state file: {result:?}; it had written {} bytes; stop asked at {asked_at:?}, ended at {:?}",
+            written.load(std::sync::atomic::Ordering::Relaxed),
+            started.elapsed()
+        );
     };
     let busy = {
         let (engine, url, dir) = (

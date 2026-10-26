@@ -16,6 +16,12 @@
 //! which is written down instead of opening a file manager. Each window
 //! says its step with [`ui_test_step`], into `<folder>/e2e-<step>.json`
 //! (M5.5's end-to-end test, `tests/end_to_end.rs`).
+//!
+//! `zajil-desktop --ui-test-windows --ui-test-out <folder>`: not a scene;
+//! the main window opens every window its buttons open, through the page's
+//! own calls, and each window says its page ran, into
+//! `<folder>/loaded-<label>.json` (`src/uitest/windows.ts`,
+//! `tests/windows_open.rs`).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +37,8 @@ pub struct UiTest {
     e2e: Option<String>,
     /// The steps said so far, which numbers them.
     steps: AtomicU64,
+    /// This run opens every window and says which pages ran.
+    windows: bool,
 }
 
 impl UiTest {
@@ -46,6 +54,7 @@ impl UiTest {
             out: value("--ui-test-out").map(PathBuf::from),
             e2e: value("--ui-test-e2e"),
             steps: AtomicU64::new(0),
+            windows: args.iter().any(|a| a == "--ui-test-windows"),
         }
     }
 
@@ -127,6 +136,44 @@ pub fn ui_test_step(
     detail: serde_json::Value,
 ) -> Result<(), String> {
     test.step(&step, detail)
+}
+
+/// This run opens every window (`--ui-test-windows`).
+#[tauri::command]
+pub fn ui_test_windows(test: State<'_, UiTest>) -> bool {
+    test.windows
+}
+
+/// Window `label`'s page ran (or, with `why`, opening it was refused); the
+/// main window hears it, and opens the next one.
+#[tauri::command]
+pub fn ui_test_loaded<R: tauri::Runtime>(
+    test: State<'_, UiTest>,
+    label: String,
+    why: Option<String>,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let Some(out) = test.out.as_ref().filter(|_| test.windows) else {
+        return Ok(());
+    };
+    // A file name of its own: a window's label.
+    if label.is_empty()
+        || !label
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err(format!("not a window: {label}"));
+    }
+    std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    let text = serde_json::json!({ "label": label, "why": why }).to_string();
+    // Written then renamed, so the test never reads half a file.
+    let tmp = out.join(format!("loaded-{label}.json.tmp"));
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, out.join(format!("loaded-{label}.json"))).map_err(|e| e.to_string())?;
+    use tauri::Emitter;
+    handle
+        .emit_to("main", "ui-test-loaded", label)
+        .map_err(|e| e.to_string())
 }
 
 /// Writes what the page reports (where it drew the rows, the language,
@@ -338,6 +385,7 @@ pub fn demo_snapshot() -> Snapshot {
             .collect(),
         speed_limit: None,
         problem: None,
+        categories_problem: None,
     }
 }
 

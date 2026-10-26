@@ -5,6 +5,7 @@
   import { nameDir } from "../fname";
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
+  import { categoryName as nameOf } from "../categoryName";
   import { probeSentence, sizeText } from "../probeText";
   import { chosenFolder } from "../addFolder";
   import type { ProbeView } from "../bindings/ProbeView";
@@ -80,7 +81,7 @@
   const page = $derived(probe?.page === true);
 
   // The user's own name, else the translated built-in one (as the sidebar).
-  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? locale.t(`category-${id}`);
+  const categoryName = (id: string) => nameOf(id, categories.find((c) => c.id === id)?.name, (k) => locale.t(k));
   const extension = $derived((/\.([^.]+)$/.exec(probe?.name ?? "")?.[1] ?? "").toUpperCase());
 
   // The name and the description as the user leaves them (#103, #95).
