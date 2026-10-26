@@ -10,6 +10,7 @@
   import type { IntegrationView } from "../bindings/IntegrationView";
   import CompleteSetting from "./CompleteSetting.svelte";
   import UpdateSetting from "./UpdateSetting.svelte";
+  import SiteLimitsSetting from "./SiteLimitsSetting.svelte";
 
   let {
     settings,
@@ -57,6 +58,7 @@
       notifications: settings.notifications,
       clipboard: settings.clipboard,
       update_check: settings.update_check,
+      site_connections: settings.site_connections,
       speed_limit: settings.speed_limit,
       ...patch,
     });
@@ -224,6 +226,11 @@
         max: num(locale.lang, locale.digits, settings.max_connections, 0),
       })}
     </p>
+  </fieldset>
+
+  <fieldset>
+    <legend>{locale.t("sites-title")}</legend>
+    <SiteLimitsSetting list={settings.site_connections} onsave={(list) => change({ site_connections: list })} />
   </fieldset>
 
   <fieldset>

@@ -493,6 +493,18 @@ update-setting-hint = Only asks GitHub; nothing is downloaded.
 ## حد كل موقع
 
 status-waiting-site = Site busy
+sites-title = Connections per site
+sites-hint = No limit by default. A site in the list covers its subdomains, and its number is shared by all its downloads.
+sites-empty = No sites in the list: no site has a limit.
+sites-site = Site
+sites-connections = Connections
+sites-add = Add a site
+sites-remove = Remove the site
+sites-save = Save the list
+sites-bad-site = Not a site name:
+sites-twice = Listed twice:
+sites-bad-number = Connections out of range for this site:
+sites-too-many = The list is longer than allowed.
 
 ## Video (M6)
 

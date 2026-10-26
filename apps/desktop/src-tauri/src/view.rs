@@ -305,6 +305,8 @@ pub struct SettingsView {
     pub clipboard: bool,
     /// Look for a newer Zajil at start (#124).
     pub update_check: bool,
+    /// The sites with a connection limit of their own (#165).
+    pub site_connections: Vec<SiteView>,
     /// Bytes per second for all downloads together; `null`: no limit.
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
@@ -322,8 +324,19 @@ pub struct SettingsChange {
     pub notifications: bool,
     pub clipboard: bool,
     pub update_check: bool,
+    pub site_connections: Vec<SiteView>,
     #[ts(type = "number | null")]
     pub speed_limit: Option<u64>,
+}
+
+/// One site's connection limit (#165), as the settings screen edits it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SiteView {
+    /// Such as `example.com`, its subdomains too.
+    pub site: String,
+    /// The most connections at once to it.
+    pub connections: u32,
 }
 
 /// The browser integration (M5): `zajil-host` registered with each
@@ -407,6 +420,14 @@ pub fn settings(file: &SettingsFile, speed_limit: Option<u64>, system_dir: &Path
         notifications: file.notifications,
         clipboard: file.clipboard,
         update_check: file.update_check,
+        site_connections: file
+            .site_connections
+            .iter()
+            .map(|s| SiteView {
+                site: s.site.clone(),
+                connections: s.connections,
+            })
+            .collect(),
         speed_limit,
     }
 }
@@ -431,6 +452,14 @@ pub fn apply_settings(file: &mut SettingsFile, change: &SettingsChange) {
     file.notifications = change.notifications;
     file.clipboard = change.clipboard;
     file.update_check = change.update_check;
+    file.site_connections = change
+        .site_connections
+        .iter()
+        .map(|s| zajil_core::settings::SiteConnections {
+            site: s.site.clone(),
+            connections: s.connections,
+        })
+        .collect();
 }
 
 /// The categories as the page edits them, back into categories. Every
@@ -907,10 +936,72 @@ mod tests {
             notifications: shown.notifications,
             clipboard: shown.clipboard,
             update_check: false,
+            site_connections: vec![SiteView {
+                site: "example.com".into(),
+                connections: 2,
+            }],
             speed_limit: None,
         };
         apply_settings(&mut file, &change);
         assert!(!file.update_check);
         assert!(!settings(&file, None, Path::new("/d")).update_check);
+    }
+
+    /// #165: the list saved from the screen reaches the engine: a site's
+    /// limit, and its change, apply to an engine that already runs.
+    #[test]
+    fn the_site_list_reaches_the_engine() {
+        let mut file = SettingsFile::default();
+        let shown = settings(&file, None, Path::new("/d"));
+        assert!(shown.site_connections.is_empty());
+        let change = |list: Vec<SiteView>| SettingsChange {
+            language: LanguageView::Ar,
+            theme: ThemeView::System,
+            digits: DigitsView::Latn,
+            download_dir: None,
+            connections: 8,
+            notifications: true,
+            clipboard: false,
+            update_check: true,
+            site_connections: list,
+            speed_limit: None,
+        };
+        let site = |name: &str, n| SiteView {
+            site: name.into(),
+            connections: n,
+        };
+        apply_settings(&mut file, &change(vec![site("example.com", 2)]));
+        assert_eq!(file.check(), Ok(()));
+        let engine = zajil_core::Engine::new(zajil_core::Options::default())
+            .unwrap()
+            .with_site_limits(zajil_core::sites::SiteLimits::from_settings(&file));
+        let running = engine.clone();
+        assert_eq!(
+            engine.site_room("https://dl.example.com/f").map(|r| r.1),
+            Some(2)
+        );
+        apply_settings(
+            &mut file,
+            &change(vec![site("example.com", 5), site("other.test", 1)]),
+        );
+        engine.site_limits().set_from_settings(&file);
+        // The clone made before the change sees it too.
+        assert_eq!(
+            running.site_room("https://example.com/f").map(|r| r.1),
+            Some(5)
+        );
+        assert_eq!(
+            running.site_room("https://other.test/f").map(|r| r.1),
+            Some(1)
+        );
+        assert_eq!(
+            settings(&file, None, Path::new("/d"))
+                .site_connections
+                .len(),
+            2
+        );
+        // What the file's own check refuses never reaches the engine.
+        apply_settings(&mut file, &change(vec![site("http://bad/", 2)]));
+        assert!(file.check().is_err());
     }
 }

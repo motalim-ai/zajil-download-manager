@@ -127,8 +127,16 @@ pub fn run() {
         .unwrap_or(zajil_core::DEFAULT_CONNECTIONS);
     // Off with a damaged settings file, as by default.
     let clipboard = loaded.as_ref().is_ok_and(|s| s.clipboard);
+    // The per-site connection limits of the settings (#165): none with a
+    // damaged file, as by default.
+    let sites = loaded
+        .as_ref()
+        .map(zajil_core::sites::SiteLimits::from_settings)
+        .unwrap_or_default();
     let app = App {
-        engine: Engine::new(Options::default()).expect("the engine starts"),
+        engine: Engine::new(Options::default())
+            .expect("the engine starts")
+            .with_site_limits(sites),
         store: QueueStore::new(&data),
         categories: CategoryStore::new(&data),
         settings,
@@ -3849,12 +3857,13 @@ async fn save_settings<R: tauri::Runtime>(
             &app.system_download_dir,
         ));
     }
-    let (settings, store, system, connections, clipboard) = (
+    let (settings, store, system, connections, clipboard, engine) = (
         app.settings.clone(),
         app.store.clone(),
         app.system_download_dir.clone(),
         app.connections.clone(),
         app.clipboard.clone(),
+        app.engine.clone(),
     );
     let saved = tokio::task::spawn_blocking(move || {
         if change.speed_limit == Some(0) {
@@ -3874,6 +3883,9 @@ async fn save_settings<R: tauri::Runtime>(
             .map_err(blocking_err)?;
         connections.store(file.connections as usize, Ordering::Relaxed);
         clipboard.store(file.clipboard, Ordering::Relaxed);
+        // The site limits, in place: the running downloads and the queue
+        // runner's engine see them at once (#165).
+        engine.site_limits().set_from_settings(&file);
         Ok(view::settings(&file, change.speed_limit, &system))
     })
     .await

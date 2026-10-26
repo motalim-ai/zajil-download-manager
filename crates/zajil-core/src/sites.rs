@@ -22,11 +22,30 @@ use crate::{Error, Stop, Url};
 /// The most sites with a limit.
 pub const MAX_SITES: usize = 100;
 
-/// The per-site limits an [`crate::Engine`] counts against.
+/// The per-site limits an [`crate::Engine`] counts against. Shared by the
+/// engine and its clones, and changed in place ([`SiteLimits::set`]), so a
+/// change reaches the downloads already running (#165, #170).
 #[derive(Debug, Default)]
 pub struct SiteLimits {
     /// `(site, its counter, its limit)`, the site lowercase.
-    sites: Vec<(String, Arc<Semaphore>, usize)>,
+    sites: std::sync::RwLock<Vec<(String, Arc<Semaphore>, usize)>>,
+}
+
+/// `(site, connections)` pairs as kept: lowercase, at most [`MAX_SITES`],
+/// 0 counting as 1, a site listed twice keeping its first entry.
+fn plain<'a>(list: impl IntoIterator<Item = (&'a str, u32)>) -> Vec<(String, usize)> {
+    let mut kept: Vec<(String, usize)> = Vec::new();
+    for (site, connections) in list.into_iter().take(MAX_SITES) {
+        let site = site.trim().trim_end_matches('.').to_ascii_lowercase();
+        if site.is_empty() || kept.iter().any(|(s, _)| *s == site) {
+            continue;
+        }
+        kept.push((
+            site,
+            (connections.max(1) as usize).min(crate::MAX_CONNECTIONS),
+        ));
+    }
+    kept
 }
 
 impl SiteLimits {
@@ -34,16 +53,53 @@ impl SiteLimits {
     /// `site_connections` (checked there). A connection count of 0 counts
     /// as 1, and a site listed twice keeps its first entry.
     pub fn new<'a>(list: impl IntoIterator<Item = (&'a str, u32)>) -> Self {
-        let mut sites: Vec<(String, Arc<Semaphore>, usize)> = Vec::new();
-        for (site, connections) in list.into_iter().take(MAX_SITES) {
-            let site = site.trim().trim_end_matches('.').to_ascii_lowercase();
-            if site.is_empty() || sites.iter().any(|(s, _, _)| *s == site) {
-                continue;
-            }
-            let n = (connections.max(1) as usize).min(crate::MAX_CONNECTIONS);
-            sites.push((site, Arc::new(Semaphore::new(n)), n));
+        let sites = plain(list)
+            .into_iter()
+            .map(|(site, n)| (site, Arc::new(Semaphore::new(n)), n))
+            .collect();
+        SiteLimits {
+            sites: std::sync::RwLock::new(sites),
         }
-        SiteLimits { sites }
+    }
+
+    /// Changes the limits to `list`, in place (#165; #170, item 2): a site
+    /// that stays keeps its counter, so its running downloads and the new
+    /// ones are counted together, never twice its limit. A higher limit
+    /// gives its slots at once; a lower one takes back the free ones now
+    /// and the others as running downloads give them back (in the
+    /// background, on the current runtime). A site no longer listed has no
+    /// limit for new downloads; one newly listed starts with all its
+    /// slots.
+    pub fn set<'a>(&self, list: impl IntoIterator<Item = (&'a str, u32)>) {
+        let mut sites = self.sites.write().unwrap_or_else(|e| e.into_inner());
+        let next = plain(list)
+            .into_iter()
+            .map(
+                |(site, n)| match sites.iter().find(|(s, _, _)| *s == site) {
+                    Some((_, counter, old)) => {
+                        let counter = counter.clone();
+                        if n > *old {
+                            counter.add_permits(n - old);
+                        } else if n < *old {
+                            let owed = (old - n).saturating_sub(counter.forget_permits(old - n));
+                            take_back(&counter, owed);
+                        }
+                        (site, counter, n)
+                    }
+                    None => (site, Arc::new(Semaphore::new(n)), n),
+                },
+            )
+            .collect();
+        *sites = next;
+    }
+
+    /// [`SiteLimits::set`] from a settings file.
+    pub fn set_from_settings(&self, file: &crate::settings::SettingsFile) {
+        self.set(
+            file.site_connections
+                .iter()
+                .map(|s| (s.site.as_str(), s.connections)),
+        );
     }
 
     /// The limits of a settings file.
@@ -65,6 +121,8 @@ impl SiteLimits {
     pub fn entry_for(&self, url: &Url) -> Option<(Arc<Semaphore>, usize)> {
         let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
         self.sites
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .filter(|(site, _, _)| {
                 host == *site
@@ -74,6 +132,26 @@ impl SiteLimits {
             })
             .max_by_key(|(site, _, _)| site.len())
             .map(|(_, counter, limit)| (counter.clone(), *limit))
+    }
+}
+
+/// Takes `owed` slots of `counter` back as they are given back, and keeps
+/// them: a lowered limit reached once the running downloads return their
+/// slots. Without a runtime (a test), only the free slots were taken.
+fn take_back(counter: &Arc<Semaphore>, owed: usize) {
+    let Ok(owed) = u32::try_from(owed) else {
+        return;
+    };
+    if owed == 0 {
+        return;
+    }
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        let counter = counter.clone();
+        runtime.spawn(async move {
+            if let Ok(slots) = counter.acquire_many_owned(owed).await {
+                slots.forget();
+            }
+        });
     }
 }
 
@@ -174,5 +252,51 @@ mod tests {
             Err(Error::Stopped { state_file: None })
         ));
         assert!(take_slot(None, &stop).await.unwrap().is_none());
+    }
+
+    /// #165, #170 item 2: a changed list keeps a site's counter, so the
+    /// downloads running and the new ones are counted together; a higher
+    /// limit gives its slots at once, a lower one takes back the free ones
+    /// now and the busy ones as they come back.
+    #[tokio::test]
+    async fn a_changed_list_keeps_each_site_s_counter() {
+        let limits = SiteLimits::new([("example.com", 2)]);
+        let counter = limits.counter_for(&url("https://example.com/a")).unwrap();
+        let held = counter.clone().acquire_owned().await.unwrap();
+        limits.set([("example.com", 4), ("other.test", 1)]);
+        let same = limits
+            .counter_for(&url("https://dl.example.com/b"))
+            .unwrap();
+        assert!(Arc::ptr_eq(&counter, &same));
+        assert_eq!(same.available_permits(), 3, "one held, three free");
+        assert_eq!(
+            limits
+                .counter_for(&url("https://other.test/c"))
+                .unwrap()
+                .available_permits(),
+            1
+        );
+        // Down to 1, one slot held: the three free ones go now, and the
+        // held one, once given back, comes back as the only one.
+        limits.set([("example.com", 1)]);
+        assert_eq!(same.available_permits(), 0);
+        drop(held);
+        assert_eq!(same.available_permits(), 1);
+        // Down to 1 from 2 with both held: one is taken back when given.
+        limits.set([("example.com", 2)]);
+        let a = same.clone().acquire_owned().await.unwrap();
+        let b = same.clone().acquire_owned().await.unwrap();
+        limits.set([("example.com", 1)]);
+        drop(a);
+        tokio::task::yield_now().await;
+        drop(b);
+        // The taker runs on this runtime: let it.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(same.available_permits(), 1);
+        // No longer listed: no limit for new downloads.
+        limits.set(std::iter::empty());
+        assert!(limits.counter_for(&url("https://example.com/a")).is_none());
     }
 }
