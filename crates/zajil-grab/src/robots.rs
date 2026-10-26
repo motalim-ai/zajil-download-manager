@@ -172,10 +172,12 @@ pub fn without_cut_line(body: &[u8]) -> &[u8] {
 /// escape stays, with capital hex digits (`%2f` → `%2F`: an escaped `/` or
 /// `?` is not a path or query separator, RFC 9309 §2.2.2); and what needs
 /// encoding is encoded (`é` → `%C3%A9`). `*` and `$` stay, as they may be
-/// wildcards.
+/// wildcards. A `'` in the query is `%27`, as the URL parser writes it in
+/// every link (review of #227).
 fn normalise(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut out = String::with_capacity(path.len());
+    let mut in_query = false;
     let mut i = 0;
     while i < bytes.len() {
         let mut byte = bytes[i];
@@ -193,7 +195,9 @@ fn normalise(path: &str) -> String {
         let unreserved = byte.is_ascii_alphanumeric() || b"-._~".contains(&byte);
         let plain = unreserved
             || (!escaped
+                && !(in_query && byte == b'\'')
                 && (b"!&'()+,;=:@/?".contains(&byte) || matches!(byte, b'*' | b'$' | b'%')));
+        in_query |= !escaped && byte == b'?';
         if plain {
             out.push(char::from(byte));
         } else {
@@ -342,6 +346,11 @@ mod tests {
     /// `Allow: /private/pub`).
     #[test]
     fn escaped_separators_stay_escaped() {
+        // The URL parser writes `'` in a query as `%27`: the rule must too.
+        let r = robots("User-agent: *\nDisallow: /search?q='x'\n");
+        assert!(!r.allows("/search?q=%27x%27"));
+        let r = robots("User-agent: *\nDisallow: /it's\n");
+        assert!(!r.allows("/it's"), "a `'` in the path stays as it is");
         let r = robots("User-agent: *\nDisallow: /private\nAllow: /private/pub\n");
         assert!(r.allows("/private/pub/a.zip"));
         assert!(!r.allows("/private%2Fpub/a.zip"));
@@ -357,10 +366,12 @@ mod tests {
     #[test]
     fn a_cut_last_line_is_dropped() {
         let mut text = String::from("User-agent: *\nDisallow: /\n");
-        text.push_str(&"#".repeat(MAX_ROBOTS_BYTES - text.len() - 8));
+        // Cut right after `Allow: /`, which would win its tie with
+        // `Disallow: /` (review of #227: the cut was one byte short).
+        text.push_str(&"#".repeat(MAX_ROBOTS_BYTES - text.len() - 1 - "Allow: /".len()));
         text.push('\n');
         text.push_str("Allow: /private/pub\n");
-        assert!(text.len() > MAX_ROBOTS_BYTES);
+        assert!(text[..MAX_ROBOTS_BYTES].ends_with("\nAllow: /"));
         let r = robots(&text);
         assert!(!r.allows("/anything"), "the cut `Allow: /` was read");
         assert_eq!(without_cut_line(b"a\nb\nAll"), b"a\nb\n");
@@ -384,10 +395,13 @@ mod tests {
     /// costs no more than a search each.
     #[test]
     fn long_hostile_rules_stay_fast() {
-        let rule = format!("/{}", "*a".repeat(2000));
+        // One `*` and a long piece that almost matches everywhere: slow
+        // for a matcher that tries every length of the `*` (review of
+        // #227: `/*a*a…` was not).
+        let rule = format!("/*{}b", "a".repeat(2000));
         let mut text = String::from("User-agent: *\n");
         for _ in 0..100 {
-            text.push_str(&format!("Disallow: {rule}b\n"));
+            text.push_str(&format!("Disallow: {rule}\n"));
         }
         let r = robots(&text);
         let path = format!("/{}", "a".repeat(4000));
