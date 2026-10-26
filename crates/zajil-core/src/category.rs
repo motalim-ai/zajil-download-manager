@@ -311,14 +311,15 @@ pub const RUNS_CODE: &[&str] = &[
     "exe", "msi", "msix", "msixbundle", "msp", "msu", "appx", "appxbundle", "com", "pif", "scr",
     "cpl", "bat", "cmd", "ps1", "psm1", "psd1", "ps1xml", "vbs", "vbe", "js", "jse", "wsf",
     "wsh", "wsc", "sct", "hta", "chm", "msc", "inf", "reg", "lnk", "url", "scf", "cab",
-    "diagcab", "library-ms", "appref-ms", "application", "settingcontent-ms",
+    "diagcab", "library-ms", "appref-ms", "application", "settingcontent-ms", "website", "mht",
+    "mhtml",
     // Java, macOS and Unix
-    "jar", "dmg", "pkg", "mpkg", "app", "command", "terminal", "tool", "workflow", "scpt",
+    "jar", "jnlp", "dmg", "pkg", "mpkg", "app", "command", "terminal", "tool", "workflow", "scpt",
     "fileloc", "sh", "run", "desktop", "appimage", "deb", "rpm",
     // Office and other documents that can hold macros or run code
     "doc", "dot", "docm", "dotm", "wll", "xls", "xlt", "xla", "xll", "xlsm", "xltm", "xlsb",
     "xlam", "ppt", "pot", "pps", "ppa", "pptm", "potm", "ppsm", "ppam", "sldm", "one", "rtf",
-    "mdb", "accdb", "accde", "pub", "vsd", "vsdm",
+    "mdb", "accdb", "accde", "pub", "vsd", "vsdm", "iqy",
     // Disk images
     "iso", "img", "vhd", "vhdx",
 ];
@@ -704,6 +705,35 @@ mod tests {
             "exe",
             "",
         ] {
+            assert!(!runs_code(name), "{name}");
+        }
+    }
+
+    /// Owner's decision on #152: these run code (or open what does) when
+    /// opened; a web page (`.html`, `.xhtml`, `.xml`) does not count: the
+    /// mark of a file from the internet is enough, and the browser keeps
+    /// it apart.
+    #[test]
+    fn the_owner_s_list_of_152_runs_code_and_web_pages_do_not() {
+        for ext in [
+            "hta",
+            "mht",
+            "mhtml",
+            "url",
+            "website",
+            "lnk",
+            "scf",
+            "library-ms",
+            "settingcontent-ms",
+            "appref-ms",
+            "jnlp",
+            "xll",
+            "iqy",
+        ] {
+            assert!(runs_code(&format!("a.{ext}")), "{ext}");
+            assert!(runs_code(&format!("A.{}", ext.to_uppercase())), "{ext}");
+        }
+        for name in ["view.html", "page.xhtml", "feed.xml", "page.htm"] {
             assert!(!runs_code(name), "{name}");
         }
     }
