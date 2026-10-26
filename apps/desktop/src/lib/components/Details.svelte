@@ -49,6 +49,9 @@
           <button class="btn" onclick={onresume}><Icon name="down" />{locale.t("add-start")}</button>
         </div>
       {/if}
+      {#if d.waits_for_site}
+        <div class="browser" role="status"><Icon name="list-end" /><span>{locale.t("status-waiting-site-hint")}</span></div>
+      {/if}
       {#if d.waits_for_browser}
         <div class="browser" role="status">
           <Icon name="link" />

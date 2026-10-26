@@ -185,6 +185,7 @@
     if (!d) return "…";
     if (d.needs_ok) return locale.t("status-needs-ok");
     if (d.waits_for_browser) return locale.t("status-open-browser");
+    if (d.waits_for_site) return locale.t("status-waiting-site");
     if (d.status === "active") return locale.t("progress-receiving");
     if (d.status === "failed" && d.error) return locale.t("details-failed", { error: d.error });
     return locale.t(`status-${d.status}`);

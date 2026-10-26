@@ -81,6 +81,14 @@ pub enum QueueEvent {
         url: String,
         source: crate::queue::BrowserSource,
     },
+    /// Item `item` is next in its queue, but its site (`site`, its link's
+    /// host) has no free connection (the user's per-site limit): it waits
+    /// without taking room in its queue, so the next download on another
+    /// site starts (#170). Said once while it waits.
+    WaitingForSite {
+        item: u64,
+        site: String,
+    },
 }
 
 /// What the schedules say at one look.
@@ -128,6 +136,8 @@ pub struct Runner {
     /// Items that failed and wait for another try (#142): not started
     /// before this time of the engine's clock.
     retry_at: Arc<std::sync::Mutex<HashMap<u64, Duration>>>,
+    /// Items told to wait for their site (#170), so it is said once.
+    waiting_for_site: Arc<std::sync::Mutex<HashSet<u64>>>,
 }
 
 /// Queues the user started now (#125, «Start now»): each runs as if its
@@ -170,6 +180,7 @@ impl Runner {
             from_browser: None,
             run_now: None,
             retry_at: Arc::default(),
+            waiting_for_site: Arc::default(),
         }
     }
 
@@ -514,6 +525,15 @@ impl Runner {
         events: &mpsc::UnboundedSender<(u64, Event)>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
+        // One that no longer waits is told again when it waits again.
+        self.waiting_for_site
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id| {
+                queues
+                    .item(*id)
+                    .is_some_and(|i| i.status == Status::Waiting)
+            });
         for queue in queues.queues.iter().filter(|q| !closed.contains(&q.name)) {
             let busy = queue
                 .items
@@ -556,19 +576,47 @@ impl Runner {
                     None => false,
                 }
             };
-            let next: Vec<_> = queue
-                .items
-                .iter()
-                .filter(|i| {
-                    i.status == Status::Waiting
-                        && !running.contains_key(&i.id)
-                        && !needs_browser(i)
-                        && !pausing(i)
-                })
-                .take(room)
-                .map(|i| i.id)
-                .collect();
-            for id in next {
+            // A download whose site has no free connection waits without
+            // taking room (#170): its slot is taken here, before it starts,
+            // and handed to it.
+            let mut next = Vec::new();
+            for i in queue.items.iter().filter(|i| {
+                i.status == Status::Waiting
+                    && !running.contains_key(&i.id)
+                    && !needs_browser(i)
+                    && !pausing(i)
+            }) {
+                if next.len() >= room {
+                    break;
+                }
+                let slot = match engine.site_counter(&i.url) {
+                    None => None,
+                    Some(counter) => match counter.try_acquire_owned() {
+                        Ok(slot) => Some(slot),
+                        Err(_) => {
+                            let new = self
+                                .waiting_for_site
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(i.id);
+                            if new {
+                                let site = crate::Url::parse(&i.url)
+                                    .ok()
+                                    .and_then(|u| u.host_str().map(str::to_owned))
+                                    .unwrap_or_default();
+                                on_event(QueueEvent::WaitingForSite { item: i.id, site });
+                            }
+                            continue;
+                        }
+                    },
+                };
+                self.waiting_for_site
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&i.id);
+                next.push((i.id, slot));
+            }
+            for (id, slot) in next {
                 // Marked active first: if the user changed it meanwhile,
                 // it is not started.
                 let item = self
@@ -602,6 +650,9 @@ impl Runner {
                 let mut engine = engine
                     .with_own_limit(limit.clone())
                     .named(item.name.as_deref());
+                if let Some(slot) = slot {
+                    engine = engine.with_taken_slot(slot);
+                }
                 // Not yet started by the user, a file that can run code is
                 // held, by the names the download itself gets (review of
                 // #90: the probe's name could differ): from a page, by the

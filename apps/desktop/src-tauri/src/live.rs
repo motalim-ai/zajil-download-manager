@@ -44,6 +44,9 @@ struct Inner {
     /// Downloads that wait for their browser's cookies, which is not open
     /// or did not answer (M5): «افتح المتصفح ليكمل».
     waiting_for_browser: std::collections::HashSet<u64>,
+    /// Downloads next in their queue whose site has no free connection
+    /// (#170): «بانتظار الموقع».
+    waiting_for_site: std::collections::HashSet<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +73,7 @@ impl Live {
             QueueEvent::Started { item, .. } => {
                 inner.items.insert(*item, ItemLive::default());
                 inner.waiting_for_browser.remove(item);
+                inner.waiting_for_site.remove(item);
                 inner.urgent = true;
             }
             QueueEvent::Download { item, event } => {
@@ -121,6 +125,11 @@ impl Live {
             | QueueEvent::Retrying { item, .. }
             | QueueEvent::Stopped { item } => {
                 inner.items.remove(item);
+                inner.waiting_for_site.remove(item);
+                inner.urgent = true;
+            }
+            QueueEvent::WaitingForSite { item, .. } => {
+                inner.waiting_for_site.insert(*item);
                 inner.urgent = true;
             }
             // The app decides, once it has asked the browser.
@@ -143,6 +152,10 @@ impl Live {
 
     pub fn waiting_for_browser(&self, id: u64) -> bool {
         self.inner().waiting_for_browser.contains(&id)
+    }
+
+    pub fn waiting_for_site(&self, id: u64) -> bool {
+        self.inner().waiting_for_site.contains(&id)
     }
 
     /// When to tell the page about a change, at `now`: at once, at most

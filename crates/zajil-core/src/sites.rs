@@ -12,6 +12,10 @@
 //! downloads. (The short probe and page requests, and a refreshed link's
 //! first request, are not counted.) The site is the address the download
 //! was given, not where it redirects.
+//!
+//! In the queues, the runner takes a download's first slot before starting
+//! it and hands it over: a download whose site has no free slot waits
+//! without taking room in its queue (#170).
 
 use std::sync::Arc;
 
@@ -72,15 +76,38 @@ impl SiteLimits {
     }
 }
 
+/// A slot the queue runner took for a download before starting it (so a
+/// download that would wait for its site takes no room in its queue, #170):
+/// the download uses it instead of waiting for one.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TakenSlot(Arc<std::sync::Mutex<Option<OwnedSemaphorePermit>>>);
+
+impl TakenSlot {
+    pub(crate) fn new(permit: OwnedSemaphorePermit) -> Self {
+        TakenSlot(Arc::new(std::sync::Mutex::new(Some(permit))))
+    }
+
+    /// The slot, once, if it is one of `counter`'s (the download's site);
+    /// one of another site is let go.
+    fn take_for(&self, counter: &Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
+        let permit = self.0.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        Arc::ptr_eq(permit.semaphore(), counter).then_some(permit)
+    }
+}
+
 /// Waits for a slot of `counter` (none to wait for without a limit), until
-/// `stop`.
+/// `stop`; a slot `taken` for it ahead comes at once.
 pub(crate) async fn take_slot(
     counter: Option<&Arc<Semaphore>>,
+    taken: &TakenSlot,
     stop: &Stop,
 ) -> Result<Option<OwnedSemaphorePermit>, Error> {
     let Some(counter) = counter else {
         return Ok(None);
     };
+    if let Some(permit) = taken.take_for(counter) {
+        return Ok(Some(permit));
+    }
     tokio::select! {
         // A stop already asked wins over a free slot.
         biased;
@@ -165,9 +192,37 @@ mod tests {
         let stop = Stop::new();
         stop.request();
         assert!(matches!(
-            take_slot(Some(&counter), &stop).await,
+            take_slot(Some(&counter), &TakenSlot::default(), &stop).await,
             Err(Error::Stopped { state_file: None })
         ));
-        assert!(take_slot(None, &stop).await.unwrap().is_none());
+        assert!(
+            take_slot(None, &TakenSlot::default(), &stop)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A slot taken ahead by the queue runner is the download's own, once,
+    /// and only for its site.
+    #[tokio::test]
+    async fn a_slot_taken_ahead_is_used_once_for_its_site() {
+        let site = Arc::new(Semaphore::new(1));
+        let other = Arc::new(Semaphore::new(1));
+        let stop = Stop::new();
+        let taken = TakenSlot::new(site.clone().try_acquire_owned().unwrap());
+        // Another site's download lets it go and takes its own.
+        let own = take_slot(Some(&other), &taken, &stop).await.unwrap();
+        assert!(own.is_some());
+        assert_eq!(site.available_permits(), 1);
+        let taken = TakenSlot::new(site.clone().try_acquire_owned().unwrap());
+        let slot = take_slot(Some(&site), &taken, &stop).await.unwrap();
+        assert!(slot.is_some());
+        assert_eq!(site.available_permits(), 0);
+        // Used: a second download waits as any other would.
+        stop.request();
+        assert!(take_slot(Some(&site), &taken, &stop).await.is_err());
+        drop(slot);
+        assert_eq!(site.available_permits(), 1);
     }
 }

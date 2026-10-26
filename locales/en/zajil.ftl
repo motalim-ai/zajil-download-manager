@@ -613,3 +613,7 @@ video-tools-missing = The video tools are not installed or have changed. Open th
 
 ## Video downloads in the list (M6, #149)
 queue-video = Video
+
+## Waiting for the site (#170)
+status-waiting-site = Waiting for its site
+status-waiting-site-hint = Its site has reached the most connections you set for it in the settings, so it waits for its turn without taking a place in the queue.

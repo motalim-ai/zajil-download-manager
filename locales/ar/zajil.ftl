@@ -683,3 +683,7 @@ video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّ�
 
 ## Video downloads in the list (M6, #149)
 queue-video = فيديو
+
+## Waiting for the site (#170)
+status-waiting-site = بانتظار الموقع
+status-waiting-site-hint = وصل موقعه إلى أقصى عدد اتصالات حددته له في الإعدادات، فهو ينتظر دوره دون أن يأخذ مكانًا في الطابور.

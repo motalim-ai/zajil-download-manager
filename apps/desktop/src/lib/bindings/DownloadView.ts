@@ -39,6 +39,11 @@ segments: number, error: string | null,
  */
 waits_for_browser: boolean, 
 /**
+ * Next in its queue, its site has no free connection (the user's
+ * per-site limit, #170): «بانتظار الموقع».
+ */
+waits_for_site: boolean, 
+/**
  * The user's description (#95).
  */
 description: string | null, 

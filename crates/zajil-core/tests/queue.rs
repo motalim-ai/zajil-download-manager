@@ -64,6 +64,7 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
             QueueEvent::Download { .. }
             | QueueEvent::Waiting { .. }
             | QueueEvent::NeedsBrowser { .. }
+            | QueueEvent::WaitingForSite { .. }
             | QueueEvent::QueueDone { .. } => {}
         })
         .await

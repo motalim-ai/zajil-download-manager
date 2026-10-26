@@ -482,6 +482,8 @@ pub struct Engine {
     /// The user's per-site connection limits, shared by every download of
     /// this engine and its clones ([`crate::sites`]).
     sites: Arc<crate::sites::SiteLimits>,
+    /// Its site's slot, taken ahead by the queue runner (#170).
+    taken_slot: crate::sites::TakenSlot,
     /// Hold a new download whose name it says: the name the server gives
     /// at the download itself, before any file is made (security review
     /// #84). `None`: no check.
@@ -519,6 +521,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             sites: Arc::default(),
+            taken_slot: Default::default(),
             hold: None,
             own_limit: None,
             name: None,
@@ -540,6 +543,7 @@ impl Engine {
             options,
             browser: Arc::default(),
             sites: Arc::default(),
+            taken_slot: Default::default(),
             hold: None,
             own_limit: None,
             name: None,
@@ -584,6 +588,19 @@ impl Engine {
     pub fn with_site_limits(&self, sites: crate::sites::SiteLimits) -> Engine {
         let mut engine = self.clone();
         engine.sites = Arc::new(sites);
+        engine
+    }
+
+    /// The counter of `url`'s site, if the user limited it.
+    pub(crate) fn site_counter(&self, url: &str) -> Option<Arc<tokio::sync::Semaphore>> {
+        self.sites.counter_for(&Url::parse(url).ok()?)
+    }
+
+    /// This engine, for one download whose site's slot the queue runner
+    /// took ahead.
+    pub(crate) fn with_taken_slot(&self, permit: tokio::sync::OwnedSemaphorePermit) -> Engine {
+        let mut engine = self.clone();
+        engine.taken_slot = crate::sites::TakenSlot::new(permit);
         engine
     }
 
@@ -711,7 +728,7 @@ impl Engine {
         let url = parse_url(url)?;
         // The download's own slot of its site, held until it ends.
         let site = self.sites.counter_for(&url);
-        let _slot = crate::sites::take_slot(site.as_ref(), stop).await?;
+        let _slot = crate::sites::take_slot(site.as_ref(), &self.taken_slot, stop).await?;
         let mut attempt = Attempt::new(Some(&url), stop, &self.limits()).with_site(site);
         let response = self
             .retrying(&mut attempt, on_event, || self.get(url.clone(), None))
@@ -870,7 +887,7 @@ impl Engine {
         let site = Url::parse(&state.url)
             .ok()
             .and_then(|url| self.sites.counter_for(&url));
-        let _slot = crate::sites::take_slot(site.as_ref(), stop)
+        let _slot = crate::sites::take_slot(site.as_ref(), &self.taken_slot, stop)
             .await
             .map_err(|_| Error::Stopped {
                 state_file: Some(state_file.clone()),

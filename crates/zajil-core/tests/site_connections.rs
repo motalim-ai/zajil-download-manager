@@ -335,3 +335,92 @@ fn the_settings_list_is_empty_by_default_and_checked() {
     };
     assert!(many.check().unwrap_err().contains("at most 100"));
 }
+
+/// #170: a queue of three at once with A1, A2, A3 and B1, site A limited to
+/// one connection. A2 and A3 wait for their site without taking room (each
+/// told once), so B1 starts while A1 runs; and site A never has two.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_waiting_for_its_site_takes_no_room_in_its_queue() {
+    use zajil_core::queue::{QueueEvent, QueueStore, Runner, Status};
+
+    let server = TestServer::http();
+    let a = random_bytes(600_000, 51);
+    let b = random_bytes(50_000, 52);
+    // A slow file on site A (127.0.0.1); B is the same server by another
+    // name (localhost), which has no limit.
+    server.put("/a.bin", FileSpec::new(a.clone()).throttle(600_000));
+    server.put("/b.bin", FileSpec::new(b.clone()));
+    let a_url = server.url("/a.bin");
+    let b_url = server.url("/b.bin").replacen("127.0.0.1", "localhost", 1);
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    let ids: Vec<u64> = store
+        .update(|queues| {
+            queues.queue_or_new("main")?.max_active = 3;
+            let mut ids = Vec::new();
+            for url in [&a_url, &a_url, &a_url, &b_url] {
+                ids.push(queues.add("main", url, downloads.path())?);
+            }
+            Ok(ids)
+        })
+        .unwrap();
+    let (a1, a2, a3, b1) = (ids[0], ids[1], ids[2], ids[3]);
+
+    let runner = Runner::new(engine(Some(1)), store.clone()).poll(Duration::from_millis(50));
+    let mut log: Vec<String> = Vec::new();
+    let summary = runner
+        .run(&Stop::new(), &mut |event| match event {
+            QueueEvent::Started { item, .. } => log.push(format!("start {item}")),
+            QueueEvent::Finished { item, .. } => log.push(format!("done {item}")),
+            QueueEvent::Failed { item, error } => log.push(format!("failed {item}: {error}")),
+            QueueEvent::WaitingForSite { item, site } => log.push(format!("site {item} {site}")),
+            _ => {}
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(summary.finished, 4, "{log:?}");
+    let at = |line: String| {
+        log.iter()
+            .position(|l| *l == line)
+            .unwrap_or_else(|| panic!("no «{line}» in {log:?}"))
+    };
+    // B1 starts while A1 still runs, before A2.
+    assert!(
+        at(format!("start {b1}")) < at(format!("done {a1}")),
+        "{log:?}"
+    );
+    assert!(
+        at(format!("start {b1}")) < at(format!("start {a2}")),
+        "{log:?}"
+    );
+    // A2 and A3 are told once each that they wait for 127.0.0.1.
+    for item in [a2, a3] {
+        let told = log
+            .iter()
+            .filter(|l| **l == format!("site {item} 127.0.0.1"))
+            .count();
+        assert_eq!(told, 1, "{log:?}");
+    }
+    // Site A: one download at a time, and one connection.
+    let mut running = 0i32;
+    for line in &log {
+        if [a1, a2, a3].iter().any(|id| *line == format!("start {id}")) {
+            running += 1;
+            assert!(running <= 1, "{log:?}");
+        } else if [a1, a2, a3].iter().any(|id| *line == format!("done {id}")) {
+            running -= 1;
+        }
+    }
+    assert_eq!(server.most_concurrent("/a.bin"), 1);
+    let queues = store.load().unwrap();
+    assert!(
+        queues
+            .queue("main")
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.status == Status::Done)
+    );
+}

@@ -191,6 +191,7 @@ fn view_of(row: &Row, categories: &zajil_core::category::CategoriesFile) -> Down
         segments: 0,
         error: row.error.clone(),
         waits_for_browser: false,
+        waits_for_site: false,
         description: None,
         last_try: None,
         needs_ok: false,
