@@ -5,16 +5,18 @@
 // the page makes is refused.
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { launch } from "./browser.js";
+import { BROWSER_START, launch } from "./browser.js";
 
 const script = readFileSync(new URL("../src/video-button.js", import.meta.url), "utf8");
 
 /** @type {import("playwright-core").Browser} */
 let browser;
 
+// Starting the runner's Chrome took from 0.2 s to 13.7 s on CI (#174):
+// 30 s, not Vitest's 10.
 beforeAll(async () => {
   browser = await launch("video-button");
-});
+}, BROWSER_START);
 
 afterAll(async () => {
   await browser?.close();

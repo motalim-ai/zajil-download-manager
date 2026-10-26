@@ -2,12 +2,16 @@
 // here Playwright's Chromium. Its start is timed and printed (when it began
 // and how long it took, and every 2 s while it takes), so a slow start on
 // CI shows its length, and whether the test files' browsers started at the
-// same moment (a test file's `beforeAll` has 10 s).
+// same moment.
 import { chromium } from "playwright-core";
 
 // Past Vitest's console, which keeps a passing file's lines to itself.
 /** @param {string} line */
 const say = (line) => process.stderr.write(`${line}\n`);
+
+/** How long a test file's `beforeAll` gives the browser to start: it took
+ * from 0.2 s to 13.7 s on CI (#174), more than Vitest's 10 s. */
+export const BROWSER_START = 30_000;
 
 /** Starts the browser for test file `name`, saying how long it took.
  * @param {string} name */
