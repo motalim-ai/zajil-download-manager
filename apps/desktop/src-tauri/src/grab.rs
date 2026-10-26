@@ -4,9 +4,9 @@
 //! run: pages only, no file downloaded) and lists the files it would get.
 //! The user takes some out, then they go into a queue of the site's own,
 //! one download at a time (owner's decision of 2026-10-26: the site's
-//! manners, as `zajil grab`; one connection each once a queued download can
-//! have its own, #211). robots.txt is always respected (ADR-0010, owner's
-//! decision 2: turning it off is the command line's only).
+//! manners, as `zajil grab`), with one connection each (#211). robots.txt
+//! is always respected (ADR-0010, owner's decision 2: turning it off is
+//! the command line's only).
 //!
 //! The list stays here: the page shows it and says which ones it took out,
 //! by their place in it; the links themselves never come back from it.
@@ -348,7 +348,8 @@ fn add_to_site_queue(
             let id = queues.add(&name, file, given)?;
             let item = queues.item_mut(id).expect("just added");
             item.categorize = categorize;
-            // One connection each once a download can have its own (#211).
+            // One connection each: the site's manners (#211, ADR-0010).
+            item.connections = Some(1);
             if !start {
                 item.status = Status::Paused;
             }
@@ -483,7 +484,7 @@ mod tests {
             queue
                 .items
                 .iter()
-                .all(|i| i.status == Status::Paused && i.categorize)
+                .all(|i| i.status == Status::Paused && i.categorize && i.connections == Some(1))
         );
         store
             .update(|q| {
@@ -496,6 +497,7 @@ mod tests {
         let queue = queues.queue("a-test").unwrap();
         assert_eq!((queue.max_active, queue.items.len()), (2, 4));
         assert_eq!(queue.items[3].status, Status::Waiting);
+        assert_eq!(queue.items[3].connections, Some(1));
         let bad = vec![
             "https://a.test/x.zip".to_owned(),
             "https://u:p@a.test/y.zip".to_owned(),
