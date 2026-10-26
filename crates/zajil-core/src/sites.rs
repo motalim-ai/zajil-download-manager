@@ -25,8 +25,8 @@ pub const MAX_SITES: usize = 100;
 /// The per-site limits an [`crate::Engine`] counts against.
 #[derive(Debug, Default)]
 pub struct SiteLimits {
-    /// `(site, its counter)`, the site lowercase.
-    sites: Vec<(String, Arc<Semaphore>)>,
+    /// `(site, its counter, its limit)`, the site lowercase.
+    sites: Vec<(String, Arc<Semaphore>, usize)>,
 }
 
 impl SiteLimits {
@@ -34,14 +34,14 @@ impl SiteLimits {
     /// `site_connections` (checked there). A connection count of 0 counts
     /// as 1, and a site listed twice keeps its first entry.
     pub fn new<'a>(list: impl IntoIterator<Item = (&'a str, u32)>) -> Self {
-        let mut sites: Vec<(String, Arc<Semaphore>)> = Vec::new();
+        let mut sites: Vec<(String, Arc<Semaphore>, usize)> = Vec::new();
         for (site, connections) in list.into_iter().take(MAX_SITES) {
             let site = site.trim().trim_end_matches('.').to_ascii_lowercase();
-            if site.is_empty() || sites.iter().any(|(s, _)| *s == site) {
+            if site.is_empty() || sites.iter().any(|(s, _, _)| *s == site) {
                 continue;
             }
             let n = (connections.max(1) as usize).min(crate::MAX_CONNECTIONS);
-            sites.push((site, Arc::new(Semaphore::new(n))));
+            sites.push((site, Arc::new(Semaphore::new(n)), n));
         }
         SiteLimits { sites }
     }
@@ -58,17 +58,22 @@ impl SiteLimits {
     /// The counter of `url`'s site: the longest listed site that is its
     /// host or a parent domain of it; `None` without a limit.
     pub fn counter_for(&self, url: &Url) -> Option<Arc<Semaphore>> {
+        self.entry_for(url).map(|(counter, _)| counter)
+    }
+
+    /// The counter of `url`'s site and its limit; `None` without a limit.
+    pub fn entry_for(&self, url: &Url) -> Option<(Arc<Semaphore>, usize)> {
         let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
         self.sites
             .iter()
-            .filter(|(site, _)| {
+            .filter(|(site, _, _)| {
                 host == *site
                     || host
                         .strip_suffix(site.as_str())
                         .is_some_and(|rest| rest.ends_with('.'))
             })
-            .max_by_key(|(site, _)| site.len())
-            .map(|(_, counter)| counter.clone())
+            .max_by_key(|(site, _, _)| site.len())
+            .map(|(_, counter, limit)| (counter.clone(), *limit))
     }
 }
 

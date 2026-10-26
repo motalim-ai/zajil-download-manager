@@ -522,9 +522,25 @@ impl Runner {
         events: &mpsc::UnboundedSender<(u64, Event)>,
         on_event: &mut (dyn FnMut(QueueEvent) + Send),
     ) -> Result<(), StoreError> {
-        // Connections taken on each site by the downloads started in this
-        // look: their own slots come only once they run (#170).
+        // This runner's downloads on each site with a limit: running, and
+        // started in this look (#170). Counted, not the site's free
+        // connections: a split download's extra connections must not keep
+        // the next download out, which waits for its own slot first.
         let mut site_taken: HashMap<usize, usize> = HashMap::new();
+        for id in running.keys() {
+            if let Some((site, _)) = queues.item(*id).and_then(|i| engine.site_room(&i.url)) {
+                *site_taken.entry(site).or_default() += 1;
+            }
+        }
+        // Items said to wait for their site that no longer wait.
+        self.site_said
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id| {
+                queues
+                    .item(*id)
+                    .is_some_and(|i| i.status == Status::Waiting)
+            });
         for queue in queues.queues.iter().filter(|q| !closed.contains(&q.name)) {
             let busy = queue
                 .items
@@ -580,9 +596,9 @@ impl Runner {
                 if next.len() >= room {
                     break;
                 }
-                if let Some((site, free)) = engine.site_room(&i.url) {
+                if let Some((site, limit)) = engine.site_room(&i.url) {
                     let taken = site_taken.entry(site).or_default();
-                    if *taken >= free {
+                    if *taken >= limit {
                         let first = self
                             .site_said
                             .lock()

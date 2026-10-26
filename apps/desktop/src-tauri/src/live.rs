@@ -207,7 +207,11 @@ impl Live {
     /// Forgets the running downloads: the runner stopped with an error, so
     /// none of them runs (review of #45: their speed stayed on screen).
     pub fn clear(&self) {
-        self.inner().items.clear();
+        let mut inner = self.inner();
+        inner.items.clear();
+        // Nothing runs, so nothing waits for its site either (review of
+        // #170).
+        inner.waiting_for_site.clear();
     }
 
     pub fn set_problem(&self, problem: Option<String>) {

@@ -1325,8 +1325,12 @@ async fn a_download_waiting_for_its_site_takes_no_place_in_its_queue() {
         );
     }
     assert!(!seen.contains(&("site", b1)), "{seen:?}");
-    // A had one download at a time, by the server's own count.
+    // A had one download at a time, by the server's own count, and each
+    // started only once the one before had finished (review of #170).
     assert_eq!(server.most_concurrent("/a.bin"), 1, "{seen:?}");
+    for i in 0..2 {
+        assert!(at(("done", a[i])) < at(("start", a[i + 1])), "{seen:?}");
+    }
     let queues = store.load().unwrap();
     assert!(
         queues
