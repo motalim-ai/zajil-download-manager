@@ -76,6 +76,13 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - feat(desktop): «Video quality»: the tools asked for once, the page's formats or playlist, and the download (#175)
 - feat(core): the most connections at once to a site, shared by its downloads (#166)
 - feat(extension): keys with a click send a link to Zajil or leave it to the browser (#169)
+- feat(desktop): video downloads in the list and the progress window (#181)
+- feat(core): Engine::fetch_page, a page without following redirects (M7) (#187)
+- feat(desktop): «Video tools» in the settings, and the tools' licenses, sources and owners in «About» (#182)
+- feat: a download waiting for its site takes no place in its queue, and says so (#170) (#188)
+- feat(desktop): sounds when a download finishes, fails, or a queue finishes (#197)
+- feat: the per-site connection limits in Settings, applied at once (#165) (#190)
+- feat(grab): the site grabber, zajil grab (M7) (#195)
 
 ### Fixes
 
@@ -87,6 +94,7 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - fix(desktop): «Download file info» says an unknown size in words, shows the name, and warns of a web page (#117)
 - fix(core): a stop after a periodic save does not save again (#132) (#160)
 - fix(cli): the built-in categories' names as the app's, Videos and Audio (#121) (#167)
+- fix(desktop): the name column keeps room to be read; the table scrolls sideways instead (#184) (#198)
 
 ### Documentation
 
@@ -115,6 +123,9 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - test(desktop): screenshots of the real window and the image test of mixed names (#47)
 - test(desktop): close_resume says how long each close took and what was left when one fails (#139)
 - test(core): the stop tests no longer bound the saved bytes by the progress seen (#178)
+- test(extension): the browser tests time the browser's start, and say it (#192)
+- test: the flaky round: causes found and fixed, or failures that say what happened (#193)
+- test(extension): the browser tests give the browser 30 s to start, from its measured times (#200)
 
 ### CI
 
@@ -125,6 +136,10 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - ci: screenshots of «Add a link» and the progress window (#138)
 - ci: the video tests download the published FFmpeg instead of building it (#172)
 - ci: a lost testgen cache turns the weekly run red; caches saved from main only (#176)
+
+### Build
+
+- build: every installer carries the notices of the tools Zajil downloads, with FFmpeg's LGPL (#168) (#183)
 
 ### Details
 
