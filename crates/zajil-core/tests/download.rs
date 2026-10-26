@@ -586,7 +586,16 @@ fn a_new_download_right_after_a_cancelled_one_never_loses_its_data() {
             .download(&server.url("/b/f.bin"), dir.path(), &mut |_| {})
             .await
             .expect("the second download completes");
-        assert_eq!(done.file.file_name().unwrap(), "f (1).bin");
+        // `f (1).bin` while A's save still holds `f.bin`; `f.bin` if A's
+        // save ended, and its files went, before B took a name (a slow
+        // first request: #145, macOS CI). Either way B's data must stay.
+        let name = done
+            .file
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name == "f (1).bin" || name == "f.bin", "{name}");
         assert_eq!(
             sha256_hex(&fs::read(&done.file).unwrap()),
             sha256_hex(&data)
@@ -596,7 +605,7 @@ fn a_new_download_right_after_a_cancelled_one_never_loses_its_data() {
         busy.await.unwrap();
         tokio::task::spawn_blocking(|| ()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
-        assert_eq!(names_in(dir.path()), vec!["f (1).bin"]);
+        assert_eq!(names_in(dir.path()), vec![name.as_str()]);
         assert_eq!(fs::read(&done.file).unwrap(), data);
     });
 }
