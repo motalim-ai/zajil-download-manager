@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod addprefs;
+mod batch;
 mod closing;
 mod complete;
 mod dropbox;
@@ -187,6 +188,7 @@ pub fn run() {
         .manage(app)
         .manage(windows::Shared::default())
         .manage(video::VideoState::default())
+        .manage(batch::Pending::default())
         .manage(closing::Closing::new(
             &data,
             args.iter().any(|a| a == "--close-quits"),
@@ -251,6 +253,7 @@ pub fn run() {
             // close with the main window (review of #104).
             tauri_app.add_capability(windows::CAPABILITY)?;
             tauri_app.add_capability(video::CAPABILITY)?;
+            tauri_app.add_capability(batch::CAPABILITY)?;
             // What a video run or a tools install left when Zajil stopped
             // (#149).
             {
@@ -377,6 +380,11 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_item_details,
         video::video_pending,
         video::open_video,
+        batch::open_batch,
+        batch::batch_pending,
+        batch::batch_preview,
+        batch::batch_add,
+        batch::clipboard_link,
         video::video_folder,
         video::video_tools_status,
         video::video_tools_install,
@@ -460,6 +468,11 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_item_details,
         video::video_pending,
         video::open_video,
+        batch::open_batch,
+        batch::batch_pending,
+        batch::batch_preview,
+        batch::batch_add,
+        batch::clipboard_link,
         video::video_folder,
         video::video_tools_status,
         video::video_tools_install,
@@ -899,7 +912,7 @@ async fn add<R: tauri::Runtime>(
 /// The folder a new download goes to: its own, checked as a category's
 /// folder is (absolute, no `..`, valid text without hidden characters),
 /// since it comes from the page; or the given download folder.
-fn chosen_folder(folder: Option<&str>, download_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn chosen_folder(folder: Option<&str>, download_dir: &Path) -> Result<PathBuf, String> {
     match folder {
         Some(folder) => {
             let folder = PathBuf::from(folder);

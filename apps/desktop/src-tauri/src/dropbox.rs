@@ -116,14 +116,19 @@ pub fn toggle<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
 mod tests {
     use super::*;
 
-    /// The drop box may listen and drag itself; nothing more.
+    /// The drop box may listen, drag itself, and show its right-click menu
+    /// (M7: «Batch download», hiding it); nothing more.
     #[test]
     fn the_drop_box_has_only_its_own_permissions() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY).unwrap();
         assert_eq!(capability["windows"], serde_json::json!([LABEL]));
         assert_eq!(
             capability["permissions"],
-            serde_json::json!(["core:event:default", "core:window:allow-start-dragging"])
+            serde_json::json!([
+                "core:event:default",
+                "core:window:allow-start-dragging",
+                "core:menu:default"
+            ])
         );
     }
 }

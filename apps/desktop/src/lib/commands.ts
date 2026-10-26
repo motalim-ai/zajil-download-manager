@@ -6,6 +6,8 @@ import { onMac } from "./keys";
 export type Command =
   | "add"
   | "video"
+  | "batch"
+  | "batch-clipboard"
   | "import"
   | "export"
   | "quit"

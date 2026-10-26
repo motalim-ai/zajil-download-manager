@@ -581,10 +581,10 @@ tb-done = Done
 
 ## The drop box (M5.5, an IDM touch)
 drop-box = Drop box
-drop-hint = Drag a link here to download it. A right-click hides it.
+drop-hint = Drag a link here to download it. Right-click it for a batch download, or to hide it.
 tray-drop-box = Show the drop box
 settings-drop-box-label = Show the drop box above all windows
-settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; a right-click hides it.
+settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; right-click it for a batch download, or to hide it.
 
 ## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
 col-queue = Queue
@@ -663,3 +663,54 @@ settings-progress-hidden = Not shown
 settings-start-while-open = Start downloading while the window is open
 settings-start-while-open-hint = The download starts in the background as soon as the server answers, while you are still in “Download file info”. “Cancel” removes it and deletes its unfinished file.
 add-started-note = The download has started in the background, so its name and folder can no longer change. The category and description can.
+
+## Batch download (M7)
+cmd-batch = Batch download…
+cmd-batch-clipboard = Batch download from the clipboard
+batch-title = Batch download
+batch-pattern = Link with a pattern
+batch-pattern-hint = Put a star where the link changes, such as { $example }. A range in square brackets or a list in braces works too.
+batch-kind = Changes by
+batch-numbers = Numbers
+batch-letters = Letters
+batch-from = From
+batch-to = To
+batch-width = Digits
+batch-width-hint = With zeros on the left, such as { $example }.
+batch-links = Links
+batch-links-count =
+    { PLURAL($count) ->
+        [one] { $count } link
+       *[other] { $count } links
+    }
+batch-max = At most at once: { $max }.
+batch-shown = The first { $shown } are shown here.
+batch-empty = Write a link with a pattern to see the links it makes.
+batch-clipboard-empty = The clipboard has no link.
+batch-folder-category = By category
+batch-error-at = At character { $at } of the link.
+batch-error-too_many = More links than the most allowed ({ $max }).
+drop-menu-hide = Hide the box
+batch-error-not_http = The link must start with { $http } or { $https }.
+batch-error-too_long = The link is too long.
+batch-error-hidden = The link has a hidden character or a line break.
+batch-error-no_host = The link has no site name.
+batch-error-in_host = A pattern goes in the link's path only, not in the site name.
+batch-error-in_fragment = A pattern does not work after #.
+batch-error-backslash = A backslash is allowed only before brackets, braces, the star and the comma.
+batch-error-unclosed = A bracket is opened and not closed.
+batch-error-unopened = A bracket is closed and was not opened.
+batch-error-nested = A pattern inside a pattern.
+batch-error-empty = An empty range or list.
+batch-error-bad_range = A range is written as its start, a dash, then its end.
+batch-error-mixed = The range mixes numbers and letters, or capital and small letters.
+batch-error-descending = The range goes down: its start is after its end.
+batch-error-zero_step = A step cannot be zero.
+batch-error-width = The number of digits does not fit the numbers.
+batch-error-too_large = A number is too large.
+batch-error-bad_counter = «From» and «To» must be two numbers or two letters.
+batch-error-star_needs_range = Write «From» and «To» for the star.
+batch-error-second_star = Only one star in the link.
+batch-error-no_star = «From» and «To» work with a star in the link.
+batch-error-no_pattern = The link has no pattern: put a star or a range where it changes.
+batch-error-bad_url = One of the links the pattern makes is not valid.
