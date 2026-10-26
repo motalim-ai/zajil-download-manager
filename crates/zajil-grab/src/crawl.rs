@@ -142,6 +142,9 @@ pub enum Skip {
     NoFollow,
     /// Larger than `--max-file-size`.
     TooLarge,
+    /// It announced a size larger than what is left of `--max-total`
+    /// (#196): refused before anything of it was written.
+    OverTotal,
     /// Too many redirects.
     TooManyRedirects,
     /// A user name or password in the link.
@@ -162,6 +165,7 @@ impl fmt::Display for Skip {
             Skip::Filtered => "left out by --include or --exclude",
             Skip::NoFollow => "the page asks not to follow its links",
             Skip::TooLarge => "larger than --max-file-size",
+            Skip::OverTotal => "larger than what is left of --max-total",
             Skip::TooManyRedirects => "too many redirects",
             Skip::Credentials => "a user name or password in the link",
             Skip::TooManyOrigins => "too many different sites",
@@ -1035,6 +1039,8 @@ impl Crawler<'_> {
                 if max_file.is_some_and(|max| size > max) {
                     self.skip(&item.url, Skip::TooLarge, on_event);
                 } else {
+                    // Each file counted (#212): the limit itself is said once.
+                    self.skip(&item.url, Skip::OverTotal, on_event);
                     self.limit(Limit::Total, on_event);
                 }
             }

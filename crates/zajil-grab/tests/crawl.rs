@@ -727,7 +727,14 @@ async fn max_total_stops_a_file_announced_larger_than_what_is_left() {
         "/f2.zip",
         FileSpec::new(random_bytes(2_000_000, 2)).throttle(500_000),
     );
-    site.put("/index.html", links(&["f0.zip", "f1.zip", "f2.zip"]));
+    site.put(
+        "/f3.zip",
+        FileSpec::new(random_bytes(2_000_000, 3)).throttle(500_000),
+    );
+    site.put(
+        "/index.html",
+        links(&["f0.zip", "f1.zip", "f2.zip", "f3.zip"]),
+    );
     let dir = tempfile::tempdir().unwrap();
     let mut plan = plan(&site.url("/index.html"), dir.path());
     plan.max_total = 250_000;
@@ -735,6 +742,9 @@ async fn max_total_stops_a_file_announced_larger_than_what_is_left() {
 
     assert_eq!(saved(&events), ["f0.zip", "f1.zip"]);
     assert_eq!(report.limits, [Limit::Total]);
+    // Each named as left out, the second too (#212); the limit said once.
+    assert_eq!(skipped(&events, Skip::OverTotal).len(), 2);
+    assert_eq!(report.skipped.get(&Skip::OverTotal), Some(&2));
     // Refused on its announced size before anything of it was written
     // (#196): no byte past the two files, nothing to resume, no file left.
     assert_eq!(report.bytes, 200_000);
