@@ -624,3 +624,4 @@ about-ffmpeg = This software uses libraries from the FFmpeg project under the { 
 about-tool = { $tool } { $version }, under the { $license }. Its source: { $source }
 about-or-later = { $license } or later
 about-not-ours = Zajil does not own these tools; they belong to their projects:
+tool-license-yt-dlp = { $binary } for the file Zajil downloads (its source code: { $source })

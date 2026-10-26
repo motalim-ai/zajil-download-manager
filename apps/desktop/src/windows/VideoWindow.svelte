@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import { licenseOf } from "../lib/about";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { size } from "../lib/format";
@@ -63,10 +64,10 @@
       step = {
         kind: "consent",
         tools: [
-          { tool: "yt-dlp", installed: false, version: "2026.10.10", host: "github.com", license: "GPLv3+", source: "https://github.com/yt-dlp/yt-dlp" },
-          { tool: "ffmpeg", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
-          { tool: "ffprobe", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
-          { tool: "qjs", installed: false, version: "0.10.1", host: "github.com", license: "MIT", source: "https://github.com/quickjs-ng/quickjs" },
+          { tool: "yt-dlp", installed: false, version: "2026.10.10", host: "github.com", source: "https://github.com/yt-dlp/yt-dlp" },
+          { tool: "ffmpeg", installed: false, version: "7.1", host: "github.com", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
+          { tool: "ffprobe", installed: false, version: "7.1", host: "github.com", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
+          { tool: "qjs", installed: false, version: "0.10.1", host: "github.com", source: "https://github.com/quickjs-ng/quickjs" },
         ],
       };
       return;
@@ -204,7 +205,7 @@
         <thead><tr><th scope="col">{locale.t("video-tool")}</th><th scope="col">{locale.t("video-version")}</th><th scope="col">{locale.t("video-source")}</th><th scope="col">{locale.t("video-license")}</th></tr></thead>
         <tbody>
           {#each step.tools.filter((t) => !t.installed) as t (t.tool)}
-            <tr><td dir="ltr">{t.tool}</td><td dir="ltr">{t.version ?? "—"}</td><td dir="ltr">{t.host ?? "—"}</td><td dir="ltr">{t.license}</td></tr>
+            <tr><td dir="ltr">{t.tool}</td><td dir="ltr">{t.version ?? "—"}</td><td dir="ltr">{t.host ?? "—"}</td><td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td></tr>
           {/each}
         </tbody>
       </table>

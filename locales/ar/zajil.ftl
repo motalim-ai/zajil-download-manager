@@ -694,3 +694,4 @@ about-ffmpeg = يستعمل هذا البرنامج مكتبات من مشروع
 about-tool = { $tool } { $version }، بترخيص { $license }. مصدره: { $source }
 about-or-later = { $license } أو أحدث
 about-not-ours = زاجِل لا يملك هذه الأدوات، وهي لأصحابها:
+tool-license-yt-dlp = { $binary } للملف الذي ينزّله زاجِل (والكود المصدري بترخيص { $source })

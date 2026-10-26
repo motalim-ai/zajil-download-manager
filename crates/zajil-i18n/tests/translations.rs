@@ -788,6 +788,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("about-ffmpeg", &["license"]),
     ("about-tool", &["license", "source", "tool", "version"]),
     ("about-or-later", &["license"]),
+    ("tool-license-yt-dlp", &["binary", "source"]),
     // A button's name.
     ("tb-earlier", &["name"]),
     ("tb-later", &["name"]),
@@ -1095,6 +1096,17 @@ const WHOLE_TEXTS: &[Whole] = &[
                 ("source", "SOURCE"),
             ],
             "FFmpeg VERSION, under the LICENSE. Its source: SOURCE",
+        ),
+    },
+    Whole {
+        key: "tool-license-yt-dlp",
+        ar: (
+            &[("binary", "GPLv3+"), ("source", "Unlicense")],
+            "GPLv3+ للملف الذي ينزّله زاجِل (والكود المصدري بترخيص Unlicense)",
+        ),
+        en: (
+            &[("binary", "GPLv3+"), ("source", "Unlicense")],
+            "GPLv3+ for the file Zajil downloads (its source code: Unlicense)",
         ),
     },
     Whole {

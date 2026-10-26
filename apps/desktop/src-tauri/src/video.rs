@@ -143,8 +143,6 @@ pub struct ToolView {
     pub version: Option<String>,
     /// Where it comes from: the host only.
     pub host: Option<String>,
-    /// Its license, as ADR-0009 says.
-    pub license: String,
     /// Where its source is, for «About» (ADR-0009): the release of the
     /// pinned version, or the project's page.
     pub source: String,
@@ -196,12 +194,6 @@ pub fn video_tools_status(app: State<'_, crate::App>) -> Vec<ToolView> {
                     .as_ref()
                     .and_then(|p| zajil_core::Url::parse(&p.url).ok())
                     .and_then(|u| u.host_str().map(str::to_owned)),
-                license: match tool {
-                    Tool::YtDlp => "GPLv3+",
-                    Tool::QuickJs => "MIT",
-                    Tool::Ffmpeg | Tool::Ffprobe => "LGPL 2.1+",
-                }
-                .into(),
                 source: source_of(tool, pin.as_ref()),
             }
         })
