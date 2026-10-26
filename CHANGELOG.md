@@ -83,6 +83,7 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - feat(desktop): sounds when a download finishes, fails, or a queue finishes (#197)
 - feat: the per-site connection limits in Settings, applied at once (#165) (#190)
 - feat(grab): the site grabber, zajil grab (M7) (#195)
+- feat(desktop): the progress window shown, minimized or not, and starting while «Download file info» is open (#201)
 
 ### Fixes
 
@@ -126,6 +127,9 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - test(extension): the browser tests time the browser's start, and say it (#192)
 - test: the flaky round: causes found and fixed, or failures that say what happened (#193)
 - test(extension): the browser tests give the browser 30 s to start, from its measured times (#200)
+- test: a queue's tries and file to open, from #161's review notes (#203)
+- test: the Drive links' notes from #158's review (#204)
+- test: a web page's name at the limit, and the hold's names, from #152's review (#205)
 
 ### CI
 
@@ -136,6 +140,7 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - ci: screenshots of «Add a link» and the progress window (#138)
 - ci: the video tests download the published FFmpeg instead of building it (#172)
 - ci: a lost testgen cache turns the weekly run red; caches saved from main only (#176)
+- ci: every run on main goes to its end; the GUI libraries are tried three times (#119) (#202)
 
 ### Build
 
