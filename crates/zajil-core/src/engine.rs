@@ -522,13 +522,14 @@ pub struct Engine {
     drive: Arc<crate::drive::DriveSite>,
 }
 
-/// What [`Engine::holding`] checks a new download's names with.
+/// What [`Engine::holding`] checks a new download's names and size with.
 #[derive(Clone)]
 struct Hold(HoldCheck);
 
-/// Whether to hold a new download, from the name the server gives and the
-/// name it is saved under ([`Engine::named`]; the same when it has none).
-pub type HoldCheck = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
+/// Whether to hold a new download, from the name the server gives, the
+/// name it is saved under ([`Engine::named`]; the same when it has none)
+/// and the size the server announced (`None` when it announced none).
+pub type HoldCheck = Arc<dyn Fn(&str, &str, Option<u64>) -> bool + Send + Sync>;
 
 impl std::fmt::Debug for Hold {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -634,12 +635,14 @@ impl Engine {
         engine
     }
 
-    /// This engine, holding a new download whose names make `hold` true
-    /// (the server's, then the one it is saved under): it stops with
-    /// [`Error::Held`] once the server has named the file, before anything
-    /// is created. For a file from a page that can run code: the probe's
-    /// name is not enough, the download's own answer may name another file
-    /// (review of #90).
+    /// This engine, holding a new download whose names and size make `hold`
+    /// true (the server's name, the one it is saved under, the size the
+    /// server announced): it stops with [`Error::Held`] once the server has
+    /// answered, before anything is created. For a file from a page that
+    /// can run code: the probe's name is not enough, the download's own
+    /// answer may name another file (review of #90). For the grabber's
+    /// limits: a file announced larger than what is left is refused before
+    /// a byte of it is written (#196).
     pub fn holding(&self, hold: HoldCheck) -> Engine {
         let mut engine = self.clone();
         engine.hold = Some(Hold(hold));
@@ -771,7 +774,7 @@ impl Engine {
         if self
             .hold
             .as_ref()
-            .is_some_and(|hold| (hold.0)(&server_name, &name))
+            .is_some_and(|hold| (hold.0)(&server_name, &name, response.content_length()))
         {
             return Err(Error::Held(name));
         }

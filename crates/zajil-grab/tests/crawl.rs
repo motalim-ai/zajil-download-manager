@@ -710,9 +710,8 @@ async fn max_files_stops_new_files() {
 }
 
 /// `--max-total`: a file whose `Content-Length` passes what is left is
-/// stopped as soon as its headers come, never downloaded whole. (The
-/// engine may already have written the first chunk it holds when the stop
-/// arrives, so the total can pass the limit by that chunk.)
+/// refused on that size before anything of it is written (#196): the total
+/// stays within the limit, and nothing of it is left to resume.
 #[tokio::test(flavor = "multi_thread")]
 async fn max_total_stops_a_file_announced_larger_than_what_is_left() {
     let site = server();
@@ -736,13 +735,20 @@ async fn max_total_stops_a_file_announced_larger_than_what_is_left() {
 
     assert_eq!(saved(&events), ["f0.zip", "f1.zip"]);
     assert_eq!(report.limits, [Limit::Total]);
-    assert!(report.bytes < 300_000, "{} bytes", report.bytes);
+    // Refused on its announced size before anything of it was written
+    // (#196): no byte past the two files, nothing to resume, no file left.
+    assert_eq!(report.bytes, 200_000);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::Stopped { url, .. } if url.path().ends_with("/f2.zip"))),
+        !events.iter().any(|e| matches!(e, Event::Stopped { .. })),
         "{events:?}"
     );
+    let mut left: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "index.html")
+        .collect();
+    left.sort();
+    assert_eq!(left, ["f0.zip", "f1.zip"]);
 }
 
 /// `--max-total` with a file that announces no length: it is stopped soon
@@ -1159,6 +1165,8 @@ async fn a_file_over_the_size_limit_leaves_nothing() {
 
     assert_eq!(saved(&events), ["small.zip"]);
     assert_eq!(skipped(&events, Skip::TooLarge).len(), 1);
+    // Refused on its announced size: not a byte of it counted (#196).
+    assert_eq!(report.bytes, 500);
     assert!(!events.iter().any(|e| matches!(e, Event::Stopped { .. })));
     assert!(!report.stopped);
     let left: Vec<String> = std::fs::read_dir(dir.path())

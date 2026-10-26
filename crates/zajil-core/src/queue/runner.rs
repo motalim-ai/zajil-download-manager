@@ -658,7 +658,7 @@ impl Runner {
                 // that name can run code and the server's could not.
                 let from_page = item.from_page;
                 if !item.ok_given && (from_page || item.name.is_some()) {
-                    let hold: crate::HoldCheck = Arc::new(move |server: &str, saved: &str| {
+                    let hold: crate::HoldCheck = Arc::new(move |server: &str, saved: &str, _| {
                         use crate::category::runs_code;
                         runs_code(saved) && (from_page || !runs_code(server))
                     });

@@ -941,6 +941,18 @@ impl Crawler<'_> {
         let before = self.report.bytes;
         let max_total = self.plan.max_total;
         let max_file = self.plan.max_file_size;
+        // A file the server announces larger than `--max-file-size`, or than
+        // what is left of `--max-total`, is held before anything of it is
+        // created (#196): no part file, nothing past the limit.
+        let announced = Arc::new(AtomicU64::new(0));
+        let said = announced.clone();
+        let engine = engine.holding(Arc::new(move |_, _, size| {
+            let Some(size) = size else {
+                return false;
+            };
+            said.store(size, Ordering::Relaxed);
+            max_file.is_some_and(|max| size > max) || before.saturating_add(size) > max_total
+        }));
         let written = Arc::new(AtomicU64::new(0));
         let seen = written.clone();
         let mut why_stopped: Option<Skip> = None;
@@ -950,6 +962,12 @@ impl Crawler<'_> {
                 item.url.as_str(),
                 &self.plan.dir,
                 &file_stop,
+                // The hold checked the first answer's size. When the
+                // engine starts over with a new answer (a broken
+                // connection on a server that cannot continue, a file that
+                // changed), its size comes with `Started` again: checked
+                // here before anything of it is written. A file with no size
+                // is stopped once it passes a limit.
                 &mut |event| match event {
                     EngineEvent::Started {
                         total: Some(total), ..
@@ -1011,6 +1029,14 @@ impl Crawler<'_> {
                     url: item.url,
                     state_file,
                 });
+            }
+            Err(Error::Held(_)) => {
+                let size = announced.load(Ordering::Relaxed);
+                if max_file.is_some_and(|max| size > max) {
+                    self.skip(&item.url, Skip::TooLarge, on_event);
+                } else {
+                    self.limit(Limit::Total, on_event);
+                }
             }
             Err(err) => {
                 self.report.failed += 1;
