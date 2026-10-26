@@ -12,9 +12,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its older run. On main every
+# commit's run goes to its end: a cancelled run shows as a red cross, as if
+# main were broken (owner's decision, 2026-10-26).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -310,16 +313,27 @@ jobs:
       # Tauri 2 on Linux needs WebKitGTK 4.1 (the minimum the owner chose:
       # Ubuntu 22.04 and Debian 12). Xvfb, xdotool and ImageMagick are for
       # opening the real window and taking its screenshots.
+      # A slow package mirror sometimes hangs this step (#119): each try has
+      # its own time limit, and it is tried up to three times.
       - name: Install the GUI libraries (Linux)
         if: runner.os == 'Linux'
-        timeout-minutes: 10
+        timeout-minutes: 30
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
         run: |
           set -euo pipefail
-          sudo apt-get $APT_OPTIONS update -q
-          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick
+          for try in 1 2 3; do
+            # A try cut off in the middle can leave dpkg half done.
+            [ "$try" = 1 ] || sudo dpkg --configure -a || true
+            if sudo timeout 300 apt-get $APT_OPTIONS update -q \
+              && sudo timeout 240 apt-get $APT_OPTIONS install -y -q --no-install-recommends \
+                libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick; then
+              exit 0
+            fi
+            echo "::warning::installing the GUI libraries failed (try $try of 3)"
+            sleep 15
+          done
+          exit 1
       - name: Install npm packages (from the lock file only)
         run: npm ci
       - name: Licenses and advisories of npm packages
