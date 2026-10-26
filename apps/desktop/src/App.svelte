@@ -22,6 +22,7 @@
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
+  import { toolLines } from "./lib/about";
   import { api } from "./lib/api";
   import { scheduleApi } from "./lib/scheduleApi";
   import { showTrayTip, trayTip } from "./lib/trayTip";
@@ -602,9 +603,13 @@
     await api.quitApp();
   }
 
+  // «About»: the version, and the video tools (`lib/about.ts`).
   async function about() {
     const version = await api.appVersion().catch(() => "");
-    await message(locale.t("about-text", { version }), { title: locale.t("app-name"), kind: "info" }).catch(() => {});
+    const tools = await api.videoToolsStatus().catch(() => []);
+    const more = toolLines((key, args) => locale.t(key, args), tools);
+    const text = [locale.t("about-text", { version }), ...(more.length ? ["", ...more] : [])].join("\n");
+    await message(text, { title: locale.t("app-name"), kind: "info" }).catch(() => {});
   }
 
   // Copy (Ctrl+C, or the system's Copy on macOS) on the table is «Copy

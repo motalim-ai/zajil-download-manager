@@ -63,10 +63,10 @@
       step = {
         kind: "consent",
         tools: [
-          { tool: "yt-dlp", installed: false, version: "2026.10.10", host: "github.com", license: "GPLv3+" },
-          { tool: "ffmpeg", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+" },
-          { tool: "ffprobe", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+" },
-          { tool: "qjs", installed: false, version: "0.10.1", host: "github.com", license: "MIT" },
+          { tool: "yt-dlp", installed: false, version: "2026.10.10", host: "github.com", license: "GPLv3+", source: "https://github.com/yt-dlp/yt-dlp" },
+          { tool: "ffmpeg", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
+          { tool: "ffprobe", installed: false, version: "7.1", host: "github.com", license: "LGPL 2.1+", source: "https://github.com/motalim-ai/zajil-download-manager/releases" },
+          { tool: "qjs", installed: false, version: "0.10.1", host: "github.com", license: "MIT", source: "https://github.com/quickjs-ng/quickjs" },
         ],
       };
       return;

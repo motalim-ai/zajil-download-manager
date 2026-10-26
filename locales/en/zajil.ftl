@@ -610,3 +610,17 @@ video-download-chosen = Download the chosen ones
 video-done = The video has downloaded.
 video-drm = This video is protected, and Zajil does not download protected content.
 video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.
+
+## Video tools in the settings and «About» (M6, #149)
+settings-video-tools = Video tools
+settings-video-tools-hint = They are downloaded with your agreement the first time you download a video, and kept in Zajil's data folder.
+settings-video-tools-ready = Ready
+settings-video-tools-missing = Not downloaded
+settings-video-tools-remove = Delete the video tools
+settings-video-tools-remove-question = The video tools are deleted, and downloaded again with your agreement when you download a video. Delete them?
+settings-video-tools-removed = The video tools were deleted.
+about-video-tools = Zajil downloads videos with free tools, downloaded from their sources:
+about-ffmpeg = This software uses libraries from the FFmpeg project under the { $license }.
+about-tool = { $tool } { $version }, under the { $license }. Its source: { $source }
+about-or-later = { $license } or later
+about-not-ours = Zajil does not own these tools; they belong to their projects:

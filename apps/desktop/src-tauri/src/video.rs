@@ -145,6 +145,30 @@ pub struct ToolView {
     pub host: Option<String>,
     /// Its license, as ADR-0009 says.
     pub license: String,
+    /// Where its source is, for «About» (ADR-0009): the release of the
+    /// pinned version, or the project's page.
+    pub source: String,
+}
+
+/// The page of the release `pin` comes from, or the project's own.
+fn source_of(tool: Tool, pin: Option<&zajil_core::tools::Pinned>) -> String {
+    if let Some(page) = pin.and_then(|p| {
+        let (release, _file) = p.url.rsplit_once('/')?;
+        release
+            .contains("/releases/download/")
+            .then(|| release.replacen("/releases/download/", "/releases/tag/", 1))
+    }) {
+        return page;
+    }
+    match tool {
+        Tool::YtDlp => "https://github.com/yt-dlp/yt-dlp",
+        Tool::QuickJs => "https://github.com/quickjs-ng/quickjs",
+        // Our own build, with its exact source, on Zajil's releases.
+        Tool::Ffmpeg | Tool::Ffprobe => {
+            "https://github.com/motalim-ai/zajil-download-manager/releases"
+        }
+    }
+    .into()
 }
 
 fn name(tool: Tool) -> &'static str {
@@ -178,6 +202,7 @@ pub fn video_tools_status(app: State<'_, crate::App>) -> Vec<ToolView> {
                     Tool::Ffmpeg | Tool::Ffprobe => "LGPL 2.1+",
                 }
                 .into(),
+                source: source_of(tool, pin.as_ref()),
             }
         })
         .collect()
@@ -505,6 +530,25 @@ pub fn video_cancel(state: State<'_, VideoState>, id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// «About» names each tool's source: its pinned release, or its
+    /// project.
+    #[test]
+    fn every_tool_has_its_source() {
+        let pin = zajil_core::tools::Pinned {
+            version: "2026.10.10".into(),
+            url: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.10/yt-dlp_macos"
+                .into(),
+            sha256: String::new(),
+        };
+        assert_eq!(
+            source_of(Tool::YtDlp, Some(&pin)),
+            "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.10"
+        );
+        for tool in TOOLS {
+            assert!(source_of(tool, None).starts_with("https://github.com/"));
+        }
+    }
 
     /// The page's names for what can go wrong, one per kind.
     #[test]

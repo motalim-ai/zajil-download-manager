@@ -19,4 +19,9 @@ host: string | null,
 /**
  * Its license, as ADR-0009 says.
  */
-license: string, };
+license: string, 
+/**
+ * Where its source is, for «About» (ADR-0009): the release of the
+ * pinned version, or the project's page.
+ */
+source: string, };

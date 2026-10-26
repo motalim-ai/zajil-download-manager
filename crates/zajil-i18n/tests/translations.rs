@@ -785,6 +785,9 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("footer-selected", &["number"]),
     // A file format's name (m4a).
     ("video-audio-only", &["format"]),
+    ("about-ffmpeg", &["license"]),
+    ("about-tool", &["license", "source", "tool", "version"]),
+    ("about-or-later", &["license"]),
     // A button's name.
     ("tb-earlier", &["name"]),
     ("tb-later", &["name"]),
@@ -1072,6 +1075,43 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "tb-later",
         ar: (&[("name", "NAME")], "أخّر «NAME»"),
         en: (&[("name", "NAME")], "Move “NAME” later"),
+    },
+    Whole {
+        key: "about-tool",
+        ar: (
+            &[
+                ("tool", "FFmpeg"),
+                ("version", "VERSION"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "FFmpeg VERSION، بترخيص LICENSE. مصدره: SOURCE",
+        ),
+        en: (
+            &[
+                ("tool", "FFmpeg"),
+                ("version", "VERSION"),
+                ("license", "LICENSE"),
+                ("source", "SOURCE"),
+            ],
+            "FFmpeg VERSION, under the LICENSE. Its source: SOURCE",
+        ),
+    },
+    Whole {
+        key: "about-or-later",
+        ar: (&[("license", "LICENSE")], "LICENSE أو أحدث"),
+        en: (&[("license", "LICENSE")], "LICENSE or later"),
+    },
+    Whole {
+        key: "about-ffmpeg",
+        ar: (
+            &[("license", "LGPLv2.1")],
+            "يستعمل هذا البرنامج مكتبات من مشروع FFmpeg بترخيص LGPLv2.1.",
+        ),
+        en: (
+            &[("license", "LGPLv2.1")],
+            "This software uses libraries from the FFmpeg project under the LGPLv2.1.",
+        ),
     },
     Whole {
         key: "video-audio-only",
