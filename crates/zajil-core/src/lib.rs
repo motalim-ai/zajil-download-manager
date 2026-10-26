@@ -26,8 +26,8 @@ pub mod video;
 
 pub use browser::FromBrowser;
 pub use engine::{
-    Engine, Error, Event, Finished, HoldCheck, Mismatch, Options, Page, Probe, RestartReason, Stop,
-    is_page_type,
+    Engine, Error, Event, FetchedPage, Finished, HoldCheck, Mismatch, Options, Probe,
+    RestartReason, Stop, is_page_type,
 };
 /// URLs as the engine parses them (for [`Engine::download_choosing_until`]).
 pub use reqwest::Url;

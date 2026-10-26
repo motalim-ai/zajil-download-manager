@@ -127,6 +127,19 @@ async fn a_long_page_is_cut_at_the_limit() {
     assert!(page.truncated);
 }
 
+/// A page of exactly the size asked for is whole, not cut.
+#[tokio::test]
+async fn a_page_of_exactly_the_limit_is_not_cut() {
+    let server = TestServer::http();
+    server.put("/exact.html", html(&"x".repeat(10_000)));
+    let page = engine()
+        .fetch_page(&server.url("/exact.html"), 10_000)
+        .await
+        .unwrap();
+    assert_eq!(page.body.as_ref().map(Vec::len), Some(10_000));
+    assert!(!page.truncated);
+}
+
 #[tokio::test]
 async fn an_error_status_has_no_body() {
     let server = TestServer::http();

@@ -292,18 +292,21 @@ pub struct Finished {
 
 /// A page [`Engine::fetch_page`] fetched (M7, the site grabber).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Page {
+pub struct FetchedPage {
     /// The status the server answered, redirects included.
     pub status: u16,
-    /// A redirect's `Location`, as the server sent it: never followed, so
-    /// the caller can check the target before asking for it.
+    /// A redirect's `Location` (301, 302, 303, 307 or 308), as the server
+    /// sent it: never followed, so the caller can check the target before
+    /// asking for it. `None` for a redirect whose `Location` is missing or
+    /// not text: a dead end.
     pub location: Option<String>,
     /// The media type, lowercase, without parameters (`text/html`).
     pub content_type: Option<String>,
     /// The name the file would get (as [`Probe::name`]).
     pub name: String,
     /// The body, read only for a successful HTML page (`text/html` or
-    /// `application/xhtml+xml`), and at most the size asked for.
+    /// `application/xhtml+xml`; any successful answer for
+    /// [`Engine::fetch_robots_until`]), and at most the size asked for.
     pub body: Option<Vec<u8>>,
     /// The body was longer than the size asked for: the rest was not read.
     pub truncated: bool,
@@ -869,7 +872,7 @@ impl Engine {
     /// returned, for the caller to check), with the body read only for a
     /// successful HTML page, and at most `max_bytes` of it. One try; the
     /// same TLS checks, user agent and browser headers as a download.
-    pub async fn fetch_page(&self, url: &str, max_bytes: usize) -> Result<Page, Error> {
+    pub async fn fetch_page(&self, url: &str, max_bytes: usize) -> Result<FetchedPage, Error> {
         self.fetch_page_until(url, max_bytes, &Stop::new()).await
     }
 
@@ -879,8 +882,9 @@ impl Engine {
         url: &str,
         max_bytes: usize,
         stop: &Stop,
-    ) -> Result<Page, Error> {
-        self.fetch(url, max_bytes, stop, Body::Html).await
+    ) -> Result<FetchedPage, Error> {
+        self.fetch_page_inner(url, max_bytes, stop, ReadBody::Html)
+            .await
     }
 
     /// Like [`fetch_page_until`](Self::fetch_page_until), but the body of
@@ -893,17 +897,18 @@ impl Engine {
         url: &str,
         max_bytes: usize,
         stop: &Stop,
-    ) -> Result<Page, Error> {
-        self.fetch(url, max_bytes, stop, Body::Any).await
+    ) -> Result<FetchedPage, Error> {
+        self.fetch_page_inner(url, max_bytes, stop, ReadBody::Any)
+            .await
     }
 
-    async fn fetch(
+    async fn fetch_page_inner(
         &self,
         url: &str,
         max_bytes: usize,
         stop: &Stop,
-        read: Body,
-    ) -> Result<Page, Error> {
+        read: ReadBody,
+    ) -> Result<FetchedPage, Error> {
         let url = parse_url(url)?;
         let request = self.browser.apply(&url, self.page_client.get(url.clone()));
         let mut response = tokio::select! {
@@ -917,22 +922,18 @@ impl Engine {
                 .and_then(|v: &header::HeaderValue| v.to_str().ok())
                 .map(str::to_owned)
         };
-        let location = header_text(header::LOCATION).filter(|_| response.status().is_redirection());
+        // Only a redirect's: a 300 or 304 that carries one leads nowhere.
+        let location = header_text(header::LOCATION)
+            .filter(|_| matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308));
         let content_type = header_text(header::CONTENT_TYPE)
             .and_then(|v| v.split(';').next().map(|v| v.trim().to_ascii_lowercase()))
             .filter(|v| !v.is_empty());
-        let name = suggested_name(
-            response
-                .headers()
-                .get(header::CONTENT_DISPOSITION)
-                .map(|v| v.as_bytes()),
-            response.url(),
-        );
+        let name = response_name(&response);
         let html = matches!(
             content_type.as_deref(),
             Some("text/html" | "application/xhtml+xml")
         );
-        let mut page = Page {
+        let mut page = FetchedPage {
             status: response.status().as_u16(),
             location,
             content_type,
@@ -940,7 +941,7 @@ impl Engine {
             body: None,
             truncated: false,
         };
-        if !(response.status().is_success() && (html || read == Body::Any)) {
+        if !(response.status().is_success() && (html || read == ReadBody::Any)) {
             return Ok(page);
         }
         let mut body = Vec::new();
@@ -2241,9 +2242,9 @@ async fn check_space(dir: &Path, needed: u64, reusable: u64) -> Result<(), Error
     Ok(())
 }
 
-/// Which bodies [`Engine::fetch`] reads.
+/// Which bodies [`Engine::fetch_page_inner`] reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Body {
+enum ReadBody {
     Html,
     Any,
 }
