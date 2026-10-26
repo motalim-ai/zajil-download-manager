@@ -19,7 +19,7 @@
 
 ### yt-dlp
 
-بترخيص GPLv3 أو أحدث للملف المستقل الذي ينزّله زاجِل (والمصدر بترخيص Unlicense). وهو ملك أصحابه: [github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
+الملف التنفيذي الذي ينزّله زاجِل بترخيص GPLv3 أو أحدث (والكود المصدري بترخيص Unlicense). وهو ملك أصحابه: [github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ### QuickJS-NG
 
@@ -48,7 +48,7 @@ This software uses code of FFmpeg licensed under the LGPLv2.1 (or later; the tex
 
 ### yt-dlp
 
-GPLv3 or later for the standalone program Zajil downloads (its source is under the Unlicense). It belongs to its authors: [github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
+The executable Zajil downloads is under GPLv3 or later (its source code is under the Unlicense). It belongs to its authors: [github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 ### QuickJS-NG
 
