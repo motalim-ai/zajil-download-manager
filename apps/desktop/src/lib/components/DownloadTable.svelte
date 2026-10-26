@@ -13,7 +13,7 @@
   import { categoryIcon } from "./Tree.svelte";
   import { locale } from "../i18n.svelte";
   import { lastTry, left, percent, size, speed } from "../format";
-  import { COLUMNS, clampWidth, load, minTableWidth, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
+  import { COLUMNS, MENU_COLUMN_WIDTH, clampWidth, load, minTableWidth, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
   import type { DownloadView } from "../bindings/DownloadView";
 
   let {
@@ -40,6 +40,7 @@
   // The columns as the user left them (M5.5).
   let columns = $state<Columns>(load());
   const shownColumns = $derived(visible(columns));
+  let scroller: HTMLElement | undefined = $state();
   function keep(next: Columns) {
     columns = next;
     save(next);
@@ -149,7 +150,11 @@
       event.preventDefault();
       const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
       if (!selected.includes(downloads[index]!.id)) selected = [downloads[index]!.id];
-      oncontext(box.left + 24, box.bottom - 4);
+      // At the start of the row's part in view: the table may scroll
+      // sideways (#184), and a row's own edge is then off the screen.
+      const view = scroller?.getBoundingClientRect() ?? box;
+      const rtl = getComputedStyle(event.currentTarget as HTMLElement).direction === "rtl";
+      oncontext(rtl ? Math.min(box.right, view.right) - 24 : Math.max(box.left, view.left) + 24, box.bottom - 4);
       return;
     }
     const next =
@@ -230,7 +235,7 @@
   {/if}
 {/snippet}
 
-<div class="scroll">
+<div class="scroll" bind:this={scroller}>
   <table
     class="grid"
     aria-label={label}
@@ -240,7 +245,7 @@
   >
     <colgroup>
       {#each shownColumns as c (c.id)}<col style:width={c.width === null ? undefined : `${c.width}px`} />{/each}
-      <col class="c-cols" />
+      <col class="c-cols" style:width={`${MENU_COLUMN_WIDTH}px`} />
     </colgroup>
     <thead>
       <tr>
@@ -348,9 +353,6 @@
     table-layout: fixed;
     font-size: 13px;
   }
-  .c-cols {
-    width: 34px;
-  }
   th {
     text-align: start;
     font-size: 12px;
@@ -384,9 +386,14 @@
   }
   th.cols,
   td.cols {
-    width: 34px;
     padding: 0;
     text-align: center;
+  }
+  /* The columns button stays in view when the table scrolls sideways
+     (#184): it is how columns are hidden to win the width back. */
+  th.cols {
+    inset-inline-end: 0;
+    z-index: 3;
   }
   .colbtn {
     border: 0;
