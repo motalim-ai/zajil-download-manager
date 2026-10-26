@@ -16,7 +16,10 @@
 // own 5 s limit, so a close that only waited it out fails (review of #45).
 //
 // A failure says at which stage it happened, how the app ended, and
-// everything the app wrote to stderr (owner's request on #45).
+// everything the app wrote to stderr (owner's request on #45); if the app
+// still runs, also its state, its child processes (WebView2's) and every
+// window it has, shown or not, before it is killed (#220: once on Windows
+// no window came in 90 s and the app had said nothing).
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,6 +54,38 @@ function hasWindow(pid) {
   }
 }
 
+/// What the system says of a process still running: its state, its child
+/// processes, and its windows. Lines to print; never throws.
+function diagnose(pid) {
+  const run = (file, argv) => {
+    try {
+      return execFileSync(file, argv, { ...CALL, timeout: 20_000 }).trimEnd().split("\n");
+    } catch (e) {
+      return [`(${file} failed: ${String(e.message ?? e).split("\n")[0]})`];
+    }
+  };
+  if (process.platform === "win32") {
+    const ps = [
+      `$p = Get-Process -Id ${pid}`,
+      `"process: responding=$($p.Responding) cpu=$($p.CPU) s threads=$($p.Threads.Count) main window=$($p.MainWindowHandle) '$($p.MainWindowTitle)'"`,
+      `Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} } | ForEach-Object { "child: $($_.ProcessId) $($_.Name)" }`,
+      "Add-Type -TypeDefinition 'using System; using System.Text; using System.Runtime.InteropServices; public static class ZajilWindows { public delegate bool EnumProc(IntPtr h, IntPtr l); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h); [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n); [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n); public static void List(uint pid) { EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid) { var t = new StringBuilder(256); var c = new StringBuilder(256); GetWindowText(h, t, 256); GetClassName(h, c, 256); Console.WriteLine(\"window: \" + h + \" class=\" + c + \" visible=\" + IsWindowVisible(h) + \" title=\" + t); } return true; }, IntPtr.Zero); } }'",
+      `[ZajilWindows]::List(${pid})`,
+    ].join("; ");
+    return run("powershell", ["-NoProfile", "-Command", ps]);
+  }
+  const lines = run("ps", ["-A", "-o", "pid=,ppid=,stat=,etime=,time=,comm="]).filter((l) => {
+    const [p, pp] = l.trim().split(/\s+/);
+    return p === String(pid) || pp === String(pid);
+  });
+  if (process.platform === "linux") lines.push(...run("xdotool", ["search", "--all", "--pid", String(pid)]).map((w) => `window: ${w}`));
+  else {
+    const script = `ObjC.import('CoreGraphics'); ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionAll, 0))).filter(w => w.kCGWindowOwnerPID === ${pid}).map(w => 'window: layer=' + w.kCGWindowLayer + ' onscreen=' + (w.kCGWindowIsOnscreen ? 1 : 0) + ' ' + JSON.stringify(w.kCGWindowBounds)).join('\\n')`;
+    lines.push(...run("osascript", ["-l", "JavaScript", "-e", script]));
+  }
+  return lines;
+}
+
 /// The ways of closing the app on this system.
 const WAYS = { linux: ["SIGTERM"], darwin: ["SIGTERM", "quit"], win32: ["window close"] }[process.platform] ?? ["SIGTERM"];
 
@@ -83,12 +118,14 @@ async function once(run, way) {
   child.on("exit", (code, signal) => (ended = { code, signal, at: at() }));
   child.on("error", (err) => (ended = { error: String(err), at: at() }));
   const fail = (why) => {
+    const seen = ended ? [] : diagnose(child.pid);
     if (!ended) child.kill("SIGKILL");
     return [
       `run ${run} FAILED at the stage "${stage}": ${why}`,
       `  how the app ended: ${ended ? JSON.stringify(ended) : "still running (killed now)"}`,
       `  the app's stderr (${stderr.length} bytes; it writes no log file):`,
       ...(stderr.trim() ? stderr.trimEnd().split("\n").map((l) => `    | ${l}`) : ["    (nothing)"]),
+      ...(seen.length ? ["  what the system said of it before it was killed:", ...seen.map((l) => `    | ${l}`)] : []),
     ].join("\n");
   };
 

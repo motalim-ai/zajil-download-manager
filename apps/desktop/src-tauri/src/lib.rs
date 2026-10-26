@@ -124,6 +124,13 @@ fn data_dir(args: &[String]) -> Result<PathBuf, String> {
 }
 
 pub fn run() {
+    // Said at once, as each stage of the start below (#220: a start whose
+    // window never came said nothing at all).
+    eprintln!(
+        "zajil: starting (version {}, process {})",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id()
+    );
     let args: Vec<String> = std::env::args().collect();
     let data = data_dir(&args).unwrap_or_else(|e| panic!("no data folder: {e}"));
     let system_download_dir = SystemPaths::new()
@@ -232,6 +239,12 @@ pub fn run() {
         .invoke_handler(handlers())
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
+            if let Some(window) = tauri_app.get_webview_window("main") {
+                eprintln!(
+                    "zajil: the window is made (shown: {}); its page is loading",
+                    window.is_visible().unwrap_or(false)
+                );
+            }
             #[cfg(unix)]
             if let Some(signals) = signals {
                 tauri::async_runtime::spawn(exit_on_signal(handle.clone(), signals));
