@@ -48,7 +48,13 @@ export async function drive(win: string | null): Promise<void> {
     await step("info", { name: (document.getElementById("add-name") as HTMLInputElement | null)?.value ?? null });
     start.click();
   } else if (/^progress-\d+$/.test(win)) {
-    await step("progress", { id: Number(win.slice("progress-".length)), name: await until("the name", shownName) });
+    // It draws its name only in its title bar; its heading for screen
+    // readers has the name once the download's data came.
+    const name = await until("the download's name", () => {
+      const text = document.getElementById("progress-name")?.textContent?.trim();
+      return text && text !== locale.t("progress-title") ? text : null;
+    });
+    await step("progress", { id: Number(win.slice("progress-".length)), name });
   } else if (win === "complete") {
     const open = await until("«Open folder»", () => button("complete-open-folder"));
     await step("complete", { name: shownName() });
