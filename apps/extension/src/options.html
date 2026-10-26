@@ -20,6 +20,19 @@
         <label for="sites" data-i18n="optionsSites"></label>
         <p class="hint" id="sites-hint" data-i18n="optionsSitesHint"></p>
         <textarea id="sites" rows="4" dir="ltr" spellcheck="false" aria-describedby="sites-hint"></textarea>
+        <fieldset aria-describedby="keys-hint">
+          <legend data-i18n="keysTitle"></legend>
+          <label class="choice">
+            <input type="checkbox" id="use-keys" aria-describedby="keys-warning" />
+            <span data-i18n="keysUse"></span>
+          </label>
+          <p class="hint" id="keys-warning" data-i18n="keysWarning"></p>
+          <p class="hint" id="keys-hint" data-i18n="keysHint"></p>
+          <label for="send-keys" data-i18n="keysSend"></label>
+          <select id="send-keys"></select>
+          <label for="browser-keys" data-i18n="keysBrowser"></label>
+          <select id="browser-keys"></select>
+        </fieldset>
         <div class="row">
           <button type="submit" data-i18n="optionsSave"></button>
           <button type="button" id="reset" data-i18n="optionsReset"></button>
@@ -34,6 +47,7 @@
           <li data-i18n="cookiesOnlyThisSite"></li>
           <li data-i18n="cookiesNotKept"></li>
           <li data-i18n="sitesVideo"></li>
+          <li data-i18n="sitesKeys"></li>
           <li data-i18n="cookiesOptional"></li>
         </ul>
         <p class="hint" data-i18n="cookiesPrompt"></p>

@@ -72,7 +72,9 @@ async function siteKey(url, store) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** @typedef {Record<string, { site: string, at: number }>} Tickets */
+/** `noStrict`: its link came from another site's page with Zajil's keys,
+ * so no `SameSite=Strict` cookie goes with it (`cookieHeader`).
+ * @typedef {Record<string, { site: string, at: number, noStrict?: boolean }>} Tickets */
 
 /** @param {any} browserApi @returns {Promise<Tickets>} */
 async function tickets(browserApi) {
@@ -91,11 +93,12 @@ function fresh(all, now) {
 /** Remembers that download `ticket` went to Zajil with the cookies of
  * `url`'s site from `store`: Zajil may ask for them again while it is open.
  * @param {any} browserApi @param {string} ticket @param {string} url
- * @param {string | undefined} store @param {number} [now] */
-export async function rememberTicket(browserApi, ticket, url, store, now = Date.now()) {
+ * @param {string | undefined} store @param {number} [now]
+ * @param {{ noStrict?: boolean }} [how] */
+export async function rememberTicket(browserApi, ticket, url, store, now = Date.now(), how = {}) {
   const site = await siteKey(url, store);
   await inTurn(async () => {
-    const all = { ...(await tickets(browserApi)), [ticket]: { site, at: now } };
+    const all = { ...(await tickets(browserApi)), [ticket]: how.noStrict ? { site, at: now, noStrict: true } : { site, at: now } };
     await browserApi.storage.local.set({ linkTickets: fresh(all, now) }).catch(() => {});
   });
 }
@@ -113,13 +116,20 @@ const SAME_SITE_DOWNLOADS = /** @type {Record<string, string[]>} */ ({
  * @param {any} browserApi @param {string} ticket @param {string} url
  * @param {string | undefined} store @param {number} [now] */
 export async function openTicket(browserApi, ticket, url, store, now = Date.now()) {
+  return Boolean(await ticketFor(browserApi, ticket, url, store, now));
+}
+
+/** The open `ticket` for `url`'s site and `store`, or null.
+ * @param {any} browserApi @param {string} ticket @param {string} url
+ * @param {string | undefined} store @param {number} [now] */
+async function ticketFor(browserApi, ticket, url, store, now = Date.now()) {
   const found = fresh(await tickets(browserApi), now)[ticket];
-  if (!found) return false;
-  if (found.site === (await siteKey(url, store))) return true;
+  if (!found) return null;
+  if (found.site === (await siteKey(url, store))) return found;
   for (const link of SAME_SITE_DOWNLOADS[new URL(url).origin] ?? []) {
-    if (found.site === (await siteKey(link, store))) return true;
+    if (found.site === (await siteKey(link, store))) return found;
   }
-  return false;
+  return null;
 }
 
 /** Forgets `ticket`: Zajil did not take its download.
@@ -168,8 +178,9 @@ export async function answer(browserApi, message) {
   const store = plainStore(message.store);
   const wrongStore = message.store !== undefined && message.store !== null && store === undefined;
   if (!isWeb(message.url) || wrongStore || typeof message.ticket !== "string" || !ID.test(message.ticket)) return reply(null);
-  if (!(await openTicket(browserApi, message.ticket, message.url, store))) return reply(null);
-  return reply(await cookieHeader(browserApi, message.url, store));
+  const found = await ticketFor(browserApi, message.ticket, message.url, store);
+  if (!found) return reply(null);
+  return reply(await cookieHeader(browserApi, message.url, store, { noStrict: found.noStrict === true }));
 }
 
 /**

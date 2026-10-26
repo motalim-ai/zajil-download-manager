@@ -1,5 +1,6 @@
 // @ts-check
-// What the extension captures, kept in `storage.local`.
+// What the extension captures, and the keys of a click, kept in
+// `storage.local`.
 
 /** The file types captured by default: Zajil's built-in categories
  * (`zajil_core::category::CategoriesFile::built_in`). */
@@ -17,11 +18,51 @@ export const DEFAULT_EXTENSIONS = [
  * @property {string[]} extensions File types captured, lower case, no dot.
  * @property {string[]} excludedSites Sites whose downloads stay in the
  *   browser: a host and its subdomains.
+ * @property {boolean} useKeys The keys of a click are in use: off by
+ *   default, as in IDM; the user turns them on (owner's decision).
+ * @property {string | null} sendKeys The keys that, held while clicking a
+ *   link, send it to Zajil (one of `KEY_CHOICES`); null: this system's
+ *   default (`defaultKeys`).
+ * @property {string | null} browserKeys The keys that leave a clicked
+ *   link to the browser, which then downloads it without Zajil taking it;
+ *   null: this system's default.
  */
+
+/** The keys a click can be held with (owner's decision, 2026-10-26): the
+ * modifiers in this order, joined by `+`; `off` for none. Never Cmd or the
+ * Windows key, nor Shift alone (a new window). The same list is in
+ * `click-keys.js`, which cannot import this module. */
+export const KEY_CHOICES = ["off", "ctrl", "alt", "ctrl+shift", "alt+shift", "ctrl+alt"];
+
+/** Whether this is a Mac, where Option (`alt`) is the key and Control+click
+ * opens the menu. @param {{ platform?: string, userAgentData?: { platform?: string } }} nav */
+export function isMac(nav) {
+  return /^mac/i.test(nav.userAgentData?.platform || nav.platform || "");
+}
+
+/** The owner's defaults: Ctrl+click sends to Zajil and Alt+click leaves it
+ * to the browser on Windows and Linux; on a Mac, Option+click and
+ * Option+Shift+click. @param {boolean} mac */
+export function defaultKeys(mac) {
+  return mac ? { send: "alt", browser: "alt+shift" } : { send: "ctrl", browser: "alt" };
+}
+
+/** The keys in force: the stored ones, else this system's; the browser's
+ * keys off when they are the same as Zajil's.
+ * @param {Pick<Settings, "sendKeys" | "browserKeys">} settings @param {boolean} mac */
+export function clickKeys(settings, mac) {
+  const base = defaultKeys(mac);
+  const send = settings.sendKeys ?? base.send;
+  const browser = settings.browserKeys ?? base.browser;
+  return { send, browser: browser === send ? "off" : browser };
+}
+
+/** @param {unknown} value @returns {string | null} */
+const keysOrNull = (value) => (typeof value === "string" && KEY_CHOICES.includes(value) ? value : null);
 
 /** @returns {Settings} */
 export function defaults() {
-  return { capture: true, extensions: [...DEFAULT_EXTENSIONS], excludedSites: [] };
+  return { capture: true, extensions: [...DEFAULT_EXTENSIONS], excludedSites: [], useKeys: false, sendKeys: null, browserKeys: null };
 }
 
 /**
@@ -36,6 +77,9 @@ export async function load(browserApi) {
     capture: typeof stored.capture === "boolean" ? stored.capture : base.capture,
     extensions: Array.isArray(stored.extensions) ? normalizeExtensions(stored.extensions) : base.extensions,
     excludedSites: Array.isArray(stored.excludedSites) ? normalizeSites(stored.excludedSites) : base.excludedSites,
+    useKeys: stored.useKeys === true,
+    sendKeys: keysOrNull(stored.sendKeys),
+    browserKeys: keysOrNull(stored.browserKeys),
   };
 }
 
@@ -49,6 +93,9 @@ export async function save(browserApi, settings) {
       capture: settings.capture,
       extensions: normalizeExtensions(settings.extensions),
       excludedSites: normalizeSites(settings.excludedSites),
+      useKeys: settings.useKeys === true,
+      sendKeys: keysOrNull(settings.sendKeys),
+      browserKeys: keysOrNull(settings.browserKeys),
     },
   });
 }

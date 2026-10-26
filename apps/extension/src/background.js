@@ -5,8 +5,8 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely } from "./compat.js";
-import { PROTOCOL_VERSION, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
-import { cookieHeader, cookiesAllowed, videoAllowed } from "./cookies.js";
+import { PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
+import { cookieHeader, cookiesAllowed, otherSite, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
 import { forget, forgetAll, note, originOf, streamFor } from "./streams.js";
@@ -140,16 +140,59 @@ api.notifications.onClosed?.addListener((/** @type {string} */ id) => {
  * that never came («unknown») keeps it: Zajil may have taken it, and its
  * `keep` forgets it otherwise (review of the Drive links).
  * @param {{ outcome: string } | null | undefined} result @param {string} ticket
- * @param {string} url @param {string | undefined} store */
-async function settleTicket(result, ticket, url, store) {
-  if (result?.outcome === "taken") await rememberTicket(api, ticket, url, store);
+ * @param {string} url @param {string | undefined} store
+ * @param {{ noStrict?: boolean }} [how] the ticket's (`rememberTicket`) */
+async function settleTicket(result, ticket, url, store, how = {}) {
+  if (result?.outcome === "taken") await rememberTicket(api, ticket, url, store, undefined, how);
   else if (result?.outcome === "refused" || result?.outcome === "unreachable") await forgetTicket(api, ticket);
+}
+
+/** How long a link clicked with the browser's keys stays the browser's. */
+const LEAVE_MS = 30_000;
+
+/** The links left to the browser (`leave` in `storage.session`) are read
+ * and written one change at a time, in the order the events came (review
+ * of #169: a click and its download arriving together, or two clicks,
+ * lost one another). */
+let leaveQueue = Promise.resolve();
+
+/** Changes the list of links left to the browser, after every change
+ * asked before; expired ones are dropped.
+ * @template T
+ * @param {(live: { url: string, until: number }[]) => T} change
+ * @returns {Promise<T>} */
+function changeLeave(change) {
+  const done = leaveQueue.then(async () => {
+    const { leave = [] } = await api.storage.session.get("leave").catch(() => ({}));
+    const now = Date.now();
+    const live = leave.filter((/** @type {any} */ l) => l.until > now);
+    const result = change(live);
+    await api.storage.session.set({ leave: live.slice(-20) }).catch(() => {});
+    return result;
+  });
+  leaveQueue = done.then(
+    () => {},
+    () => {},
+  );
+  return done;
+}
+
+/** Whether `item` is a link the user clicked with the browser's keys
+ * (`click-keys.js`) a moment ago: then it is the browser's, once.
+ * @param {any} item */
+function leftToBrowser(item) {
+  return changeLeave((live) => {
+    const at = live.findIndex((l) => l.url === item.url || l.url === item.finalUrl);
+    if (at >= 0) live.splice(at, 1);
+    return at >= 0;
+  });
 }
 
 onNewDownload(api, (item) => {
   void (async () => {
     const settings = await load(api);
     if (!shouldCapture(item, settings, api.runtime.id)) return;
+    if (await leftToBrowser(item)) return;
     const pause = pausesSafely(api);
     const url = item.finalUrl || item.url;
     const cookies = await cookieHeader(api, url, item.cookieStoreId);
@@ -186,38 +229,69 @@ api.contextMenus.onClicked.addListener((/** @type {any} */ info, /** @type {any}
     return;
   }
   if (info.menuItemId !== MENU) return;
-  void (async () => {
-    // The link is checked before any cookie is read (review of #76).
-    if (!menuMessage(info)) {
-      await notify(t("menuNotALink"));
-      return;
-    }
-    // A private window's cookies are never sent: the link goes without.
-    const cookies = tab?.incognito ? null : await cookieHeader(api, info.linkUrl, tab?.cookieStoreId);
-    const from = {
-      // Nothing that ties a private window's download to this browser.
-      instance: tab?.incognito ? undefined : await instanceId(api),
-      store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
-      ticket: newTicket(),
-    };
-    const message = /** @type {Record<string, unknown>} */ (menuMessage(info, cookies, from));
-    // Zajil keeps nothing of a private window's download once it is done.
-    if (tab?.incognito) message.private = true;
-    // Kept before Zajil is asked (it may ask for a Drive file's download
-    // address meanwhile).
-    if (cookies) await rememberTicket(api, from.ticket, info.linkUrl, from.store);
-    const result = await send(api, message);
-    if (cookies) await settleTicket(result, from.ticket, info.linkUrl, from.store);
-    // Zajil is told when the last private window closes (only a flag).
-    if (tab?.incognito && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
-    await report(result, "menu", {
-      url: info.linkUrl,
-      sentCookies: Boolean(cookies),
-      inPrivate: Boolean(tab?.incognito),
-      store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
-    });
-  })();
+  void sendLink(info, tab);
 });
+
+/**
+ * A link to Zajil: from its menu, or clicked with Zajil's keys
+ * (`click-keys.js`). Its cookies go with it when the user allowed them,
+ * never from a private window. From the keys (owner's decision): its
+ * `SameSite=Strict` cookies only from a page of the same site, as the
+ * browser; and a link Zajil finds to be a web page opens in a tab behind
+ * this one, as Ctrl+click would have.
+ * @param {any} info the link (`linkUrl`) and its page (`pageUrl`) @param {any} tab
+ * @param {{ keys?: boolean }} [how]
+ */
+async function sendLink(info, tab, how = {}) {
+  // The link is checked before any cookie is read (review of #76).
+  if (!menuMessage(info)) {
+    await notify(t("menuNotALink"));
+    return;
+  }
+  // A private window's cookies are never sent: the link goes without.
+  const cookies = tab?.incognito ? null : await cookieHeader(api, info.linkUrl, tab?.cookieStoreId, how.keys ? { from: info.pageUrl } : {});
+  const from = {
+    // Nothing that ties a private window's download to this browser.
+    instance: tab?.incognito ? undefined : await instanceId(api),
+    store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
+    ticket: newTicket(),
+  };
+  const message = /** @type {Record<string, unknown>} */ (menuMessage(info, cookies, from));
+  // Zajil keeps nothing of a private window's download once it is done.
+  if (tab?.incognito) message.private = true;
+  // Kept before Zajil is asked (it may ask for a Drive file's download
+  // address meanwhile).
+  const ticket = { noStrict: Boolean(how.keys) && otherSite(info.pageUrl, info.linkUrl) };
+  if (cookies) await rememberTicket(api, from.ticket, info.linkUrl, from.store, undefined, ticket);
+  const result = await send(api, message);
+  if (cookies) await settleTicket(result, from.ticket, info.linkUrl, from.store, ticket);
+  // Zajil is told when the last private window closes (only a flag).
+  if (tab?.incognito && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
+  if (how.keys && isPageRefusal(result)) {
+    await openBehind(info.linkUrl, tab);
+    return;
+  }
+  await report(result, "menu", {
+    url: info.linkUrl,
+    sentCookies: Boolean(cookies),
+    inPrivate: Boolean(tab?.incognito),
+    store: tab?.incognito ? undefined : plainStore(tab?.cookieStoreId),
+  });
+}
+
+/** Opens `url` in a new tab behind `tab`, next to it, in its window and
+ * its container (Firefox): where Ctrl+click would have opened it.
+ * @param {string} url @param {any} tab */
+async function openBehind(url, tab) {
+  /** @type {Record<string, unknown>} */
+  const where = { url, active: false };
+  if (Number.isSafeInteger(tab?.windowId)) where.windowId = tab.windowId;
+  if (Number.isSafeInteger(tab?.index)) where.index = tab.index + 1;
+  if (Number.isSafeInteger(tab?.id)) where.openerTabId = tab.id;
+  if (typeof tab?.cookieStoreId === "string") where.cookieStoreId = tab.cookieStoreId;
+  await api.tabs.create(where).catch(() => api.tabs.create({ url, active: false }).catch(() => {}));
+  await api.action.setBadgeText({ text: "" }).catch(() => {});
+}
 
 /**
  * "Download video with Zajil" (M6): the video's page goes to Zajil, which
@@ -250,7 +324,22 @@ async function sendVideo(info, tab, doc) {
 // its frame and its tab are the browser's word (the sender), never the
 // message's; only the video's address comes from the page.
 api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} */ sender) => {
-  if (sender?.id !== api.runtime.id || !sender.tab || message?.type !== "video-button") return;
+  if (sender?.id !== api.runtime.id || !sender.tab) return;
+  if (message?.type === "click-browser") {
+    // Noted at once, before any wait, so its download finds it (review of
+    // #169). Leaving a link to the browser needs no permission; and nothing
+    // of a private window is kept (its downloads are never taken anyway).
+    if (!sender.tab.incognito && isWeb(message.href)) {
+      const url = /** @type {string} */ (message.href);
+      void changeLeave((live) => void live.push({ url, until: Date.now() + LEAVE_MS }));
+    }
+    return;
+  }
+  if (message?.type === "click-link") {
+    void clicked(message.href, sender);
+    return;
+  }
+  if (message?.type !== "video-button") return;
   const frameId = Number.isSafeInteger(sender.frameId) ? sender.frameId : 0;
   const info = {
     pageUrl: sender.tab.url,
@@ -260,6 +349,18 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
   };
   void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined);
 });
+
+/**
+ * A link clicked with Zajil's keys goes to Zajil as from its menu, its page
+ * the browser's word (the frame's own address). Only while "Allow Zajil on
+ * sites" lasts and the keys are on (review: a script left from before does
+ * nothing).
+ * @param {unknown} href @param {any} sender
+ */
+async function clicked(href, sender) {
+  if (typeof href !== "string" || !(await videoAllowed(api)) || !(await load(api)).useKeys) return;
+  await sendLink({ linkUrl: href, pageUrl: sender.url ?? sender.tab.url }, sender.tab, { keys: true });
+}
 
 /** The button's script, on every site while the video permissions last. */
 const BUTTON = {
@@ -271,6 +372,17 @@ const BUTTON = {
   persistAcrossSessions: true,
 };
 
+/** The keys of a click (`click-keys.js`), on every site and from the
+ * start of a page, under the same permission. */
+const CLICKS = {
+  id: "zajil-click-keys",
+  js: ["click-keys.js"],
+  matches: ["<all_urls>"],
+  allFrames: true,
+  runAt: "document_start",
+  persistAcrossSessions: true,
+};
+
 /** @param {any} details */
 const onHeaders = (details) => void note(api, details);
 const WATCHED = { urls: ["<all_urls>"], types: ["main_frame", "xmlhttprequest", "media", "other"] };
@@ -279,6 +391,10 @@ const WATCHED = { urls: ["<all_urls>"], types: ["main_frame", "xmlhttprequest", 
  * button's script registered or not, the playlists watched or not. */
 async function syncVideo() {
   const allowed = await videoAllowed(api);
+  // The keys' scripts already in open tabs stay there when the permission
+  // goes (unregistering is for pages loaded later): they read this, and
+  // take no click while it is not true (review of #169).
+  await api.storage.local.set({ clickKeysOn: allowed }).catch(() => {});
   const requests = api.webRequest?.onHeadersReceived;
   if (allowed && requests && !requests.hasListener(onHeaders)) {
     try {
@@ -291,9 +407,11 @@ async function syncVideo() {
   if (!allowed && requests?.hasListener(onHeaders)) requests.removeListener(onHeaders);
   if (!allowed) await forgetAll(api);
   if (!api.scripting) return;
-  const registered = await api.scripting.getRegisteredContentScripts({ ids: [BUTTON.id] }).catch(() => []);
-  if (allowed && !registered.length) await api.scripting.registerContentScripts([BUTTON]).catch(() => {});
-  if (!allowed && registered.length) await api.scripting.unregisterContentScripts({ ids: [BUTTON.id] }).catch(() => {});
+  for (const script of [BUTTON, CLICKS]) {
+    const registered = await api.scripting.getRegisteredContentScripts({ ids: [script.id] }).catch(() => []);
+    if (allowed && !registered.length) await api.scripting.registerContentScripts([script]).catch(() => {});
+    if (!allowed && registered.length) await api.scripting.unregisterContentScripts({ ids: [script.id] }).catch(() => {});
+  }
 }
 
 // Added at once, at the top, when the permission is there: a background

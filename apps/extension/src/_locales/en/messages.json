@@ -117,7 +117,7 @@
     "message": "Download with the browser"
   },
   "cookiesPrompt": {
-    "message": "The browser will say the extension asks to “Read and change all your data on all websites” or to “Access your data for all websites”: that is what it calls this permission, as each site's cookies and videos need that site's permission. The extension reads only the download link's cookies, where the videos are and their addresses, and their playlists' addresses; never the pages' text or what you type in them."
+    "message": "The browser will say the extension asks to “Read and change all your data on all websites” or to “Access your data for all websites”: that is what it calls this permission, as each site's cookies and videos need that site's permission. The extension reads only the download link's cookies, where the videos are and their addresses, their playlists' addresses, and the address of a link you click with Zajil's keys; never the pages' text or what you type in them."
   },
   "signInNoCookies": {
     "message": "This site needs a sign-in, and no cookies went (the browser gave none for this link), so the browser went on with the download."
@@ -145,5 +145,32 @@
   },
   "sitesPartly": {
     "message": "Partly allowed: a download link's cookies go to Zajil with its download, but the “Download video” button needs the rest of the permission. You can also take it all back."
+  },
+  "keysTitle": {
+    "message": "Keys with a click on a link"
+  },
+  "keysSend": {
+    "message": "Sends the link to Zajil"
+  },
+  "keysBrowser": {
+    "message": "Leaves it to the browser (Zajil does not take its download)"
+  },
+  "keysHint": {
+    "message": "These work only after “Allow Zajil on sites” (below), as the extension must see the click in the page, and in open tabs once reloaded. The extension reads nothing of the page but the clicked link's address. Strict cookies (SameSite=Strict) never go with a link from another site's page, as in the browser."
+  },
+  "keysOff": {
+    "message": "Nothing"
+  },
+  "keysClick": {
+    "message": "click"
+  },
+  "sitesKeys": {
+    "message": "Keys with a click (in the settings): of a link clicked with Zajil's or the browser's keys, the extension learns only its address. Any other click stays the page's own."
+  },
+  "keysUse": {
+    "message": "Use keys to force Zajil or keep it out"
+  },
+  "keysWarning": {
+    "message": "Off by default. Once on, Ctrl+click no longer opens a link in a new tab (on Windows and Linux): it sends it to Zajil, and a link that is a web page opens in a tab behind this one."
   }
 }

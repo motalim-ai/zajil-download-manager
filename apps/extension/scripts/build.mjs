@@ -17,6 +17,7 @@ const files = [
   "settings.js",
   "streams.js",
   "video-button.js",
+  "click-keys.js",
   "options.html",
   "options.js",
   "options.css",
