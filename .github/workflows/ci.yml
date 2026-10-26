@@ -326,7 +326,11 @@ jobs:
       - name: The GUI libraries' cache key (Linux)
         if: runner.os == 'Linux'
         id: gui-key
-        run: echo "key=gui-debs-$ImageOS-$ImageVersion-$(printf '%s' "$GUI_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          # Never one key for every image: these must be set.
+          : "${ImageOS:?}" "${ImageVersion:?}"
+          echo "key=gui-debs-$ImageOS-$ImageVersion-$(dpkg --print-architecture)-$(printf '%s' "$GUI_PACKAGES --no-install-recommends" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore the GUI libraries' packages (Linux)
         if: runner.os == 'Linux'
         id: gui-debs
@@ -354,7 +358,8 @@ jobs:
           fi
           mkdir -p "$GUI_DEBS/partial"
           for try in 1 2 3; do
-            if [ "$try" != 1 ]; then
+            # After a failed try, or a failed install from the cache.
+            if [ "$try" != 1 ] || [ "$HIT" = true ]; then
               sleep 15
               # A try cut off in the middle can leave dpkg half done.
               sudo timeout -k 20 120 dpkg --configure -a || true
@@ -364,6 +369,9 @@ jobs:
             if sudo timeout -k 20 300 apt-get $APT_OPTIONS update -q \
               && sudo timeout -k 20 240 apt-get $APT_OPTIONS install -y -q --no-install-recommends \
                 -o Dir::Cache::Archives="$GUI_DEBS" $GUI_PACKAGES; then
+              # Only the versions installed now are kept (a try cut off
+              # may have left older ones).
+              sudo apt-get -o Dir::Cache::Archives="$GUI_DEBS" autoclean -q
               sudo chown -R "$(id -u):$(id -g)" "$GUI_DEBS"
               rm -rf "$GUI_DEBS/partial" "$GUI_DEBS/lock"
               exit 0
