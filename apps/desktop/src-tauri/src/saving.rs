@@ -2,7 +2,7 @@
 //! (#81). Windows waits for the window to answer `WM_ENDSESSION`, and the
 //! process's own exit then took seconds while WebView2 came down, past
 //! what a shutdown waits. So once the downloads have stopped, Zajil ends
-//! its process at once (`terminate`), but only after every write in
+//! its process at once (`zajil_platform::session::terminate`), but only after every write in
 //! progress is done: the stores' (queues, settings, categories) by their
 //! own lock files, the app's own files (`window.json`, `videos.json`) by
 //! [`writing`]. Both are then kept until the end, so no write starts
@@ -115,20 +115,6 @@ fn lock_until(path: &Path, deadline: Instant) -> io::Result<Option<File>> {
             Err(TryLockError::Error(err)) => return Err(err),
         }
     }
-}
-
-/// Ends the process at once, with code 0, without the exit that waits for
-/// WebView2 (#81).
-#[cfg(windows)]
-pub fn terminate() -> ! {
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
-    // SAFETY: the pseudo-handle of this process, always valid; the call
-    // ends it and does not return.
-    unsafe {
-        TerminateProcess(GetCurrentProcess(), 0);
-    }
-    // Only if Windows refused: the usual exit.
-    std::process::exit(0)
 }
 
 #[cfg(test)]

@@ -59,10 +59,6 @@ tauri = { version = "2.12.5", features = ["test"] }
 tempfile = "3.27.0"
 zajil-testserver = { path = "../../../crates/zajil-testserver" }
 
-# Ending the process at the end of a Windows session (`saving.rs`, #81).
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
 # Whether the desktop shows tray icons (`closing.rs`): already in the tree
 # through tauri-plugin-notification, so no new crate.
 [target.'cfg(target_os = "linux")'.dependencies]

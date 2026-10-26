@@ -657,7 +657,7 @@ fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
                     still.join(", ")
                 );
             }
-            saving::terminate();
+            zajil_platform::session::terminate();
         }),
     )
     .map_err(tauri::Error::Io)

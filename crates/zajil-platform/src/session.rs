@@ -30,6 +30,14 @@ pub fn on_session_end(_window: isize, _on_end: Box<dyn Fn() + Send + 'static>) -
     Ok(())
 }
 
+/// Ends this process at once, with code 0, without its usual exit: at a
+/// session end that exit waited seconds for WebView2 to come down (#81).
+/// For the desktop app, once everything is saved.
+#[cfg(windows)]
+pub fn terminate() -> ! {
+    imp::terminate()
+}
+
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod imp {
@@ -43,6 +51,17 @@ mod imp {
     const ID: usize = 0x7a61_6a69; // "zaji"
 
     type OnEnd = Box<dyn Fn() + Send + 'static>;
+
+    pub fn terminate() -> ! {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        // SAFETY: the pseudo-handle of this process, always valid; the
+        // call ends the process and does not return.
+        unsafe {
+            TerminateProcess(GetCurrentProcess(), 0);
+        }
+        // Only if Windows refused: the usual exit.
+        std::process::exit(0)
+    }
 
     pub fn on_session_end(window: isize, on_end: OnEnd) -> io::Result<()> {
         // Lives as long as the program: the window may get the message at

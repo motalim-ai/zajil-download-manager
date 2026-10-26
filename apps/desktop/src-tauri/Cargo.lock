@@ -6294,7 +6294,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "ts-rs",
- "windows-sys 0.61.2",
  "zajil-core",
  "zajil-grab",
  "zajil-host",
