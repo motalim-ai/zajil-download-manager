@@ -583,6 +583,23 @@ async fn pages_that_link_each_other_are_asked_for_once() {
     assert!(site.strays().is_empty(), "{:?}", site.strays());
 }
 
+/// A redirect target is written as links are: `/a.html#x` and a link to
+/// `/a.html` are one page, asked for once (review of #227).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redirect_target_and_a_link_to_it_are_one_page() {
+    let site = server();
+    site.put("/index.html", links(&["moved.html", "a.html"]));
+    site.redirect("/moved.html", "/a.html#x", 301);
+    site.put("/a.html", links(&[]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut plan = plan(&site.url("/index.html"), dir.path());
+    plan.depth = crawl::MAX_DEPTH;
+    let (report, _) = grab(&engine(), &plan, &scope(&plan)).await;
+
+    each_asked_at_most_once(&site);
+    assert_eq!(report.pages, 2);
+}
+
 /// A redirect cycle (A → B → A) ends at once, and a chain longer than
 /// `MAX_REDIRECTS` stops there; each URL is asked for once.
 #[tokio::test(flavor = "multi_thread")]

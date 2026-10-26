@@ -184,7 +184,13 @@ pub async fn run(engine: Engine, args: GrabArgs) -> ExitCode {
         // Nothing could be read from the start page (the site cannot be
         // reached, its robots.txt allows nothing): a failure, not "done"
         // (review of #195).
-        eprintln!("zajil: nothing could be read from the start page");
+        if report.limits.contains(&Limit::Pages) {
+            // A redirect of the start costs a page request too (review of
+            // #232).
+            eprintln!("zajil: --max-pages was reached before a page could be read: raise it");
+        } else {
+            eprintln!("zajil: nothing could be read from the start page");
+        }
         if let Some(to) = &report.start_left_site {
             let host = match (to.host_str(), to.port()) {
                 (Some(host), Some(port)) => format!("{host}:{port}"),

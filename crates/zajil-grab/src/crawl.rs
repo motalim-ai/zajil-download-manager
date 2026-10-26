@@ -447,8 +447,6 @@ fn remove_download(state_file: &std::path::Path) {
     let _ = std::fs::remove_file(state_file);
 }
 
-/// Whether `text` matches `glob`, where `*` is any run of characters and
-/// the whole text must match.
 /// Whether `--include` or `--exclude` `glob` matches `path`, as written in
 /// the URL or decoded: `'/my files/*'` matches `/my%20files/a.zip`, and so
 /// does `'/my%20files/*'` (review of #195).
@@ -476,6 +474,8 @@ fn decoded(path: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Whether `text` matches `glob`, where `*` is any run of characters and
+/// the whole text must match.
 pub fn glob_matches(glob: &str, text: &str) -> bool {
     let (p, s) = (glob.as_bytes(), text.as_bytes());
     let (mut i, mut j) = (0, 0);
