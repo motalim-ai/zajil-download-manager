@@ -4,7 +4,8 @@ name: FFmpeg release
 # publishes a release with the binaries, the official source and its
 # signature, the source with the build notes in its root, and every build
 # file: the LGPL checklist of ADR-0009, section 1. Apart from ffmpeg.yml,
-# so that ci.yml can call the build without the release's write access.
+# so that its builds on main and in PRs run without the release's write
+# access.
 on:
   push:
     tags: ["tools-ffmpeg-*"]

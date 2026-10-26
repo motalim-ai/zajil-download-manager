@@ -8,8 +8,9 @@ name: FFmpeg
 # Publishing a release is .github/workflows/ffmpeg-release.yml, which
 # calls this one. ci.yml's video tests take the released ffmpeg and
 # ffprobe, and ffmpeg-testgen from the cache this workflow fills (ADR-0009,
-# section 8): it is rebuilt only when the FFmpeg source, options or build
-# script change.
+# section 8): it is rebuilt only when the FFmpeg source, its options, the
+# build script or this workflow change, or when the weekly run finds it
+# gone from main's cache.
 on:
   # main; a PR is built through `pull_request`, once. The pins and the
   # README change no build (review of #172).
@@ -37,11 +38,11 @@ on:
 permissions:
   contents: read
 
-# Called by the release, `github.workflow` is the caller's: its runs never
-# cancel this workflow's own run for the same branch. Only a PR's newer
-# commit cancels a run: main's runs fill the cache, and go to the end.
+# As in ci.yml: a PR's newer commit cancels its older run, and every other
+# run (main's, which fill the cache, and the release's) has its own group,
+# so none is cancelled or kept waiting (review of #228).
 concurrency:
-  group: ffmpeg-${{ github.workflow }}-${{ github.ref }}
+  group: ffmpeg-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -95,8 +96,8 @@ jobs:
             ${{ matrix.cc }}:p
             make:
             diffutils:
-      # The test-only build, rebuilt only when its source, options or
-      # script change. Its own name and folder: it is never released.
+      # The test-only build, rebuilt only when its key changes or the cache
+      # lost it. Its own name and folder: it is never released.
       - name: Restore ffmpeg-testgen
         id: testgen
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

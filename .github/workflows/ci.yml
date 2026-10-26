@@ -179,14 +179,14 @@ jobs:
       # pin (the same pins files Zajil reads): yt-dlp, QuickJS-NG, and our
       # ffmpeg and ffprobe from the published tools-ffmpeg release, never
       # built here (owner's decision: building them on five systems held
-      # every PR). ffmpeg.yml builds them only when tools/ffmpeg/** or
-      # itself change.
+      # every PR). ffmpeg.yml builds them, for a release.
       #
       # The test-only ffmpeg-testgen is never released: it comes from the
       # cache ffmpeg.yml fills (same key, same folder), and ffmpeg.yml runs
-      # whenever that key would change. Without it (a change of those files
-      # in this PR, or a cache gone after a week unused) the tests do not
-      # wait for a build: video_real says NOT RUN, with a warning here.
+      # whenever that key would change, and every Sunday on main to fill a
+      # cache gone. Without it (a change of those files in this PR, or a
+      # cache gone since Sunday) the tests do not wait for a build:
+      # video_real says NOT RUN, with a warning here.
       - name: Restore ffmpeg-testgen
         id: testgen
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
