@@ -115,10 +115,12 @@ async fn each_queue_has_its_own_number_of_downloads_at_once() {
 async fn pausing_and_resuming_an_item_through_the_queues_file() {
     let server = TestServer::http();
     let data = random_bytes(4 * MIB, 402);
-    server.put(
-        "/f.bin",
-        FileSpec::new(data.clone()).throttle(2 * MIB as u64),
-    );
+    // Slow enough that the pause lands long before the end, even on a
+    // slow machine: 256 KiB/s on each of its connections, 4 s for the
+    // whole, paused after 1 MiB. At 2 MiB/s each it finished in half a
+    // second, and on Windows CI it once finished before the pause reached
+    // it (#179).
+    server.put("/f.bin", FileSpec::new(data.clone()).throttle(256 * 1024));
     let data_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data_dir.path());
@@ -166,7 +168,23 @@ async fn pausing_and_resuming_an_item_through_the_queues_file() {
         .await
         .unwrap();
 
-    assert!(paused && resumed);
+    // Said with what happened, if the download ended before the pause
+    // reached it (#179).
+    let finished_before_resume = events
+        .iter()
+        .position(|e| matches!(e, QueueEvent::Finished { .. }))
+        .zip(
+            events
+                .iter()
+                .position(|e| matches!(e, QueueEvent::Stopped { .. })),
+        )
+        .is_none_or(|(finished, stopped)| finished < stopped);
+    assert!(
+        paused && resumed,
+        "paused {paused}, resumed {resumed}; finished before any stop: {finished_before_resume}; \
+         last events: {:?}",
+        events.iter().rev().take(6).collect::<Vec<_>>()
+    );
     assert_eq!(summary.finished, 1);
     let done = store.load().unwrap();
     let file = done.item(id).unwrap().file.clone().unwrap();
