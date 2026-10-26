@@ -492,7 +492,7 @@ update-setting-hint = Only asks GitHub; nothing is downloaded.
 
 ## حد كل موقع
 
-status-waiting-site = Waiting for its site
+status-waiting-site = Site busy
 
 ## Video (M6)
 
