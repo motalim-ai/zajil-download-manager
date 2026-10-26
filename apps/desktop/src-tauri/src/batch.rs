@@ -208,7 +208,7 @@ fn add_all(
 
 /// Opens «Batch download», with `url` in its pattern box if one is given.
 #[tauri::command]
-pub fn open_batch<R: tauri::Runtime>(
+pub async fn open_batch<R: tauri::Runtime>(
     pending: State<'_, Pending>,
     url: Option<String>,
     handle: tauri::AppHandle<R>,

@@ -91,7 +91,7 @@ pub fn drop_box_shown(closing: tauri::State<'_, Closing>) -> bool {
 
 /// Shows or hides the drop box, and keeps the choice.
 #[tauri::command]
-pub fn set_drop_box<R: tauri::Runtime>(
+pub async fn set_drop_box<R: tauri::Runtime>(
     closing: tauri::State<'_, Closing>,
     shown: bool,
     handle: tauri::AppHandle<R>,
