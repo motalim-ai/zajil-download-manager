@@ -5,7 +5,7 @@
 // the page makes is refused.
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium } from "playwright-core";
+import { launch } from "./browser.js";
 
 const script = readFileSync(new URL("../src/video-button.js", import.meta.url), "utf8");
 
@@ -13,7 +13,7 @@ const script = readFileSync(new URL("../src/video-button.js", import.meta.url), 
 let browser;
 
 beforeAll(async () => {
-  browser = await chromium.launch(process.env.CI ? { channel: "chrome" } : {});
+  browser = await launch("video-button");
 });
 
 afterAll(async () => {
