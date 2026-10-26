@@ -1,18 +1,21 @@
 <div dir="rtl">
 
-# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (M8)
+# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (M8، ويبدأ في 0.3)
 
 | البند | القيمة |
 |---|---|
-| الحالة | **مقترح (مسودة)**: ينتظر قرارات المالك في آخره |
+| الحالة | **مقبول** (قرارات المالك في 2026-10-26، في آخر الورقة) |
 | التاريخ | 2026-10-26 |
 | صاحب القرار | Motalim (@motalim-ai) |
 
-> **English summary (draft).**
+> **English summary.**
 > - **Signed by the project's own key, never by Apple or Microsoft** (owner's decision, 2026-10-25). The signature proves an update comes from us; the operating systems' warnings on first install stay as they are.
-> - **Zajil itself:** Tauri 2's updater (`tauri-plugin-updater`). Its signatures are minisign (Ed25519). The public key is built into Zajil; the private key never is. An update is downloaded and installed only after the user says yes. Nothing is silent. TLS is always fully checked.
-> - **The video tools** (yt-dlp, FFmpeg, QuickJS-NG, ADR-0009) get their own signed list, `tools.json`, under the same key. It holds each tool's version, address and SHA-256, so a tool can be updated without a full Zajil release. The list is never older than the one Zajil has (no rollback), and the tools keep being checked by SHA-256 before every run.
-> - **Where the private key lives, who can reach it, and what to do if it leaks** are the owner's decisions: the questions are at the end.
+> - **When:** before 1.0, in 0.3 (owner's decision, 2026-10-26).
+> - **Zajil itself:** Tauri 2's updater (`tauri-plugin-updater`, minisign, Ed25519). Two public keys are built into Zajil: the signing key and an offline emergency key. Our own check accepts either before Tauri's runs. An update is downloaded and installed only after the user says yes. Nothing is silent. TLS is always fully checked. The `.deb` gets a notice and a link only; an apt repository comes after 1.0.
+> - **The video tools** (yt-dlp, FFmpeg, QuickJS-NG, ADR-0009) get a signed list, `tools.json`, under the same keys. It holds each tool's version, address and SHA-256, so a tool can be updated without a full Zajil release. A list is never older than the one Zajil has (no rollback), and the tools keep being checked by SHA-256 before every run.
+> - **The private key** is a GitHub secret in an environment named `release`. Each run needs the owner's approval, only on a `vX.Y.Z` tag from `main`. Only the owner and the release workflow reach it. The emergency key stays offline with the owner.
+> - **If a key leaks:** the plan in section 4. The update check also shows a clear security alert when a leak has been announced.
+> - **Also:** «Skip this version», and «Updates have not been checked for a long time».
 > - **Tests:** a good update installs; a wrong signature, a wrong SHA-256, an older list and a bad TLS certificate are all refused. All of it runs on a local server in CI.
 
 ## السياق
@@ -45,14 +48,14 @@
 | **أ. `tools.json` موقّع بنفس المفتاح** (توقيع minisign بجانبه) | أداة واحدة ومفتاح واحد، والتحقق Ed25519 بمكتبة صغيرة (`minisign-verify`، بلا شبكة ولا ملفات) | يحتاج كود تحقق منّا (صغير) ورقمًا يمنع الإرجاع |
 | ب. الأدوات تتحدث مع إصدارات زاجِل فقط (كما اليوم) | لا شيء جديد | يخالف ADR-0009: إصدار كامل كلما تغيّر yt-dlp |
 
-## القرار (مقترح)
+## القرار
 
 ### 1. تحديث زاجِل نفسه
 
 - **`tauri-plugin-updater`**، والمثبّتات تُبنى معها ملفات التحديث الموقّعة (`createUpdaterArtifacts`):
   - ماك: `.app.tar.gz` وتوقيعه.
   - ويندوز: مثبّت NSIS نفسه وتوقيعه. يُثبَّت للمستخدم الحالي، بلا صلاحيات مدير، كما اليوم.
-  - لينكس: الـ AppImage وتوقيعه. **أما الـ `.deb` فلا يتحدث من داخل البرنامج**: زاجِل يقول «توجد نسخة جديدة» مع رابط صفحة الإصدار، كما اليوم (#124). ومستودع apt موقّع بـ GPG قرار منفصل في M8.
+  - لينكس: الـ AppImage وتوقيعه. **أما الـ `.deb` فلا يتحدث من داخل البرنامج**: زاجِل يقول «توجد نسخة جديدة» مع رابط صفحة الإصدار، كما اليوم (#124). ومستودع apt موقّع يأتي بعد 1.0 (قرار المالك).
 - **المفتاح العام داخل البرنامج** (في `tauri.conf.json`، فيدخل في الملف التنفيذي عند البناء). ولا يُقرأ أي مفتاح من ملف أو من الشبكة.
 - **مصدر التحديث:** ملف `latest.json` في أصول آخر إصدار على GitHub، يكتبه workflow الإصدار. فيه النسخة، ولكل نظام رابط الملف وتوقيعه.
   - زاجِل لا يتبع رابطًا خارج `https://github.com/motalim-ai/zajil-download-manager/releases/download/` (وما يحوّل إليه GitHub). والتوقيع يُتحقق منه على الملف نفسه، فرابط آخر لا يفيد مهاجمًا، لكنه يقلل ما يُطلب.
@@ -80,29 +83,33 @@
 - **القائمة المبنية في زاجِل تبقى الأساس:** بلا شبكة، أو إن رُفضت القائمة الجديدة، تعمل الأدوات المثبّتة كما هي.
 - **من يكتب القائمة:** الـ PR الذي يرفع نسخة yt-dlp (المهمة المجدولة في ADR-0009) يرفع معها `tools.json`، والتوقيع عند الإصدار فقط، بنفس طريقة توقيع التحديث (القسم 3).
 
-### 3. المفتاح الخاص (قرار المالك)
+### 3. المفاتيح (قرار المالك)
 
-**مقترح للنقاش، والقرار للمالك (الأسئلة في آخر الورقة):**
-- مفتاح Ed25519 واحد يصنعه المالك بـ `tauri signer generate`، **محميّ بكلمة مرور**.
-- **المكان: GitHub Actions secrets**، في environment اسمه `release`:
+- **مفتاح التوقيع:** Ed25519، يصنعه المالك بـ `tauri signer generate`، **محميّ بكلمة مرور**.
+- **مكانه: GitHub Actions secrets**، في environment اسمه `release`:
   - يحتاج موافقة المالك على كل تشغيل (required reviewers).
   - ولا يعمل إلا على tag بصيغة `vX.Y.Z` من `main`.
   - المفتاح وكلمة مروره في secretين منفصلين (`TAURI_SIGNING_PRIVATE_KEY` و`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`).
-  - لا يراهما أي workflow آخر، ولا أي PR، ولا أي جلسة عمل.
-- **نسخة احتياطية** من المفتاح المشفّر خارج GitHub عند المالك وحده (مدير كلمات مرور، أو وسيط غير متصل).
-- **مفتاح طوارئ ثانٍ** يصنعه المالك ويحفظه **خارج الإنترنت فقط**، ومفتاحه العام مبني في زاجِل من أول نسخة فيها التحديث. وهذا يتطلب أن يقبل زاجِل أحد مفتاحين:
-  - لقائمة الأدوات سهل، لأن التحقق كودنا.
-  - أما updater بتاع Tauri فيقبل مفتاحًا واحدًا. فإما تحقق إضافي منّا قبله، وإما نقبل أن تسرّب المفتاح يحتاج تثبيتًا يدويًا جديدًا (السؤال 4).
+  - **لا يصل إليه إلا المالك وworkflow الإصدار.** لا workflow آخر، ولا PR، ولا أي جلسة عمل.
+- **نسخة احتياطية** من المفتاح المشفّر خارج GitHub عند المالك وحده.
+- **مفتاح طوارئ ثانٍ** يصنعه المالك ويحفظه **خارج الإنترنت فقط**. ومفتاحه العام مبني في زاجِل من أول نسخة فيها التحديث.
+- **زاجِل يقبل التوقيع بأيٍّ من المفتاحين:**
+  - تحقق منّا (`minisign-verify`) على الملف المنزَّل **قبل** updater بتاع Tauri. فلا يصل إلى Tauri ملف لم يوقّعه أحد مفتاحينا.
+  - ولقائمة الأدوات التحقق كودنا أصلًا، بنفس المفتاحين.
+  - التوقيع بمفتاح الطوارئ يُقبل، لكنه يُسجَّل في السجل، لأنه لا يُستعمل إلا عند تسرّب.
 
-### 4. إن تسرّب المفتاح (خطة، والقرار للمالك)
+### 4. إن تسرّب المفتاح (قرار المالك: هذه الخطة)
 
 - **يُوقف workflow الإصدار فورًا**، ويُحذف الـ secret، ويُكتب تنبيه أمني في GitHub (Security advisory) وفي صفحة الإصدار وREADME.
-- **مع مفتاح الطوارئ:**
-  - إصدار جديد يوقَّع به، ويزيل المفتاح المسرّب من البرنامج ويضيف مفتاح طوارئ جديدًا.
-  - فالنسخ المثبّتة تقبله وتتحول إلى المفتاح الجديد.
+- **إصدار جديد يوقَّع بمفتاح الطوارئ:**
+  - يزيل المفتاح المسرّب من البرنامج، ويضيف مفتاحًا جديدًا للتوقيع ومفتاح طوارئ جديدًا.
+  - فالنسخ المثبّتة تقبله، لأنها تعرف مفتاح الطوارئ، وتتحول إلى المفتاحين الجديدين.
   - وتحديث موقّع بالمفتاح المسرّب يبقى خطرًا على النسخ التي لم تتحدث بعد، فالتنبيه يطلب التحديث سريعًا.
-- **بدون مفتاح طوارئ:** إصدار جديد بمفتاح جديد، **يثبّته المستخدمون يدويًا** من صفحة الإصدار (بعد التحقق من SHA256SUMS). والنسخ القديمة تبقى تقبل المفتاح المسرّب حتى تُحدَّث يدويًا.
-- **في الحالتين:** المفتاح المسرّب يُكتب في `SECURITY.md` كمفتاح ملغى، ببصمته.
+- **تنبيه في البرنامج نفسه** (قرار المالك):
+  - فحص التحديث يقرأ أيضًا ملف تنبيهات موقّعًا (`advisories.json` في أصول الإصدار، بأحد المفتاحين).
+  - إن قال إن مفتاحًا تسرّب، يعرض زاجِل **تنبيهًا أمنيًا واضحًا**: ما حدث، وأي النسخ تتأثر، وماذا يفعل المستخدم (التحديث، أو التثبيت اليدوي من صفحة الإصدار بعد التحقق من SHA256SUMS).
+  - ويرفض بعده أي تحديث أو قائمة أدوات موقّعة بالمفتاح المسرّب، حتى قبل أن يتحدث.
+- **المفتاح المسرّب يُكتب في `SECURITY.md`** كمفتاح ملغى، ببصمته.
 
 ## السبب
 
@@ -121,7 +128,7 @@
   - **ماك بتوقيع ad-hoc:** هل يقبل Gatekeeper البرنامج بعد أن يستبدله التحديث، دون «Open Anyway» من جديد؟ يُجرَّب يدويًا قبل الاعتماد (البند الأول في الاختبار اليدوي).
   - **ويندوز:** SmartScreen قد ينبّه على المثبّت الجديد. يُجرَّب.
   - **الـ `.deb`:** لا يتحدث من البرنامج. صفحة الإصدار وزاجِل يقولان ذلك.
-  - **تجميد التحديث** (مهاجم يمنع وصول الجديد): `issued_at` يسمح لزاجِل أن يقول «لم يُفحص التحديث منذ مدة طويلة». مقترح، لا قرار.
+  - **تجميد التحديث** (مهاجم يمنع وصول الجديد): زاجِل يقول «لم يُفحص التحديث منذ مدة طويلة» حين يمر وقت طويل دون فحص ناجح، أو دون قائمة أدوات أحدث (`issued_at`). قرار المالك: نعم.
 
 ## الاختبار
 
@@ -137,25 +144,25 @@
 | `tools.json` صحيح بـ `sequence` أكبر | يُقبل ويُحفظ، والأداة تتحدث بعد الموافقة وتُفحص SHA-256 |
 | `tools.json` بتوقيع خاطئ، أو `sequence` أصغر أو مساوٍ، أو رابط خارج المسموح، أو SHA-256 لا يطابق الملف | يُرفض، والأدوات المثبّتة تبقى كما هي |
 | `tools.json` المحفوظ تغيّر على القرص | يُرفض عند القراءة، ويُرجع إلى المبني في البرنامج |
+| تحديث أو قائمة أدوات موقّعة بمفتاح الطوارئ | يُقبل، ويُسجَّل في السجل |
+| ملف لم يوقّعه أي من المفتاحين | يُرفض بتحققنا قبل أن يصل إلى Tauri |
+| `advisories.json` موقّع يقول إن مفتاحًا تسرّب | تنبيه أمني واضح في البرنامج، ثم رفض كل ما يوقّعه ذلك المفتاح |
+| `advisories.json` بتوقيع خاطئ | يُتجاهل، ولا تنبيه |
+| «تخطَّ هذه النسخة»، و«لم يُفحص منذ مدة» بساعة وهمية | النسخة المتخطاة لا تُعرض ثانية، والأحدث منها تُعرض؛ والتنبيه يظهر بعد المدة |
 | فحص الكود | لا `dangerous*` في إعدادات Tauri ولا في الكود |
 
 **يدويًا** (MANUAL-TESTS): تحديث حقيقي من إصدار منشور إلى التالي على كل نظام، ومنه سلوك Gatekeeper وSmartScreen بعد التحديث.
 
-## قرارات يحتاجها المالك
+## قرارات المالك (2026-10-26)
 
-1. **أداة التوقيع:** updater بتاع Tauri (minisign، Ed25519) للبرنامج، وقائمة `tools.json` موقّعة بنفس المفتاح للأدوات؟
-2. **مكان المفتاح الخاص:**
-   - (أ) GitHub Actions secret في environment محمي يحتاج موافقتك على كل إصدار (المقترح)؛
-   - (ب) على جهازك فقط، والـ CI يبني بلا توقيع، وأنت توقّع وترفع؛
-   - (ج) غير ذلك.
-3. **من يصل إليه:** أنت وحدك؟ وهل يُسمح لـ workflow الإصدار وحده باستعماله، بموافقتك على كل تشغيل؟
-4. **مفتاح طوارئ ثانٍ خارج الإنترنت:**
-   - نعم: نبني قبولًا لمفتاحين، بتحقق منّا قبل Tauri؛
-   - أو لا: تسرّب المفتاح يعني تثبيتًا يدويًا جديدًا للجميع.
-5. **عند التسرّب:** هل الخطة في القسم 4 مقبولة؟ ومن يُبلَّغ وكيف (Security advisory، وصفحة الإصدار، وREADME)؟
-6. **الـ `.deb`:** يبقى بلا تحديث من البرنامج (إشعار ورابط فقط)، أم نعمل مستودع apt موقّعًا بـ GPG في M8؟
-7. **«تخطَّ هذه النسخة»** و«لم يُفحص منذ مدة»: نريدهما؟
-8. **متى يبدأ:** مع 1.0 (M8)، أم قبله لتسهيل تحديث yt-dlp في 0.x؟
+1. **أداة التوقيع:** updater بتاع Tauri (Ed25519) للبرنامج، و`tools.json` يوقَّع بنفس المفتاح.
+2. **مكان المفتاح الخاص:** GitHub secret في environment اسمه `release`، يحتاج موافقة المالك على كل تشغيل، وعلى tag بصيغة `vX.Y.Z` من `main` فقط.
+3. **من يصل إليه:** المالك وحده، وworkflow الإصدار وحده.
+4. **مفتاح طوارئ ثانٍ خارج الإنترنت:** نعم. وزاجِل يقبل أيًّا منهما، بتحقق منّا قبل Tauri.
+5. **عند التسرّب:** الخطة في القسم 4، ومعها تنبيه أمني واضح في البرنامج نفسه حين يُعلن التسرّب.
+6. **الـ `.deb`:** إشعار ورابط فقط، ومستودع apt بعد 1.0.
+7. **«تخطَّ هذه النسخة» و«لم يُفحص منذ مدة»:** الاثنان نعم.
+8. **متى:** قبل 1.0، في 0.3.
 
 ## المصادر
 
