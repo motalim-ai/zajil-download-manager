@@ -31,7 +31,7 @@
       {#if d.status === "active" || d.status === "waiting"}
         <button class="btn" id="details-pause" onclick={onpause}><Icon name="pause" />{locale.t("action-pause")}</button>
       {:else if d.status === "paused" || d.status === "failed"}
-        <button class="btn quiet" id="details-refresh" onclick={onrefresh}><Icon name="link" />{locale.t("refresh-action")}</button>
+        {#if !d.video}<button class="btn quiet" id="details-refresh" onclick={onrefresh}><Icon name="link" />{locale.t("refresh-action")}</button>{/if}
         <button class="btn" id="details-resume" onclick={onresume}><Icon name="play" />{locale.t("action-resume")}</button>
       {/if}
     </span>

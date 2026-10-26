@@ -54,4 +54,9 @@ last_try: string | null,
  * A file that can run code, from the browser: it waits for the user
  * to start it (security review #84).
  */
-needs_ok: boolean, };
+needs_ok: boolean, 
+/**
+ * A video download (#149): no queue, no parts; «pause» stops it, and
+ * it starts over.
+ */
+video: boolean, };
