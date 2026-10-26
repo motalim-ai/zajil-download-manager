@@ -59,6 +59,12 @@ pub type Shared = Mutex<Pending>;
 
 /// Opens window `label` (`win` in the page's address), or brings it to the
 /// front if it is open.
+///
+/// Only from an async command or another thread, never from a command
+/// that is not async (those run on the main thread) nor an event handler:
+/// on Windows, WebView2 then waits for the main thread, which waits for
+/// it, and the window's page never loads (Tauri's documented deadlock;
+/// the «Add link» window of the end-to-end test of #226 stayed blank).
 pub(crate) fn open<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     label: &str,
@@ -137,7 +143,7 @@ pub(crate) fn open_page<R: tauri::Runtime>(
 /// «Add a link»: with `url` (a copied link, or none), titled `title` in
 /// the page's language. An open one takes the new link.
 #[tauri::command]
-pub fn open_add_link<R: tauri::Runtime>(
+pub async fn open_add_link<R: tauri::Runtime>(
     pending: State<'_, Shared>,
     url: Option<String>,
     from_clipboard: bool,
@@ -166,7 +172,7 @@ pub fn pending_link(pending: State<'_, Shared>) -> Option<PendingLink> {
 /// One info window at a time: while one is open, it comes to the front and
 /// [`INFO_OPEN`] is the answer.
 #[tauri::command]
-pub fn open_add_info<R: tauri::Runtime>(
+pub async fn open_add_info<R: tauri::Runtime>(
     pending: State<'_, Shared>,
     url: String,
     title: String,
@@ -258,7 +264,7 @@ pub fn close_window<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) -> Resul
 /// download as in IDM, titled `title`; an open one comes to the front. The
 /// page reads the download's id from the window's label.
 #[tauri::command]
-pub fn open_progress<R: tauri::Runtime>(
+pub async fn open_progress<R: tauri::Runtime>(
     id: u64,
     title: String,
     handle: tauri::AppHandle<R>,

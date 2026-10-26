@@ -1472,6 +1472,14 @@ impl Engine {
         };
         let len = state.content_length;
         let part_file = part_path(&final_path);
+        // A download starting over (`cleanup` is set only for a new one)
+        // records that nothing is done before its part file is emptied:
+        // otherwise a crash between the two left the old state, which still
+        // counted the old bytes as done, over a file of zeros, and a resume
+        // the server then allowed kept the zeros (#163).
+        if cleanup.is_none() {
+            save_state(&mut state, &state_path(&final_path), None).await?;
+        }
         // Like a save, the allocation keeps a cancelled new download's name
         // reserved until it is over (see `EmptyDownloadCleanup`). It hands
         // the guard's share back next to the file, so if nobody waits for
@@ -1492,6 +1500,12 @@ impl Engine {
         })
         .await?;
         drop(keep_alive);
+        #[cfg(feature = "test-support")]
+        if engine_test_hooks::CRASH_AFTER_ALLOCATING
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(Error::Io(io::Error::other("a crash, as the test asked")));
+        }
 
         let split = attempt.split.then(|| self.split(&state)).flatten();
         let watch = cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
@@ -2763,6 +2777,18 @@ pub(crate) fn error_chain(err: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     text
+}
+
+/// What tests can ask of the engine (`test-support` only, never in a
+/// shipped binary).
+#[cfg(feature = "test-support")]
+pub mod engine_test_hooks {
+    use std::sync::atomic::AtomicBool;
+
+    /// The next start of a download stops right after its part file was
+    /// emptied and allocated, as a crash there would (#163). Set it from a
+    /// test file of its own: it is one switch for the whole process.
+    pub static CRASH_AFTER_ALLOCATING: AtomicBool = AtomicBool::new(false);
 }
 
 #[cfg(test)]

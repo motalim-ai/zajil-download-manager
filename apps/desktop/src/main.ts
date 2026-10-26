@@ -20,6 +20,9 @@ const win = new URLSearchParams(location.search).get("win");
 // choice is kept by the page).
 if (win === null) void completeApi.setShow(loadShow()).catch(() => {});
 const progress = /^progress-(\d+)$/.exec(win ?? "");
+// ui-test builds only: the test that opens every window
+// (`src/uitest/windows.ts`); a release build has none of it.
+if (__UI_TEST__) void import("./uitest/windows").then((test) => test.run(win));
 export default progress
   ? mount(ProgressWindow, { target, props: { id: Number(progress[1]) } })
   : mount(

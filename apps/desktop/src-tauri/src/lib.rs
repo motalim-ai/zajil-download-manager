@@ -220,22 +220,20 @@ pub fn run() {
     builder
         // The macOS menu bar's commands go to the page (`menu.rs`).
         .on_menu_event(|handle, event| {
-            // To the window in front: in an add window, Select all is its
-            // text box's, not the main window's rows (M5.5).
             if let Some(command) = event.id().as_ref().strip_prefix(menu::PREFIX) {
                 let front = handle
                     .webview_windows()
                     .into_iter()
                     .find(|(_, w)| w.is_focused().unwrap_or(false))
                     .map_or_else(|| "main".to_owned(), |(label, _)| label);
-                // Quit is the main window's, which asks first while
-                // downloads run (review of #105: an add window quit at once).
-                let front = if command == "quit" {
-                    "main"
-                } else {
-                    front.as_str()
-                };
-                let _ = handle.emit_to(front, "menu-command", command.to_owned());
+                let to = menu_target(command, &front);
+                // A command of the main window, chosen while another is in
+                // front: the main window comes forward to do it (#98: the
+                // others ignored everything but Select all).
+                if to == "main" && front != "main" {
+                    tray::show_window(handle);
+                }
+                let _ = handle.emit_to(to, "menu-command", command.to_owned());
             }
         })
         .invoke_handler(handlers())
@@ -560,7 +558,9 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::open_release_page,
         complete::drag_out,
         ui_test::ui_test_scenario,
-        ui_test::ui_test_report
+        ui_test::ui_test_report,
+        ui_test::ui_test_windows,
+        ui_test::ui_test_loaded
     ]
 }
 
@@ -1421,6 +1421,19 @@ fn show_running(data: &Path) -> bool {
     });
     let _ = wait.recv_timeout(Duration::from_secs(2));
     true
+}
+
+/// Which window a macOS menu command goes to, with `front` the window in
+/// front: Select all is the front window's own (in an add window, its text
+/// box's, M5.5); every other command is the main window's, which alone
+/// handles them (#98), Quit among them, which asks first while downloads
+/// run (review of #105).
+fn menu_target<'a>(command: &str, front: &'a str) -> &'a str {
+    if command == "select-all" {
+        front
+    } else {
+        "main"
+    }
 }
 
 /// Registers `zajil-host` with every supported browser for the current user
@@ -2290,7 +2303,7 @@ async fn open_download<R: tauri::Runtime>(
             .open_path(file.to_string_lossy(), None::<&str>)
             .map(|()| true)
             .map_err(|e| e.to_string()),
-        (false, None) => Err(format!("download {id} has no finished file")),
+        (false, None) => Err(OPEN_NO_FILE.into()),
         (true, Some(file)) => opener
             .reveal_item_in_dir(&file)
             .map(|()| true)
@@ -2299,9 +2312,15 @@ async fn open_download<R: tauri::Runtime>(
             .reveal_item_in_dir(&dir)
             .map(|()| true)
             .map_err(|e| e.to_string()),
-        (true, None) => Err(format!("download {id} has no folder")),
+        (true, None) => Err(OPEN_NO_FOLDER.into()),
     }
 }
+
+/// What `open_download` says when the finished file, or the folder, is not
+/// there any more (moved or deleted): codes the page says in the user's
+/// language (#98: it showed «download N has no finished file»).
+pub const OPEN_NO_FILE: &str = "no-file";
+pub const OPEN_NO_FOLDER: &str = "no-folder";
 
 /// A file that can run code (#84): opening it runs it.
 fn asks_before_opening(file: &std::path::Path) -> bool {
@@ -3454,6 +3473,18 @@ mod tests {
         assert_eq!(item.status, Status::Waiting);
     }
 
+    /// #98: the macOS menu's commands reach the main window from any
+    /// window in front, but Select all stays the front window's.
+    #[test]
+    fn menu_commands_go_to_the_main_window_but_select_all() {
+        assert_eq!(menu_target("select-all", "add-1"), "add-1");
+        assert_eq!(menu_target("select-all", "main"), "main");
+        for command in ["add-link", "settings", "quit", "pause-all", "schedule"] {
+            assert_eq!(menu_target(command, "progress-7"), "main", "{command}");
+            assert_eq!(menu_target(command, "main"), "main", "{command}");
+        }
+    }
+
     /// #58: a categories file that cannot be read says why on the
     /// categories screen (it showed an empty list with no reason), apart
     /// from the queues' own problem.
@@ -4145,8 +4176,13 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        for cmd in ["ui_test_scenario", "ui_test_report"] {
-            let body = serde_json::json!({ "report": {} });
+        for cmd in [
+            "ui_test_scenario",
+            "ui_test_report",
+            "ui_test_windows",
+            "ui_test_loaded",
+        ] {
+            let body = serde_json::json!({ "report": {}, "label": "main" });
             let answer = tauri::test::get_ipc_response(
                 &webview,
                 tauri::webview::InvokeRequest {

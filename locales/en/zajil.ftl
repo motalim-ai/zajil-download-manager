@@ -391,6 +391,8 @@ sys-zoom = Zoom
 row-menu = Download menu
 open-code-question = “{ $name }” is a program, or a file that can run commands on your computer. Open it?
 open-code-ok = Open
+open-no-file = The file is not where it was: it may have been moved or deleted.
+open-no-folder = The download's folder is not there any more.
 
 ## M5.5: the add windows
 info-title = Download file info

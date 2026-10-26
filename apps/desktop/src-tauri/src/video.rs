@@ -337,7 +337,7 @@ pub fn open_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Re
 
 /// «Download a video…»: «Video quality» for a link the user gives there.
 #[tauri::command]
-pub fn open_video<R: tauri::Runtime>(
+pub async fn open_video<R: tauri::Runtime>(
     state: State<'_, VideoState>,
     url: Option<String>,
     handle: tauri::AppHandle<R>,
@@ -483,9 +483,13 @@ pub fn video_tools_cancel(state: State<'_, VideoState>) {
 
 /// «Delete the video tools» (the settings).
 #[tauri::command]
-pub fn video_tools_remove(app: State<'_, crate::App>) -> Result<(), String> {
-    Toolbox::new(folders(&app).0)
-        .remove_all()
+pub async fn video_tools_remove(app: State<'_, crate::App>) -> Result<(), String> {
+    // Off the main thread, where a command that is not async runs: the
+    // tools are tens of megabytes, and the windows would wait meanwhile.
+    let toolbox = Toolbox::new(folders(&app).0);
+    tauri::async_runtime::spawn_blocking(move || toolbox.remove_all())
+        .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
 }
 

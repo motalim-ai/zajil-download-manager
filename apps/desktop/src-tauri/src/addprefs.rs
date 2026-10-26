@@ -45,7 +45,7 @@ pub fn set_add_prefs(closing: State<'_, Closing>, prefs: AddPrefs) -> Result<(),
 /// The progress window of a download «Download file info» started, as the
 /// settings say: shown, minimized, or not at all.
 #[tauri::command]
-pub fn open_started_progress<R: tauri::Runtime>(
+pub async fn open_started_progress<R: tauri::Runtime>(
     closing: State<'_, Closing>,
     id: u64,
     title: String,
@@ -55,7 +55,7 @@ pub fn open_started_progress<R: tauri::Runtime>(
     if show == ProgressShow::Hidden {
         return Ok(());
     }
-    crate::windows::open_progress(id, title, handle.clone())?;
+    crate::windows::open_progress(id, title, handle.clone()).await?;
     if show == ProgressShow::Minimized
         && let Some(window) = handle.get_webview_window(&crate::windows::progress_label(id))
     {
