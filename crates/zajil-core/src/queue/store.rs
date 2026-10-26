@@ -176,10 +176,27 @@ pub struct Item {
     /// it finishes or the user starts it.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub failed_tries: u32,
+    /// Its own number of connections, 1 to [`crate::MAX_CONNECTIONS`]
+    /// (#211: the site grabber's polite queue takes one for each file,
+    /// ADR-0010 section 5); `None`: the program's, as set when it starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<u32>,
 }
 
 fn is_zero(n: &u32) -> bool {
     *n == 0
+}
+
+/// A download's own number of connections: 1 to [`crate::MAX_CONNECTIONS`].
+pub(crate) fn check_connections(n: u32) -> Result<(), String> {
+    if (1..=crate::MAX_CONNECTIONS).contains(&(n as usize)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "has {n} connections; from 1 to {} are possible",
+            crate::MAX_CONNECTIONS
+        ))
+    }
 }
 
 /// Where a download from the browser extension came from.
@@ -382,6 +399,7 @@ impl QueuesFile {
             description: None,
             last_try: None,
             failed_tries: 0,
+            connections: None,
         };
         self.queue_or_new(queue)?.items.push(item);
         self.next_id = id.checked_add(1).ok_or_else(|| StoreError::Corrupt {
@@ -444,6 +462,18 @@ impl QueuesFile {
         }
         let item = self.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
         item.category = category.map(str::to_owned);
+        Ok(())
+    }
+
+    /// Gives item `id` its own number of connections (#211), 1 to
+    /// [`crate::MAX_CONNECTIONS`]; `None`: the program's again. It applies
+    /// when the download next starts.
+    pub fn set_connections(&mut self, id: u64, connections: Option<u32>) -> Result<(), StoreError> {
+        if let Some(n) = connections {
+            check_connections(n).map_err(StoreError::Refused)?;
+        }
+        let item = self.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
+        item.connections = connections;
         Ok(())
     }
 
@@ -526,6 +556,9 @@ impl QueuesFile {
                 }
                 if item.limit == Some(0) {
                     return Err(format!("a speed limit of 0 for item {}", item.id));
+                }
+                if let Some(n) = item.connections {
+                    check_connections(n).map_err(|why| format!("item {} {why}", item.id))?;
                 }
                 check_item_details(item).map_err(|why| format!("item {} {why}", item.id))?;
             }

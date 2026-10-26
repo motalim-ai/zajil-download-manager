@@ -664,7 +664,10 @@ impl Runner {
                     });
                     engine = engine.holding(hold);
                 }
-                if let Some(count) = &self.connections {
+                // Its own number (#211), else the program's as it is now.
+                if let Some(n) = item.connections {
+                    engine = engine.with_connections(n as usize);
+                } else if let Some(count) = &self.connections {
                     engine = engine.with_connections(count.load(Ordering::Relaxed));
                 }
                 // The browser's headers kept in memory; else, after a

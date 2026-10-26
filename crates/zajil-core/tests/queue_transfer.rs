@@ -48,6 +48,8 @@ fn sample() -> QueuesFile {
     q.item_mut(d).unwrap().error = Some("the server answered 404".into());
     q.item_mut(e).unwrap().status = Status::Active;
     q.item_mut(e).unwrap().state_file = Some(dir("e").join("e.bin.zajil-state"));
+    // Its own number of connections (#211).
+    q.set_connections(a, Some(1)).unwrap();
     // `main` with settings of its own too: a new data folder has a default
     // `main`, which must take them (review of #41).
     let main = q.queue_mut("main").unwrap();
@@ -86,6 +88,7 @@ fn as_seen(q: &QueuesFile) -> serde_json::Value {
                 "limit": i.limit,
                 "categorize": i.categorize,
                 "added_at": i.added_at,
+                "connections": i.connections,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -344,8 +347,11 @@ fn no_header_ever_goes_into_an_export() {
     for queue in value["queues"].as_array().unwrap() {
         assert_eq!(keys(queue), ["items", "max_active", "name", "schedule"]);
         for item in queue["items"].as_array().unwrap() {
+            // Its own number of connections only when it has one (#211).
+            let mut item_keys = keys(item);
+            item_keys.retain(|k| k != "connections");
             assert_eq!(
-                keys(item),
+                item_keys,
                 ["added_at", "categorize", "dir", "limit", "status", "url"]
             );
         }
@@ -723,6 +729,38 @@ fn a_refused_file_never_sends_its_escape_codes_to_the_terminal() {
             "{err:?}"
         );
         assert!(err.contains("\\u{1b}"), "{err}");
+    }
+}
+
+/// #211: a download's own number of connections describes the download,
+/// so it goes into an export and comes back from it; an impossible one in
+/// a file is refused.
+#[test]
+fn a_download_s_own_connections_go_with_it_and_are_checked() {
+    let original = sample();
+    let (tmp, path) = exported(&original);
+    let export = read_export(&path).unwrap();
+    assert_eq!(export.queues[0].items[0].connections, Some(1));
+    assert!(
+        export.queues[0].items[1..]
+            .iter()
+            .all(|i| i.connections.is_none())
+    );
+
+    let mut elsewhere = QueuesFile::empty();
+    elsewhere.import(&export, &Folders::Keep).unwrap();
+    let main = elsewhere.queue("main").unwrap();
+    assert_eq!(main.items[0].connections, Some(1));
+    assert!(main.items[1..].iter().all(|i| i.connections.is_none()));
+
+    for n in [0, zajil_core::MAX_CONNECTIONS as u64 + 1] {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["queues"][0]["items"][0]["connections"] = n.into();
+        let bad = tmp.path().join("bad.json");
+        write_signed(&bad, value);
+        let err = read_export(&bad).unwrap_err().to_string();
+        assert!(err.contains("connections"), "{n}: {err}");
     }
 }
 
