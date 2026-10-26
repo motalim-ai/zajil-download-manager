@@ -2271,8 +2271,9 @@ fn copied_here(copied: &str, link: &str) -> bool {
 }
 
 /// A download's own speed limit (the progress window, M5.5); `None` or 0:
-/// none. A running download takes it the next time it starts (the runner
-/// reads it then).
+/// none. A running download takes it at once: the runner gives each
+/// running download its item's limit whenever the queues file changes
+/// (#115).
 #[tauri::command]
 async fn set_limit<R: tauri::Runtime>(
     app: State<'_, App>,
