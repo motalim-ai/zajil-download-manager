@@ -7,9 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-26
+## [0.2.0] - 2026-10-26
 
-The first test build. This list is the titles of the pull requests merged before it (owner's rule for 0.1). The notes each pull request wrote follow under «Details».
+The first published build. 0.1.0 was a test draft that was never published (owner's decision of 2026-10-26): its changes are here too. This list is the titles of the pull requests merged before it; the notes each pull request wrote follow under «Details».
 
 ### Features
 
@@ -35,8 +35,8 @@ The first test build. This list is the titles of the pull requests merged before
 - feat(desktop): adding a download and download details (#48)
 - feat(desktop): settings, categories and the language switch without a restart (#57)
 - feat(desktop): system tray, notifications, starting with the system, and saving at a Windows shutdown (#59)
-- feat(host): zajil-host, the Native Messaging host, and the user's private channel to the app (#62)
 - feat(platform): register the native host with each browser, for the current user (#63)
+- feat(host): zajil-host, the Native Messaging host, and the user's private channel to the app (#62)
 - feat(desktop): clipboard monitoring, off by default (#67)
 - feat(extension): the browser extension for Chrome, Edge and Firefox (#70)
 - feat(desktop): register the browser extension's host at each start, and fix it from the settings (#71)
@@ -45,17 +45,37 @@ The first test build. This list is the titles of the pull requests merged before
 - feat(desktop): refresh the download link from the app (#78)
 - feat: ask the browser for the cookies again after a restart (#80)
 - feat(desktop): the M5.5 main window, part 1 (#96)
-- feat: video from the extension: the menu item, zajil-host's video message, and the app's «coming soon» (#99)
 - feat(desktop): the M5.5 main window, part 2: menus, right-click menu, shortcuts and columns (#101)
 - feat(desktop): the M5.5 add windows, part 3: «Add a link» and «Download file info» as windows of their own (#104)
 - feat(desktop): quit asks first while downloads are running (#105)
+- feat: video from the extension: the menu item, zajil-host's video message, and the app's «coming soon» (#99)
+- feat(desktop): the main window's own title bar with the logo and name, and «فيديوهات» and «صوتيات» (#118)
 - feat(desktop): closing the window hides it into the system tray, as in IDM (#109)
 - feat(desktop): the M5.5 progress window, part 4 (#111)
 - feat(grab): batch downloads with patterns, zajil batch (M7) (#113)
 - feat(core): a queued download's own file name, category and description, and its last try (#114)
-- feat(desktop): the main window's own title bar with the logo and name, and «فيديوهات» and «صوتيات» (#118)
-- feat(desktop): the M5.5 schedule window: queues, when they start and stop, and what happens after (#126)
 - feat(desktop): the user's file name, category and description in «Download file info», and «Last try» and «Description» in the table (#135)
+- feat(desktop): the M5.5 schedule window: queues, when they start and stop, and what happens after (#126)
+- feat(desktop): the M5.5 «Download complete» window, with «Don't show this window again» (#137)
+- feat(core): a running download takes its item's new speed limit (#115)
+- feat(desktop): the tray icon tells what runs: how many, how far together, and the speed (#141)
+- feat(desktop): the schedule window is ready for a file to open after a queue and tries per file (#143)
+- feat(desktop): drag the finished file out of «Download complete» into any program or folder (#148)
+- feat(desktop): the toolbar's right-click: big or small buttons, and customizing which and in what order (#146)
+- feat: the video engine with yt-dlp and FFmpeg, and zajil video (M6, without YouTube) (#128)
+- feat(core): the probe says when the answer is a web page, and a name takes its type's extension (#153)
+- feat(core): YouTube, with Deno, Node or our QuickJS-NG in a sandbox (#155)
+- feat(extension): the Download video button and a tab's HLS and DASH playlists, behind one optional permission (#151)
+- feat(desktop): the drop box, a small window above all others that takes a dropped link (#140)
+- feat: «Start now» outside a queue's window, tries for each download, and a file to open when a queue is done (#162)
+- feat(desktop): the table's queue column, «Remove from queue», and asking before deleting what has not finished (#147)
+- feat(desktop): the app's video commands: the tools, the probe and the download (#156)
+- feat(core): pin Zajil's FFmpeg build (tools-ffmpeg-8.1.3-1) (#164)
+- feat: Google Drive links, and their download address's own cookies from the browser (#159)
+- feat: the update check (#124): a notice of a new version, its release page, and a switch to turn it off (#144)
+- feat(desktop): «Video quality»: the tools asked for once, the page's formats or playlist, and the download (#175)
+- feat(core): the most connections at once to a site, shared by its downloads (#166)
+- feat(extension): keys with a click send a link to Zajil or leave it to the browser (#169)
 
 ### Fixes
 
@@ -65,6 +85,8 @@ The first test build. This list is the titles of the pull requests merged before
 - fix: mark files from the internet, and hold files that run code for the user (#90)
 - fix(extension): a private window's download offers no button and leaves nothing (#91)
 - fix(desktop): «Download file info» says an unknown size in words, shows the name, and warns of a web page (#117)
+- fix(core): a stop after a periodic save does not save again (#132) (#160)
+- fix(cli): the built-in categories' names as the app's, Videos and Audio (#121) (#167)
 
 ### Documentation
 
@@ -88,9 +110,11 @@ The first test build. This list is the titles of the pull requests merged before
 - test(core): verify HTTPS against a temporary test CA and reject invalid certificates (#16)
 - test: run a real-clock speed limit test every night, and record the owner's decisions on #36 (#37)
 - test: record the speed limit's waits in the nightly test and upload them on failure (#42)
-- test(desktop): screenshots of the real window and the image test of mixed names (#47)
 - test: a path of its own for every test server, and no zajil left running by a test (#51)
 - test: a test server prints what it saw when a test fails (#52)
+- test(desktop): screenshots of the real window and the image test of mixed names (#47)
+- test(desktop): close_resume says how long each close took and what was left when one fails (#139)
+- test(core): the stop tests no longer bound the saved bytes by the progress seen (#178)
 
 ### CI
 
@@ -99,6 +123,8 @@ The first test build. This list is the titles of the pull requests merged before
 - ci: build Zajil's LGPL FFmpeg on every system, and release it from a tag (#100)
 - ci: build the 0.1 installers, zajil-host and the extension, and draft a release from a tag (#122)
 - ci: screenshots of «Add a link» and the progress window (#138)
+- ci: the video tests download the published FFmpeg instead of building it (#172)
+- ci: a lost testgen cache turns the weekly run red; caches saved from main only (#176)
 
 ### Details
 
@@ -198,5 +224,5 @@ The first test build. This list is the titles of the pull requests merged before
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.1.0
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.2.0

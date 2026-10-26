@@ -5,7 +5,7 @@
 [![CI](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-> **الحالة: نسخة تجريبية.** [زاجِل 0.1.0](https://github.com/motalim-ai/zajil-download-manager/releases) أول نسخة للتجربة، لا للاستعمال اليومي بعد. وما يأتي بعدها في [ROADMAP](docs/ROADMAP.md).
+> **الحالة: نسخة تجريبية.** [زاجِل 0.2.0](https://github.com/motalim-ai/zajil-download-manager/releases) أول نسخة منشورة للتجربة، لا للاستعمال اليومي بعد، وفيها تحميل الفيديو. وما يأتي بعدها في [ROADMAP](docs/ROADMAP.md).
 
 **زاجِل** برنامج مجاني ومفتوح المصدر لإدارة التحميل. يعمل على **ويندوز وماك ولينكس**، وواجهته **عربية أولًا** (من اليمين إلى اليسار)، والإنجليزية بضغطة زر.
 
@@ -20,6 +20,8 @@
 | ![النافذة الرئيسية بالعربية، الوضع الفاتح](docs/screenshots/main-ar-light.png) | ![النافذة الرئيسية بالعربية، الوضع الداكن](docs/screenshots/main-ar-dark.png) |
 | **نافذة التقدم بالأجزاء** | **معلومات ملف التحميل** |
 | ![نافذة التقدم: الأجزاء والاتصالات الثمانية](docs/screenshots/progress-ar.png) | ![نافذة معلومات ملف التحميل](docs/screenshots/file-info-ar.png) |
+| **نافذة «جودة الفيديو»** | **زر «نزّل الفيديو» فوق الفيديو (الإضافة)** |
+| ![نافذة جودة الفيديو: الجودات والحجم واسم الملف](docs/screenshots/video-quality-ar.png) | ![زر نزّل الفيديو فوق فيديو تجريبي في المتصفح](docs/screenshots/video-button-ar.png) |
 
 ## الفكرة
 
@@ -74,7 +76,7 @@ This software uses code of [FFmpeg](https://ffmpeg.org) licensed under the [LGPL
 
 **Zajil Download Manager** is a free, open-source (GPL-3.0-or-later) download manager for **Windows, macOS and Linux**, designed **Arabic-first (RTL)** with one-click English.
 
-**Status: test build.** [Zajil 0.1.0](https://github.com/motalim-ai/zajil-download-manager/releases) is the first build to try, not for daily use yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status: test build.** [Zajil 0.2.0](https://github.com/motalim-ai/zajil-download-manager/releases) is the first published build to try, with video downloads; not for daily use yet. What comes next is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Screenshots
 
@@ -85,6 +87,8 @@ Real screenshots from CI (test data only):
 | ![The main window in Arabic, light](docs/screenshots/main-ar-light.png) | ![The main window in Arabic, dark](docs/screenshots/main-ar-dark.png) |
 | **The progress window with its parts** | **Download file info** |
 | ![The progress window: its parts and eight connections](docs/screenshots/progress-ar.png) | ![The Download file info window](docs/screenshots/file-info-ar.png) |
+| **The «Video quality» window** | **The «Download video» button over a video (the extension)** |
+| ![The Video quality window: the formats, their size and the file name](docs/screenshots/video-quality-ar.png) | ![The Download video button over a test video in the browser](docs/screenshots/video-button-ar.png) |
 
 **Planned for 1.0:**
 - Segmented parallel downloads (up to 32 connections) with dynamic re-segmentation.
