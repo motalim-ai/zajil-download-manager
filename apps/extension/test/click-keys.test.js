@@ -4,7 +4,7 @@
 // CI, the runner's Chrome; here, Playwright's Chromium. No site is reached.
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium } from "playwright-core";
+import { launch } from "./browser.js";
 
 const script = readFileSync(new URL("../src/click-keys.js", import.meta.url), "utf8");
 
@@ -12,7 +12,7 @@ const script = readFileSync(new URL("../src/click-keys.js", import.meta.url), "u
 let browser;
 
 beforeAll(async () => {
-  browser = await chromium.launch(process.env.CI ? { channel: "chrome" } : {});
+  browser = await launch("click-keys");
 });
 
 afterAll(async () => {
