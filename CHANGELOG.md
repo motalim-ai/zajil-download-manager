@@ -84,6 +84,7 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - feat: the per-site connection limits in Settings, applied at once (#165) (#190)
 - feat(grab): the site grabber, zajil grab (M7) (#195)
 - feat(desktop): the progress window shown, minimized or not, and starting while «Download file info» is open (#201)
+- feat(desktop): «Batch download», as IDM's: a link with a pattern, its links shown, then added to a queue (#209)
 
 ### Fixes
 
@@ -96,6 +97,8 @@ The first published build. 0.1.0 was a test draft that was never published (owne
 - fix(core): a stop after a periodic save does not save again (#132) (#160)
 - fix(cli): the built-in categories' names as the app's, Videos and Audio (#121) (#167)
 - fix(desktop): the name column keeps room to be read; the table scrolls sideways instead (#184) (#198)
+- fix(core): .mht, .mhtml, .website, .jnlp and .iqy run code too; web pages do not (#152) (#207)
+- fix(core): no save after a stop, and every connection stops at once (#194, #130, #136) (#208)
 
 ### Documentation
 
