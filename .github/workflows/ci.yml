@@ -298,6 +298,10 @@ jobs:
     defaults:
       run:
         working-directory: apps/desktop
+    env:
+      # Linux only (the GUI libraries step below).
+      GUI_PACKAGES: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick
+      GUI_DEBS: /home/runner/gui-debs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned toolchain
@@ -315,15 +319,40 @@ jobs:
       # Tauri 2 on Linux needs WebKitGTK 4.1 (the minimum the owner chose:
       # Ubuntu 22.04 and Debian 12). Xvfb, xdotool and ImageMagick are for
       # opening the real window and taking its screenshots.
-      # A slow package mirror sometimes hangs this step (#119): each try has
-      # its own time limit, and it is tried up to three times.
+      # A slow package mirror made this step take up to 10 minutes or fail
+      # (#119). The packages it downloads are kept in the cache, for this
+      # runner image and this list: then nothing is downloaded at all.
+      # Saved from main only, as the other caches.
+      - name: The GUI libraries' cache key (Linux)
+        if: runner.os == 'Linux'
+        id: gui-key
+        run: echo "key=gui-debs-$ImageOS-$ImageVersion-$(printf '%s' "$GUI_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Restore the GUI libraries' packages (Linux)
+        if: runner.os == 'Linux'
+        id: gui-debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GUI_DEBS }}
+          key: ${{ steps.gui-key.outputs.key }}
+      # From the cache, with no network; otherwise downloaded, each try with
+      # its own time limit and up to three tries.
       - name: Install the GUI libraries (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 40
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60
+          HIT: ${{ steps.gui-debs.outputs.cache-hit }}
         run: |
           set -euo pipefail
+          if [ "$HIT" = true ]; then
+            if sudo dpkg -i "$GUI_DEBS"/*.deb; then
+              echo "installed from the cache: $(ls "$GUI_DEBS"/*.deb | wc -l) packages"
+              exit 0
+            fi
+            echo "::warning::installing from the cache failed; downloading instead"
+            sudo dpkg --configure -a || true
+          fi
+          mkdir -p "$GUI_DEBS/partial"
           for try in 1 2 3; do
             if [ "$try" != 1 ]; then
               sleep 15
@@ -331,14 +360,23 @@ jobs:
               sudo timeout -k 20 120 dpkg --configure -a || true
               sudo timeout -k 20 120 apt-get $APT_OPTIONS -f install -y -q || true
             fi
+            # The packages are downloaded into $GUI_DEBS, to be cached.
             if sudo timeout -k 20 300 apt-get $APT_OPTIONS update -q \
               && sudo timeout -k 20 240 apt-get $APT_OPTIONS install -y -q --no-install-recommends \
-                libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb xdotool imagemagick; then
+                -o Dir::Cache::Archives="$GUI_DEBS" $GUI_PACKAGES; then
+              sudo chown -R "$(id -u):$(id -g)" "$GUI_DEBS"
+              rm -rf "$GUI_DEBS/partial" "$GUI_DEBS/lock"
               exit 0
             fi
             echo "::warning::installing the GUI libraries failed (try $try of 3)"
           done
           exit 1
+      - name: Save the GUI libraries' packages (Linux)
+        if: runner.os == 'Linux' && steps.gui-debs.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.GUI_DEBS }}
+          key: ${{ steps.gui-key.outputs.key }}
       - name: Install npm packages (from the lock file only)
         run: npm ci
       - name: Licenses and advisories of npm packages
