@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [1.0.0] - 2026-10-27
 
-The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-27). This list is the titles of the pull requests merged after 0.2.0.
+The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). This list is the titles of the pull requests merged after 0.2.0.
 
 ### Features
 
@@ -54,7 +54,7 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 
 ## [0.2.0] - 2026-10-26
 
-The first published build. 0.1.0 was a test draft that was never published (owner's decision of 2026-10-26): its changes are here too. This list is the titles of the pull requests merged before it; the notes each pull request wrote follow under «Details».
+The first build of the release workflow, a draft that was never published (see 1.0.0). 0.1.0 was a test draft that was never published (owner's decision of 2026-10-26): its changes are here too. This list is the titles of the pull requests merged before it; the notes each pull request wrote follow under «Details».
 
 ### Features
 
