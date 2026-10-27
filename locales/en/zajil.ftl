@@ -307,6 +307,7 @@ tb-halt-queue = Halt queue
 tb-toolbar = Download tools
 tree-unfinished = Unfinished
 tree-finished = Finished
+tree-waiting = Waiting
 tree-label = Downloads, categories and queues
 confirm-remove = Take off the list
 confirm-cancel = Cancel

@@ -1,12 +1,15 @@
 <script lang="ts" module>
+  import type { Section } from "../sections";
   /** What the table shows (M5.5): every download, a category (or only its
-   * unfinished or finished ones), the downloads of no category, or a
-   * queue's. */
+   * unfinished or finished ones), the downloads of no category, a queue's,
+   * or the unfinished, finished or waiting ones (of one category, or of
+   * none with `null`), as IDM's tree (the owner's notes on 1.0). */
   export type Filter =
     | { kind: "all" }
     | { kind: "category"; id: string; part?: "unfinished" | "finished" }
     | { kind: "uncategorized" }
-    | { kind: "queue"; name: string };
+    | { kind: "queue"; name: string }
+    | { kind: "status"; status: Section; category?: string | null };
 
   export type View = "list" | "settings" | "categories";
 
@@ -18,6 +21,7 @@
 
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import { inSection } from "../sections";
   import { locale } from "../i18n.svelte";
   import { categoryName as nameOf } from "../categoryName";
   import { num } from "../format";
@@ -48,12 +52,48 @@
   const current = (f: Filter) => (view === "list" && same(filter, f) ? "page" : undefined);
   const categoryName = (c: Snapshot["categories"][number]) => nameOf(c.id, c.name, (k) => locale.t(k));
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
+  const SECTIONS = [
+    { section: "unfinished", icon: "circle-dashed", key: "tree-unfinished" },
+    { section: "finished", icon: "circle-check", key: "tree-finished" },
+    { section: "waiting", icon: "clock", key: "tree-waiting" },
+  ] as const;
 </script>
 
 <nav class="tree" aria-label={locale.t("tree-label")}>
   <button class="node top" aria-current={current({ kind: "all" })} onclick={() => show({ kind: "all" })}>
     <Icon name="layers" size={16} /><span class="label">{locale.t("nav-all")}</span><span class="n num">{count(() => true)}</span>
   </button>
+
+  <!-- Under «All downloads»: the unfinished, finished and waiting ones,
+       each with its categories inside (as IDM's). -->
+  {#each SECTIONS as sec (sec.section)}
+    {@const of = (d: Download) => inSection(sec.section, d.status)}
+    {@const key = `section:${sec.section}`}
+    {@const expanded = open.has(key)}
+    <div class="row">
+      <button
+        class="twist"
+        aria-expanded={expanded}
+        aria-label={`${locale.t("tree-expand")}: ${locale.t(sec.key)}`}
+        onclick={() => toggle(key)}
+      ><span class="flip"><Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} /></span></button>
+      <button class="node" aria-current={current({ kind: "status", status: sec.section })} onclick={() => show({ kind: "status", status: sec.section })}>
+        <Icon name={sec.icon} size={16} /><span class="label">{locale.t(sec.key)}</span><span class="n num">{count(of)}</span>
+      </button>
+    </div>
+    {#if expanded}
+      {#each snapshot.categories as c (c.id)}
+        <button class="node l1" aria-current={current({ kind: "status", status: sec.section, category: c.id })} onclick={() => show({ kind: "status", status: sec.section, category: c.id })}>
+          <Icon name={categoryIcon(c.id)} size={15} /><span class="label">{categoryName(c)}</span><span class="n num">{count((d) => of(d) && d.category === c.id)}</span>
+        </button>
+      {/each}
+      {#if snapshot.downloads.some((d) => d.category === null)}
+        <button class="node l1" aria-current={current({ kind: "status", status: sec.section, category: null })} onclick={() => show({ kind: "status", status: sec.section, category: null })}>
+          <Icon name="file" size={15} /><span class="label">{locale.t("category-none")}</span><span class="n num">{count((d) => of(d) && d.category === null)}</span>
+        </button>
+      {/if}
+    {/if}
+  {/each}
 
   <h2>{locale.t("nav-categories")}</h2>
   {#each snapshot.categories as c (c.id)}

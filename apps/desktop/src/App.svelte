@@ -4,6 +4,7 @@
   import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
   import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Tree, { type Filter, type View } from "./lib/components/Tree.svelte";
+  import { inSection } from "./lib/sections";
   import Toolbar, { type ToolAction } from "./lib/components/Toolbar.svelte";
   import { onMac } from "./lib/keys";
   import { accelerator, commandFor, keyOf, type Command } from "./lib/commands";
@@ -105,6 +106,8 @@
             return d.category === null;
           case "queue":
             return d.queue === filter.name;
+          case "status":
+            return inSection(filter.status, d.status) && (filter.category === undefined || d.category === filter.category);
         }
       })();
       return picked && (!words || d.name.toLocaleLowerCase().includes(words) || (d.host ?? "").toLocaleLowerCase().includes(words));

@@ -353,6 +353,7 @@ tb-halt-queue = إيقاف الطابور
 tb-toolbar = أدوات التحميل
 tree-unfinished = غير مكتملة
 tree-finished = مكتملة
+tree-waiting = في الانتظار
 tree-label = التحميلات والفئات والطوابير
 confirm-remove = احذف من القائمة
 confirm-cancel = إلغاء
