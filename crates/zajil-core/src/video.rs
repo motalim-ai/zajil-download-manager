@@ -627,35 +627,44 @@ impl Video {
     /// with sound in one format, or the highest picture-only format with
     /// the best sound-only one when that picture is higher; sound alone
     /// for a page that has no picture. `None` when nothing is usable.
+    ///
+    /// An MP4 that every player opens (H.264 picture, AAC sound) comes
+    /// first when the page has one: VP9, AV1 or Opus would be merged into
+    /// MKV or WebM, which QuickTime on macOS does not play.
     pub fn best_choice(&self) -> Option<Choice> {
         let height = |f: &Format| f.height.unwrap_or(0);
         let rate = |f: &Format| f.tbr.unwrap_or(0.0);
-        let better = |a: &&Format, b: &&Format| {
-            height(a).cmp(&height(b)).then(
-                rate(a)
-                    .partial_cmp(&rate(b))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
+        let by_rate = |a: &&Format, b: &&Format| {
+            rate(a)
+                .partial_cmp(&rate(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
         };
-        let both = self
-            .formats
-            .iter()
-            .filter(|f| f.has_video() && f.has_audio())
-            .max_by(better);
-        let picture = self
-            .formats
-            .iter()
-            .filter(|f| f.has_video() && !f.has_audio())
-            .max_by(better);
-        let sound = self
-            .formats
-            .iter()
-            .filter(|f| f.has_audio() && !f.has_video())
-            .max_by(|a, b| {
-                rate(a)
-                    .partial_cmp(&rate(b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+        let better = |a: &&Format, b: &&Format| height(a).cmp(&height(b)).then(by_rate(a, b));
+        let mp4_picture = |f: &Format| {
+            f.vcodec
+                .as_deref()
+                .is_some_and(|c| c.starts_with("avc1") || c.starts_with("h264"))
+        };
+        let mp4_sound = |f: &Format| {
+            f.acodec.as_deref().is_some_and(|c| c.starts_with("mp4a")) || f.ext == "m4a"
+        };
+        // The best of `kind`, among those `preferred` if any.
+        let top = |kind: &dyn Fn(&Format) -> bool,
+                   preferred: &dyn Fn(&Format) -> bool,
+                   order: &dyn Fn(&&Format, &&Format) -> std::cmp::Ordering| {
+            let of_kind = || self.formats.iter().filter(|f| kind(f));
+            of_kind()
+                .filter(|f| preferred(f))
+                .max_by(|a, b| order(a, b))
+                .or_else(|| of_kind().max_by(|a, b| order(a, b)))
+        };
+        let both = top(
+            &|f| f.has_video() && f.has_audio(),
+            &|f| mp4_picture(f) && mp4_sound(f),
+            &better,
+        );
+        let picture = top(&|f| f.has_video() && !f.has_audio(), &mp4_picture, &better);
+        let sound = top(&|f| f.has_audio() && !f.has_video(), &mp4_sound, &by_rate);
         match (both, picture, sound) {
             (Some(both), Some(picture), Some(sound)) if height(picture) > height(both) => {
                 Some(Choice::Merge {
@@ -735,7 +744,8 @@ struct Raw {
 /// What a download reports while it runs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VideoEvent {
-    /// Bytes of the current part (the picture, then the sound) so far.
+    /// Bytes of the whole download so far (a merge's picture and sound
+    /// together), and of all of it when known.
     Progress {
         done: u64,
         total: Option<u64>,
@@ -1075,6 +1085,63 @@ fn says_drm(message: &str) -> bool {
         .any(|phrase| lower.contains(phrase))
 }
 
+/// A download's progress as a whole. yt-dlp counts each part from 0 (a
+/// merge: the picture, then the sound), so the parts before are added;
+/// the whole is the chosen formats' sizes when the page gave them all.
+struct Overall {
+    /// The parts that ended.
+    before: u64,
+    done: u64,
+    total: Option<u64>,
+    expected: Option<u64>,
+}
+
+impl Overall {
+    fn new(expected: Option<u64>) -> Overall {
+        Overall {
+            before: 0,
+            done: 0,
+            total: None,
+            expected,
+        }
+    }
+
+    fn of(&mut self, event: VideoEvent) -> VideoEvent {
+        let VideoEvent::Progress { done, total, speed } = event;
+        if done < self.done {
+            // Back to the start: the part before has ended.
+            self.before += self.total.unwrap_or(0).max(self.done);
+        }
+        self.done = done;
+        self.total = total;
+        let so_far = self.before + done;
+        let known = total.map(|t| self.before + t.max(done));
+        VideoEvent::Progress {
+            done: so_far,
+            total: match (self.expected, known) {
+                (Some(expected), known) => Some(expected.max(known.unwrap_or(so_far))),
+                (None, known) => known,
+            },
+            speed,
+        }
+    }
+}
+
+/// The size of what `choice` downloads, when the page gave every part's.
+fn expected_size(choice: &Choice, formats: &[Format]) -> Option<u64> {
+    let size = |id: &str| {
+        formats
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.filesize.or(f.filesize_approx))
+    };
+    match choice {
+        Choice::Format(id) => size(id),
+        Choice::Merge { video, audio } => Some(size(video)? + size(audio)?),
+        Choice::AudioOnly => None,
+    }
+}
+
 /// yt-dlp's words when nothing but pictures was left to choose from.
 fn says_no_format(message: &str) -> bool {
     message.contains("Requested format is not available")
@@ -1412,8 +1479,10 @@ impl VideoRunner {
             name: name.to_owned(),
             origin: url.origin().ascii_serialization(),
         };
+        let mut overall = Overall::new(expected_size(choice, request.formats));
+        let mut on_part = |event| on_event(overall.of(event));
         let output = self
-            .run(&url, args, cookies, Some(finish), stop, on_event)
+            .run(&url, args, cookies, Some(finish), stop, &mut on_part)
             .await?;
         match output.placed {
             Some(placed) => Ok(placed?),
@@ -2137,6 +2206,52 @@ mod tests {
             Some(Choice::Format("0".into()))
         );
         assert_eq!(video(vec![]).best_choice(), None);
+    }
+
+    /// A YouTube page: VP9 and AV1 pictures above the H.264 one, Opus
+    /// sound with a higher rate than AAC. The default is the MP4 that
+    /// every player opens.
+    #[test]
+    fn the_best_choice_is_an_mp4_when_the_page_has_one() {
+        let f = |id: &str, h: Option<u32>, ext: &str, v: &str, a: &str, tbr: f64| -> Format {
+            serde_json::from_value(serde_json::json!({
+                "format_id": id, "height": h, "ext": ext, "vcodec": v, "acodec": a, "tbr": tbr,
+            }))
+            .unwrap()
+        };
+        let page = Video {
+            title: String::new(),
+            duration: None,
+            formats: vec![
+                f("18", Some(360), "mp4", "avc1.42001E", "mp4a.40.2", 500.0),
+                f("139", None, "m4a", "none", "mp4a.40.5", 49.0),
+                f("140", None, "m4a", "none", "mp4a.40.2", 129.0),
+                f("251", None, "webm", "none", "opus", 135.0),
+                f("251-drc", None, "webm", "none", "opus", 160.0),
+                f("137", Some(1080), "mp4", "avc1.640028", "none", 4000.0),
+                f("399", Some(1080), "mp4", "av01.0.08M.08", "none", 2000.0),
+                f("616", Some(1440), "mp4", "vp09.00.40.08", "none", 9000.0),
+            ],
+        };
+        assert_eq!(
+            page.best_choice(),
+            Some(Choice::Merge {
+                video: "137".into(),
+                audio: "140".into()
+            })
+        );
+        // No H.264 at all: the highest picture, with AAC still first.
+        let mut other = page.clone();
+        other
+            .formats
+            .retain(|f| !f.vcodec.as_deref().unwrap().starts_with("avc1"));
+        assert_eq!(
+            other.best_choice(),
+            Some(Choice::Merge {
+                video: "616".into(),
+                audio: "140".into()
+            })
+        );
     }
 
     #[test]

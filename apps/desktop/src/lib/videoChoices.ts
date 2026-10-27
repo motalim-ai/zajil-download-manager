@@ -1,7 +1,8 @@
 // «Video quality»'s choices (M6, #149), from the formats a page offers:
 // each picture height once, best first; a picture-only format is merged
-// with the best sound (m4a first); «Sound only (m4a)» last. The engine's
-// own best choice is the one picked at first.
+// with the sound of the engine's best choice (else the largest m4a);
+// «Sound only (m4a)» last. The engine's best choice is always in the
+// list, and is the one picked at first.
 import type { ChoiceView } from "./bindings/ChoiceView";
 import type { FormatView } from "./bindings/FormatView";
 
@@ -15,13 +16,14 @@ export type Option = {
   size: number | null;
 };
 
-function bestAudio(formats: FormatView[]): FormatView | undefined {
+function bestAudio(formats: FormatView[], best: ChoiceView | null): FormatView | undefined {
   const audio = formats.filter((f) => f.kind === "audio");
-  return audio.find((f) => f.ext === "m4a") ?? audio[0];
+  const largest = (list: FormatView[]) => list.reduce<FormatView | undefined>((a, f) => (!a || (f.size ?? 0) > (a.size ?? 0) ? f : a), undefined);
+  return audio.find((f) => best?.kind === "merge" && f.id === best.audio) ?? largest(audio.filter((f) => f.ext === "m4a")) ?? largest(audio);
 }
 
-export function options(formats: FormatView[]): Option[] {
-  const audio = bestAudio(formats);
+export function options(formats: FormatView[], best: ChoiceView | null = null): Option[] {
+  const audio = bestAudio(formats, best);
   const list: Option[] = [];
   for (const f of formats) {
     if (f.kind === "both") list.push({ choice: { kind: "format", id: f.id }, height: f.height ?? 0, ext: f.ext, fps: f.fps, size: f.size });
@@ -34,12 +36,14 @@ export function options(formats: FormatView[]): Option[] {
         size: f.size !== null && audio.size !== null ? f.size + audio.size : null,
       });
   }
-  // Each height and kind of file once: the one with the size, else the first.
+  // Each height and kind of file once: the engine's best, else the one
+  // with the size, else the first.
+  const isBest = (o: Option) => best !== null && same(o.choice, best);
   const seen = new Map<string, Option>();
   for (const o of list) {
     const key = `${o.height}-${o.ext}`;
     const had = seen.get(key);
-    if (!had || (had.size === null && o.size !== null)) seen.set(key, o);
+    if (!had || isBest(o) || (!isBest(had) && had.size === null && o.size !== null)) seen.set(key, o);
   }
   const sorted = [...seen.values()].sort((a, b) => b.height - a.height || (b.size ?? 0) - (a.size ?? 0));
   if (formats.some((f) => f.kind === "audio" || f.kind === "both"))

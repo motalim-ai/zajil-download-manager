@@ -517,6 +517,51 @@ async fn a_name_that_came_with_an_extension_gets_only_yt_dlp_s() {
 }
 
 #[tokio::test]
+async fn a_merge_s_progress_goes_on_from_the_picture_to_the_sound() {
+    let sized = |id: &str, size: Option<u64>| -> Format {
+        serde_json::from_value(serde_json::json!({
+            "format_id": id, "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "filesize": size,
+        }))
+        .unwrap()
+    };
+    let choice = Choice::Merge {
+        video: "137".into(),
+        audio: "140".into(),
+    };
+    // The page gave no size: the whole grows as each part says its own.
+    // The page gave both: the whole is known from the start.
+    for (formats, first_total) in [
+        (vec![sized("137", None), sized("140", None)], 1000),
+        (
+            vec![sized("137", Some(1000)), sized("140", Some(200))],
+            1200,
+        ),
+    ] {
+        let s = setup("download-parts");
+        let request = Download {
+            url: "https://example.com/v",
+            choice: &choice,
+            formats: &formats,
+            cookies: None,
+            dest: &s.dest,
+            name: "x",
+        };
+        let mut seen = Vec::new();
+        s.runner
+            .download(
+                &request,
+                &Stop::new(),
+                &mut |VideoEvent::Progress { done, total, .. }| seen.push((done, total)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(seen.first(), Some(&(500, Some(first_total))), "{seen:?}");
+        assert_eq!(seen.last(), Some(&(1200, Some(1200))), "{seen:?}");
+        assert!(seen.windows(2).all(|w| w[1].0 >= w[0].0), "{seen:?}");
+    }
+}
+
+#[tokio::test]
 async fn a_file_printed_outside_the_output_folder_is_refused() {
     let s = setup("escape");
     let request = Download {

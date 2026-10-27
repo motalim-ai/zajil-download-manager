@@ -88,7 +88,7 @@
         { id: "140", ext: "m4a", width: null, height: null, fps: null, size: 28 * MIB, kind: "audio", hls: false },
       ],
     };
-    const list = options(info.formats);
+    const list = options(info.formats, info.best);
     pick = picked(list, info.best);
     name = fileName(info.title);
     step = { kind: "video", info, list };
@@ -119,7 +119,7 @@
     try {
       const info = await api.videoProbe(url);
       if (info.kind === "video") {
-        const list = options(info.formats);
+        const list = options(info.formats, info.best);
         pick = picked(list, info.best);
         name = fileName(info.title);
         step = { kind: "video", info, list };

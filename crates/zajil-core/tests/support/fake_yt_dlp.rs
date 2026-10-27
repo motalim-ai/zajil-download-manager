@@ -57,6 +57,17 @@ fn main() {
             let json = std::fs::read(control.join("probe.json")).unwrap();
             std::io::stdout().write_all(&json).unwrap();
         }
+        // Like `download`, in two parts as a merge goes: the picture
+        // (1000 bytes), then the sound (200), each counted from 0.
+        "download-parts" => {
+            let file = std::env::current_dir().unwrap().join("media.mp4");
+            std::fs::write(&file, vec![7u8; 1200]).unwrap();
+            println!("zajil-progress 500 1000 NA 250.0");
+            println!("zajil-progress 1000 1000 NA NA");
+            println!("zajil-progress 100 200 NA NA");
+            println!("zajil-progress 200 200 NA NA");
+            println!("{}", file.display());
+        }
         // Prints a path outside its folder.
         "escape" => {
             let outside = control.join("outside.mp4");

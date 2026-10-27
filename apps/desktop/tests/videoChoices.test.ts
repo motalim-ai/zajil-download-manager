@@ -36,6 +36,25 @@ describe("the quality choices", () => {
     expect(picked(list, null)).toBe(0);
   });
 
+  it("always holds the engine's best and picks it, whatever comes first in the page", () => {
+    // A YouTube page: AV1 listed before H.264 at 1080p (both .mp4), and a
+    // small m4a before the one the engine chose.
+    const page = [
+      f("139", "audio", null, "m4a", 2),
+      f("140", "audio", null, "m4a", 5),
+      f("251", "audio", null, "webm", 7),
+      f("399", "video", 1080, "mp4", 80),
+      f("137", "video", 1080, "mp4", 100),
+      f("616", "video", 1440, "mp4", 300),
+    ];
+    const best = { kind: "merge" as const, video: "137", audio: "140" };
+    const list = options(page, best);
+    expect(list[picked(list, best)]!.choice).toEqual(best);
+    expect(list.filter((o) => o.choice.kind === "merge").every((o) => o.choice.kind === "merge" && o.choice.audio === "140")).toBe(true);
+    // With no best from the engine, the largest m4a.
+    expect(options(page)[0]!.choice).toEqual({ kind: "merge", video: "616", audio: "140" });
+  });
+
   it("names the file after the title, with no extension (the engine adds yt-dlp's)", () => {
     expect(fileName("درس: الجزء 1/2")).toBe("درس الجزء 1 2");
     expect(fileName("Talk")).toBe("Talk");
