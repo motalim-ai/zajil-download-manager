@@ -27,7 +27,6 @@
     | { kind: "video"; info: Extract<VideoInfoView, { kind: "video" }>; list: Option[] }
     | { kind: "playlist"; info: Extract<VideoInfoView, { kind: "playlist" }>; chosen: boolean[] }
     | { kind: "downloading"; label: string; done: number; total: number | null; speed: number | null; id: number | null }
-    | { kind: "done"; file: string }
     | { kind: "failed"; error: VideoErrorView | string };
 
   // The UI test scenes («tools», «quality») start at a step, with demo
@@ -124,37 +123,12 @@
         pick = picked(list, info.best);
         name = fileName(info.title);
         step = { kind: "video", info, list };
-      } else step = { kind: "playlist", info, chosen: info.entries.map(() => true) };
+      } else step = { kind: "playlist", info, chosen: info.entries.map((e) => !e.playlist && !!e.url) };
       await tick();
       document.querySelector<HTMLElement>("[data-first]")?.focus();
     } catch (e) {
       step = { kind: "failed", error: e as VideoErrorView };
     }
-  }
-
-  async function download(choice: Option["choice"], file: string, label: string): Promise<boolean> {
-    step = { kind: "downloading", label, done: 0, total: null, speed: null, id: null };
-    const id = await api.videoDownload(url, choice, folder, file).catch((e) => {
-      step = { kind: "failed", error: String(e) };
-      return null;
-    });
-    if (id === null) return false;
-    if (step.kind === "downloading") step = { ...step, id };
-    return await new Promise<boolean>((done) => {
-      const offs: (() => void)[] = [];
-      void api.onVideoFinished((f) => {
-        if (f.id !== id) return;
-        offs.forEach((o) => o());
-        step = { kind: "done", file: f.file };
-        done(true);
-      }).then((o) => offs.push(o));
-      void api.onVideoFailed((f) => {
-        if (f.id !== id) return;
-        offs.forEach((o) => o());
-        step = { kind: "failed", error: f.error };
-        done(false);
-      }).then((o) => offs.push(o));
-    });
   }
 
   /** One video joins the list, and its progress window takes over, as a
@@ -170,19 +144,24 @@
     }
   }
 
-  /** A playlist: its chosen items one after another, each at its best. */
+  /** A playlist: its chosen videos join the list at once, each at its
+   * best, and the window closes; Zajil asks each page and downloads it in
+   * turn, and one that fails says why in the list. */
   async function downloadList(info: Extract<VideoInfoView, { kind: "playlist" }>, chosen: boolean[]) {
-    const items = info.entries.filter((e, i) => chosen[i] && e.url);
-    for (const [i, entry] of items.entries()) {
-      url = entry.url!;
-      const probed = await api.videoProbe(url).catch((e) => e as VideoErrorView);
-      if ("message" in probed || probed.kind !== "video") continue;
-      const list = options(probed.formats);
-      const option = list[picked(list, probed.best)];
-      if (!option) continue;
-      const ok = await download(option.choice, fileName(probed.title), `${i + 1}/${items.length}: ${probed.title}`);
-      if (!ok) return;
+    const items = info.entries.filter((e, i) => chosen[i] && e.url && !e.playlist).map((e) => ({ url: e.url!, title: e.title }));
+    step = { kind: "downloading", label: info.title, done: 0, total: null, speed: null, id: null };
+    try {
+      await api.videoAddMany(url, items, folder);
+      await api.closeWindow();
+    } catch (e) {
+      step = { kind: "failed", error: String(e) };
     }
+  }
+
+  /** A playlist inside the playlist: its own items, in this window. */
+  async function openPlaylist(link: string) {
+    url = link;
+    await probe();
   }
 
   async function chooseFolder() {
@@ -286,9 +265,19 @@
       <p class="muted">{locale.t("video-playlist", { count: list.info.entries.length })}</p>
       <ul class="entries">
         {#each list.info.entries as e, i (i)}
-          <li><label><input type="checkbox" bind:checked={list.chosen[i]} data-first={i === 0 ? true : undefined} /><bdi dir="auto">{e.title ?? e.url ?? "—"}</bdi></label></li>
+          {#if e.playlist}
+            <li class="inner">
+              <Icon name="queue" size={15} /><bdi dir="auto">{e.title ?? e.url ?? "—"}</bdi>
+              {#if e.url}<button class="btn" onclick={() => void openPlaylist(e.url!)} data-first={i === 0 ? true : undefined}>{locale.t("video-open-playlist")}</button>{/if}
+            </li>
+          {:else}
+            <li><label><input type="checkbox" bind:checked={list.chosen[i]} disabled={!e.url} data-first={i === 0 ? true : undefined} /><bdi dir="auto">{e.title ?? e.url ?? "—"}</bdi></label></li>
+          {/if}
         {/each}
       </ul>
+      {#if list.info.entries.length > 0 && list.info.entries.every((e) => e.playlist)}
+        <p class="muted">{locale.t("video-playlists-only")}</p>
+      {/if}
       <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       <div class="actions">
         <button class="btn primary" disabled={!list.chosen.some(Boolean) || !folder} onclick={() => void downloadList(list.info, list.chosen)}><Icon name="download" size={15} />{locale.t("video-download-chosen")}</button>
@@ -303,12 +292,6 @@
       </div>
       <p class="muted num">{size(locale.lang, locale.digits, step.done)}{step.total ? ` / ${size(locale.lang, locale.digits, step.total)}` : ""}</p>
       <div class="actions"><button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button></div>
-    </section>
-  {:else if step.kind === "done"}
-    <section class="col" aria-live="polite">
-      <h2><Icon name="circle-check" size={18} />{locale.t("video-done")}</h2>
-      <p class="muted" dir="ltr">{step.file}</p>
-      <div class="actions"><button class="btn primary" onclick={() => void api.closeWindow()} data-first>{locale.t("progress-close")}</button></div>
     </section>
   {:else}
     <section class="col">
@@ -456,6 +439,17 @@
     gap: 8px;
     padding: 5px 10px;
     font-size: 13px;
+  }
+  /* A playlist inside it: opened, not chosen. */
+  .entries li.inner {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 3px 10px;
+    font-size: 13px;
+  }
+  .entries li.inner bdi {
+    flex: 1;
   }
   .bar {
     height: 10px;

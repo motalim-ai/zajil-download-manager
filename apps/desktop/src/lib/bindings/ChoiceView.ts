@@ -3,4 +3,4 @@
 /**
  * What to download, as the page says it.
  */
-export type ChoiceView = { "kind": "format", id: string, } | { "kind": "merge", video: string, audio: string, } | { "kind": "audio_only" };
+export type ChoiceView = { "kind": "format", id: string, } | { "kind": "merge", video: string, audio: string, } | { "kind": "audio_only" } | { "kind": "best" };

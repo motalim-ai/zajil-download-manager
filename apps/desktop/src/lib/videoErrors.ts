@@ -11,6 +11,7 @@ const SENTENCE: Record<string, string> = {
   private: "video-error-private",
   unsupported: "video-error-unsupported",
   challenge: "video-error-challenge",
+  playlist: "video-error-playlist",
 };
 
 /** The sentence's key: its own for a known failure, else a general one. */

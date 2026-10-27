@@ -225,6 +225,7 @@ const ALLOWED: &[&str] = &[
     "--no-js-runtimes",
     "--no-playlist",
     "--flat-playlist",
+    "--playlist-end",
     "--no-color",
     "--no-mtime",
     "--progress",
@@ -247,6 +248,7 @@ const ALLOWED: &[&str] = &[
 /// of the option before it).
 fn options(a: &[String]) -> Vec<String> {
     let takes_value = [
+        "--playlist-end",
         "--encoding",
         "--downloader",
         "--ffmpeg-location",
@@ -741,6 +743,37 @@ async fn a_playlist_lists_its_entries() {
     assert_eq!(entries.len(), 2);
     let a = args(&calls(&s.control)[0]);
     assert!(a.contains(&"--flat-playlist".to_owned()));
+    // yt-dlp itself stops at the limit: a channel is not read whole first.
+    let at = a.iter().position(|x| x == "--playlist-end").unwrap();
+    assert_eq!(a[at + 1], "1000");
+}
+
+#[tokio::test]
+async fn a_playlist_inside_a_playlist_is_told_apart_from_a_video() {
+    let s = setup("probe");
+    fs::write(
+        s.control.join("probe.json"),
+        r#"{"_type": "playlist", "title": "Playlists", "entries": [
+            {"_type": "url", "ie_key": "YoutubeTab", "url": "https://www.youtube.com/playlist?list=PLx", "title": "p"},
+            {"_type": "url", "ie_key": "Youtube", "url": "https://www.youtube.com/watch?v=abc", "title": "v"},
+            {"_type": "playlist", "webpage_url": "https://www.youtube.com/playlist?list=PLy", "title": "opened"},
+            {"url": "https://example.com/playlist?list=1", "title": "by its link"}]}"#,
+    )
+    .unwrap();
+    let probed = s
+        .runner
+        .probe("https://www.youtube.com/@c/playlists", None, &Stop::new())
+        .await
+        .unwrap();
+    let Probed::Playlist { entries, .. } = probed else {
+        panic!("{probed:?}")
+    };
+    let playlist: Vec<bool> = entries.iter().map(|e| e.is_playlist()).collect();
+    assert_eq!(playlist, [true, false, true, true]);
+    assert_eq!(
+        entries[2].url.as_deref(),
+        Some("https://www.youtube.com/playlist?list=PLy")
+    );
 }
 
 #[tokio::test]

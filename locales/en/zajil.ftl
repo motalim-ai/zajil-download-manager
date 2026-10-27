@@ -627,6 +627,9 @@ video-playlist =
        *[other] A playlist with { $count } videos.
     }
 video-download-chosen = Download the chosen ones
+video-open-playlist = Open
+video-playlists-only = These are playlists: open each one to choose its videos.
+video-error-playlist = This link is a playlist, not a video. Open it in «Video quality» to choose from it.
 video-done = The video has downloaded.
 video-drm = This video is protected, and Zajil does not download protected content.
 video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.

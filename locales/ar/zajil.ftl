@@ -697,6 +697,9 @@ video-playlist =
        *[other] قائمة تشغيل فيها { $count } فيديو.
     }
 video-download-chosen = نزّل المحدد
+video-open-playlist = افتح
+video-playlists-only = هذه قوائم تشغيل: افتح كل واحدة منها لتختار فيديوهاتها.
+video-error-playlist = هذا الرابط قائمة تشغيل لا فيديو. افتحه في «جودة الفيديو» لتختار منه.
 video-done = اكتمل تحميل الفيديو.
 video-drm = هذا الفيديو محمي، وزاجِل لا يحمّل المحتوى المحمي.
 video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّرت. افتح النافذة من جديد لتنزيلها.

@@ -304,6 +304,9 @@ pub enum Arg {
     JsRuntime(JsRuntime),
     NoPlaylist,
     FlatPlaylist,
+    /// A playlist is read up to [`MAX_PLAYLIST_ENTRIES`] items: a channel
+    /// or a long list is not paged through to its end first.
+    PlaylistEnd,
     NoColor,
     NoMtime,
     Progress,
@@ -361,6 +364,10 @@ impl Arg {
             }
             Arg::NoPlaylist => add("--no-playlist"),
             Arg::FlatPlaylist => add("--flat-playlist"),
+            Arg::PlaylistEnd => {
+                add("--playlist-end");
+                add(&MAX_PLAYLIST_ENTRIES.to_string());
+            }
             Arg::NoColor => add("--no-color"),
             Arg::NoMtime => add("--no-mtime"),
             Arg::Progress => add("--progress"),
@@ -669,13 +676,36 @@ impl Video {
     }
 }
 
-/// One item of a playlist, to be probed and downloaded on its own.
+/// One item of a playlist, to be probed and downloaded on its own; or a
+/// playlist inside it (a channel's «Playlists»), to be opened.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Entry {
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
+    /// `playlist`, or `url` for an item yt-dlp did not open.
+    #[serde(rename = "_type", default)]
+    pub kind: Option<String>,
+    /// What reads an item yt-dlp did not open: `YoutubeTab` for a
+    /// playlist or a channel's tab.
+    #[serde(default)]
+    pub ie_key: Option<String>,
+    #[serde(default)]
+    webpage_url: Option<String>,
+}
+
+impl Entry {
+    /// A playlist, not a video: it is opened, never downloaded as one.
+    pub fn is_playlist(&self) -> bool {
+        self.kind.as_deref() == Some("playlist")
+            || self.ie_key.as_deref() == Some("YoutubeTab")
+            || self.url.as_deref().is_some_and(|url| {
+                reqwest::Url::parse(url).is_ok_and(|u| {
+                    u.path() == "/playlist" && u.query_pairs().any(|(k, _)| k == "list")
+                })
+            })
+    }
 }
 
 /// What a page holds.
@@ -1281,7 +1311,12 @@ impl VideoRunner {
     ) -> Result<Probed, VideoError> {
         let url = checked(url)?;
         let mut args = base_args();
-        args.extend([Arg::NoPlaylist, Arg::FlatPlaylist, Arg::DumpSingleJson]);
+        args.extend([
+            Arg::NoPlaylist,
+            Arg::FlatPlaylist,
+            Arg::PlaylistEnd,
+            Arg::DumpSingleJson,
+        ]);
         let output = self
             .run(&url, args, cookies, None, stop, &mut |_| {})
             .await?;
@@ -1294,6 +1329,13 @@ impl VideoRunner {
         if raw.kind.as_deref() == Some("playlist") {
             let mut entries = raw.entries;
             entries.truncate(MAX_PLAYLIST_ENTRIES);
+            for entry in &mut entries {
+                // A playlist yt-dlp opened (a channel's page) may give
+                // only its page.
+                if entry.url.is_none() {
+                    entry.url = entry.webpage_url.take();
+                }
+            }
             return Ok(Probed::Playlist {
                 title: raw.title,
                 entries,

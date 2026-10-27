@@ -9,7 +9,7 @@
 //! only (ADR-0005): they stay here, in memory, by link, and never reach
 //! the page; the probe and the download take them from here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,6 +41,9 @@ pub struct VideoState {
     installing: Mutex<Option<Stop>>,
     probing: Mutex<Option<Stop>>,
     downloads: Mutex<HashMap<u64, Stop>>,
+    /// Downloads whose formats «Video quality» just read: their page is
+    /// not asked again when they start.
+    fresh: Mutex<HashSet<u64>>,
     next: AtomicU64,
     /// The video downloads of the list (#149): kept in `videos.json`.
     rows: Mutex<Vec<Row>>,
@@ -48,6 +51,10 @@ pub struct VideoState {
     /// second, as the queues' downloads).
     told: Mutex<HashMap<u64, Instant>>,
 }
+
+/// At most this many video downloads run at once; the others wait in the
+/// list (a playlist's items, many at a time).
+const MAX_RUNNING: usize = 2;
 
 /// Video downloads' ids start here, far above the queues' (JavaScript's
 /// numbers stay exact up to 2^53), so one list holds both.
@@ -230,8 +237,16 @@ pub fn url_of(state: &VideoState, id: u64) -> Option<String> {
     with_row(state, id, |row| row.url.clone())
 }
 
-/// «Pause»: a running video stops (it starts over when resumed).
+/// «Pause»: a running video stops (it starts over when resumed); a
+/// waiting one stays out of the turn.
 pub fn pause(state: &VideoState, ids: &[u64]) {
+    for &id in ids {
+        with_row(state, id, |row| {
+            if row.status == StatusView::Waiting {
+                row.status = StatusView::Paused;
+            }
+        });
+    }
     let downloads = state.downloads.lock().unwrap();
     for id in ids {
         if let Some(stop) = downloads.get(id) {
@@ -244,22 +259,41 @@ pub fn pause(state: &VideoState, ids: &[u64]) {
 pub fn resume<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
     let state = handle.state::<VideoState>();
     for &id in ids {
-        let again = with_row(&state, id, |row| {
-            let again = matches!(row.status, StatusView::Paused | StatusView::Failed);
-            if again {
+        with_row(&state, id, |row| {
+            if matches!(row.status, StatusView::Paused | StatusView::Failed) {
                 row.status = StatusView::Waiting;
                 row.error = None;
                 row.done = 0;
                 row.size = None;
             }
-            again
         });
-        if again == Some(true) {
-            start(handle.clone(), id, true);
-        }
     }
     save_rows(&handle.state::<crate::App>(), &state);
     let _ = handle.emit("downloads-changed", ());
+    pump(handle);
+}
+
+/// The waiting video downloads that may start now, first come first: as
+/// many as leave at most [`MAX_RUNNING`] running.
+fn to_start(rows: &[Row], running: &HashSet<u64>) -> Vec<u64> {
+    let free = MAX_RUNNING.saturating_sub(running.len());
+    rows.iter()
+        .filter(|r| r.status == StatusView::Waiting && !running.contains(&r.id))
+        .map(|r| r.id)
+        .take(free)
+        .collect()
+}
+
+/// Starts the waiting video downloads whose turn it is.
+fn pump<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let state = handle.state::<VideoState>();
+    let running = state.downloads.lock().unwrap().keys().copied().collect();
+    let ids = to_start(&state.rows.lock().unwrap(), &running);
+    for id in ids {
+        // A page «Video quality» asked just now is not asked again.
+        let ask = !state.fresh.lock().unwrap().remove(&id);
+        start(handle.clone(), id, ask);
+    }
 }
 
 /// Takes video downloads off the list; a running one stops first. A
@@ -515,9 +549,17 @@ pub struct FormatView {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ChoiceView {
-    Format { id: String },
-    Merge { video: String, audio: String },
+    Format {
+        id: String,
+    },
+    Merge {
+        video: String,
+        audio: String,
+    },
     AudioOnly,
+    /// The engine's best, chosen when it starts and its page is asked (a
+    /// playlist's items); then kept as that choice.
+    Best,
 }
 
 impl From<Choice> for ChoiceView {
@@ -530,13 +572,25 @@ impl From<Choice> for ChoiceView {
     }
 }
 
-impl From<ChoiceView> for Choice {
-    fn from(c: ChoiceView) -> Self {
-        match c {
+impl ChoiceView {
+    /// The engine's choice, with [`ChoiceView::Best`] chosen among
+    /// `formats`.
+    fn resolved(&self, formats: &[Format]) -> Result<Choice, VideoErrorView> {
+        Ok(match self.clone() {
             ChoiceView::Format { id } => Choice::Format(id),
             ChoiceView::Merge { video, audio } => Choice::Merge { video, audio },
             ChoiceView::AudioOnly => Choice::AudioOnly,
-        }
+            ChoiceView::Best => zajil_core::video::Video {
+                title: String::new(),
+                duration: None,
+                formats: formats.to_vec(),
+            }
+            .best_choice()
+            .ok_or_else(|| VideoErrorView {
+                kind: "no_formats".into(),
+                message: "the page offers no format to download".into(),
+            })?,
+        })
     }
 }
 
@@ -545,6 +599,8 @@ impl From<ChoiceView> for Choice {
 pub struct EntryView {
     pub url: Option<String>,
     pub title: Option<String>,
+    /// A playlist inside the playlist: opened, not downloaded.
+    pub playlist: bool,
 }
 
 /// What a page holds.
@@ -571,7 +627,8 @@ pub enum VideoInfoView {
 pub struct VideoErrorView {
     /// `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped` or
     /// `io`; for a failure of yt-dlp's whose words say what it comes to,
-    /// `no_formats`, `sign_in`, `private`, `unsupported` or `challenge`.
+    /// `no_formats`, `sign_in`, `private`, `unsupported` or `challenge`;
+    /// `playlist` for a playlist's item that is a playlist itself.
     pub kind: String,
     pub message: String,
 }
@@ -618,6 +675,7 @@ impl VideoErrorView {
             "private" => "video-error-private",
             "unsupported" => "video-error-unsupported",
             "challenge" => "video-error-challenge",
+            "playlist" => "video-error-playlist",
             _ => {
                 return localizer
                     .text(
@@ -684,6 +742,7 @@ pub async fn video_probe(
             entries: entries
                 .into_iter()
                 .map(|e| EntryView {
+                    playlist: e.is_playlist(),
                     url: e.url,
                     title: e.title,
                 })
@@ -753,10 +812,84 @@ pub fn video_download<R: tauri::Runtime>(
         error: None,
         file: None,
     });
+    state.fresh.lock().unwrap().insert(id);
     save_rows(&app, &state);
     let _ = handle.emit("downloads-changed", ());
-    start(handle, id, false);
+    pump(&handle);
     Ok(id)
+}
+
+/// A video of a playlist, for [`video_add_many`].
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct NewVideo {
+    pub url: String,
+    pub title: Option<String>,
+}
+
+/// A playlist's chosen videos join the list at once, each at its best,
+/// named after its title; they start in turn, at most [`MAX_RUNNING`] at
+/// a time, and each asks its own page then. Those on the playlist's site
+/// take its cookies, if the browser sent any. Returns their ids.
+#[tauri::command]
+pub fn video_add_many<R: tauri::Runtime>(
+    app: State<'_, crate::App>,
+    state: State<'_, VideoState>,
+    page: String,
+    items: Vec<NewVideo>,
+    dest: String,
+    handle: tauri::AppHandle<R>,
+) -> Vec<u64> {
+    let page_cookies = state.cookies.lock().unwrap().get(&page).cloned();
+    let mut ids = Vec::new();
+    for item in items {
+        if let Some(cookies) = &page_cookies
+            && same_site(&page, &item.url)
+        {
+            state
+                .cookies
+                .lock()
+                .unwrap()
+                .entry(item.url.clone())
+                .or_insert_with(|| cookies.clone());
+        }
+        let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
+        state.rows.lock().unwrap().push(new_row(id, item, &dest));
+        ids.push(id);
+    }
+    save_rows(&app, &state);
+    let _ = handle.emit("downloads-changed", ());
+    pump(&handle);
+    ids
+}
+
+/// Whether two links are on the same host: a playlist's cookies go only
+/// to its own site's videos (ADR-0005).
+fn same_site(a: &str, b: &str) -> bool {
+    crate::view::host_of(a).is_some_and(|host| crate::view::host_of(b) == Some(host))
+}
+
+/// A playlist's video as a waiting row: at its best, named after its
+/// title as a file can be.
+fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
+    let name = item
+        .title
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+        .map_or_else(|| "video".into(), zajil_core::sanitize::sanitize_file_name);
+    Row {
+        id,
+        url: item.url,
+        name,
+        folder: dest.to_owned(),
+        choice: ChoiceView::Best,
+        status: StatusView::Waiting,
+        size: None,
+        done: 0,
+        speed: 0,
+        error: None,
+        file: None,
+    }
 }
 
 /// Runs video download `id` of the list; `ask` asks its page first (a
@@ -785,12 +918,23 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
             .await
             {
                 Ok(Probed::Video(video)) => Ok(video.formats),
-                Ok(Probed::Playlist { .. }) => {
-                    Err(VideoError::Refused("the page is a playlist now".into()))
-                }
-                Err(e) => Err(e),
+                Ok(Probed::Playlist { .. }) => Err(VideoErrorView {
+                    kind: "playlist".into(),
+                    message: "the page is a playlist".into(),
+                }),
+                Err(e) => Err(e.into()),
             },
         };
+        // The engine's best, once chosen, is the row's choice from now on.
+        let chosen = formats.and_then(|formats| {
+            let choice = row.choice.resolved(&formats)?;
+            if row.choice == ChoiceView::Best {
+                with_row(&handle.state::<VideoState>(), id, |row| {
+                    row.choice = ChoiceView::from(choice.clone());
+                });
+            }
+            Ok((formats, choice))
+        });
         // After the probe: the cookies it went with, if any.
         let cookies = handle
             .state::<VideoState>()
@@ -799,9 +943,8 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
             .unwrap()
             .get(&row.url)
             .cloned();
-        let choice = Choice::from(row.choice.clone());
-        let result = match formats {
-            Ok(formats) => {
+        let result = match chosen {
+            Ok((formats, choice)) => {
                 let request = Download {
                     url: &row.url,
                     choice: &choice,
@@ -820,13 +963,13 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                         },
                     )
                     .await
+                    .map_err(VideoErrorView::from)
             }
             Err(e) => Err(e),
         };
         let state = handle.state::<VideoState>();
         state.downloads.lock().unwrap().remove(&id);
         state.told.lock().unwrap().remove(&id);
-        let result = result.map_err(VideoErrorView::from);
         let lang = handle
             .state::<crate::App>()
             .settings
@@ -851,6 +994,8 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         });
         save_rows(&handle.state::<crate::App>(), &state);
         let _ = handle.emit("downloads-changed", ());
+        // Its place is free: the next waiting one starts.
+        pump(&handle);
         match result {
             Ok(file) => {
                 let _ = handle.emit(
@@ -1058,7 +1203,7 @@ mod tests {
             },
             Choice::AudioOnly,
         ] {
-            assert_eq!(Choice::from(ChoiceView::from(choice.clone())), choice);
+            assert_eq!(ChoiceView::from(choice.clone()).resolved(&[]), Ok(choice));
         }
         let json: ChoiceView =
             serde_json::from_str(r#"{"kind":"merge","video":"137","audio":"140"}"#).unwrap();
@@ -1095,5 +1240,88 @@ mod tests {
                 .text(Language::En)
                 .contains("protected")
         );
+    }
+
+    fn item(url: &str, title: Option<&str>) -> NewVideo {
+        NewVideo {
+            url: url.into(),
+            title: title.map(Into::into),
+        }
+    }
+
+    /// A playlist's chosen videos all join the list at once, and at most
+    /// [`MAX_RUNNING`] run: the rest wait their turn, first come first.
+    #[test]
+    fn a_playlist_s_videos_wait_their_turn() {
+        let mut rows: Vec<Row> = (1..=5)
+            .map(|n| new_row(FIRST_ID + n, item("https://example.com/v", Some("v")), "/d"))
+            .collect();
+        let none = HashSet::new();
+        assert_eq!(to_start(&rows, &none), [FIRST_ID + 1, FIRST_ID + 2]);
+        let two: HashSet<u64> = [FIRST_ID + 1, FIRST_ID + 2].into();
+        for row in &mut rows[..2] {
+            row.status = StatusView::Active;
+        }
+        assert!(to_start(&rows, &two).is_empty());
+        // One ended, one paused: the next waiting one, not the paused.
+        rows[0].status = StatusView::Done;
+        rows[2].status = StatusView::Paused;
+        let one: HashSet<u64> = [FIRST_ID + 2].into();
+        assert_eq!(to_start(&rows, &one), [FIRST_ID + 4]);
+    }
+
+    /// Each one goes at the engine's best, named after its title as a
+    /// file can be, and keeps that choice once its page is asked.
+    #[test]
+    fn a_playlist_s_video_goes_at_its_best_under_its_title() {
+        let row = new_row(
+            FIRST_ID + 1,
+            item("https://example.com/v", Some("a/b: c")),
+            "/d",
+        );
+        assert_eq!(row.choice, ChoiceView::Best);
+        assert_eq!(row.status, StatusView::Waiting);
+        assert!(
+            !row.name.contains('/') && row.name.contains('c'),
+            "{}",
+            row.name
+        );
+        assert_eq!(
+            new_row(FIRST_ID + 2, item("https://e.com/w", None), "/d").name,
+            "video"
+        );
+
+        let format = |id: &str, height: u32, vcodec: &str, acodec: &str| {
+            serde_json::from_value::<Format>(serde_json::json!({
+                "format_id": id, "height": height, "vcodec": vcodec, "acodec": acodec
+            }))
+            .unwrap()
+        };
+        let formats = [
+            format("18", 360, "avc1", "mp4a"),
+            format("137", 1080, "avc1", "none"),
+            format("140", 0, "none", "mp4a"),
+        ];
+        assert_eq!(
+            ChoiceView::Best.resolved(&formats),
+            Ok(Choice::Merge {
+                video: "137".into(),
+                audio: "140".into()
+            })
+        );
+        assert_eq!(
+            ChoiceView::Best.resolved(&[]).unwrap_err().kind,
+            "no_formats"
+        );
+    }
+
+    /// A playlist's cookies go to its own site's videos only.
+    #[test]
+    fn a_playlist_s_cookies_stay_on_its_site() {
+        let page = "https://www.youtube.com/playlist?list=PLx";
+        assert!(same_site(page, "https://www.youtube.com/watch?v=abc"));
+        assert!(!same_site(page, "https://youtu.be.example.com/watch?v=abc"));
+        assert!(!same_site(page, "not a link"));
+        assert!(!same_site("not a link", "not a link"));
     }
 }

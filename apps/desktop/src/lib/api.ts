@@ -22,6 +22,7 @@ import type { GrabAdded } from "./bindings/GrabAdded";
 import type { VideoInfoView } from "./bindings/VideoInfoView";
 import type { VideoErrorView } from "./bindings/VideoErrorView";
 import type { ChoiceView } from "./bindings/ChoiceView";
+import type { NewVideo } from "./bindings/NewVideo";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { SettingsView } from "./bindings/SettingsView";
 import type { SettingsChange } from "./bindings/SettingsChange";
@@ -156,6 +157,7 @@ export const api = {
   videoProbeCancel: () => invoke<void>("video_probe_cancel"),
   videoDownload: (url: string, choice: ChoiceView, dest: string, name: string) =>
     invoke<number>("video_download", { url, choice, dest, name }),
+  videoAddMany: (page: string, items: NewVideo[], dest: string) => invoke<number[]>("video_add_many", { page, items, dest }),
   videoCancel: (id: number) => invoke<void>("video_cancel", { id }),
   onVideoToolsProgress: (handler: (p: { tool: string; done: number; total: number | null }) => void): Promise<UnlistenFn> =>
     listen<{ tool: string; done: number; total: number | null }>("video-tools-progress", (e) => handler(e.payload)),
