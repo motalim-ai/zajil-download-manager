@@ -399,6 +399,53 @@ fn near_4_seconds(duration: f64) {
     assert!((3.9..4.2).contains(&duration), "lasts {duration} s");
 }
 
+/// The pinned zip itself (macOS and Windows), installed through Zajil's
+/// own code with this build's pins (only its address is the local
+/// server's): its SHA-256, then the tree SHA-256 of pins.txt, then a run.
+/// A wrong pin would break every install, so it fails here first (review of
+/// #278).
+#[tokio::test]
+async fn the_pinned_zip_installs_through_zajil_s_own_code_and_runs() {
+    let Some(tools) = tools() else { return };
+    let unpacked = tools.yt_dlp.parent().unwrap();
+    if !unpacked.join("_internal").is_dir() {
+        return; // Linux: the one-file build.
+    }
+    let target = zajil_platform::target::current().unwrap();
+    let pin = zajil_core::tools::pinned(Tool::YtDlp, target).unwrap();
+    let archive = pin.archive.clone().expect("a zip is pinned on this system");
+    let zip = unpacked.with_file_name(format!("{}.zip", archive.folder));
+    let server = TestServer::https(Tls::trusted(&["localhost", "127.0.0.1"]), "localhost");
+    server.put("/yt-dlp.zip", FileSpec::new(fs::read(&zip).unwrap()));
+    let root = tempfile::tempdir().unwrap();
+    let url = server.url("/yt-dlp.zip");
+    let toolbox = Toolbox::with_pins(
+        root.path().join("tools"),
+        Box::new(move |tool, _| {
+            (tool == Tool::YtDlp).then(|| Pinned {
+                url: url.clone(),
+                ..pin.clone()
+            })
+        }),
+    );
+    let engine = Engine::with_test_root(Options::default(), &test_ca_der()).unwrap();
+    let path = toolbox
+        .install(&engine, Tool::YtDlp, &Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert!(path.ends_with(&archive.program));
+    let checked = toolbox.verified(Tool::YtDlp).await.unwrap();
+    let version = Command::new(checked.path())
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        zajil_core::tools::yt_dlp_version()
+    );
+}
+
 /// The warm-up run (owner's decision, 2026-10-27): yt-dlp starts, loads
 /// what it has, and reaches nothing: done well before its time limit, with
 /// nothing left behind.

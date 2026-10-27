@@ -2,9 +2,9 @@
 # Downloads the pinned yt-dlp for this machine into <dir> and checks its
 # SHA-256 against tools/yt-dlp/pins.txt, the file Zajil itself reads
 # (ADR-0009). For the CI's video tests and for developers; prints the
-# program's path. A zip (macOS and Windows) is unpacked into <dir>/<its
-# name>; Zajil itself checks what it holds (tools.rs), and so do the tests
-# that install it.
+# program's path. A zip (macOS and Windows) is kept as <dir>/<file> and
+# unpacked into <dir>/<its name>; Zajil itself checks what it holds
+# (tools.rs), and so do the tests that install it.
 #
 #   scripts/get-yt-dlp.sh <dir>
 set -euo pipefail
@@ -56,7 +56,8 @@ case "$file" in
     else
       powershell -NoProfile -Command "Expand-Archive -LiteralPath '$dir/$name' -DestinationPath '$folder'"
     fi
-    rm -f "$dir/$name"
+    # The zip stays next to its folder: the real video tests install it
+    # through Zajil's own code, against the tree SHA-256 of pins.txt.
     chmod 700 "$folder/$program"
     echo "$folder/$program"
     ;;

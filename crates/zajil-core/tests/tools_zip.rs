@@ -193,6 +193,33 @@ async fn a_pinned_zip_is_unpacked_once_and_checked_whole_before_use() {
     }
 }
 
+/// Only another version or build counts as "earlier" (brought up to date
+/// without asking): not an empty folder a failed install left, nor the
+/// pinned one changed (that one is refused before it runs). Told without
+/// hashing anything (review of #278).
+#[tokio::test]
+async fn only_another_version_or_build_is_an_earlier_one() {
+    let entries = good_entries();
+    let (_server, root, tools) = served(&entries, None);
+    let version = root.path().join("tools/yt-dlp").join(VERSION);
+    assert!(!tools.has_an_earlier_one(Tool::YtDlp));
+    // A failed install's empty folders.
+    zajil_platform::fs::private_dir(&version.join("yt-dlp_test/_internal")).unwrap();
+    zajil_platform::fs::private_dir(&root.path().join("tools/yt-dlp/2098.01.01")).unwrap();
+    assert!(!tools.has_an_earlier_one(Tool::YtDlp));
+    // Another version's program.
+    zajil_platform::fs::create_private(&root.path().join("tools/yt-dlp/2098.01.01/yt-dlp"))
+        .unwrap();
+    assert!(tools.has_an_earlier_one(Tool::YtDlp));
+    fs::remove_dir_all(root.path().join("tools/yt-dlp/2098.01.01")).unwrap();
+    // The pinned one, installed and then changed: not "earlier".
+    fs::remove_dir_all(version.join("yt-dlp_test")).unwrap();
+    let path = install(&tools).await.unwrap();
+    fs::write(&path, b"changed").unwrap();
+    assert!(!tools.has_an_earlier_one(Tool::YtDlp));
+    assert!(tools.verified(Tool::YtDlp).await.is_err());
+}
+
 #[tokio::test]
 async fn a_file_changed_added_or_missing_after_the_install_stops_the_tool() {
     let entries = good_entries();
@@ -307,6 +334,8 @@ fn a_zip_that_could_write_outside_its_folder_or_hold_a_link_is_refused() {
         ("drive", ("C:outside", &b"x"[..], 0o644)),
         ("a link", ("_internal/link", &b"/etc/passwd"[..], 0o120_777)),
         ("trailing dot", ("_internal/name.", &b"x"[..], 0o644)),
+        ("a Windows device", ("_internal/NUL.dll", &b"x"[..], 0o644)),
+        ("a Windows port", ("_internal/com1", &b"x"[..], 0o644)),
     ] {
         let bytes = zip_of(&[program, bad]);
         let dir = tempfile::tempdir().unwrap();

@@ -49,6 +49,9 @@ pub struct VideoState {
     /// The link «Video quality» opens with, from the extension.
     pending: Mutex<Option<String>>,
     installing: Mutex<Option<Stop>>,
+    /// One install, update or removal of the tools at a time (review of
+    /// #278: the update at start and the user's install raced).
+    tools_lock: tokio::sync::Mutex<()>,
     probing: Mutex<Option<Stop>>,
     downloads: Mutex<HashMap<u64, Stop>>,
     /// Downloads whose formats «Video quality» just read: their page is
@@ -488,9 +491,17 @@ fn name(tool: Tool) -> &'static str {
     }
 }
 
+/// Off the main thread: checking yt-dlp reads and hashes every file it
+/// unpacked (review of #278), and the windows would wait meanwhile.
 #[tauri::command]
-pub fn video_tools_status(app: State<'_, crate::App>) -> Vec<ToolView> {
+pub async fn video_tools_status(app: State<'_, crate::App>) -> Result<Vec<ToolView>, String> {
     let toolbox = Toolbox::new(folders(&app).0);
+    tauri::async_runtime::spawn_blocking(move || tools_status(&toolbox))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn tools_status(toolbox: &Toolbox) -> Vec<ToolView> {
     let target = zajil_platform::target::current();
     TOOLS
         .iter()
@@ -530,6 +541,9 @@ pub async fn video_tools_install<R: tauri::Runtime>(
 ) -> Result<(), String> {
     let stop = Stop::new();
     *state.installing.lock().unwrap() = Some(stop.clone());
+    // After an update at start that is under way: then what it brought
+    // is there, and only what is still missing comes.
+    let _one_at_a_time = state.tools_lock.lock().await;
     let toolbox = Toolbox::new(folders(&app).0);
     let mut installed = false;
     for tool in TOOLS {
@@ -582,6 +596,8 @@ async fn warm_up(app: &crate::App, stop: &Stop) -> Result<(), String> {
 pub fn update_tools<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let app = handle.state::<crate::App>();
+        let state = handle.state::<VideoState>();
+        let _one_at_a_time = state.tools_lock.lock().await;
         let tools = folders(&app).0;
         let earlier = tauri::async_runtime::spawn_blocking(move || {
             let toolbox = Toolbox::new(tools);
@@ -619,7 +635,12 @@ pub fn video_tools_cancel(state: State<'_, VideoState>) {
 
 /// «Delete the video tools» (the settings).
 #[tauri::command]
-pub async fn video_tools_remove(app: State<'_, crate::App>) -> Result<(), String> {
+pub async fn video_tools_remove(
+    app: State<'_, crate::App>,
+    state: State<'_, VideoState>,
+) -> Result<(), String> {
+    // Not while they are being installed or brought up to date.
+    let _one_at_a_time = state.tools_lock.lock().await;
     // Off the main thread, where a command that is not async runs: the
     // tools are tens of megabytes, and the windows would wait meanwhile.
     let toolbox = Toolbox::new(folders(&app).0);

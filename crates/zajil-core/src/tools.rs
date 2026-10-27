@@ -305,7 +305,7 @@ fn from_pins(
             ),
             sha256: line.sha256.clone(),
             archive: line.archive.as_ref().map(|(program, tree)| Archive {
-                folder: file.trim_end_matches(".zip").to_owned(),
+                folder: file.strip_suffix(".zip").unwrap_or(file).to_owned(),
                 program: program.clone(),
                 tree_sha256: tree.clone(),
             }),
@@ -417,18 +417,50 @@ impl Toolbox {
         })
     }
 
-    /// Whether this user has had `tool` before, of another version or
-    /// another build, and not the pinned one now: they agreed to it then,
-    /// so it is brought up to date without asking again (owner's decision,
-    /// 2026-10-27). Reads and hashes the tool: call it from a blocking
-    /// task.
+    /// Whether this user has `tool` of another version or build than the
+    /// pinned one (yt-dlp's one-file build, now that its zip is pinned), and
+    /// not the pinned one: they agreed to it then, so it is brought up to
+    /// date without asking again (owner's decision, 2026-10-27). Told by
+    /// the folders alone, without hashing anything (review of #278): a
+    /// file of another version's folder, or in the version's folder
+    /// something else than the pinned zip's folder, while the pinned
+    /// program is not there. A tool that is there but changed is not
+    /// "earlier": it is refused before it runs, as before. Blocking.
     pub fn has_an_earlier_one(&self, tool: Tool) -> bool {
-        let Ok(current) = self.path(tool) else {
+        let (Ok((pin, _)), Ok(current)) = (self.pin(tool), self.path(tool)) else {
             return false;
         };
+        if std::fs::symlink_metadata(&current).is_ok() {
+            return false;
+        }
         let folder = self.root.join(tool.folder());
-        let earlier = std::fs::read_dir(&folder).is_ok_and(|mut entries| entries.next().is_some());
-        earlier && current.starts_with(&folder) && !self.is_installed(tool)
+        let holds_a_file = |dir: &Path, skip: Option<&str>| {
+            fn any_file(dir: &Path, depth: usize) -> bool {
+                std::fs::read_dir(dir).is_ok_and(|entries| {
+                    entries.flatten().any(|e| match e.file_type() {
+                        Ok(t) if t.is_dir() => depth < 4 && any_file(&e.path(), depth + 1),
+                        Ok(_) => true,
+                        Err(_) => false,
+                    })
+                })
+            }
+            std::fs::read_dir(dir).is_ok_and(|entries| {
+                entries.flatten().any(|e| {
+                    skip.is_none_or(|s| e.file_name() != std::ffi::OsStr::new(s))
+                        && match e.file_type() {
+                            Ok(t) if t.is_dir() => any_file(&e.path(), 1),
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
+                })
+            })
+        };
+        let other_versions = holds_a_file(&folder, Some(&pin.version));
+        let other_build = pin
+            .archive
+            .as_ref()
+            .is_some_and(|archive| holds_a_file(&folder.join(&pin.version), Some(&archive.folder)));
+        other_versions || other_build
     }
 
     /// Whether `tool` is there and is the pinned file. Reads and hashes it,
@@ -563,10 +595,11 @@ impl Staging {
         self.0.as_deref().expect("not removed yet")
     }
 
-    /// Removes the folder now. Blocking.
+    /// Removes the folder now, again for a while if a scanner still holds
+    /// a file in it. Blocking.
     fn remove(mut self) {
         if let Some(dir) = self.0.take() {
-            let _ = std::fs::remove_dir_all(dir);
+            let _ = zajil_platform::fs::remove_dir_all_retrying(&dir);
         }
     }
 }
@@ -664,12 +697,23 @@ fn zip_path(name: &str) -> Option<Vec<&str>> {
         return None;
     }
     let parts: Vec<&str> = name.split('/').collect();
+    // Windows opens these as devices, whatever comes after a dot.
+    let device = |part: &str| {
+        let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+        matches!(
+            stem.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit())
+    };
     let good = parts.len() <= MAX_DEPTH
         && parts.iter().all(|part| {
             !part.is_empty()
                 && *part != "."
                 && *part != ".."
                 && !part.ends_with('.')
+                && !device(part)
                 && part
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
@@ -803,7 +847,9 @@ fn keep_archive_if_pinned(
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => return Err(err.into()),
     }
-    std::fs::rename(&new, target)?;
+    // Again for a while if a scanner still holds a file just written (#55;
+    // review of #278); `target` is gone, so nothing is replaced.
+    zajil_platform::fs::rename_noreplace(&new, target)?;
     zajil_platform::fs::sync_dir(version)?;
     Ok(dest.to_owned())
 }
@@ -918,9 +964,10 @@ fn copy_hashing(from: &mut File, to: &mut File) -> io::Result<String> {
 }
 
 /// A tool checked right before it runs: its path, and the files it was
-/// checked on (the program, and for a zip everything unpacked from it),
-/// kept open until the program has started (on Windows each stays locked
-/// while open).
+/// checked on, kept open until its run has ended: on Windows each stays
+/// locked while open. For a zip, everything unpacked from it is kept open
+/// on Windows only: elsewhere an open file locks nothing, and a Mac app may
+/// have only 256 files open at once (review of #278).
 #[derive(Debug)]
 pub struct VerifiedTool {
     path: PathBuf,
@@ -971,9 +1018,14 @@ fn check_installed(
         if !files.iter().any(|(name, _)| name == &archive.program) {
             return Err(ToolError::Missing(tool));
         }
+        let kept = if cfg!(windows) {
+            files.into_iter().map(|(_, file)| file).collect()
+        } else {
+            Vec::new()
+        };
         return Ok(VerifiedTool {
             path: path.to_owned(),
-            _files: files.into_iter().map(|(_, file)| file).collect(),
+            _files: kept,
         });
     }
     // The file itself, checked on the opened file.

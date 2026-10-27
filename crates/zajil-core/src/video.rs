@@ -334,8 +334,9 @@ pub enum Arg {
     ProgressTemplate,
     /// The warm-up run ([`VideoRunner::warm_up`]): yt-dlp's verbose header,
     /// which loads every library it has, then a simulated run whose every
-    /// request goes to a closed port on this machine: nothing leaves it.
-    WarmUp,
+    /// request goes, as to a proxy, to this port of `127.0.0.1`, where
+    /// Zajil itself drops each connection: nothing leaves the machine.
+    WarmUp(u16),
     /// Tests only ([`VideoRunner::with_test_root`]): trust the system's
     /// store, where the test sets its authority, instead of the list
     /// bundled in yt-dlp. Never in a shipped build (no `test-support`).
@@ -343,9 +344,6 @@ pub enum Arg {
     TestNoCertifi,
 }
 
-/// Where the warm-up run's requests go: a closed port of this machine
-/// (`discard`, which nothing listens on), so it never reaches the network.
-const WARM_UP_PROXY: &str = "http://127.0.0.1:9/";
 /// The page the warm-up run "opens": a YouTube video, so YouTube's own
 /// code is loaded too; no request for it leaves the machine.
 const WARM_UP_URL: &str = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
@@ -365,12 +363,12 @@ impl Arg {
             Arg::NoRemoteComponents => add("--no-remote-components"),
             Arg::NoCacheDir => add("--no-cache-dir"),
             Arg::NoJsRuntimes => add("--no-js-runtimes"),
-            Arg::WarmUp => {
+            Arg::WarmUp(port) => {
+                for word in ["--verbose", "--simulate", "--proxy"] {
+                    add(word);
+                }
+                add(&format!("http://127.0.0.1:{port}/"));
                 for word in [
-                    "--verbose",
-                    "--simulate",
-                    "--proxy",
-                    WARM_UP_PROXY,
                     "--socket-timeout",
                     "5",
                     "--retries",
@@ -1418,11 +1416,23 @@ impl VideoRunner {
     /// It ends after [`WARM_UP_TIME`] at most.
     pub async fn warm_up(&self, stop: &Stop) -> Result<(), VideoError> {
         let url = checked(WARM_UP_URL)?;
+        // Every request of the run comes here, and is dropped at once: a
+        // port of our own, not one another program could listen on
+        // (review of #278).
+        let proxy = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let port = proxy.local_addr()?.port();
+        let dropping = tokio::spawn(async move {
+            while let Ok((connection, _)) = proxy.accept().await {
+                drop(connection);
+            }
+        });
         let mut args = base_args();
-        args.push(Arg::WarmUp);
+        args.push(Arg::WarmUp(port));
         let mut ignore = |_| {};
         let run = self.run(&url, args, None, None, stop, &mut ignore);
-        match tokio::time::timeout(WARM_UP_TIME, run).await {
+        let ran = tokio::time::timeout(WARM_UP_TIME, run).await;
+        dropping.abort();
+        match ran {
             // Dropped: the run's tree is ended and its folders removed.
             Err(_elapsed) => Ok(()),
             Ok(Ok(_) | Err(VideoError::Tool(_) | VideoError::Drm)) => Ok(()),

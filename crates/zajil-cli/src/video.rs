@@ -310,7 +310,7 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool, data_dir: &Path)
         }
     }
     // Every tool needs a released file for this system before anything is
-    // downloaded: yt-dlp alone (about 35 MB) is of no use without FFmpeg
+    // downloaded: yt-dlp alone (17 to 52 MB) is of no use without FFmpeg
     // (review of #128). Every tool is pinned for every target this build
     // knows; on another system, nothing comes.
     let unavailable: Vec<String> = Tool::ALL
@@ -353,12 +353,15 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool, data_dir: &Path)
     // video's wait (owner's decision, 2026-10-27).
     println!("Preparing the tools…");
     let runs = Runs::new(data_dir.join("run"));
-    if let Ok(runner) = runner(&data_dir.join("tools"), runs, engine.clone()).await {
-        match runner.warm_up(&stop).await {
-            Err(VideoError::Stopped) => return crate::fail("stopped"),
-            Err(err) => eprintln!("note: the tools' first run: {err}"),
-            Ok(()) => {}
-        }
+    let runner = match runner(&data_dir.join("tools"), runs, engine.clone()).await {
+        Ok(runner) => runner,
+        // It said why.
+        Err(code) => return code,
+    };
+    match runner.warm_up(&stop).await {
+        Err(VideoError::Stopped) => return crate::fail("stopped"),
+        Err(err) => eprintln!("note: the tools' first run: {err}"),
+        Ok(()) => {}
     }
     println!("The video tools are ready.");
     ExitCode::SUCCESS
