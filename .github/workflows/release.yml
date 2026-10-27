@@ -155,11 +155,13 @@ jobs:
             echo "::warning::installing the GUI libraries failed (try $try of 3)"
           done
           exit 1
-      # zajil-host, the program the browsers start (ADR-0005), and the zajil
-      # command, named as Tauri wants a sidecar: binaries/<name>-<target>.
+      # zajil-host, the program the browsers start (ADR-0005), the zajil
+      # command, and zajil-jsbox, what yt-dlp runs as QuickJS-NG for
+      # YouTube (ADR-0009: Zajil looks for it next to itself), named as
+      # Tauri wants a sidecar: binaries/<name>-<target>.
       # On macOS the build script of each processor's half wants its own
       # file, and the bundle the universal one made from both.
-      - name: Build zajil-host and zajil
+      - name: Build zajil-host, zajil and zajil-jsbox
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
@@ -168,17 +170,17 @@ jobs:
           mkdir -p "$bin"
           if [ "${{ matrix.target }}" = universal-apple-darwin ]; then
             for t in aarch64-apple-darwin x86_64-apple-darwin; do
-              cargo build --release --locked -p zajil-host -p zajil-cli --target "$t"
-              for p in zajil-host zajil; do cp "target/$t/release/$p" "$bin/$p-$t"; done
+              cargo build --release --locked -p zajil-host -p zajil-cli -p zajil-jsbox --target "$t"
+              for p in zajil-host zajil zajil-jsbox; do cp "target/$t/release/$p" "$bin/$p-$t"; done
             done
-            for p in zajil-host zajil; do
+            for p in zajil-host zajil zajil-jsbox; do
               lipo -create -output "$bin/$p-universal-apple-darwin" "$bin/$p-aarch64-apple-darwin" "$bin/$p-x86_64-apple-darwin"
               lipo -archs "$bin/$p-universal-apple-darwin"
             done
           else
-            cargo build --release --locked -p zajil-host -p zajil-cli --target "${{ matrix.target }}"
+            cargo build --release --locked -p zajil-host -p zajil-cli -p zajil-jsbox --target "${{ matrix.target }}"
             ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
-            for p in zajil-host zajil; do
+            for p in zajil-host zajil zajil-jsbox; do
               cp "target/${{ matrix.target }}/release/$p$ext" "$bin/$p-${{ matrix.target }}$ext"
             done
           fi
@@ -210,8 +212,22 @@ jobs:
           for f in "$out"/*; do
             case "$(basename "$f")" in *"$VERSION"*) ;; *) echo "::error::$f does not carry $VERSION"; exit 1 ;; esac
           done
-      # Each installer is tried on its own system: it installs, zajil-host is
-      # next to the program, and it uninstalls.
+      # The pinned QuickJS-NG, for the installed zajil-jsbox to run below:
+      # it answers `--help` through the real qjs, in its sandbox, as yt-dlp
+      # asks it.
+      - name: Get the pinned QuickJS-NG
+        run: |
+          set -euo pipefail
+          qjs="$(bash scripts/get-qjs.sh "$RUNNER_TEMP/quickjs")"
+          sha="$( (sha256sum < "$qjs" 2>/dev/null || shasum -a 256 < "$qjs") | cut -d' ' -f1)"
+          version="$(awk '$1 == "version" { print $2 }' tools/quickjs/pins.txt)"
+          {
+            echo "ZAJIL_QJS=$qjs"
+            echo "ZAJIL_QJS_SHA256=$sha"
+            echo "QJS_HELP=QuickJS-ng version ${version#v}"
+          } >> "$GITHUB_ENV"
+      # Each installer is tried on its own system: it installs, zajil-host,
+      # zajil and zajil-jsbox are next to the program, and it uninstalls.
       - name: Try the macOS disk image
         if: runner.os == 'macOS'
         run: |
@@ -223,6 +239,10 @@ jobs:
           ls -l "$app/Contents/MacOS"
           test -x "$app/Contents/MacOS/zajil-host"
           test -x "$app/Contents/MacOS/zajil"
+          test -x "$app/Contents/MacOS/zajil-jsbox"
+          # `qjs --help` ends with 1 after its version.
+          { "$app/Contents/MacOS/zajil-jsbox" --help 2>&1 || true; } | tee "$RUNNER_TEMP/jsbox.txt"
+          grep -qF "$QJS_HELP" "$RUNNER_TEMP/jsbox.txt"
           for f in LICENSE THIRD-PARTY-NOTICES.md LGPL-2.1.txt; do test -f "$app/Contents/Resources/$f"; done
           "$app/Contents/MacOS/zajil" --version
           # Every program in the bundle runs on both processors.
@@ -245,13 +265,19 @@ jobs:
           # A per-user install goes to %LOCALAPPDATA%\Zajil.
           $dir = Join-Path $env:LOCALAPPDATA 'Zajil'
           Get-ChildItem $dir | Format-Table Name, Length
-          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'LGPL-2.1.txt')) {
+          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'zajil-jsbox.exe', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'LGPL-2.1.txt')) {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "$f is not in $dir" }
           }
+          # `qjs --help` ends with 1 after its version.
+          $ErrorActionPreference = 'Continue'
+          $jsbox = & (Join-Path $dir 'zajil-jsbox.exe') --help 2>&1 | Out-String
+          $ErrorActionPreference = 'Stop'
+          Write-Output $jsbox
+          if (-not $jsbox.Contains($env:QJS_HELP)) { throw "zajil-jsbox.exe did not answer --help through qjs" }
           & (Join-Path $dir 'zajil.exe') --version
           # `_?=` keeps the uninstaller in place, so -Wait waits for it.
           Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait
-          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe')) {
+          foreach ($f in @('zajil-desktop.exe', 'zajil-host.exe', 'zajil.exe', 'zajil-jsbox.exe')) {
             if (Test-Path (Join-Path $dir $f)) { throw "$f is still there after uninstall" }
           }
       - name: Try the Linux package
@@ -264,15 +290,21 @@ jobs:
           sudo apt-get install -y -q "$deb"
           test -x /usr/bin/zajil-host
           test -x /usr/bin/zajil
+          test -x /usr/bin/zajil-jsbox
+          # `qjs --help` ends with 1 after its version.
+          { /usr/bin/zajil-jsbox --help 2>&1 || true; } | tee "$RUNNER_TEMP/jsbox.txt"
+          grep -qF "$QJS_HELP" "$RUNNER_TEMP/jsbox.txt"
           /usr/bin/zajil --version
           for f in LICENSE THIRD-PARTY-NOTICES.md LGPL-2.1.txt; do dpkg -L "$package" | grep -q "/$f\$"; done
           sudo apt-get remove -y -q "$package"
           test ! -e /usr/bin/zajil-host
+          test ! -e /usr/bin/zajil-jsbox
           appimage=$(ls "$RUNNER_TEMP"/installers/*.AppImage)
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
           test -x squashfs-root/usr/bin/zajil-host
           test -x squashfs-root/usr/bin/zajil
+          test -x squashfs-root/usr/bin/zajil-jsbox
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-${{ matrix.name }}
