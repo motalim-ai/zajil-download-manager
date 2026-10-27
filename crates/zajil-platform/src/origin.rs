@@ -13,6 +13,11 @@
 //!
 //! A file system that cannot hold it (FAT32, exFAT, a network share) keeps
 //! the file without it: the caller decides what to do with the error.
+//!
+//! On macOS the system also writes the mark by itself on every file a
+//! marked process writes: Chrome marks its own process, and so every
+//! program it starts, and theirs. [`clear`] removes it from what Zajil
+//! checked to be its own (the video tools).
 
 use std::io;
 use std::path::Path;
@@ -26,6 +31,58 @@ pub fn mark(file: &Path, origin: &str) -> io::Result<()> {
 /// tests.
 pub fn read(file: &Path) -> io::Result<Option<String>> {
     imp::read(file)
+}
+
+/// Removes the mark from `path` (a file, a folder, or a link itself, never
+/// what it points to). Nothing to remove, or a file system that cannot
+/// hold it, is not an error.
+pub fn clear(path: &Path) -> io::Result<()> {
+    imp::clear(path)
+}
+
+/// Marks this process as Chrome marks its own (`LSFileQuarantineEnabled`):
+/// from now on the system marks every file it, or a program it starts,
+/// writes, with `agent` as the program that downloaded it. Once marked, a
+/// process stays so. For tests only: they stand in for the browser.
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+#[allow(unsafe_code)]
+pub fn quarantine_this_process(agent: &str) -> io::Result<()> {
+    use std::ffi::{CString, c_char, c_int, c_void};
+    // libquarantine, part of libSystem: what LaunchServices calls for an
+    // app that asks for it.
+    unsafe extern "C" {
+        fn _qtn_proc_alloc() -> *mut c_void;
+        fn _qtn_proc_set_identifier(qtn: *mut c_void, identifier: *const c_char) -> c_int;
+        fn _qtn_proc_set_flags(qtn: *mut c_void, flags: u32) -> c_int;
+        fn _qtn_proc_apply_to_self(qtn: *mut c_void) -> c_int;
+        fn _qtn_proc_free(qtn: *mut c_void);
+    }
+    let agent = CString::new(agent)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "a NUL in the name"))?;
+    // SAFETY: a handle the library allocated, used and freed here only,
+    // and a NUL-terminated string alive for the calls.
+    let done = unsafe {
+        let qtn = _qtn_proc_alloc();
+        if qtn.is_null() {
+            return Err(io::Error::other("no quarantine handle"));
+        }
+        // 0081: "downloaded, not yet opened", as Chrome's files say.
+        let mut done = _qtn_proc_set_identifier(qtn, agent.as_ptr());
+        if done == 0 {
+            done = _qtn_proc_set_flags(qtn, 0x0081);
+        }
+        if done == 0 {
+            done = _qtn_proc_apply_to_self(qtn);
+        }
+        _qtn_proc_free(qtn);
+        done
+    };
+    if done == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("quarantine error {done}")))
+    }
 }
 
 #[cfg(windows)]
@@ -50,6 +107,13 @@ mod imp {
             Ok(text) => Ok(Some(text)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(err) => Err(err),
+        }
+    }
+
+    pub fn clear(path: &Path) -> io::Result<()> {
+        match std::fs::remove_file(stream(path)) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => Err(err),
+            _ => Ok(()),
         }
     }
 }
@@ -155,5 +219,29 @@ mod imp {
         }
         buffer.truncate(got as usize);
         Ok(Some(String::from_utf8_lossy(&buffer).into_owned()))
+    }
+
+    #[allow(unsafe_code)]
+    pub fn clear(path: &Path) -> io::Result<()> {
+        let (path, name) = (c(path)?, CString::new(NAME).expect("no NUL"));
+        // SAFETY: NUL-terminated strings alive for the call.
+        #[cfg(target_os = "macos")]
+        let done = unsafe { libc::removexattr(path.as_ptr(), name.as_ptr(), libc::XATTR_NOFOLLOW) };
+        // SAFETY: as above; `lremovexattr` does not follow a link.
+        #[cfg(not(target_os = "macos"))]
+        let done = unsafe { libc::lremovexattr(path.as_ptr(), name.as_ptr()) };
+        if done == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        #[cfg(target_os = "macos")]
+        let missing = err.raw_os_error() == Some(libc::ENOATTR);
+        #[cfg(not(target_os = "macos"))]
+        let missing = err.raw_os_error() == Some(libc::ENODATA);
+        if missing || err.raw_os_error() == Some(libc::ENOTSUP) {
+            Ok(())
+        } else {
+            Err(err)
+        }
     }
 }

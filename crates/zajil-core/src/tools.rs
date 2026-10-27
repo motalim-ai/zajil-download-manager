@@ -533,7 +533,11 @@ impl Toolbox {
                     &dest,
                 ),
                 None => keep_if_pinned(tool, &pin, &finished.file, staging.path(), &dest),
-            };
+            }
+            .and_then(|kept| {
+                unmark_folders(&root, kept.parent().expect("a tool path has a folder"))?;
+                Ok(kept)
+            });
             staging.remove();
             if result.is_ok() {
                 remove_earlier(&root, tool, &pin);
@@ -655,6 +659,7 @@ fn keep_if_pinned(
             expected: pin.sha256.clone(),
         });
     }
+    unmark(&new)?;
     zajil_platform::fs::make_executable(&out)?;
     drop(out);
     zajil_platform::fs::replace_file(&new, dest)?;
@@ -842,6 +847,7 @@ fn keep_archive_if_pinned(
             expected: archive.tree_sha256.clone(),
         });
     }
+    unmark_all(&new)?;
     match std::fs::symlink_metadata(target) {
         Ok(_) => zajil_platform::fs::remove_dir_all_retrying(target)?,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
@@ -998,7 +1004,7 @@ fn check_installed(
             folder.push(part);
         }
         match zajil_platform::fs::is_private_dir(&folder) {
-            Ok(true) => {}
+            Ok(true) => unmark(&folder)?,
             Ok(false) => return Err(ToolError::NotPrivate(folder)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(ToolError::Missing(tool));
@@ -1018,6 +1024,7 @@ fn check_installed(
         if !files.iter().any(|(name, _)| name == &archive.program) {
             return Err(ToolError::Missing(tool));
         }
+        unmark_all(dir)?;
         let kept = if cfg!(windows) {
             files.into_iter().map(|(_, file)| file).collect()
         } else {
@@ -1047,10 +1054,54 @@ fn check_installed(
             expected: pin.sha256.clone(),
         });
     }
+    unmark(path)?;
     Ok(VerifiedTool {
         path: path.to_owned(),
         _files: vec![file],
     })
+}
+
+/// Removes the mark of the internet from `path` itself, on macOS: a Zajil
+/// started by a marked process (Chrome, through the extension, before the
+/// host started it through LaunchServices) is marked too, and the system
+/// then marks every file it writes and every file its programs write;
+/// Gatekeeper refused yt-dlp's Python.framework so marked as "damaged"
+/// (owner's report before 1.0). Only on what was just checked to be the
+/// pinned tool, and the folders that hold it. Windows and Linux mark
+/// nothing by themselves. Blocking.
+fn unmark(path: &Path) -> io::Result<()> {
+    if cfg!(target_os = "macos") {
+        zajil_platform::origin::clear(path)
+    } else {
+        Ok(())
+    }
+}
+
+/// [`unmark`] on `path` and, for a folder, everything in it (a link itself,
+/// never what it points to).
+fn unmark_all(path: &Path) -> io::Result<()> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    unmark(path)?;
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            unmark_all(&entry?.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// [`unmark`] on each folder from `root` down to `dir`, each itself only.
+fn unmark_folders(root: &Path, dir: &Path) -> io::Result<()> {
+    let below = dir.strip_prefix(root).map_err(io::Error::other)?;
+    let mut folder = root.to_path_buf();
+    unmark(&folder)?;
+    for part in below.components() {
+        folder.push(part);
+        unmark(&folder)?;
+    }
+    Ok(())
 }
 
 struct HashWriter<'a>(&'a mut Sha256);

@@ -6,8 +6,10 @@
 //!
 //! The data folder is the app's (`ZAJIL_DATA_DIR`, else the user's
 //! standard one), so the host finds the app that the user runs. When no
-//! app is running, the host starts the one next to it, unless
-//! `ZAJIL_NO_LAUNCH` is set (tests), and waits for it to open its channel.
+//! app is running, the host starts the one next to it (on macOS through
+//! LaunchServices, so that the browser's quarantine mark does not pass to
+//! it), unless `ZAJIL_NO_LAUNCH` is set (tests), and waits for it to open
+//! its channel.
 //!
 //! A `link` message (M5, `runtime.connectNative`) turns the host into the
 //! extension's link to the app for the rest of its life ([`link`]): Zajil
@@ -253,9 +255,11 @@ fn not_running(err: &io::Error) -> bool {
 }
 
 /// Starts the app installed next to this program, on the same data
-/// folder, detached from the browser: no pipes of its, its own process
-/// group on macOS and Linux, and on Windows out of the browser's job when
-/// the job allows it (Firefox kills its hosts' job when it closes them).
+/// folder, detached from the browser: on macOS through LaunchServices when
+/// this program is in Zajil.app ([`open_app`]); elsewhere with no pipes of
+/// its, its own process group on macOS and Linux, and on Windows out of the
+/// browser's job when the job allows it (Firefox kills its hosts' job when
+/// it closes them).
 fn start_app(data_dir: &Path) -> Result<(), (HostProblem, String)> {
     let here = std::env::current_exe()
         .map_err(|e| (HostProblem::NotFound, format!("cannot find myself: {e}")))?;
@@ -269,6 +273,10 @@ fn start_app(data_dir: &Path) -> Result<(), (HostProblem, String)> {
             HostProblem::NotFound,
             format!("{} is not there", app.display()),
         ));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = app_bundle(&here) {
+        return open_app(bundle, data_dir);
     }
     let command = || {
         let mut command = Command::new(&app);
@@ -298,4 +306,75 @@ fn start_app(data_dir: &Path) -> Result<(), (HostProblem, String)> {
     spawned
         .map(drop)
         .map_err(|e| (HostProblem::Unreachable, format!("cannot start it: {e}")))
+}
+
+/// The `.app` this program is in, if it is in one (`<x>.app/Contents/MacOS`).
+#[cfg(any(target_os = "macos", test))]
+fn app_bundle(here: &Path) -> Option<&Path> {
+    let macos = here.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && bundle.extension()? == "app")
+        .then_some(bundle)
+}
+
+/// Starts `bundle` through LaunchServices (`open`), not as this program's
+/// child: Chrome marks its own process, and the system marks every program
+/// it starts the same way, and every file they write
+/// (`com.apple.quarantine`, owner's report before 1.0: Zajil's queues and
+/// yt-dlp's Python.framework, which Gatekeeper then refused as "damaged").
+/// A Zajil that LaunchServices starts is not marked. `-n`: a new Zajil on
+/// this data folder even if one runs on another, as a start of its program
+/// did. `open` returns once it is started.
+#[cfg(target_os = "macos")]
+fn open_app(bundle: &Path, data_dir: &Path) -> Result<(), (HostProblem, String)> {
+    let output = Command::new("/usr/bin/open")
+        .arg("-n")
+        .arg("-a")
+        .arg(bundle)
+        .arg("--args")
+        .arg("--data-dir")
+        .arg(data_dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| (HostProblem::Unreachable, format!("cannot run open: {e}")))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err((
+            HostProblem::Unreachable,
+            format!(
+                "open did not start it ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_bundle;
+    use std::path::Path;
+
+    #[test]
+    fn only_a_program_in_an_app_s_macos_folder_is_in_an_app() {
+        assert_eq!(
+            app_bundle(Path::new(
+                "/Applications/Zajil.app/Contents/MacOS/zajil-host"
+            )),
+            Some(Path::new("/Applications/Zajil.app"))
+        );
+        for elsewhere in [
+            "/usr/local/bin/zajil-host",
+            "/Applications/Zajil.app/Contents/zajil-host",
+            "/Applications/Zajil/Contents/MacOS/zajil-host",
+            "/Applications/Zajil.app/Other/MacOS/zajil-host",
+            "zajil-host",
+        ] {
+            assert_eq!(app_bundle(Path::new(elsewhere)), None, "{elsewhere}");
+        }
+    }
 }
