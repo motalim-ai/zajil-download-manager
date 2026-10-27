@@ -814,8 +814,13 @@ async fn max_total_stops_a_file_without_length_at_the_limit() {
         matches!(&stopped, Some(Some(file)) if file.exists()),
         "{stopped:?}"
     );
+    // The server did not send the whole file: the download was stopped.
+    // What the server counts is what it handed to its own buffers, not
+    // what Zajil read, and those buffers hold more on Windows (1.1 MB of
+    // 2 MB there, #221), so this is only «not all of it». What Zajil
+    // itself downloaded is held by `report.bytes < 1_000_000` above.
     let sent = site.gets("/big.zip")[0].bytes_sent;
-    assert!(sent < size as u64 / 2, "the server sent {sent} bytes");
+    assert!(sent < size as u64, "the server sent {sent} bytes");
 }
 
 /// A page larger than `MAX_PAGE_BYTES` is read up to the limit only: links
