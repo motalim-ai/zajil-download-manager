@@ -20,3 +20,4 @@ zajil-platform.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+zajil-platform = { workspace = true, features = ["test-support"] }

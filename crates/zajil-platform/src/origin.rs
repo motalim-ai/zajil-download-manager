@@ -35,17 +35,25 @@ pub fn read(file: &Path) -> io::Result<Option<String>> {
 
 /// Removes the mark from `path` (a file, a folder, or a link itself, never
 /// what it points to). Nothing to remove, or a file system that cannot
-/// hold it, is not an error.
+/// hold it, is not an error; nor is a file that may not be changed and has
+/// no mark (macOS refuses the removal before it looks: review of #283, a
+/// tool's folder owned by root).
 pub fn clear(path: &Path) -> io::Result<()> {
-    imp::clear(path)
+    match imp::clear(path) {
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied && matches!(read(path), Ok(None)) =>
+        {
+            Ok(())
+        }
+        done => done,
+    }
 }
 
 /// Marks this process as Chrome marks its own (`LSFileQuarantineEnabled`):
 /// from now on the system marks every file it, or a program it starts,
 /// writes, with `agent` as the program that downloaded it. Once marked, a
 /// process stays so. For tests only: they stand in for the browser.
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
+#[cfg(all(target_os = "macos", feature = "test-support"))]
 #[allow(unsafe_code)]
 pub fn quarantine_this_process(agent: &str) -> io::Result<()> {
     use std::ffi::{CString, c_char, c_int, c_void};
@@ -243,5 +251,26 @@ mod imp {
         } else {
             Err(err)
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn clear_removes_the_mark_and_a_file_without_one_is_never_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        std::fs::write(&file, b"x").unwrap();
+        if super::mark(&file, "https://example.com").is_ok() {
+            assert!(super::read(&file).unwrap().is_some());
+            super::clear(&file).unwrap();
+            assert_eq!(super::read(&file).unwrap(), None);
+        }
+        super::clear(&file).unwrap();
+        // One that may not be changed and has no mark (review of #283).
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o400)).unwrap();
+        super::clear(&file).unwrap();
     }
 }

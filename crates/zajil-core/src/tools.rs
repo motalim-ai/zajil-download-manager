@@ -623,9 +623,10 @@ impl Drop for Staging {
 /// Copies the downloaded file to `dest` through a new file only the user
 /// can access, hashing what it copies, and keeps it only if the hash is the
 /// pinned one. A copy, not a rename: the new file carries no mark from the
-/// internet (ADR-0009, section 2) and is not the engine's file. The copy is
-/// made in `staging`, this install's own folder on the same volume, so two
-/// installs at once never share a file (review of the video tools).
+/// internet (ADR-0009, section 2; on macOS once [`unmark`] took the one
+/// every file of a marked Zajil gets) and is not the engine's file. The
+/// copy is made in `staging`, this install's own folder on the same volume,
+/// so two installs at once never share a file (review of the video tools).
 fn keep_if_pinned(
     tool: Tool,
     pin: &Pinned,
@@ -1004,7 +1005,7 @@ fn check_installed(
             folder.push(part);
         }
         match zajil_platform::fs::is_private_dir(&folder) {
-            Ok(true) => unmark(&folder)?,
+            Ok(true) => {}
             Ok(false) => return Err(ToolError::NotPrivate(folder)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 return Err(ToolError::Missing(tool));
@@ -1025,6 +1026,7 @@ fn check_installed(
             return Err(ToolError::Missing(tool));
         }
         unmark_all(dir)?;
+        unmark_folders(root, dir)?;
         let kept = if cfg!(windows) {
             files.into_iter().map(|(_, file)| file).collect()
         } else {
@@ -1055,6 +1057,7 @@ fn check_installed(
         });
     }
     unmark(path)?;
+    unmark_folders(root, dir)?;
     Ok(VerifiedTool {
         path: path.to_owned(),
         _files: vec![file],

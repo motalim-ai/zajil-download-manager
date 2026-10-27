@@ -28,6 +28,11 @@ objc2-app-kit.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
+[features]
+# For tests only: `origin::quarantine_this_process`. No shipped binary
+# enables it.
+test-support = []
+
 [dev-dependencies]
 tempfile.workspace = true
 

@@ -327,10 +327,13 @@ fn app_bundle(here: &Path) -> Option<&Path> {
 /// yt-dlp's Python.framework, which Gatekeeper then refused as "damaged").
 /// A Zajil that LaunchServices starts is not marked. `-n`: a new Zajil on
 /// this data folder even if one runs on another, as a start of its program
-/// did. `open` returns once it is started.
+/// did. `open` returns once it is started; one that does not within
+/// [`START_PATIENCE`] (a dialog of the system waiting for the user, review
+/// of #283) is ended, so the browser's call is not held.
 #[cfg(target_os = "macos")]
 fn open_app(bundle: &Path, data_dir: &Path) -> Result<(), (HostProblem, String)> {
-    let output = Command::new("/usr/bin/open")
+    use std::time::Instant;
+    let mut open = Command::new("/usr/bin/open")
         .arg("-n")
         .arg("-a")
         .arg(bundle)
@@ -338,18 +341,34 @@ fn open_app(bundle: &Path, data_dir: &Path) -> Result<(), (HostProblem, String)>
         .arg("--data-dir")
         .arg(data_dir)
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| (HostProblem::Unreachable, format!("cannot run open: {e}")))?;
-    if output.status.success() {
+    let deadline = Instant::now() + START_PATIENCE;
+    let status = loop {
+        match open.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = open.kill();
+                let _ = open.wait();
+                return Err((
+                    HostProblem::Unreachable,
+                    format!("open did not return within {} s", START_PATIENCE.as_secs()),
+                ));
+            }
+            Err(e) => return Err((HostProblem::Unreachable, format!("open: {e}"))),
+        }
+    };
+    if status.success() {
         Ok(())
     } else {
         Err((
             HostProblem::Unreachable,
-            format!(
-                "open did not start it ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
+            format!("open did not start it ({status})"),
         ))
     }
 }

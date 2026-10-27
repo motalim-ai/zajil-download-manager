@@ -47,5 +47,6 @@ doctest = false
 
 [dev-dependencies]
 zajil-core = { path = ".", features = ["test-support"] }
+zajil-platform = { workspace = true, features = ["test-support"] }
 zajil-testserver.workspace = true
 tempfile.workspace = true
