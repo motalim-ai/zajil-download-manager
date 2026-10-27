@@ -179,10 +179,12 @@ export function videoMessage(info, extra = {}) {
 /** YouTube's own sites, where a playlist has a page of its own. */
 const YOUTUBE_SITE = /^(www\.|m\.)?youtube\.com$/;
 
-/** A playlist's id as YouTube makes them (letters, digits, `-` and `_`).
- * A Mix (`RD…`) is not one: YouTube makes it up as you watch, and it has no
- * page of its own. */
-const LIST_ID = /^(?!RD)[\w-]{2,200}$/;
+/** A playlist's id as YouTube makes them (letters, digits, `-` and `_`),
+ * of a list that has a page of its own. Not a Mix (`RD…`), which YouTube
+ * makes up as you watch, nor a passing list (`TL…`, the queue); but YouTube
+ * Music's lists (`RDCLAK5uy_…`) have a page. As in video-button.js (a test
+ * checks they are the same). */
+const LIST_ID = /^(?!RD(?!CLAK5uy_)|TL)[\w-]{2,200}$/;
 
 /**
  * The page of the playlist `url` is about, for "Download the playlist with

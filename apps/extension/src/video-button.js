@@ -126,7 +126,7 @@
    * capture.js, which a content script cannot import.
    * @param {string} path */
   const LIST_SITE = /^(www\.|m\.)?youtube\.com$/;
-  const LIST_ID = /^(?!RD)[\w-]{2,200}$/;
+  const LIST_ID = /^(?!RD(?!CLAK5uy_)|TL)[\w-]{2,200}$/;
   const listHere = (/** @type {string} */ path) =>
     window === window.top &&
     location.protocol === "https:" &&
@@ -225,8 +225,9 @@
   const page = { ...makeButton("page"), rest: (/** @type {Texts} */ t) => t.playlist };
   listRoot.append(listStyle, page.button);
 
-  /** The button's texts, in Zajil's language, from the background (asked
-   * once, at the first video). Until they come the button is not shown at
+  /** The buttons' texts, in Zajil's language, from the background (asked
+   * once: at the first video, or on a playlist's page at the first real
+   * move of the pointer or key press, never by the page alone). Until they come the button is not shown at
    * all, so it never shows in another language first (owner's decision on
    * #264); if they never come, it never shows.
    * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string }} Texts
@@ -370,6 +371,7 @@
       // A move the page makes shows nothing, and so asks nothing (review of
       // #261: it made the extension start zajil-host).
       if (!event.isTrusted) return;
+      if (!asked && listHere("/playlist")) askTexts();
       if (event.composedPath().includes(host)) {
         clearTimeout(hiding);
         return;
@@ -465,6 +467,7 @@
   }
   listen(document, "keydown", (event) => {
     if (event.key === "Escape") closeMenu();
+    if (event.isTrusted && !asked && listHere("/playlist")) askTexts();
   });
 
   /** Where a playlist's title is, by YouTube's pages of today first, then
@@ -491,16 +494,19 @@
       listHost.remove();
       return;
     }
-    if (!texts) {
-      askTexts();
-      return;
-    }
+    // Shown once the texts came: asked at the user's first move here.
+    if (!texts) return;
     if (location.href !== listFor) {
       listFor = location.href;
       listPress += 1;
       setState("idle", undefined, page);
     }
-    const title = TITLES.map((selector) => [...document.querySelectorAll(selector)].find(visible)).find(Boolean);
+    /** @type {Element | undefined} */
+    let title;
+    for (const selector of TITLES) {
+      title = [...document.querySelectorAll(selector)].find(visible);
+      if (title) break;
+    }
     if (!title) {
       listHost.remove();
       return;

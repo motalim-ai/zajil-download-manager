@@ -405,12 +405,16 @@ describe("a YouTube playlist's page", () => {
     expect(playlistPage("https://www.youtube.com/watch?v=abc&list=PLx&index=3&pp=iAQB")).toBe("https://www.youtube.com/playlist?list=PLx");
     expect(playlistPage("https://m.youtube.com/watch?list=OLAK5uy_x&v=abc")).toBe("https://m.youtube.com/playlist?list=OLAK5uy_x");
     expect(playlistPage("https://youtube.com/playlist?list=WL")).toBe("https://youtube.com/playlist?list=WL");
+    // YouTube Music's lists have a page; only a Mix does not.
+    expect(playlistPage("https://www.youtube.com/watch?v=abc&list=RDCLAK5uy_abc")).toBe("https://www.youtube.com/playlist?list=RDCLAK5uy_abc");
   });
 
   it("is none for a Mix, another page or site, or a list id YouTube never makes", () => {
     for (const url of [
       "https://www.youtube.com/watch?v=abc&list=RDabc&start_radio=1",
       "https://www.youtube.com/watch?v=abc",
+      "https://www.youtube.com/watch?v=abc&list=TLPQMjgxMDIwMjY",
+      "https://www.youtube.com/watch?v=abc&list=RDMMabc",
       "https://www.youtube.com/playlist",
       "https://www.youtube.com/@channel/playlists?list=PLx",
       "https://www.youtube.com/embed/videoseries?list=PLx",

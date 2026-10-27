@@ -526,6 +526,7 @@ describe("YouTube's playlists", () => {
 
   it("a playlist's page gets a button beside its title, always there, in Zajil's language; a click sends only that it was pressed", async () => {
     const page = await pageWith(HEADER, { url: LIST, open: true });
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     const button = await listButtonOf(page);
     expect(button).toMatchObject({ text: "نزّل قائمة التشغيل بزاجِل", dir: "rtl", state: "idle", mark: 3 });
@@ -543,6 +544,7 @@ describe("YouTube's playlists", () => {
       const w = /** @type {any} */ (window);
       w.press = () => new Promise((done) => (w.answer = done));
     });
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     const button = /** @type {any} */ (await listButtonOf(page));
     await page.mouse.click(button.x, button.y);
@@ -558,10 +560,12 @@ describe("YouTube's playlists", () => {
 
   it("is out of the page's reach: a closed root, and a click a script makes sends nothing", async () => {
     const page = await pageWith(HEADER, { url: LIST });
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     expect(await hostAt(page)).toMatchObject({ open: false });
     await page.close();
     const opened = await pageWith(HEADER, { url: LIST, open: true });
+    await opened.mouse.move(5, 5);
     await opened.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     await opened.evaluate(() => {
       const button = document.getElementById("box")?.nextElementSibling?.shadowRoot?.querySelector("button");
@@ -581,6 +585,7 @@ describe("YouTube's playlists", () => {
       "https://example.com/playlist?list=PLx",
     ]) {
       const page = await pageWith(HEADER, { url });
+      await page.mouse.move(5, 5);
       await page.waitForTimeout(150);
       expect(await hostAt(page), url).toBeNull();
       // Nothing asked of the background either.
@@ -589,8 +594,25 @@ describe("YouTube's playlists", () => {
     }
   });
 
+  it("asks Zajil nothing before a real move or key: opening the page, or a move it makes, is not enough", async () => {
+    const page = await pageWith(HEADER, { url: LIST });
+    await page.evaluate(() => {
+      document.dispatchEvent(new PointerEvent("pointermove", { clientX: 5, clientY: 5, bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    });
+    await page.waitForTimeout(150);
+    expect(await allSent(page)).toEqual([]);
+    expect(await hostAt(page)).toBeNull();
+    // A real key press: asked, and shown.
+    await page.keyboard.press("Shift");
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    expect(await allSent(page)).toEqual([{ type: "video-button-texts" }]);
+    await page.close();
+  });
+
   it("follows YouTube's changes of page without a load, and a title drawn again", async () => {
     const page = await pageWith(HEADER, { url: LIST, open: true });
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     // To a video: gone.
     await page.evaluate(() => {
@@ -604,6 +626,7 @@ describe("YouTube's playlists", () => {
       const box = /** @type {HTMLElement} */ (document.getElementById("box"));
       box.replaceWith(box.cloneNode(true));
     });
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     expect(await listButtonOf(page)).toMatchObject({ state: "idle", text: "نزّل قائمة التشغيل بزاجِل" });
     await page.close();
@@ -614,6 +637,7 @@ describe("YouTube's playlists", () => {
     /** @type {string[]} */
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    await page.mouse.move(5, 5);
     await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
     await page.evaluate(() => {
       const runtime = /** @type {any} */ (window).chrome.runtime;
@@ -693,6 +717,18 @@ describe("YouTube's playlists", () => {
       expect(await sent(page), url).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4" }]);
       await page.close();
     }
+  });
+});
+
+describe("the ids of YouTube's lists", () => {
+  it("are told the same way here and in the background (capture.js)", () => {
+    const capture = readFileSync(new URL("../src/capture.js", import.meta.url), "utf8");
+    const rule = (/** @type {string} */ source) => source.match(/const LIST_ID = (\/.+\/);/)?.[1];
+    expect(rule(script)).toBeDefined();
+    expect(rule(script)).toBe(rule(capture));
+    const site = (/** @type {string} */ source) => source.match(/const (?:LIST_SITE|YOUTUBE_SITE) = (\/.+\/);/)?.[1];
+    expect(site(script)).toBeDefined();
+    expect(site(script)).toBe(site(capture));
   });
 });
 
