@@ -244,33 +244,10 @@ fn ask_to_close(child: &Child, how: Close) {
         // window...), not only to the one `MainWindowHandle` picks
         // (review of #59).
         #[cfg(windows)]
-        Close::SessionEnd => Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; \
-                     public static class ZajilSession {{ \
-                       public delegate bool EnumProc(IntPtr h, IntPtr l); \
-                       [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n); \
-                       [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); \
-                       [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); \
-                       [DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r); \
-                       static void Timed(string name, IntPtr h, uint m, IntPtr w, uint limit) {{ \
-                         var c = new System.Text.StringBuilder(256); GetClassNameW(h, c, 256); uint p; uint t = GetWindowThreadProcessId(h, out p); \
-                         var clock = System.Diagnostics.Stopwatch.StartNew(); IntPtr r; IntPtr ok = SendMessageTimeoutW(h, m, w, IntPtr.Zero, 2, limit, out r); \
-                         Console.WriteLine(\"  \" + name + \" to \" + h + \" (\" + c + \", thread \" + t + \"): \" + clock.ElapsedMilliseconds + \" ms, \" + (ok == IntPtr.Zero ? \"no answer\" : \"answered \" + r)); }} \
-                       public static void Send(uint pid) {{ \
-                         var all = new List<IntPtr>(); \
-                         EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
-                         Console.WriteLine(\"sending the session end to \" + all.Count + \" top-level windows\"); \
-                         foreach (var h in all) Timed(\"WM_QUERYENDSESSION\", h, 0x11, IntPtr.Zero, 5000); \
-                         foreach (var h in all) Timed(\"WM_ENDSESSION\", h, 0x16, (IntPtr)1, 10000); \
-                         Console.WriteLine(\"session end sent to \" + all.Count + \" top-level windows\"); if (all.Count == 0) Environment.Exit(1); }} }}'; \
-                     [ZajilSession]::Send({pid})"
-                ),
-            ])
-            .status(),
+        Close::SessionEnd => {
+            send_session_end(child.id());
+            return;
+        }
         #[cfg(target_os = "macos")]
         Close::Quit => Command::new("osascript")
             .args([
@@ -284,6 +261,49 @@ fn ask_to_close(child: &Child, how: Close) {
             .status(),
     };
     assert!(status.expect("the close request is sent").success());
+}
+
+/// Sends the session end to every top-level window of process `pid`, as
+/// Windows does at a shutdown (see [`Close::SessionEnd`]), and gives back
+/// what it said: a line per window and message, with how long the window
+/// took to answer (#244).
+#[cfg(windows)]
+fn send_session_end(pid: u32) -> String {
+    let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+                     Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; \
+                     public static class ZajilSession {{ \
+                       public delegate bool EnumProc(IntPtr h, IntPtr l); \
+                       [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n); \
+                       [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); \
+                       [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumProc f, IntPtr l); \
+                       [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); \
+                       [DllImport(\"user32.dll\")] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r); \
+                       static void Timed(string name, IntPtr h, uint m, IntPtr w, uint limit) {{ \
+                         var c = new System.Text.StringBuilder(256); GetClassNameW(h, c, 256); var title = new System.Text.StringBuilder(256); GetWindowTextW(h, title, 256); uint p; uint t = GetWindowThreadProcessId(h, out p); \
+                         var clock = System.Diagnostics.Stopwatch.StartNew(); IntPtr r; IntPtr ok = SendMessageTimeoutW(h, m, w, IntPtr.Zero, 2, limit, out r); \
+                         Console.WriteLine(\"  \" + name + \" to \" + h + \" (\" + c + \" [\" + title + \"], thread \" + t + \"): \" + clock.ElapsedMilliseconds + \" ms, \" + (ok == IntPtr.Zero ? \"no answer\" : \"answered \" + r)); }} \
+                       public static void Send(uint pid) {{ \
+                         var all = new List<IntPtr>(); \
+                         EnumWindows((h, l) => {{ uint p; GetWindowThreadProcessId(h, out p); if (p == pid) all.Add(h); return true; }}, IntPtr.Zero); \
+                         Console.WriteLine(\"sending the session end to \" + all.Count + \" top-level windows\"); \
+                         foreach (var h in all) Timed(\"WM_QUERYENDSESSION\", h, 0x11, IntPtr.Zero, 5000); \
+                         foreach (var h in all) Timed(\"WM_ENDSESSION\", h, 0x16, (IntPtr)1, 10000); \
+                         Console.WriteLine(\"session end sent to \" + all.Count + \" top-level windows\"); if (all.Count == 0) Environment.Exit(1); }} }}'; \
+                     [ZajilSession]::Send({pid})"
+                ),
+            ])
+            .output()
+            .expect("the session end is sent");
+    let said = String::from_utf8_lossy(&output.stdout).into_owned();
+    print!("{said}");
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "the session end was not sent");
+    said
 }
 
 fn wait_exit(child: &mut Child, within: Duration) -> ExitStatus {
@@ -453,4 +473,54 @@ fn closing_the_window_keeps_the_download_going() {
         "closing the window ended Zajil"
     );
     assert!(!app.said("zajil: the downloads stopped; exiting"));
+}
+
+/// Windows: the session ends while «Download complete» is open (#244: the
+/// close took 14.7 s once with a sixth window open). Every window of Zajil
+/// answers both messages at once, as a shutdown waits for each, and Zajil
+/// ends quickly.
+#[cfg(windows)]
+#[test]
+#[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
+fn session_end_with_download_complete_open_is_answered_at_once() {
+    let server = TestServer::http();
+    server.put("/small.bin", FileSpec::new(random_bytes(256 * 1024, 48)));
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    store
+        .update(|q| q.add("main", &server.url("/small.bin"), downloads.path()))
+        .unwrap();
+    let mut app = start(data.path());
+    wait_until("the download finished", Duration::from_secs(60), || {
+        item(&store).status == Status::Done
+    });
+    // «Download complete» opens beside the main window once it is done.
+    std::thread::sleep(Duration::from_secs(3));
+
+    let asked = Instant::now();
+    let said = send_session_end(app.child.id());
+    let status = wait_exit(&mut app.child, Duration::from_secs(30));
+    let took = asked.elapsed();
+    println!("closing took {took:?}");
+    assert!(
+        said.contains("[Download complete]") || said.contains("[اكتمل التحميل]"),
+        "«Download complete» was not open"
+    );
+    // A window that answers late holds a shutdown back: none may take a
+    // second (a window already gone answers nothing, at once).
+    let slow: Vec<&str> = said
+        .lines()
+        .filter(|l| l.contains("WM_"))
+        .filter(|l| {
+            l.split("): ")
+                .nth(1)
+                .and_then(|rest| rest.split(" ms").next())
+                .and_then(|ms| ms.trim().parse::<u64>().ok())
+                .is_none_or(|ms| ms >= 1000)
+        })
+        .collect();
+    assert!(slow.is_empty(), "windows answered late: {slow:#?}");
+    assert!(status.success(), "it ended with {status:?}");
+    assert!(app.said("zajil: saved; terminating to finish the session end"));
 }
