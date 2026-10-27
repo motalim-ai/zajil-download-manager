@@ -6,6 +6,8 @@
 // It reads nothing of the page but where its videos are and their address.
 // A press sends the background only that address: the page, its frame and
 // its tab come from the browser (`runtime.MessageSender`), not from here.
+// So does the button's first showing on a page (`video-peek`), for Zajil
+// to read the video ahead.
 //
 // What the page can and cannot do (review): it cannot reach the button (a
 // closed shadow root) nor forge a press on it (only a real click,
@@ -339,6 +341,20 @@
     place(found);
     button.hidden = false;
     clearTimeout(hiding);
+    peek(found);
+  };
+
+  /** The page whose video was last sent to be read ahead. */
+  let peeked = "";
+  /** Zajil reads the video ahead as soon as its button shows, once a page
+   * (owner's decision, 2026-10-28, as IDM): its qualities are there when
+   * the button is pressed. Only the video's address goes, as for a press.
+   * @param {HTMLVideoElement} found */
+  const peek = (found) => {
+    if (location.href === peeked) return;
+    peeked = location.href;
+    const src = found.currentSrc || found.src || "";
+    void ask({ type: "video-peek", src: src.length <= 8192 ? src : "" });
   };
 
   /** The last pointer position not yet looked at, once per frame (review:

@@ -362,6 +362,38 @@ async function sendVideo(info, tab, doc, quiet = false, list = false) {
   return result;
 }
 
+/** How long a page read ahead is not sent again: as long as Zajil keeps
+ * what it read. */
+const PEEK_MS = 10 * 60_000;
+/** The pages sent to be read ahead, and when (lost with the background:
+ * Zajil reads each one once in that time anyway).
+ * @type {Map<string, number>} */
+const peeked = new Map();
+
+/**
+ * The button showed over a video (owner's decision, 2026-10-28, as IDM):
+ * Zajil reads its page now, in the background, so its qualities are there
+ * when the button is pressed. What `sendVideo` would send, as
+ * `peek_video`, with no word to the user; once a page in ten minutes.
+ * Never from a private window, and only while "Allow Zajil on sites"
+ * lasts. zajil-host does not start Zajil for it.
+ * @param {any} info @param {any} tab @param {string} [doc]
+ */
+async function peekVideo(info, tab, doc) {
+  if (tab?.incognito || !(await videoAllowed(api))) return;
+  const page = videoMessage(info)?.page;
+  if (typeof page !== "string") return;
+  const now = Date.now();
+  for (const [sent, at] of peeked) if (now - at >= PEEK_MS) peeked.delete(sent);
+  if (peeked.has(page)) return;
+  peeked.set(page, now);
+  const cookies = await cookieHeader(api, page, tab?.cookieStoreId);
+  const want = { frame: Number.isSafeInteger(info.frameId) ? info.frameId : 0, doc, origin: originOf(info.frameUrl ?? info.pageUrl) };
+  const stream = Number.isSafeInteger(tab?.id) ? await streamFor(api, tab.id, want) : undefined;
+  const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, stream }));
+  await send(api, { ...message, type: "peek_video" });
+}
+
 /** How long Zajil's language is kept before zajil-host is asked again. */
 const LANGUAGE_MS = 60_000;
 
@@ -455,10 +487,11 @@ async function buttonAnswer(result) {
   return { taken: false, error: await textIn(lang, key) };
 }
 
-// The "Download video" button (`video-button.js`) was pressed: the page,
-// its frame and its tab are the browser's word (the sender), never the
-// message's; only the video's address comes from the page. The button
-// waits for the answer (`sendResponse`, kept open by returning true).
+// The "Download video" button (`video-button.js`) was pressed, or showed
+// over a video (`video-peek`): the page, its frame and its tab are the
+// browser's word (the sender), never the message's; only the video's
+// address comes from the page. A press waits for the answer
+// (`sendResponse`, kept open by returning true).
 api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} */ sender, /** @type {(answer: unknown) => void} */ sendResponse) => {
   if (sender?.id !== api.runtime.id || !sender.tab) return;
   if (message?.type === "click-browser") {
@@ -490,7 +523,7 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     void sent.then(sendResponse, () => sendResponse(null));
     return true;
   }
-  if (message?.type !== "video-button") return;
+  if (message?.type !== "video-button" && message?.type !== "video-peek") return;
   const frameId = Number.isSafeInteger(sender.frameId) ? sender.frameId : 0;
   const info = {
     pageUrl: sender.tab.url,
@@ -498,7 +531,13 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     srcUrl: typeof message.src === "string" ? message.src : undefined,
     frameId,
   };
-  void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined, true)
+  const doc = typeof sender.documentId === "string" ? sender.documentId : undefined;
+  // The button showed over a video: read ahead, nothing answered.
+  if (message.type === "video-peek") {
+    void peekVideo(info, sender.tab, doc).catch(() => {});
+    return;
+  }
+  void sendVideo(info, sender.tab, doc, true)
     .then(buttonAnswer)
     .then(sendResponse, () => sendResponse(null));
   return true;

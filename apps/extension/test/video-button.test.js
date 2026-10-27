@@ -106,6 +106,37 @@ describe("the Download video button", () => {
     await page.close();
   });
 
+  // Owner's decision, 2026-10-28 (as IDM): read ahead, so the qualities
+  // are there at the press.
+  it("showing over a video, it has Zajil read it ahead: once a page, with only its address", async () => {
+    const page = await pageWith(VIDEO);
+    const peeks = () => page.evaluate(() => /** @type {any} */ (window).sent.filter((/** @type {any} */ m) => m.type === "video-peek"));
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => /** @type {any} */ (window).sent.some((/** @type {any} */ m) => m.type === "video-peek"));
+    expect(await peeks()).toEqual([{ type: "video-peek", src: "https://media.invalid/v.mp4" }]);
+    // Away and back: the same page is not sent again.
+    await page.mouse.move(950, 650);
+    await page.mouse.move(400, 220);
+    await page.waitForTimeout(100);
+    expect(await peeks()).toHaveLength(1);
+    // Another page in the same document (as YouTube moves from video to video).
+    await page.evaluate(() => history.pushState(null, "", "/watch?v=2"));
+    await page.mouse.move(410, 230);
+    await page.waitForFunction(() => /** @type {any} */ (window).sent.filter((/** @type {any} */ m) => m.type === "video-peek").length === 2);
+    // Nothing is pressed meanwhile.
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("asks nothing ahead for a video it does not show over (EME)", async () => {
+    const page = await pageWith(VIDEO);
+    await page.evaluate(() => document.querySelector("video")?.dispatchEvent(new Event("encrypted")));
+    await page.mouse.move(400, 200);
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => /** @type {any} */ (window).sent.filter((/** @type {any} */ m) => m.type === "video-peek"))).toEqual([]);
+    await page.close();
+  });
+
   it("shows under a player's own controls covering the video", async () => {
     const page = await pageWith(`${VIDEO}<div style="position:absolute;left:100px;top:50px;width:640px;height:360px;z-index:5"></div>`);
     await page.mouse.move(400, 200);

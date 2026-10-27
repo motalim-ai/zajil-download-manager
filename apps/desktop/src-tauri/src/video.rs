@@ -90,7 +90,6 @@ struct Aheads(HashMap<String, Ahead>);
 
 struct Ahead {
     at: Instant,
-    media: Option<String>,
     cookies: bool,
     read: AheadRead,
 }
@@ -104,13 +103,7 @@ impl Aheads {
     /// Notes a read of `page` and returns where to put what it found;
     /// none when it was read in the last ten minutes, or is being read,
     /// or [`AHEAD_RUNNING`] are running.
-    fn begin(
-        &mut self,
-        page: &str,
-        media: Option<&str>,
-        cookies: bool,
-        now: Instant,
-    ) -> Option<AheadDone> {
+    fn begin(&mut self, page: &str, cookies: bool, now: Instant) -> Option<AheadDone> {
         self.forget_old(now);
         let running = self.0.values().filter(|a| a.read.borrow().is_none());
         if self.0.contains_key(page) || running.count() >= AHEAD_RUNNING {
@@ -125,7 +118,6 @@ impl Aheads {
         let (done, read) = tokio::sync::watch::channel(None);
         let ahead = Ahead {
             at: now,
-            media: media.map(str::to_owned),
             cookies,
             read,
         };
@@ -134,21 +126,24 @@ impl Aheads {
     }
 
     /// The read of `page` the button's press can take: one of the last
-    /// ten minutes, of the same video, with cookies if the press has some
-    /// and without if not (signed in or not, yt-dlp finds other formats).
-    fn find(
-        &mut self,
-        page: &str,
-        media: Option<&str>,
-        cookies: bool,
-        now: Instant,
-    ) -> Option<AheadRead> {
+    /// ten minutes, with cookies if the press has some and without if not
+    /// (signed in or not, yt-dlp finds other formats). What it found must
+    /// still fit the press ([`ahead_fits`]).
+    fn find(&mut self, page: &str, cookies: bool, now: Instant) -> Option<AheadRead> {
         self.forget_old(now);
         self.0
             .get(page)
-            .filter(|a| a.media.as_deref() == media && a.cookies == cookies)
+            .filter(|a| a.cookies == cookies)
             .map(|a| a.read.clone())
     }
+}
+
+/// Whether what a read ahead found fits a press on `page` with the video's
+/// own link `media`: the page itself was read, or the video's link the
+/// press has too (the one seen at the press may be another, YouTube's
+/// above all: only the page counts then).
+fn ahead_fits(sent: &zajil_core::video::Sent, page: &str, media: Option<&str>) -> bool {
+    sent.url == page || media == Some(sent.url.as_str())
 }
 
 /// At most this many video downloads run at once; the others wait in the
@@ -984,15 +979,17 @@ pub async fn video_probe(
     let cookies = state.cookies.lock().unwrap().get(&url).cloned();
     let media = state.media.lock().unwrap().get(&url).cloned();
     // Read ahead while the pointer was on it: taken, or waited for.
-    let ahead =
-        state
-            .ahead
-            .lock()
-            .unwrap()
-            .find(&url, media.as_deref(), cookies.is_some(), Instant::now());
+    let ahead = state
+        .ahead
+        .lock()
+        .unwrap()
+        .find(&url, cookies.is_some(), Instant::now());
     let read = match ahead {
         Some(mut ahead) => tokio::select! {
-            read = ahead.wait_for(Option::is_some) => read.ok().and_then(|r| r.clone().flatten()),
+            read = ahead.wait_for(Option::is_some) => read
+                .ok()
+                .and_then(|r| r.clone().flatten())
+                .filter(|sent| ahead_fits(sent, &url, media.as_deref())),
             () = stop.requested() => return Err(VideoError::Stopped.into()),
         },
         None => None,
@@ -1060,7 +1057,6 @@ pub fn read_ahead<R: tauri::Runtime>(
 ) {
     let begun = handle.state::<VideoState>().ahead.lock().unwrap().begin(
         &page,
-        media.as_deref(),
         cookies.is_some(),
         Instant::now(),
     );
@@ -1435,70 +1431,46 @@ mod tests {
     fn a_video_is_read_ahead_once_in_ten_minutes_and_two_at_a_time() {
         let mut aheads = Aheads::default();
         let now = Instant::now();
-        let a = aheads.begin("https://a.example/", None, true, now).unwrap();
-        assert!(
-            aheads
-                .begin("https://a.example/", None, true, now)
-                .is_none()
-        );
-        let b = aheads
-            .begin("https://b.example/", None, false, now)
-            .unwrap();
+        let a = aheads.begin("https://a.example/", true, now).unwrap();
+        assert!(aheads.begin("https://a.example/", true, now).is_none());
+        let b = aheads.begin("https://b.example/", false, now).unwrap();
         // Two run: a third waits for a later pass of the pointer.
-        assert!(
-            aheads
-                .begin("https://c.example/", None, false, now)
-                .is_none()
-        );
+        assert!(aheads.begin("https://c.example/", false, now).is_none());
         a.send(Some(None)).unwrap();
-        assert!(
-            aheads
-                .begin("https://c.example/", None, false, now)
-                .is_some()
-        );
+        assert!(aheads.begin("https://c.example/", false, now).is_some());
         // Read, even if it failed: not again before ten minutes.
-        assert!(
-            aheads
-                .begin("https://a.example/", None, true, now)
-                .is_none()
-        );
+        assert!(aheads.begin("https://a.example/", true, now).is_none());
         b.send(Some(Some(sent("https://b.example/")))).unwrap();
         let later = now + AHEAD_FOR;
-        assert!(
-            aheads
-                .begin("https://a.example/", None, true, later)
-                .is_some()
-        );
+        assert!(aheads.begin("https://a.example/", true, later).is_some());
         assert!(!aheads.0.contains_key("https://b.example/"));
 
         let mut aheads = Aheads::default();
         for i in 0..=AHEAD_KEPT {
             let at = now + Duration::from_secs(i as u64);
-            let done = aheads.begin(&format!("https://{i}.example/"), None, false, at);
+            let done = aheads.begin(&format!("https://{i}.example/"), false, at);
             done.unwrap().send(Some(None)).unwrap();
         }
         assert_eq!(aheads.0.len(), AHEAD_KEPT);
         assert!(!aheads.0.contains_key("https://0.example/"));
     }
 
-    /// The press takes a read of the same video, made with cookies if it
-    /// has some and without if not, from the last ten minutes; it waits for
-    /// one still running.
+    /// The press takes a read of its page, made with cookies if it has
+    /// some and without if not, from the last ten minutes; it waits for one
+    /// still running.
     #[test]
-    fn the_press_takes_the_read_of_its_own_video_or_waits_for_it() {
+    fn the_press_takes_the_read_of_its_own_page_or_waits_for_it() {
         let mut aheads = Aheads::default();
         let now = Instant::now();
         let page = "https://www.youtube.com/watch?v=x";
-        let media = Some("https://cdn.example/v.mp4");
-        let done = aheads.begin(page, media, true, now).unwrap();
-        assert!(aheads.find(page, media, false, now).is_none());
-        assert!(aheads.find(page, None, true, now).is_none());
+        let done = aheads.begin(page, true, now).unwrap();
+        assert!(aheads.find(page, false, now).is_none());
         assert!(
             aheads
-                .find("https://www.youtube.com/watch?v=y", media, true, now)
+                .find("https://www.youtube.com/watch?v=y", true, now)
                 .is_none()
         );
-        let mut read = aheads.find(page, media, true, now).unwrap();
+        let mut read = aheads.find(page, true, now).unwrap();
         let waited = tauri::async_runtime::block_on(async move {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1507,7 +1479,29 @@ mod tests {
             read.wait_for(Option::is_some).await.unwrap().clone()
         });
         assert_eq!(waited, Some(Some(sent(page))));
-        assert!(aheads.find(page, media, true, now + AHEAD_FOR).is_none());
+        assert!(aheads.find(page, true, now + AHEAD_FOR).is_none());
+    }
+
+    /// A read of the page fits a press whatever video link it has (on
+    /// YouTube it changes between the pointer's pass and the press); a
+    /// read of the video's own link fits only a press with that link.
+    #[test]
+    fn a_read_of_the_page_fits_any_press_on_it_and_one_of_the_link_only_its_own() {
+        let page = "https://www.youtube.com/watch?v=x";
+        assert!(ahead_fits(&sent(page), page, None));
+        assert!(ahead_fits(
+            &sent(page),
+            page,
+            Some("https://cdn.example/other.m3u8")
+        ));
+        let media = "https://cdn.example/v.m3u8";
+        assert!(ahead_fits(&sent(media), page, Some(media)));
+        assert!(!ahead_fits(
+            &sent(media),
+            page,
+            Some("https://cdn.example/w.m3u8")
+        ));
+        assert!(!ahead_fits(&sent(media), page, None));
     }
 
     /// «About» names each tool's source: its pinned release, or its

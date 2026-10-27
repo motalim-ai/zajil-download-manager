@@ -493,6 +493,59 @@ describe("the background", () => {
     expect(fake.done.cookieReads).toEqual([]);
   });
 
+  describe("a video read ahead, when the button shows (owner's decision, 2026-10-28)", () => {
+    it("sends peek_video as a press would send video, once a page in ten minutes, answering nothing", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+        await load(fake);
+        await flush();
+        fake.listeners.headers({
+          url: "https://cdn.example/master.m3u8?sig=1",
+          tabId: 4,
+          frameId: 0,
+          type: "xmlhttprequest",
+          initiator: "https://example.com",
+          responseHeaders: [{ name: "Content-Type", value: "application/x-mpegURL" }],
+        });
+        await flush();
+        const sender = { id: "zajil", tab: { id: 4, url: "https://example.com/watch?v=1" }, frameId: 0, url: "https://example.com/watch?v=1" };
+        expect(fake.listeners.message({ type: "video-peek", src: "blob:https://example.com/5" }, sender)).toBeUndefined();
+        await flush();
+        const peek = { type: "peek_video", protocol_version: 1, page: "https://example.com/watch?v=1", media: "https://cdn.example/master.m3u8?sig=1", cookies: "sid=abc" };
+        expect(fake.done.sent).toEqual([peek]);
+        fake.listeners.message({ type: "video-peek", src: "blob:https://example.com/5" }, sender);
+        await flush();
+        expect(fake.done.sent).toHaveLength(1);
+        vi.setSystemTime(Date.now() + 10 * 60_000);
+        fake.listeners.message({ type: "video-peek", src: "blob:https://example.com/5" }, sender);
+        await flush();
+        expect(fake.done.sent).toEqual([peek, peek]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends nothing from a private window, nor without the video permission", async () => {
+      const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+      await load(fake);
+      await flush();
+      const tab = { id: 6, url: "https://example.com/v", incognito: true };
+      fake.listeners.message({ type: "video-peek", src: "https://cdn.example/v.mp4" }, { id: "zajil", tab, frameId: 0, url: tab.url });
+      await flush();
+      expect(fake.done.sent).toEqual([]);
+      expect(fake.done.cookieReads).toEqual([]);
+
+      const without = fakeChrome({ granted: true, video: false, answer: { ok: true } });
+      await load(without);
+      await flush();
+      const sender = { id: "zajil", tab: { id: 7, url: "https://example.com/w" }, frameId: 0, url: "https://example.com/w" };
+      without.listeners.message({ type: "video-peek", src: "https://cdn.example/v.mp4" }, sender);
+      await flush();
+      expect(without.done.sent).toEqual([]);
+    });
+  });
+
   describe("a YouTube playlist, from the button", () => {
     /** Sends `message` from `sender` as the button's script does, and waits for the answer. */
     const press = (fake, message, sender) =>
