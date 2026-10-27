@@ -155,6 +155,11 @@ export const api = {
   videoToolsRemove: () => invoke<void>("video_tools_remove"),
   videoProbe: (url: string) => invoke<VideoInfoView>("video_probe", { url }),
   videoProbeCancel: () => invoke<void>("video_probe_cancel"),
+  /** «Video quality» is open: a video waits for its quality. */
+  videoWindowOpen: () => invoke<boolean>("video_window_open"),
+  /** Brings «Video quality» to the front. */
+  showVideoWindow: () => invoke<void>("show_video_window"),
+  onVideoWindow: (handler: (open: boolean) => void): Promise<UnlistenFn> => listen<boolean>("video-window", (e) => handler(e.payload)),
   videoDownload: (url: string, choice: ChoiceView, dest: string, name: string) =>
     invoke<number>("video_download", { url, choice, dest, name }),
   videoAddMany: (page: string, items: NewVideo[], dest: string) => invoke<number[]>("video_add_many", { page, items, dest }),

@@ -409,9 +409,56 @@ pub fn receive<R: tauri::Runtime>(
 }
 
 /// Opens «Video quality» (or brings it to the front), titled in the
-/// page's language by the page itself.
+/// page's language by the page itself. It stays in front of the other
+/// windows until it is done (the owner's notes on 1.0: it went behind the
+/// browser and nothing brought it back), and the main window shows that
+/// it waits («video-window»). Closed, it gives up the check of the page or
+/// the tools' download still running, as «Download file info» does.
 pub fn open_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<()> {
-    crate::windows::open(handle, LABEL, "Zajil", SIZE)
+    let new = handle.get_webview_window(LABEL).is_none();
+    crate::windows::open(handle, LABEL, "Zajil", SIZE)?;
+    let Some(window) = handle.get_webview_window(LABEL) else {
+        return Ok(());
+    };
+    window.set_always_on_top(true)?;
+    if new {
+        let _ = handle.emit_to("main", "video-window", true);
+        let app = handle.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                give_up(&app.state::<VideoState>());
+                let _ = app.emit_to("main", "video-window", false);
+            }
+        });
+    }
+    Ok(())
+}
+
+/// The window closed: its check of a page and its tools' download stop.
+/// The downloads it started go on in the list.
+fn give_up(state: &VideoState) {
+    for running in [&state.probing, &state.installing] {
+        if let Some(stop) = running.lock().unwrap().take() {
+            stop.request();
+        }
+    }
+}
+
+/// «Video quality» is open: the main window says a video waits there.
+#[tauri::command]
+pub fn video_window_open<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> bool {
+    handle.get_webview_window(LABEL).is_some()
+}
+
+/// The main window's «Show»: «Video quality» comes to the front.
+#[tauri::command]
+pub async fn show_video_window<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if handle.get_webview_window(LABEL).is_none() {
+        return Ok(());
+    }
+    open_window(&handle).map_err(|e| e.to_string())
 }
 
 /// «Download a video…»: «Video quality» for a link the user gives there.
@@ -1134,6 +1181,23 @@ pub fn video_cancel(state: State<'_, VideoState>, id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Closing «Video quality» stops its check of the page and its tools'
+    /// download (the owner's notes on 1.0: they ran on behind it).
+    #[test]
+    fn closing_the_window_gives_up_its_check_and_its_tools_download() {
+        let state = VideoState::default();
+        let (probing, installing) = (Stop::new(), Stop::new());
+        *state.probing.lock().unwrap() = Some(probing.clone());
+        *state.installing.lock().unwrap() = Some(installing.clone());
+        give_up(&state);
+        assert!(probing.is_requested() && installing.is_requested());
+        assert!(
+            state.probing.lock().unwrap().is_none() && state.installing.lock().unwrap().is_none()
+        );
+        // Nothing running: nothing to stop.
+        give_up(&state);
+    }
 
     /// «About» names each tool's source: its pinned release, or its
     /// project.

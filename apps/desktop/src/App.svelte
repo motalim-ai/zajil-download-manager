@@ -38,6 +38,7 @@
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
   import UpdateBar from "./lib/components/UpdateBar.svelte";
+  import VideoBar from "./lib/components/VideoBar.svelte";
   import { num, size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
   import type { DetailsView } from "./lib/bindings/DetailsView";
@@ -915,6 +916,7 @@
       <Toolbar bind:search {can} {hint} onaction={doAction} />
     </header>
     <UpdateBar />
+    <VideoBar />
     <div class="body">
     <Tree {snapshot} bind:filter bind:view />
     <main class="main">

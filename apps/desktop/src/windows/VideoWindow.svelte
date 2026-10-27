@@ -219,7 +219,11 @@
       <div class="actions"><button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button></div>
     </section>
   {:else if step.kind === "probing"}
-    <p class="waiting" role="status">{locale.t("video-probing")}</p>
+    <!-- It can take a while: «Cancel» stops it (the owner's notes on 1.0). -->
+    <section class="col">
+      <p class="waiting" role="status">{locale.t("video-probing")}</p>
+      <div class="actions"><button class="btn" onclick={() => void close()} data-first>{locale.t("add-cancel")}</button></div>
+    </section>
   {:else if step.kind === "video"}
     {@const info = step.info}
     <section class="col">
