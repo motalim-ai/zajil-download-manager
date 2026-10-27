@@ -9,7 +9,8 @@
 //!
 //! - **Windows:** a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 //!   The process is created suspended and joins the job before its first
-//!   instruction, so nothing it starts is ever outside. When Zajil ends,
+//!   instruction, so nothing it starts is ever outside. It is also created
+//!   with `CREATE_NO_WINDOW`: a console of its own that shows no window. When Zajil ends,
 //!   however it ends, the system closes the job's handle and ends the
 //!   whole tree.
 //! - **macOS and Linux:** a process group of its own, with `umask 077`, so
@@ -524,7 +525,7 @@ mod imp {
         TerminateJobObject,
     };
     use windows_sys::Win32::System::Threading::{
-        CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+        CREATE_NO_WINDOW, CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
     };
 
     use super::Record;
@@ -688,7 +689,14 @@ mod imp {
 
     fn spawn_in_job(mut command: Command, alone: bool) -> io::Result<(Child, Group)> {
         let job = new_job(alone)?;
-        command.creation_flags(CREATE_SUSPENDED);
+        // A tree's first process (yt-dlp, `deno --version`) gets a console
+        // of its own with no window: Zajil has none to share (`windows_subsystem
+        // = "windows"`), so Windows would show one, and what the tree starts
+        // shares it. The lone program (QuickJS under `zajil-jsbox`) keeps
+        // sharing its parent's. Set here: `creation_flags` replaces, so a
+        // caller's flag would be lost.
+        let no_window = if alone { 0 } else { CREATE_NO_WINDOW };
+        command.creation_flags(CREATE_SUSPENDED | no_window);
         let mut child = command.spawn()?;
         let joined = (|| {
             // SAFETY: both handles are open; the child has not run yet.

@@ -8,7 +8,10 @@
 //! - `escaper` (macOS and Linux): like `tool`, but its grandchild leaves
 //!   the process group (as `setsid` would), then it exits;
 //! - `zajil`: starts a `tool` as a [`Tree`], writes the tree's [`Record`],
-//!   then waits to be killed (Zajil crashing mid-download).
+//!   then waits to be killed (Zajil crashing mid-download);
+//! - `console` (Windows): writes whether it has a visible console window;
+//! - `no-console` (Windows): started with no console, as Zajil's window is
+//!   (`windows_subsystem = "windows"`), starts a `console` as a [`Tree`].
 //!
 //! A process has ended once its file stops growing.
 
@@ -86,6 +89,24 @@ fn role_entry() {
                 std::thread::sleep(Duration::from_secs(60));
             }
         }
+        #[cfg(windows)]
+        "console" => {
+            use windows_sys::Win32::System::Console::GetConsoleWindow;
+            use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+            // SAFETY: neither call has preconditions; a null window is
+            // checked before it is passed on.
+            #[allow(unsafe_code)]
+            let visible = unsafe {
+                let window = GetConsoleWindow();
+                !window.is_null() && IsWindowVisible(window) != 0
+            };
+            std::fs::write(&beat, if visible { "visible" } else { "hidden" }).unwrap();
+        }
+        #[cfg(windows)]
+        "no-console" => {
+            let mut tree = process::spawn(me("console", &beat)).unwrap();
+            tree.wait().unwrap();
+        }
         other => panic!("unknown role {other}"),
     }
 }
@@ -112,6 +133,24 @@ fn stopped(path: &Path) -> bool {
     let before = size(path);
     std::thread::sleep(Duration::from_millis(500));
     size(path) == before
+}
+
+/// A console program that Zajil starts gets no window: Zajil has no
+/// console to share, so Windows would give the tool a console window of
+/// its own (a Terminal window on Windows 11) for the whole download.
+#[cfg(windows)]
+#[test]
+fn a_tool_started_without_a_console_shows_no_console_window() {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("console");
+    let status = me("no-console", &seen)
+        .creation_flags(DETACHED_PROCESS)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&seen).unwrap(), "hidden");
 }
 
 #[test]
