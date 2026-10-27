@@ -163,17 +163,26 @@
     await api.closeWindow();
   }
   // KB/s: a whole number from 1 to 10 GB/s; anything else is said, not
-  // kept (review of #111: an empty box kept 1 KB/s).
+  // kept (review of #111: an empty box kept 1 KB/s). Applied as soon as it
+  // changes, with no «Save» (the owner's notes on 1.0); while the user
+  // types, a number that is not one yet waits quietly.
   const MAX_KB = 10 * 1024 * 1024;
-  async function saveLimit() {
-    limitSaid = null;
+  let limitTimer: ReturnType<typeof setTimeout> | undefined;
+  function limitChanged(typing: boolean) {
+    clearTimeout(limitTimer);
+    limitTimer = setTimeout(() => void applyLimit(!typing), typing ? 400 : 0);
+  }
+  async function applyLimit(sayBad: boolean) {
     const kb = Number(limitKb);
     if (limited && !(Number.isFinite(kb) && kb >= 1 && kb <= MAX_KB)) {
-      limitSaid = locale.t("progress-limit-bad", { min: num(locale.lang, locale.digits, 1, 0), max: num(locale.lang, locale.digits, MAX_KB, 0) });
+      if (sayBad) limitSaid = locale.t("progress-limit-bad", { min: num(locale.lang, locale.digits, 1, 0), max: num(locale.lang, locale.digits, MAX_KB, 0) });
       return;
     }
+    const bytes = limited ? Math.round(kb) * 1024 : null;
+    if (bytes === details?.limit) return;
+    limitSaid = null;
     try {
-      await api.setLimit(id, limited ? Math.round(kb) * 1024 : null);
+      await api.setLimit(id, bytes);
       limitSaid = locale.t(running ? "progress-limit-now" : "progress-limit-saved");
       await load();
     } catch (e) {
@@ -266,13 +275,12 @@
       </div>
     {:else if tab === "limit"}
       <div id="panel-limit" role="tabpanel" aria-labelledby="tab-limit" class="panel">
-        <label class="check"><input type="checkbox" bind:checked={limited} />{locale.t("progress-limit-on")}</label>
+        <label class="check"><input type="checkbox" bind:checked={limited} onchange={() => limitChanged(false)} />{locale.t("progress-limit-on")}</label>
         <label class="row" class:off={!limited}>
-          <input type="number" min="1" step="1" bind:value={limitKb} disabled={!limited} dir="ltr" />
+          <input type="number" min="1" step="1" bind:value={limitKb} disabled={!limited} dir="ltr" oninput={() => limitChanged(true)} onchange={() => limitChanged(false)} />
           <span>{locale.t("progress-limit-unit")}</span>
         </label>
         <p class="hint">{locale.t("progress-limit-hint")}</p>
-        <div><button class="btn" onclick={() => void saveLimit()}>{locale.t("progress-limit-save")}</button></div>
         {#if limitSaid}<p class="said" role="status">{limitSaid}</p>{/if}
       </div>
     {:else}

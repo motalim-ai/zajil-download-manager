@@ -5,7 +5,7 @@
   import type { SettingsView } from "../bindings/SettingsView";
   import type { SettingsChange } from "../bindings/SettingsChange";
   import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api } from "../api";
   import { play } from "../sounds";
   import type { Sounds } from "../bindings/Sounds";
@@ -50,6 +50,10 @@
   $effect(() => {
     const limit = settings.speed_limit;
     if (limit === null) return;
+    // What the user typed already says it (applied while typing): kept as
+    // typed, unit and all.
+    const typed = untrack(() => Math.round(Number(limitValue) * (limitUnit === "mib" ? MIB : KIB)));
+    if (typed === limit) return;
     limitUnit = limit % MIB === 0 ? "mib" : "kib";
     limitValue = String(limit / (limitUnit === "mib" ? MIB : KIB));
   });
@@ -214,9 +218,18 @@
     tools = await api.videoToolsStatus().catch(() => tools);
   }
 
+  // Applied as soon as it changes, also while the user types (the owner's
+  // notes on 1.0): a moment after the last key.
+  let limitTimer: ReturnType<typeof setTimeout> | undefined;
   function setLimit() {
+    clearTimeout(limitTimer);
     const n = Number(limitValue);
-    if (Number.isFinite(n) && n > 0) change({ speed_limit: Math.round(n * (limitUnit === "mib" ? MIB : KIB)) });
+    const limit = Math.round(n * (limitUnit === "mib" ? MIB : KIB));
+    if (Number.isFinite(n) && n > 0 && limit !== settings.speed_limit) change({ speed_limit: limit });
+  }
+  function limitTyped() {
+    clearTimeout(limitTimer);
+    limitTimer = setTimeout(setLimit, 400);
   }
 </script>
 
@@ -320,6 +333,7 @@
         aria-label={locale.t("settings-limit-value")}
         bind:value={limitValue}
         disabled={settings.speed_limit === null}
+        oninput={limitTyped}
         onchange={setLimit}
       />
       <select aria-label={locale.t("settings-limit-unit")} bind:value={limitUnit} disabled={settings.speed_limit === null} onchange={setLimit}>

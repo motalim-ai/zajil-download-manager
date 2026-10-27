@@ -608,7 +608,6 @@ progress-no-parts = تظهر الأجزاء حين يبدأ التحميل.
 progress-limit-on = حدّد سرعة هذا التحميل
 progress-limit-unit = كيلوبايت/ث
 progress-limit-hint = حد البرنامج كله في الإعدادات يبقى ساريًا كذلك.
-progress-limit-save = حفظ
 progress-limit-saved = حُفظ الحد.
 progress-limit-now = حُفظ الحد، ويأخذه التحميل الآن.
 progress-finish-hint = ما تفعله هذه النافذة حين ينتهي التحميل وهي مفتوحة:

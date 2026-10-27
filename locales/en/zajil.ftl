@@ -550,7 +550,6 @@ progress-no-parts = The parts show once the download starts.
 progress-limit-on = Limit this download's speed
 progress-limit-unit = KB/s
 progress-limit-hint = The limit for the whole program, in the settings, still applies too.
-progress-limit-save = Save
 progress-limit-saved = The limit is saved.
 progress-limit-now = The limit is saved, and the download takes it now.
 progress-finish-hint = What this window does when the download finishes while it is open:
