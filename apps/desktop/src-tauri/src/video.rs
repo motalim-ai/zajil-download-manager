@@ -519,6 +519,9 @@ struct ToolProgress {
 
 /// Installs the tools that are missing, in order, once the user agreed;
 /// `video-tools-progress` says how far. Nothing half-downloaded stays.
+/// Then yt-dlp is started once, offline, still under «preparing the tools»
+/// ([`VideoRunner::warm_up`]), so its slow first start is not the first
+/// video's.
 #[tauri::command]
 pub async fn video_tools_install<R: tauri::Runtime>(
     app: State<'_, crate::App>,
@@ -528,10 +531,12 @@ pub async fn video_tools_install<R: tauri::Runtime>(
     let stop = Stop::new();
     *state.installing.lock().unwrap() = Some(stop.clone());
     let toolbox = Toolbox::new(folders(&app).0);
+    let mut installed = false;
     for tool in TOOLS {
         if toolbox.is_installed(tool) {
             continue;
         }
+        installed = true;
         let events = handle.clone();
         toolbox
             .install(&app.engine, tool, &stop, &mut |event| {
@@ -549,8 +554,60 @@ pub async fn video_tools_install<R: tauri::Runtime>(
             .await
             .map_err(|e| e.to_string())?;
     }
+    if installed {
+        warm_up(&app, &stop).await?;
+    }
     state.installing.lock().unwrap().take();
     Ok(())
+}
+
+/// [`VideoRunner::warm_up`] after an install: only a stop is said; a run
+/// that could not start goes to the log (the first video will say why).
+async fn warm_up(app: &crate::App, stop: &Stop) -> Result<(), String> {
+    match runner(app).await.warm_up(stop).await {
+        Err(zajil_core::video::VideoError::Stopped) => Err("stopped".into()),
+        Err(e) => {
+            eprintln!("zajil: the video tools' first run: {e}");
+            Ok(())
+        }
+        Ok(()) => Ok(()),
+    }
+}
+
+/// At start: a tool this user had before in another version or build
+/// (yt-dlp's one-file build, now that its zip is pinned) is brought up to
+/// date in the background, without asking again: they agreed to it then
+/// (owner's decision, 2026-10-27). Then yt-dlp is warmed up. Said only in
+/// the log.
+pub fn update_tools<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let app = handle.state::<crate::App>();
+        let tools = folders(&app).0;
+        let earlier = tauri::async_runtime::spawn_blocking(move || {
+            let toolbox = Toolbox::new(tools);
+            TOOLS
+                .into_iter()
+                .filter(|&tool| toolbox.has_an_earlier_one(tool))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        if earlier.is_empty() {
+            return;
+        }
+        let stop = Stop::new();
+        let toolbox = Toolbox::new(folders(&app).0);
+        for tool in earlier {
+            match toolbox.install(&app.engine, tool, &stop, &mut |_| {}).await {
+                Ok(path) => eprintln!("zajil: {tool} brought up to date: {}", path.display()),
+                Err(e) => {
+                    eprintln!("zajil: {tool} could not be brought up to date: {e}");
+                    return;
+                }
+            }
+        }
+        let _ = warm_up(&app, &stop).await;
+    });
 }
 
 #[tauri::command]
@@ -1144,6 +1201,7 @@ mod tests {
             url: "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.10/yt-dlp_macos"
                 .into(),
             sha256: String::new(),
+            archive: None,
         };
         assert_eq!(
             source_of(Tool::YtDlp, Some(&pin)),

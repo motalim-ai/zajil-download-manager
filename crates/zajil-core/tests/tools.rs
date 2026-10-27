@@ -23,6 +23,7 @@ fn toolbox(root: &Path, url: String, sha256: String) -> Toolbox {
                 version: "2099.01.01".to_owned(),
                 url: url.clone(),
                 sha256: sha256.clone(),
+                archive: None,
             })
         }),
     )

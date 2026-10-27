@@ -299,6 +299,9 @@ pub fn run() {
                 video::clean_leftovers(&app);
                 video::load_rows(&app, &tauri_app.state::<video::VideoState>());
             }
+            // A video tool the user had in an earlier build (yt-dlp's
+            // one-file build) is brought up to date in the background.
+            video::update_tools(tauri_app.handle().clone());
             tauri_app.add_capability(dropbox::CAPABILITY)?;
             // The drop box, if the user left it shown.
             if tauri_app.state::<closing::Closing>().prefs().drop_box {

@@ -41,6 +41,12 @@ libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+# The official zip (onedir) builds of yt-dlp for macOS and Windows (owner's
+# decision, 2026-10-27: a one-file build unpacks itself at every start).
+# Reading only, and only stored or deflated entries, through flate2's Rust
+# backend (miniz_oxide): no AES, bzip2, zstd or the rest of zip's defaults.
+zip = { version = "9.1.2", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 dunce = "1.0.5"
 icu_properties = "2.4.0"
 # Local time and time zones for schedules (M3). Default features: the

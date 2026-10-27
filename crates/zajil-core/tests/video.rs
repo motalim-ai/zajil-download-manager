@@ -85,6 +85,7 @@ fn setup(script: &str) -> Setup {
                 version: VERSION.to_owned(),
                 url: "https://example.invalid/tool".to_owned(),
                 sha256: sha256.clone(),
+                archive: None,
             })
         }),
     );

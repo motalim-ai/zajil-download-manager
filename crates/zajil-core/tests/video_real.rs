@@ -19,7 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use zajil_core::tools::{Pinned, Tool, Toolbox};
+use zajil_core::tools::{Archive, Pinned, Tool, Toolbox, tree_sha256};
 use zajil_core::video::{Choice, Download, Probed, Runs, VideoError, VideoRunner};
 use zajil_core::{Engine, Options, Stop};
 use zajil_testserver::{FileSpec, TestServer, Tls, test_ca_der};
@@ -64,18 +64,42 @@ fn tools() -> Option<Tools> {
 
 /// The real tools, copied into a tools folder of `root` as an install
 /// leaves them, pinned with their own SHA-256: the runner checks them
-/// before every run like any tools.
+/// before every run like any tools. A yt-dlp unpacked from its zip (macOS
+/// and Windows) is copied with its whole folder, and pinned with the tree
+/// SHA-256 of what it holds.
 fn toolbox(tools: &Tools, root: &Path) -> Toolbox {
     use std::io::Write;
     const VERSION: &str = "2099.01.01";
     let dir = root.join("tools");
     let mut hashes = Vec::new();
+    let unpacked = tools.yt_dlp.parent().unwrap();
+    let archive = unpacked.join("_internal").is_dir().then(|| {
+        let folder = unpacked.file_name().unwrap().to_str().unwrap().to_owned();
+        let program = tools
+            .yt_dlp
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let into = dir.join("yt-dlp").join(VERSION).join(&folder);
+        let files = copy_tree(unpacked, &into, &program);
+        Archive {
+            folder,
+            program,
+            tree_sha256: tree_sha256(&files),
+        }
+    });
     for (tool, from, folder) in [
         (Tool::YtDlp, tools.yt_dlp.clone(), "yt-dlp"),
         (Tool::Ffmpeg, exe(&tools.ffmpeg_dir, "ffmpeg"), "ffmpeg"),
         (Tool::Ffprobe, exe(&tools.ffmpeg_dir, "ffprobe"), "ffmpeg"),
     ] {
         let bytes = fs::read(&from).unwrap();
+        if tool == Tool::YtDlp && archive.is_some() {
+            hashes.push((tool, zajil_testserver::sha256_hex(&bytes)));
+            continue;
+        }
         let folder = dir.join(folder).join(VERSION);
         zajil_platform::fs::private_dir(&folder).unwrap();
         let name = match tool {
@@ -97,9 +121,43 @@ fn toolbox(tools: &Tools, root: &Path) -> Toolbox {
                 version: VERSION.to_owned(),
                 url: "https://example.invalid/tool".to_owned(),
                 sha256: sha256.clone(),
+                archive: (tool == Tool::YtDlp).then(|| archive.clone()).flatten(),
             })
         }),
     )
+}
+
+/// Copies the folder `from` into `into` as an install from a zip leaves it
+/// (folders and files only this user can access, `program` executable),
+/// and returns each file's path inside it and SHA-256.
+fn copy_tree(from: &Path, into: &Path, program: &str) -> Vec<(String, String)> {
+    use std::io::Write;
+    let mut out = Vec::new();
+    let mut folders = vec![(from.to_path_buf(), into.to_path_buf(), String::new())];
+    while let Some((src, dst, inside)) = folders.pop() {
+        zajil_platform::fs::private_dir(&dst).unwrap();
+        for entry in fs::read_dir(&src).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            let relative = if inside.is_empty() {
+                name.clone()
+            } else {
+                format!("{inside}/{name}")
+            };
+            if entry.file_type().unwrap().is_dir() {
+                folders.push((entry.path(), dst.join(&name), relative));
+                continue;
+            }
+            let bytes = fs::read(entry.path()).unwrap();
+            let mut file = zajil_platform::fs::create_private(&dst.join(&name)).unwrap();
+            file.write_all(&bytes).unwrap();
+            if relative == program || cfg!(unix) {
+                zajil_platform::fs::make_executable(&file).unwrap();
+            }
+            out.push((relative, zajil_testserver::sha256_hex(&bytes)));
+        }
+    }
+    out
 }
 
 fn exe(dir: &Path, name: &str) -> PathBuf {
@@ -339,6 +397,24 @@ fn assert_clean(s: &Setup) {
 
 fn near_4_seconds(duration: f64) {
     assert!((3.9..4.2).contains(&duration), "lasts {duration} s");
+}
+
+/// The warm-up run (owner's decision, 2026-10-27): yt-dlp starts, loads
+/// what it has, and reaches nothing: done well before its time limit, with
+/// nothing left behind.
+#[tokio::test]
+async fn the_warm_up_runs_the_real_yt_dlp_offline_and_leaves_nothing() {
+    let Some(tools) = tools() else { return };
+    let server = TestServer::http();
+    let s = setup(&tools, &server);
+    let started = std::time::Instant::now();
+    s.runner.warm_up(&Stop::new()).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(120),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_clean(&s);
 }
 
 #[tokio::test]

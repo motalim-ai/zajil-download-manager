@@ -8,7 +8,9 @@ use std::process::ExitCode;
 
 use clap::Subcommand;
 use zajil_core::tools::{Tool, ToolError, Toolbox};
-use zajil_core::video::{Choice, Download, Probed, Runs, Video, VideoEvent, VideoRunner};
+use zajil_core::video::{
+    Choice, Download, Probed, Runs, Video, VideoError, VideoEvent, VideoRunner,
+};
 use zajil_core::{Engine, Stop};
 
 #[derive(Debug, Subcommand)]
@@ -110,7 +112,7 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
         VideoCommand::Tools { command: None } => status(&toolbox),
         VideoCommand::Tools {
             command: Some(ToolsCommand::Install { yes }),
-        } => install(&toolbox, &engine, yes).await,
+        } => install(&toolbox, &engine, yes, data_dir).await,
         VideoCommand::Tools {
             command: Some(ToolsCommand::Remove),
         } => match toolbox.remove_all() {
@@ -221,6 +223,13 @@ pub async fn run(command: VideoCommand, data_dir: &Path, engine: Engine) -> Exit
 /// first look is only for a clear message when they are missing.
 async fn runner(tools_root: &Path, runs: Runs, engine: Engine) -> Result<VideoRunner, ExitCode> {
     let toolbox = Toolbox::new(tools_root);
+    // Not stopped by Ctrl+C here (it ends the program, and an unfinished
+    // download is swept away at the next start).
+    if let Err(err) = update_earlier(&toolbox, &engine, &Stop::new()).await {
+        return Err(crate::fail(&format!(
+            "could not bring the video tools up to date: {err}"
+        )));
+    }
     let checked = async {
         for tool in [Tool::YtDlp, Tool::Ffmpeg, Tool::Ffprobe] {
             toolbox.verified(tool).await?;
@@ -266,7 +275,7 @@ fn status(toolbox: &Toolbox) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool) -> ExitCode {
+async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool, data_dir: &Path) -> ExitCode {
     let missing: Vec<Tool> = Tool::ALL
         .into_iter()
         .filter(|t| !toolbox.is_installed(*t))
@@ -339,7 +348,33 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool) -> ExitCode {
             }
         }
     }
+    // Started once now, offline: a newly unpacked yt-dlp is slow the first
+    // time (the system checks its files), and that is not the first
+    // video's wait (owner's decision, 2026-10-27).
+    println!("Preparing the tools…");
+    let runs = Runs::new(data_dir.join("run"));
+    if let Ok(runner) = runner(&data_dir.join("tools"), runs, engine.clone()).await {
+        match runner.warm_up(&stop).await {
+            Err(VideoError::Stopped) => return crate::fail("stopped"),
+            Err(err) => eprintln!("note: the tools' first run: {err}"),
+            Ok(()) => {}
+        }
+    }
+    println!("The video tools are ready.");
     ExitCode::SUCCESS
+}
+
+/// A tool this user had in an earlier version or build (yt-dlp's one-file
+/// build, now that its zip is pinned) is brought up to date without asking
+/// again: they agreed to it then (owner's decision, 2026-10-27).
+async fn update_earlier(toolbox: &Toolbox, engine: &Engine, stop: &Stop) -> Result<(), ToolError> {
+    for tool in Tool::ALL {
+        if toolbox.has_an_earlier_one(tool) {
+            eprintln!("zajil: bringing {tool} up to date…");
+            toolbox.install(engine, tool, stop, &mut |_| {}).await?;
+        }
+    }
+    Ok(())
 }
 
 fn print_formats(video: &Video) {

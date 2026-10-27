@@ -2,7 +2,9 @@
 # Downloads the pinned yt-dlp for this machine into <dir> and checks its
 # SHA-256 against tools/yt-dlp/pins.txt, the file Zajil itself reads
 # (ADR-0009). For the CI's video tests and for developers; prints the
-# program's path.
+# program's path. A zip (macOS and Windows) is unpacked into <dir>/<its
+# name>; Zajil itself checks what it holds (tools.rs), and so do the tests
+# that install it.
 #
 #   scripts/get-yt-dlp.sh <dir>
 set -euo pipefail
@@ -26,11 +28,12 @@ esac
 version="$(awk '$1 == "version" { print $2 }' "$pins")"
 # `|| true`: without a line for this machine, `read` fails, and the
 # message below must still be said.
-read -r file sha256 < <(awk -v t="$os-$arch" '$1 == t { print $2, $3 }' "$pins") || true
+read -r file sha256 program < <(awk -v t="$os-$arch" '$1 == t { print $2, $3, $4 }' "$pins") || true
 [ -n "${file:-}" ] || { echo "no yt-dlp is pinned for $os-$arch" >&2; exit 1; }
 
 name="yt-dlp"
 [ "$os" = windows ] && name="yt-dlp.exe"
+case "$file" in *.zip) name="$file" ;; esac
 mkdir -p "$dir"
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
   --retry 4 --retry-delay 5 --retry-all-errors \
@@ -44,5 +47,21 @@ if [ "$actual" != "$sha256" ]; then
   exit 1
 fi
 mv "$dir/$name.download" "$dir/$name"
-chmod 700 "$dir/$name"
-echo "$dir/$name"
+case "$file" in
+  *.zip)
+    folder="$dir/${file%.zip}"
+    rm -rf "$folder"
+    if command -v unzip >/dev/null; then
+      unzip -q "$dir/$name" -d "$folder"
+    else
+      powershell -NoProfile -Command "Expand-Archive -LiteralPath '$dir/$name' -DestinationPath '$folder'"
+    fi
+    rm -f "$dir/$name"
+    chmod 700 "$folder/$program"
+    echo "$folder/$program"
+    ;;
+  *)
+    chmod 700 "$dir/$name"
+    echo "$dir/$name"
+    ;;
+esac
