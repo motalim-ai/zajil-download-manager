@@ -11,8 +11,9 @@
 # The app's own tauri.conf.json is not changed: scripts/release/
 # tauri.release.json is merged into it here (`tauri build --config`). It
 # sets the version, puts zajil-host (the app looks for it there, lib.rs
-# `host_beside`) and the `zajil` command next to the program as Tauri
-# sidecars, ships the GPL licence as a file in every installer (not as a
+# `host_beside`), the `zajil` command and zajil-jsbox (what yt-dlp runs as
+# QuickJS-NG; zajil-core looks for it there, video.rs `jsbox_beside`) next
+# to the program as Tauri sidecars, ships the GPL licence as a file in every installer (not as a
 # licence to agree to: the GPL asks for no acceptance) with the notices of
 # the tools Zajil downloads, FFmpeg's LGPL among them (THIRD-PARTY-NOTICES.md
 # and LGPL-2.1.txt, ADR-0009's LGPL checklist, item 11), asks for the ad-hoc signature on macOS
@@ -155,6 +156,21 @@ jobs:
             echo "::warning::installing the GUI libraries failed (try $try of 3)"
           done
           exit 1
+      # The pinned QuickJS-NG, for the installed zajil-jsbox to run in the
+      # checks below: it answers `--help` through the real qjs, in its
+      # sandbox, as yt-dlp asks it. Before the build, so a download or pin
+      # problem shows at once.
+      - name: Get the pinned QuickJS-NG
+        run: |
+          set -euo pipefail
+          qjs="$(bash scripts/get-qjs.sh "$RUNNER_TEMP/quickjs")"
+          sha="$( (sha256sum < "$qjs" 2>/dev/null || shasum -a 256 < "$qjs") | cut -d' ' -f1)"
+          version="$(awk '$1 == "version" { print $2 }' tools/quickjs/pins.txt)"
+          {
+            echo "ZAJIL_QJS=$qjs"
+            echo "ZAJIL_QJS_SHA256=$sha"
+            echo "QJS_HELP=QuickJS-ng version ${version#v}"
+          } >> "$GITHUB_ENV"
       # zajil-host, the program the browsers start (ADR-0005), the zajil
       # command, and zajil-jsbox, what yt-dlp runs as QuickJS-NG for
       # YouTube (ADR-0009: Zajil looks for it next to itself), named as
@@ -212,20 +228,6 @@ jobs:
           for f in "$out"/*; do
             case "$(basename "$f")" in *"$VERSION"*) ;; *) echo "::error::$f does not carry $VERSION"; exit 1 ;; esac
           done
-      # The pinned QuickJS-NG, for the installed zajil-jsbox to run below:
-      # it answers `--help` through the real qjs, in its sandbox, as yt-dlp
-      # asks it.
-      - name: Get the pinned QuickJS-NG
-        run: |
-          set -euo pipefail
-          qjs="$(bash scripts/get-qjs.sh "$RUNNER_TEMP/quickjs")"
-          sha="$( (sha256sum < "$qjs" 2>/dev/null || shasum -a 256 < "$qjs") | cut -d' ' -f1)"
-          version="$(awk '$1 == "version" { print $2 }' tools/quickjs/pins.txt)"
-          {
-            echo "ZAJIL_QJS=$qjs"
-            echo "ZAJIL_QJS_SHA256=$sha"
-            echo "QJS_HELP=QuickJS-ng version ${version#v}"
-          } >> "$GITHUB_ENV"
       # Each installer is tried on its own system: it installs, zajil-host,
       # zajil and zajil-jsbox are next to the program, and it uninstalls.
       - name: Try the macOS disk image
