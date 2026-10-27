@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** A fake `chrome` for the real `background.js`: its listeners are kept to
  * be fired, and what it does is recorded. `granted`: the cookie
@@ -34,7 +35,7 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
       onMessage: on("message"),
       sendNativeMessage: vi.fn(async (_host, message) => {
         done.sent.push(message);
-        return answer;
+        return typeof answer === "function" ? answer(message) : answer;
       }),
     },
     permissions: {
@@ -490,6 +491,74 @@ describe("the background", () => {
     await flush();
     expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://example.com/v", private: true }]);
     expect(fake.done.cookieReads).toEqual([]);
+  });
+
+  describe("the button's answers, in Zajil's language", () => {
+    const locales = {
+      ar: JSON.parse(readFileSync(new URL("../src/_locales/ar/messages.json", import.meta.url), "utf8")),
+      en: JSON.parse(readFileSync(new URL("../src/_locales/en/messages.json", import.meta.url), "utf8")),
+    };
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url) => {
+          const lang = /_locales\/(ar|en)\/messages\.json$/.exec(String(url))?.[1];
+          return lang ? { ok: true, json: async () => locales[lang] } : { ok: false, status: 404 };
+        }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+    const sender = { id: "zajil", tab: { id: 2, url: "https://example.com/v" }, frameId: 0, url: "https://example.com/v" };
+    /** Sends `message` as the button's script does, and waits for the answer. */
+    const ask = (fake, message) =>
+      new Promise((resolve) => {
+        expect(fake.listeners.message(message, sender, resolve)).toBe(true);
+      });
+    const pings = (fake) => fake.done.sent.filter((m) => m.type === "ping");
+
+    it("its texts are in the language zajil-host says, asked once for asks at once and kept a minute", async () => {
+      const fake = fakeChrome({ granted: false, video: true, answer: (m) => (m.type === "ping" ? { ok: true, language: "en" } : { ok: true }) });
+      await load(fake);
+      await flush();
+      const answers = await Promise.all([1, 2, 3].map(() => ask(fake, { type: "video-button-texts" })));
+      for (const answer of answers) {
+        expect(answer).toEqual({
+          lang: "en",
+          texts: { button: locales.en.videoButton.message, working: locales.en.videoButtonWorking.message, done: locales.en.videoButtonDone.message, failed: locales.en.videoButtonFailed.message },
+        });
+      }
+      expect(pings(fake)).toEqual([{ type: "ping", protocol_version: 1 }]);
+      await ask(fake, { type: "video-button-texts" });
+      expect(pings(fake)).toHaveLength(1);
+      // A minute later, asked again.
+      fake.session.zajilLanguage.at -= 61_000;
+      await ask(fake, { type: "video-button-texts" });
+      expect(pings(fake)).toHaveLength(2);
+    });
+
+    it("without Zajil, the browser's language", async () => {
+      const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+      fake.chrome.runtime.sendNativeMessage = vi.fn(async () => {
+        throw new Error("Specified native messaging host not found.");
+      });
+      await load(fake);
+      await flush();
+      // The fake's browser says neither: Arabic, Zajil's default.
+      expect(await ask(fake, { type: "video-button-texts" })).toMatchObject({ lang: "ar", texts: { button: locales.ar.videoButton.message } });
+    });
+
+    it("a press: taken, refused with Zajil's own words, or unreachable in Zajil's language; no notification", async () => {
+      let next = { ok: true };
+      const fake = fakeChrome({ granted: false, video: true, answer: (m) => (m.type === "ping" ? { ok: true, language: "ar" } : next) });
+      await load(fake);
+      await flush();
+      expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: true });
+      next = { ok: false, error: "زاجِل لا يحمّل هذا الفيديو." };
+      expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: false, error: "زاجِل لا يحمّل هذا الفيديو." });
+      next = { ok: false, error: "Zajil did not answer" };
+      expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: false, error: locales.ar.videoNotAnswered.message });
+      expect(fake.done.notifications).toEqual([]);
+    });
   });
 
   it("a message not from the button's script, or not from a tab, is ignored", async () => {

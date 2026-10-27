@@ -349,33 +349,46 @@ async function sendVideo(info, tab, doc, quiet = false) {
   const result = await send(api, message);
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
   if (!quiet) await report(result, "video");
+  // From the button: a "!" left by an earlier failure goes once it worked.
+  else if (result.outcome === "taken") await api.action.setBadgeText({ text: "" }).catch(() => {});
   return result;
 }
 
 /** How long Zajil's language is kept before zajil-host is asked again. */
 const LANGUAGE_MS = 60_000;
 
+/** The ask for Zajil's language under way, so asks at once share it. */
+/** @type {Promise<"ar" | "en"> | null} */
+let askingLanguage = null;
+
 /**
  * Zajil's own language, "ar" or "en", for the video button (owner's
  * decision, 2026-10-27): zajil-host says it in its answer to `ping`, from
- * Zajil's settings. Asked at most once a minute (each ask starts
- * zajil-host); the browser's language when Zajil does not say.
+ * Zajil's settings. Asked at most once a minute, and once for asks that
+ * come together (each ask starts zajil-host; review of #261: a page of many
+ * frames asked many at once); the browser's language when Zajil does not
+ * say.
  * @returns {Promise<"ar" | "en">}
  */
 async function zajilLanguage() {
   const { zajilLanguage: kept } = await api.storage.session.get("zajilLanguage").catch(() => ({}));
   if ((kept?.lang === "ar" || kept?.lang === "en") && Date.now() - kept.at < LANGUAGE_MS) return kept.lang;
-  /** @type {"ar" | "en" | undefined} */
-  let lang;
-  try {
-    const answer = await api.runtime.sendNativeMessage(HOST, { type: "ping", protocol_version: PROTOCOL_VERSION });
-    if (answer?.language === "ar" || answer?.language === "en") lang = answer.language;
-  } catch {
-    // Zajil is not there: the browser's language.
-  }
-  lang ??= t("lang") === "en" ? "en" : "ar";
-  await api.storage.session.set({ zajilLanguage: { lang, at: Date.now() } }).catch(() => {});
-  return lang;
+  askingLanguage ??= (async () => {
+    /** @type {"ar" | "en" | undefined} */
+    let lang;
+    try {
+      const answer = await api.runtime.sendNativeMessage(HOST, { type: "ping", protocol_version: PROTOCOL_VERSION });
+      if (answer?.language === "ar" || answer?.language === "en") lang = answer.language;
+    } catch {
+      // Zajil is not there: the browser's language.
+    }
+    lang ??= t("lang") === "en" ? "en" : "ar";
+    await api.storage.session.set({ zajilLanguage: { lang, at: Date.now() } }).catch(() => {});
+    return lang;
+  })().finally(() => {
+    askingLanguage = null;
+  });
+  return askingLanguage;
 }
 
 /** Each language's texts, read once from the extension's own files. */
@@ -388,9 +401,13 @@ const localeTexts = new Map();
  */
 async function textIn(lang, key) {
   if (!localeTexts.has(lang)) {
+    // A failed read is not kept: the next ask reads again (review of #261).
     const read = fetch(api.runtime.getURL(`_locales/${lang}/messages.json`))
-      .then((r) => r.json())
-      .catch(() => ({}));
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .catch(() => {
+        localeTexts.delete(lang);
+        return {};
+      });
     localeTexts.set(lang, read);
   }
   const all = await localeTexts.get(lang);

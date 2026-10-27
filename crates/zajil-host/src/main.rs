@@ -13,6 +13,9 @@
 //! extension's link to the app for the rest of its life ([`link`]): Zajil
 //! asks that browser for cookies on it. The link never starts the app.
 //!
+//! A `ping` is answered by the host itself, with Zajil's language read from
+//! its settings (read only; the extension's video button speaks it).
+//!
 //! Nothing is written to stderr that the browser would need: Chrome keeps
 //! it in its log, Firefox in the browser console.
 

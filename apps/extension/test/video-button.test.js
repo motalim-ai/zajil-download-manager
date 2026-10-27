@@ -244,9 +244,10 @@ describe("the Download video button", () => {
       const page = await pageWith(VIDEO, { open: true });
       if (lang === "en") await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }));
       await page.mouse.move(400, 200);
-      await page.waitForFunction(() => true);
+      const word = lang === "en" ? "Download video" : "نزّل الفيديو";
+      await page.waitForFunction((w) => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.textContent === w, word);
       const button = await buttonOf(page);
-      expect(button).toMatchObject({ hidden: false, right: 732, top: 58, mark: 3 });
+      expect(button).toMatchObject({ hidden: false, right: 732, top: 58, mark: 3, dir: lang === "en" ? "ltr" : "rtl" });
       await page.close();
     }
   });
@@ -301,6 +302,35 @@ describe("the Download video button", () => {
     await gone.close();
   });
 
+  it("a pointer move the page makes shows nothing and asks nothing", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.evaluate(() => {
+      document.dispatchEvent(new PointerEvent("pointermove", { clientX: 400, clientY: 200, bubbles: true }));
+    });
+    await page.waitForTimeout(100);
+    // Never shown: not even put in the page.
+    expect((await buttonOf(page))?.hidden ?? true).toBe(true);
+    expect(await page.evaluate(() => /** @type {any} */ (window).sent)).toEqual([]);
+    await page.close();
+  });
+
+  it("pressed, it follows its video when the page scrolls", async () => {
+    const page = await pageWith(`<div style="height:2000px">${VIDEO}</div>`, { open: true });
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.press = () => new Promise(() => {});
+    });
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    await page.evaluate(() => window.scrollBy(0, 30));
+    await page.waitForFunction(() => {
+      const button = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button");
+      return button && Math.round(button.getBoundingClientRect().top) === 28;
+    });
+    expect(await buttonOf(page)).toMatchObject({ hidden: false, state: "working" });
+    await page.close();
+  });
+
   it("on YouTube, only on a video's page, a Short or an embedded player", async () => {
     for (const [url, shown] of /** @type {[string, boolean][]} */ ([
       ["https://www.youtube.com/", false],
@@ -309,6 +339,9 @@ describe("the Download video button", () => {
       ["https://www.youtube.com/watch?v=abc", true],
       ["https://m.youtube.com/shorts/abc", true],
       ["https://www.youtube-nocookie.com/embed/abc", true],
+      ["https://www.youtube.com/live/abc", true],
+      // Not YouTube: shown as on any site.
+      ["https://youtube.com.example.test/", true],
     ])) {
       const page = await pageWith(VIDEO, { url });
       await page.mouse.move(400, 200);

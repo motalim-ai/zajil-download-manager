@@ -42,6 +42,9 @@
   /** How long "sent" and an error stay. */
   const DONE_MS = 1500;
   const ERROR_MS = 6000;
+  /** The longest the button waits for Zajil's answer (zajil-host gives up
+   * sooner: 20 s to start Zajil, then 10 s on its channel). */
+  const ANSWER_MS = 45_000;
 
   /** Zajil's mark (`assets/icon/zajil-mark.svg`), drawn here: no file of the
    * extension is open to pages (no `web_accessible_resources`). A test checks
@@ -55,7 +58,7 @@
 
   /** YouTube: a video's own page, a Short, or an embedded player only. */
   const YOUTUBE = /(^|\.)(youtube\.com|youtube-nocookie\.com)$/;
-  const wantedHere = () => !YOUTUBE.test(location.hostname) || /^\/(watch|shorts\/|embed\/)/.test(location.pathname);
+  const wantedHere = () => !YOUTUBE.test(location.hostname) || /^\/(watch|shorts\/|embed\/|live\/)/.test(location.pathname);
 
   const host = document.createElement("div");
   const root = host.attachShadow({ mode: "closed" });
@@ -172,7 +175,8 @@
   /** At the video's top right, inside the window. @param {HTMLVideoElement} found */
   const place = (found) => {
     const box = found.getBoundingClientRect();
-    const width = document.documentElement.clientWidth;
+    // The viewport's width without its scrollbar, also in quirks mode.
+    const width = (document.scrollingElement ?? document.documentElement).clientWidth;
     button.style.top = `${Math.max(box.top, 0) + 8}px`;
     button.style.right = `${Math.max(width - Math.min(box.right, width), 0) + 8}px`;
     button.style.left = "auto";
@@ -215,6 +219,9 @@
   document.addEventListener(
     "pointermove",
     (event) => {
+      // A move the page makes shows nothing, and so asks nothing (review of
+      // #261: it made the extension start zajil-host).
+      if (!event.isTrusted) return;
       if (event.composedPath().includes(host)) {
         clearTimeout(hiding);
         return;
@@ -224,10 +231,12 @@
     },
     { passive: true, capture: true },
   );
-  // Pressed, it follows its video; at rest, it goes.
-  addEventListener("scroll", () => (busy() && video ? place(video) : hide()), { passive: true, capture: true });
+  // Pressed, it follows its video while the video is there (else it stays
+  // where it was); at rest, it goes.
+  addEventListener("scroll", () => (busy() && video?.isConnected ? place(video) : hide()), { passive: true, capture: true });
 
-  /** Back to rest after `ms`, and gone unless the pointer is on it. @param {number} ms */
+  /** Back to rest after `ms`, then gone after `LINGER_MS` unless the
+   * pointer moves on it meanwhile. @param {number} ms */
   const rest = (ms) => {
     setTimeout(() => {
       setState("idle");
@@ -253,7 +262,10 @@
     let answer = null;
     try {
       // A longer address is left out, never cut into another one (review).
-      answer = await api.runtime.sendMessage({ type: "video-button", src: src.length <= 8192 ? src : "" });
+      answer = await Promise.race([
+        api.runtime.sendMessage({ type: "video-button", src: src.length <= 8192 ? src : "" }),
+        new Promise((done) => setTimeout(() => done(null), ANSWER_MS)),
+      ]);
     } catch {
       // The extension was updated or stopped under this page.
     }
