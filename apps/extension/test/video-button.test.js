@@ -343,6 +343,82 @@ describe("the Download video button", () => {
     await gone.close();
   });
 
+  // Updated, reloaded or turned off, the extension leaves the script in open
+  // tabs, cut off: `runtime.id` gone, and `sendMessage` throwing at once.
+  /** Cuts the script off as the browser does. @param {import("playwright-core").Page} page */
+  const cutOff = (page) =>
+    page.evaluate(() => {
+      const runtime = /** @type {any} */ (window).chrome.runtime;
+      runtime.id = undefined;
+      runtime.sendMessage = () => {
+        throw new Error("Extension context invalidated.");
+      };
+    });
+  /** The page's uncaught errors, from now on. @param {import("playwright-core").Page} page */
+  const errorsOf = (page) => {
+    /** @type {string[]} */
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    return errors;
+  };
+
+  it("once the extension is gone, the button and its listeners go, with no error in the page", async () => {
+    const page = await pageWith(VIDEO);
+    const errors = errorsOf(page);
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "DIV");
+    await cutOff(page);
+    await page.mouse.move(410, 210);
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "VIDEO", null, { timeout: 2000 });
+    // Gone for good: the extension back, the script still does nothing.
+    await page.evaluate(() => void (/** @type {any} */ (window).chrome.runtime.id = "zajil"));
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    await page.waitForTimeout(100);
+    expect(await page.evaluate(() => document.elementFromPoint(715, 66)?.tagName)).toBe("VIDEO");
+    expect(await sent(page)).toEqual([]);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("gone before the first video: asking for the texts throws nothing into the page", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    const errors = errorsOf(page);
+    await cutOff(page);
+    await page.mouse.move(400, 200);
+    await page.waitForTimeout(100);
+    expect((await buttonOf(page))?.hidden ?? true).toBe(true);
+    expect(errors).toEqual([]);
+    await page.close();
+    // `sendMessage` throwing at once while `runtime.id` is still there: no
+    // error either, and no button without the texts.
+    const still = await pageWith(VIDEO, { open: true });
+    const stillErrors = errorsOf(still);
+    await still.evaluate(() => {
+      /** @type {any} */ (window).chrome.runtime.sendMessage = () => {
+        throw new Error("Extension context invalidated.");
+      };
+    });
+    await still.mouse.move(400, 200);
+    await still.waitForTimeout(100);
+    expect((await buttonOf(still))?.hidden ?? true).toBe(true);
+    expect(stillErrors).toEqual([]);
+    await still.close();
+  });
+
+  it("gone between showing and the press: the press sends nothing and the button goes", async () => {
+    const page = await pageWith(VIDEO);
+    const errors = errorsOf(page);
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "DIV");
+    await cutOff(page);
+    await page.mouse.click(AT.x, AT.y);
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "VIDEO", null, { timeout: 2000 });
+    expect(await sent(page)).toEqual([]);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
   it("a pointer move the page makes shows nothing and asks nothing", async () => {
     const page = await pageWith(VIDEO, { open: true });
     await page.evaluate(() => {

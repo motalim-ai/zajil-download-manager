@@ -12,6 +12,11 @@
 // click counts (`isTrusted`): a page cannot send a link by itself. The
 // page, its frame and its tab go with the link from the browser
 // (`runtime.MessageSender`), not from here.
+//
+// Updated, reloaded or turned off, the extension leaves this script in the
+// open tabs, cut off from it: `runtime.id` is gone, and its APIs throw at
+// once, not as a refused promise. So each call to them is in a `try`, and
+// once the extension is gone the script removes its listeners and stops.
 
 (() => {
   const api = /** @type {any} */ (globalThis).browser ?? /** @type {any} */ (globalThis).chrome;
@@ -43,21 +48,30 @@
     keys = { send, browser: browser === send ? "off" : browser };
     used = stored?.useKeys === true;
   };
-  api.storage?.local
-    ?.get(["settings", "clickKeysOn"])
-    .then((/** @type {any} */ got) => {
-      use(got?.settings);
-      on = got?.clickKeysOn === true;
-    })
-    .catch(() => {});
-  api.storage?.onChanged?.addListener((/** @type {any} */ changes, /** @type {string} */ area) => {
+  try {
+    api.storage?.local
+      ?.get(["settings", "clickKeysOn"])
+      .then((/** @type {any} */ got) => {
+        use(got?.settings);
+        on = got?.clickKeysOn === true;
+      })
+      .catch(() => {});
+  } catch {
+    // cut off already: the first click stops the script
+  }
+  /** @param {any} changes @param {string} area */
+  const changed = (changes, area) => {
     if (area !== "local") return;
     if (changes.settings) use(changes.settings.newValue);
     if (changes.clickKeysOn) on = changes.clickKeysOn.newValue === true;
-  });
+  };
+  try {
+    api.storage?.onChanged?.addListener(changed);
+  } catch {
+    // as above
+  }
 
-  /** Whether the extension is still there: after an update, a reload or
-   * being turned off, this script stays in open tabs, cut off. */
+  /** Whether the extension is still there. */
   const alive = () => {
     try {
       return Boolean(api.runtime?.id);
@@ -96,28 +110,42 @@
     return null;
   };
 
+  /** The extension went: its listeners go, and the script does nothing
+   * more. */
+  const stop = () => {
+    window.removeEventListener("click", click, true);
+    try {
+      api.storage?.onChanged?.removeListener(changed);
+    } catch {
+      // cut off: the browser drops it anyway
+    }
+  };
+
+  /** @param {MouseEvent} event */
+  const click = (event) => {
+    if (!alive()) {
+      stop();
+      return;
+    }
+    if (!on || !used || !event.isTrusted || event.button !== 0) return;
+    const combo = held(event);
+    if (!combo) return;
+    const which = combo === keys.send ? "click-link" : combo === keys.browser ? "click-browser" : null;
+    if (!which) return;
+    const href = linkOf(event);
+    if (!href) return;
+    if (which === "click-link") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    try {
+      void api.runtime.sendMessage({ type: which, href }).catch(() => {});
+    } catch {
+      // cut off between the check and here
+      if (!alive()) stop();
+    }
+  };
   // Before the page's own listeners (capture, on the window), so a page
   // that opens its links itself does not open this one too.
-  window.addEventListener(
-    "click",
-    (event) => {
-      if (!on || !used || !event.isTrusted || event.button !== 0 || !alive()) return;
-      const combo = held(event);
-      if (!combo) return;
-      const which = combo === keys.send ? "click-link" : combo === keys.browser ? "click-browser" : null;
-      if (!which) return;
-      const href = linkOf(event);
-      if (!href) return;
-      if (which === "click-link") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-      try {
-        void api.runtime.sendMessage({ type: which, href }).catch(() => {});
-      } catch {
-        // cut off between the check and here
-      }
-    },
-    true,
-  );
+  window.addEventListener("click", click, true);
 })();

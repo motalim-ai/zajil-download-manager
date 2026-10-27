@@ -163,6 +163,44 @@ describe("the keys of a click", () => {
     await context.close();
   });
 
+  it("cut off as the browser does it (APIs that throw at once): no error in the page, and the script stops for good", async () => {
+    const { page, context } = await pageWith({ stored: { sendKeys: "alt" } });
+    /** @type {string[]} */
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    // `sendMessage` throwing at once while `runtime.id` is still there.
+    await page.evaluate(() => {
+      const runtime = /** @type {any} */ (window).chrome.runtime;
+      runtime.sendMessage = () => {
+        throw new Error("Extension context invalidated.");
+      };
+    });
+    await click(page, ["Alt"]);
+    expect(errors).toEqual([]);
+    // Then `runtime.id` gone too, and the storage's listener cannot be taken
+    // off any more: the click is the page's and the browser's.
+    await page.evaluate(() => {
+      const chrome = /** @type {any} */ (window).chrome;
+      chrome.runtime.id = undefined;
+      chrome.storage.onChanged.removeListener = () => {
+        throw new Error("Extension context invalidated.");
+      };
+    });
+    await click(page, ["Alt"]);
+    expect((await pageSaw(page)).at(-1)).toBe(false);
+    // The extension back: the script stays stopped.
+    await page.evaluate(() => {
+      const runtime = /** @type {any} */ (window).chrome.runtime;
+      runtime.id = "zajil";
+      runtime.sendMessage = async (/** @type {unknown} */ m) => /** @type {any} */ (window).sent.push(m);
+    });
+    await click(page, ["Alt"]);
+    expect(await sent(page)).toEqual([]);
+    expect((await pageSaw(page)).at(-1)).toBe(false);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("an SVG link counts like any other", async () => {
     const { page, context } = await pageWith({
       stored: { sendKeys: "alt" },

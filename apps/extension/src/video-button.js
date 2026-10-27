@@ -27,12 +27,63 @@
 // until Zajil answers, then says if it failed. On YouTube only on a video's
 // own page, a Short or an embedded player: not on the home page, search or
 // a channel, whose previews play as the pointer passes.
+//
+// Updated, reloaded or turned off, the extension leaves this script in the
+// open tabs, cut off from it: `runtime.id` is gone, and `sendMessage`
+// throws at once ("Extension context invalidated"), not a refused promise.
+// So every ask goes through `ask`, and every listener first checks the
+// extension is there; once it is not, the button and all the listeners go,
+// for good (`stop`).
 
 (() => {
   const api = /** @type {any} */ (globalThis).browser ?? /** @type {any} */ (globalThis).chrome;
   const flag = "__zajilVideoButton";
   if (!api?.runtime?.id || /** @type {any} */ (globalThis)[flag]) return;
   /** @type {any} */ (globalThis)[flag] = true;
+
+  /** Whether the extension is still there. */
+  const alive = () => {
+    try {
+      return Boolean(api.runtime?.id);
+    } catch {
+      return false;
+    }
+  };
+  /** Each listener's removal, for `stop`. @type {(() => void)[]} */
+  const added = [];
+  /** Listens while the extension is there: the first event after it went
+   * stops the script instead.
+   * @param {EventTarget} target @param {string} type @param {(event: any) => void} listener
+   * @param {boolean | AddEventListenerOptions} [options] */
+  const listen = (target, type, listener, options) => {
+    const checked = (/** @type {Event} */ event) => (alive() ? listener(event) : stop());
+    target.addEventListener(type, checked, options);
+    added.push(() => target.removeEventListener(type, checked, options));
+  };
+  let stopped = false;
+  /** The extension went: the button and every listener go. */
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    for (const remove of added.splice(0)) remove();
+    clearTimeout(hiding);
+    host.remove();
+  };
+  /** Asks the background; null when it gives no answer. Once the extension
+   * went, null at once, and the script stops.
+   * @param {object} message @returns {Promise<any>} */
+  const ask = (message) => {
+    const gone = () => {
+      if (!alive()) stop();
+      return null;
+    };
+    if (!alive()) return Promise.resolve(gone());
+    try {
+      return Promise.resolve(api.runtime.sendMessage(message)).catch(gone);
+    } catch {
+      return Promise.resolve(gone());
+    }
+  };
 
   /** The smallest video that gets the button (not an icon or a preview). */
   const MIN_WIDTH = 200;
@@ -123,21 +174,18 @@
   const askTexts = () => {
     if (asked) return;
     asked = true;
-    void api.runtime
-      .sendMessage({ type: "video-button-texts" })
-      .then((/** @type {any} */ answer) => {
-        const given = answer?.texts;
-        if (!given || typeof given !== "object") return;
-        for (const key of ["button", "working", "done", "failed"]) {
-          if (typeof given[key] !== "string" || !given[key]) return;
-        }
-        texts = { dir: answer.lang === "en" ? "ltr" : "rtl", button: given.button, working: given.working, done: given.done, failed: given.failed };
-        setState("idle");
-        const found = waiting;
-        waiting = null;
-        if (found?.isConnected) show(found);
-      })
-      .catch(() => {});
+    void ask({ type: "video-button-texts" }).then((/** @type {any} */ answer) => {
+      const given = answer?.texts;
+      if (stopped || !given || typeof given !== "object") return;
+      for (const key of ["button", "working", "done", "failed"]) {
+        if (typeof given[key] !== "string" || !given[key]) return;
+      }
+      texts = { dir: answer.lang === "en" ? "ltr" : "rtl", button: given.button, working: given.working, done: given.done, failed: given.failed };
+      setState("idle");
+      const found = waiting;
+      waiting = null;
+      if (found?.isConnected) show(found);
+    });
   };
 
   /** Only once the texts came (the button shows only then). @param {"idle" | "working" | "done" | "error"} state @param {string} [text] */
@@ -152,7 +200,8 @@
   /** Videos that fired `encrypted`: played through EME. */
   const encrypted = new WeakSet();
   // Capture, on the document: the event does not bubble.
-  document.addEventListener(
+  listen(
+    document,
     "encrypted",
     (event) => {
       if (event.target instanceof HTMLVideoElement) encrypted.add(event.target);
@@ -187,7 +236,7 @@
 
   /** @param {HTMLVideoElement} found */
   const show = (found) => {
-    if (busy()) return;
+    if (stopped || busy()) return;
     const box = found.getBoundingClientRect();
     if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT || isProtected(found) || !wantedHere()) return;
     if (!texts) {
@@ -213,7 +262,7 @@
   const look = () => {
     const at = pending;
     pending = null;
-    if (!at) return;
+    if (!at || stopped) return;
     const found = document.elementsFromPoint(at.x, at.y).find((e) => e instanceof HTMLVideoElement);
     if (found) {
       show(/** @type {HTMLVideoElement} */ (found));
@@ -226,7 +275,8 @@
     }
   };
 
-  document.addEventListener(
+  listen(
+    document,
     "pointermove",
     (event) => {
       // A move the page makes shows nothing, and so asks nothing (review of
@@ -243,12 +293,12 @@
   );
   // The pointer left the page while the texts were on their way: nothing
   // to show when they come.
-  document.addEventListener("pointerout", (event) => {
+  listen(document, "pointerout", (event) => {
     if (!event.relatedTarget) waiting = null;
   });
   // Pressed, it follows its video while the video is there (else it stays
   // where it was); at rest, it goes.
-  addEventListener("scroll", () => (busy() && video?.isConnected ? place(video) : hide()), { passive: true, capture: true });
+  listen(window, "scroll", () => (busy() && video?.isConnected ? place(video) : hide()), { passive: true, capture: true });
 
   /** Back to rest after `ms`, then gone after `LINGER_MS` unless the
    * pointer moves on it meanwhile. @param {number} ms */
@@ -260,7 +310,7 @@
     }, ms);
   };
 
-  button.addEventListener("click", async (event) => {
+  listen(button, "click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (busy() || !event.isTrusted || !video || isProtected(video)) return;
@@ -273,17 +323,13 @@
     if (!seen) return;
     const src = video.currentSrc || video.src || "";
     setState("working");
+    // A longer address is left out, never cut into another one (review).
     /** @type {any} */
-    let answer = null;
-    try {
-      // A longer address is left out, never cut into another one (review).
-      answer = await Promise.race([
-        api.runtime.sendMessage({ type: "video-button", src: src.length <= 8192 ? src : "" }),
-        new Promise((done) => setTimeout(() => done(null), ANSWER_MS)),
-      ]);
-    } catch {
-      // The extension was updated or stopped under this page.
-    }
+    const answer = await Promise.race([
+      ask({ type: "video-button", src: src.length <= 8192 ? src : "" }),
+      new Promise((done) => setTimeout(() => done(null), ANSWER_MS)),
+    ]);
+    if (stopped) return;
     if (answer?.taken === true) {
       setState("done");
       rest(DONE_MS);
