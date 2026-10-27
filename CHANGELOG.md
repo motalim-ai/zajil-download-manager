@@ -46,6 +46,7 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 
 - test(core): the site-wait stop test stops the slow download once it has written (#224) (#225)
 - test(desktop): every window in the CI screenshots, with axe and its file names checked (M5.5) (#226)
+- test(desktop): the session-end test says how long each window took to answer (#244) (#246)
 
 ### CI
 
