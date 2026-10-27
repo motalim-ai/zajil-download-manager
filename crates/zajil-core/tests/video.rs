@@ -730,6 +730,61 @@ async fn what_a_failure_of_yt_dlp_s_comes_to_is_read_from_its_words() {
 }
 
 #[tokio::test]
+async fn a_page_yt_dlp_cannot_read_is_asked_by_its_video_s_own_link() {
+    let page = "https://news.example.com/page/1";
+    let media = "https://cdn.example.com/v.mp4";
+    let s = setup("page-unsupported");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    let sent = s
+        .runner
+        .probe_sent(page, Some(media), Some("sid=x"), &Stop::new())
+        .await
+        .unwrap();
+    assert!(matches!(sent.probed, Probed::Video(_)));
+    assert_eq!(sent.url, media);
+    assert!(!sent.cookies_kept);
+    let runs = calls(&s.control);
+    assert_eq!(runs.len(), 2);
+    assert!(args(&runs[0]).contains(&"--cookies".to_owned()));
+    // The page's cookies never go to the video's own server.
+    assert!(!args(&runs[1]).contains(&"--cookies".to_owned()));
+    assert_eq!(args(&runs[1]).last().map(String::as_str), Some(media));
+
+    // No link of its own: the page's failure.
+    let s = setup("page-unsupported");
+    let err = s
+        .runner
+        .probe_sent(page, None, None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.problem(), Some(ToolProblem::Unsupported));
+
+    // A page that wants its user signed in is not read another way.
+    let s = setup("fail Sign in to confirm your age");
+    s.runner
+        .probe_sent(page, Some(media), None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert_eq!(calls(&s.control).len(), 1);
+
+    // A page it reads: the page, as before.
+    let s = setup("probe");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    let sent = s
+        .runner
+        .probe_sent(
+            "https://example.com/v",
+            Some(media),
+            Some("sid=x"),
+            &Stop::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sent.url, "https://example.com/v");
+    assert!(sent.cookies_kept);
+}
+
+#[tokio::test]
 async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     let s = setup("hang");
     let stop = Stop::new();

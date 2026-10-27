@@ -33,6 +33,16 @@ const TOOLS: [Tool; 4] = Tool::ALL;
 pub struct VideoState {
     /// A page's cookies, by link, as the extension sent them.
     cookies: Mutex<HashMap<String, String>>,
+    /// A page's video's own link, by page, as the extension saw it: asked
+    /// when yt-dlp cannot read the page.
+    media: Mutex<HashMap<String, String>>,
+    /// The link a page was read by when it was its video's own: the
+    /// download goes from it.
+    read_as: Mutex<HashMap<String, String>>,
+    /// Pages from a private window: their downloads are never written to
+    /// `videos.json`, and leave the list when the last private window
+    /// closes.
+    private: Mutex<HashSet<String>>,
     /// The formats the last probe of each link found (a download names
     /// them).
     formats: Mutex<HashMap<String, Vec<Format>>>,
@@ -89,6 +99,9 @@ struct Row {
     speed: u64,
     error: Option<String>,
     file: Option<String>,
+    /// From a private window: never written to `videos.json`.
+    #[serde(skip)]
+    private: bool,
 }
 
 fn rows_file(app: &crate::App) -> PathBuf {
@@ -123,9 +136,10 @@ fn read_rows(path: &std::path::Path) -> Vec<Row> {
     rows
 }
 
-/// Writes the list's video downloads whole (a new file, then renamed).
+/// Writes the list's video downloads whole (a new file, then renamed),
+/// but those of a private window.
 fn save_rows(app: &crate::App, state: &VideoState) {
-    let rows = state.rows.lock().unwrap().clone();
+    let rows = kept(&state.rows.lock().unwrap());
     let path = rows_file(app);
     let saved = serde_json::to_vec_pretty(&rows)
         .map_err(std::io::Error::other)
@@ -134,6 +148,29 @@ fn save_rows(app: &crate::App, state: &VideoState) {
         });
     if let Err(e) = saved {
         eprintln!("zajil: {ROWS_FILE} could not be saved: {e}");
+    }
+}
+
+/// The rows `videos.json` keeps: not those of a private window.
+fn kept(rows: &[Row]) -> Vec<Row> {
+    rows.iter().filter(|r| !r.private).cloned().collect()
+}
+
+/// The last private window closed: its video downloads leave the list (a
+/// running one stops; a finished file stays), as the queues' do.
+pub fn discard_private<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let state = handle.state::<VideoState>();
+    let ids: Vec<u64> = state
+        .rows
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.private)
+        .map(|r| r.id)
+        .collect();
+    state.private.lock().unwrap().clear();
+    if !ids.is_empty() {
+        remove(handle, &ids);
     }
 }
 
@@ -348,16 +385,24 @@ pub const LABEL: &str = "video";
 pub const SIZE: (f64, f64) = (640.0, 520.0);
 pub const CAPABILITY: &str = include_str!("../runtime-capabilities/video.json");
 
-/// A video from the extension: its cookies kept here, and «Video quality»
-/// opened for its link.
+/// A video from the extension: its cookies and its own link kept here,
+/// and «Video quality» opened for its page.
 pub fn receive<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     url: String,
+    media: Option<String>,
     cookies: Option<String>,
+    private: bool,
 ) {
     let state = handle.state::<VideoState>();
     if let Some(cookies) = cookies {
         state.cookies.lock().unwrap().insert(url.clone(), cookies);
+    }
+    if let Some(media) = media {
+        state.media.lock().unwrap().insert(url.clone(), media);
+    }
+    if private {
+        state.private.lock().unwrap().insert(url.clone());
     }
     *state.pending.lock().unwrap() = Some(url);
     let _ = open_window(handle);
@@ -719,9 +764,26 @@ pub async fn video_probe(
     if let Some(old) = state.probing.lock().unwrap().replace(stop.clone()) {
         old.request();
     }
-    let probed = probe(&state, &runner(&app).await, &url, &stop).await?;
+    let cookies = state.cookies.lock().unwrap().get(&url).cloned();
+    let media = state.media.lock().unwrap().get(&url).cloned();
+    let sent = runner(&app)
+        .await
+        .probe_sent(&url, media.as_deref(), cookies.as_deref(), &stop)
+        .await?;
     state.probing.lock().unwrap().take();
-    Ok(match probed {
+    if !sent.cookies_kept {
+        state.cookies.lock().unwrap().remove(&url);
+    }
+    // Read by the video's own link: the download goes from that one.
+    if sent.url != url {
+        state
+            .read_as
+            .lock()
+            .unwrap()
+            .insert(url.clone(), sent.url.clone());
+    }
+    let read = sent.url;
+    Ok(match sent.probed {
         Probed::Video(video) => {
             let best = video.best_choice().map(ChoiceView::from);
             let formats = video.formats.iter().map(format_view).collect();
@@ -729,7 +791,7 @@ pub async fn video_probe(
                 .formats
                 .lock()
                 .unwrap()
-                .insert(url, video.formats.clone());
+                .insert(read, video.formats.clone());
             VideoInfoView::Video {
                 title: video.title,
                 duration: video.duration,
@@ -799,6 +861,14 @@ pub fn video_download<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Result<u64, String> {
     let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
+    let private = state.private.lock().unwrap().contains(&url);
+    let url = state
+        .read_as
+        .lock()
+        .unwrap()
+        .get(&url)
+        .cloned()
+        .unwrap_or(url);
     state.rows.lock().unwrap().push(Row {
         id,
         url,
@@ -811,6 +881,7 @@ pub fn video_download<R: tauri::Runtime>(
         speed: 0,
         error: None,
         file: None,
+        private,
     });
     state.fresh.lock().unwrap().insert(id);
     save_rows(&app, &state);
@@ -841,6 +912,7 @@ pub fn video_add_many<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Vec<u64> {
     let page_cookies = state.cookies.lock().unwrap().get(&page).cloned();
+    let private = state.private.lock().unwrap().contains(&page);
     let mut ids = Vec::new();
     for item in items {
         if let Some(cookies) = &page_cookies
@@ -854,7 +926,9 @@ pub fn video_add_many<R: tauri::Runtime>(
                 .or_insert_with(|| cookies.clone());
         }
         let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
-        state.rows.lock().unwrap().push(new_row(id, item, &dest));
+        let mut row = new_row(id, item, &dest);
+        row.private = private;
+        state.rows.lock().unwrap().push(row);
         ids.push(id);
     }
     save_rows(&app, &state);
@@ -889,6 +963,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
         speed: 0,
         error: None,
         file: None,
+        private: false,
     }
 }
 
@@ -1095,6 +1170,7 @@ mod tests {
             speed: 9,
             error: None,
             file: None,
+            private: false,
         }
     }
 
@@ -1323,5 +1399,18 @@ mod tests {
         assert!(!same_site(page, "https://youtu.be.example.com/watch?v=abc"));
         assert!(!same_site(page, "not a link"));
         assert!(!same_site("not a link", "not a link"));
+    }
+
+    /// A private window's video is in the list, but never in
+    /// `videos.json` (zajil-host: Zajil keeps nothing of it).
+    #[test]
+    fn a_private_window_s_video_is_never_written_down() {
+        let mut secret = row(FIRST_ID + 2, StatusView::Active);
+        secret.private = true;
+        secret.url = "https://private.example.org/watch/2".into();
+        let rows = [row(FIRST_ID + 1, StatusView::Done), secret];
+        let saved = serde_json::to_string(&kept(&rows)).unwrap();
+        assert!(!saved.contains("private.example.org"), "{saved}");
+        assert!(saved.contains("videos.example.org"), "{saved}");
     }
 }

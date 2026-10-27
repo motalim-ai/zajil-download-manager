@@ -717,6 +717,18 @@ impl Entry {
     }
 }
 
+/// What [`VideoRunner::probe_sent`] found, and where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sent {
+    pub probed: Probed,
+    /// The link that was read: the page's, or the video's own. The
+    /// download goes from it.
+    pub url: String,
+    /// Whether the page's cookies were kept (see
+    /// [`VideoRunner::probe_with_or_without_cookies`]).
+    pub cookies_kept: bool,
+}
+
 /// What a page holds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Probed {
@@ -1439,6 +1451,50 @@ impl VideoRunner {
                 Ok((self.probe(url, None, stop).await?, false))
             }
             probed => Ok((probed?, cookies.is_some())),
+        }
+    }
+
+    /// What the browser sent holds: its page asked as
+    /// [`probe_with_or_without_cookies`](Self::probe_with_or_without_cookies)
+    /// does; and when yt-dlp cannot read the page at all (a site it does not
+    /// know), the video's own link the browser saw, `media`. That one is
+    /// asked without the page's cookies: they are the page's alone
+    /// (ADR-0005).
+    pub async fn probe_sent(
+        &self,
+        page: &str,
+        media: Option<&str>,
+        cookies: Option<&str>,
+        stop: &Stop,
+    ) -> Result<Sent, VideoError> {
+        let error = match self
+            .probe_with_or_without_cookies(page, cookies, stop)
+            .await
+        {
+            Ok((probed, cookies_kept)) => {
+                return Ok(Sent {
+                    probed,
+                    url: page.to_owned(),
+                    cookies_kept,
+                });
+            }
+            Err(error) => error,
+        };
+        let unreadable = matches!(error, VideoError::Output(_))
+            || matches!(error, VideoError::Tool(_))
+                && matches!(error.problem(), None | Some(ToolProblem::Unsupported));
+        match media.filter(|media| unreadable && *media != page) {
+            Some(media) => match self.probe(media, None, stop).await {
+                Ok(probed) => Ok(Sent {
+                    probed,
+                    url: media.to_owned(),
+                    cookies_kept: false,
+                }),
+                // The page's own failure says more.
+                Err(VideoError::Stopped) => Err(VideoError::Stopped),
+                Err(_) => Err(error),
+            },
+            None => Err(error),
         }
     }
 

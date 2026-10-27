@@ -1039,12 +1039,30 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 let reach = extension_reach(&app.engine);
                 // The user's language, for what the extension is told.
                 let lang = app.settings.load().map(|s| s.language).unwrap_or_default();
-                // A video opens «Video quality» with its page and that
-                // page's cookies (M6, #149): the extension is told it was
-                // taken.
-                if let zajil_host::Request::Video { page, cookies, .. } = &request {
-                    video::receive(&handle, page.clone(), cookies.clone());
+                // A video opens «Video quality» with its page, that page's
+                // cookies and the video's own link (M6, #149): the
+                // extension is told it was taken.
+                if let zajil_host::Request::Video {
+                    page,
+                    media,
+                    cookies,
+                    private,
+                    ..
+                } = &request
+                {
+                    video::receive(
+                        &handle,
+                        page.clone(),
+                        media.clone(),
+                        cookies.clone(),
+                        *private,
+                    );
                     return zajil_host::Response::ok();
+                }
+                // The last private window closed: its videos leave the list
+                // too (the queues' downloads go below).
+                if let zajil_host::Request::PrivateClosed { .. } = &request {
+                    video::discard_private(&handle);
                 }
                 // Zajil started again on this data folder (macOS, #60).
                 if let zajil_host::Request::ShowWindow { .. } = &request {
