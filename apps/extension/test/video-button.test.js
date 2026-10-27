@@ -41,7 +41,7 @@ async function pageWith(body, how = {}) {
   await page.addInitScript(() => {
     const w = /** @type {any} */ (window);
     w.sent = [];
-    w.texts = { lang: "ar", texts: { button: "نزّل الفيديو", working: "يُرسَل إلى زاجِل…", done: "أُرسل إلى زاجِل", failed: "✗" } };
+    w.texts = { lang: "ar", texts: { button: "نزّل الفيديو", working: "يُرسَل إلى زاجِل…", done: "أُرسل إلى زاجِل", failed: "✗", playlist: "نزّل قائمة التشغيل بزاجِل", thisVideo: "هذا الفيديو", wholeList: "قائمة التشغيل كلها" } };
     w.press = async () => ({ taken: true });
     w.chrome = {
       runtime: {
@@ -49,7 +49,7 @@ async function pageWith(body, how = {}) {
         sendMessage: async (/** @type {any} */ m) => {
           w.sent.push(m);
           if (m.type === "video-button-texts") return typeof w.texts === "function" ? w.texts() : w.texts;
-          if (m.type === "video-button") return w.press();
+          if (m.type === "video-button" || m.type === "playlist-button") return w.press();
         },
       },
       i18n: { getMessage: (/** @type {string} */ k) => ({ videoButton: "نزّل الفيديو", lang: "ar" })[k] ?? "" },
@@ -243,7 +243,7 @@ describe("the Download video button", () => {
   it("sits at the video's top right, with Zajil's mark, in either language", async () => {
     for (const lang of ["ar", "en"]) {
       const page = await pageWith(VIDEO, { open: true });
-      if (lang === "en") await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }));
+      if (lang === "en") await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil.", playlist: "Download the playlist with Zajil", thisVideo: "This video", wholeList: "The whole playlist" } }));
       await page.mouse.move(400, 200);
       const word = lang === "en" ? "Download video" : "نزّل الفيديو";
       await page.waitForFunction((w) => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.textContent === w, word);
@@ -255,7 +255,7 @@ describe("the Download video button", () => {
 
   it("speaks Zajil's language, not the browser's", async () => {
     const page = await pageWith(VIDEO, { open: true });
-    await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }));
+    await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil.", playlist: "Download the playlist with Zajil", thisVideo: "This video", wholeList: "The whole playlist" } }));
     await page.mouse.move(400, 200);
     await page.waitForFunction(() => {
       const button = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button");
@@ -278,7 +278,7 @@ describe("the Download video button", () => {
     await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     await page.evaluate(() =>
-      /** @type {any} */ (window).give({ lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }),
+      /** @type {any} */ (window).give({ lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil.", playlist: "Download the playlist with Zajil", thisVideo: "This video", wholeList: "The whole playlist" } }),
     );
     // Then shown over the video the pointer is on, in Zajil's language.
     await page.waitForFunction(() => {
@@ -492,6 +492,205 @@ describe("the Download video button", () => {
       await page.mouse.move(400, 200);
       await page.mouse.click(AT.x, AT.y);
       expect(await sent(page), url).toHaveLength(shown ? 1 : 0);
+      await page.close();
+    }
+  });
+});
+
+describe("YouTube's playlists", () => {
+  /** A playlist's page as YouTube makes it today: the title in its own box,
+   * in a column. */
+  const HEADER = `<yt-page-header-view-model><div style="display:flex;flex-direction:column;padding:40px">
+    <yt-dynamic-text-view-model id="box" style="display:flow-root;overflow:hidden"><h1 style="margin:0">My list</h1></yt-dynamic-text-view-model>
+    <span id="by">by me</span></div></yt-page-header-view-model>`;
+  const LIST = "https://www.youtube.com/playlist?list=PLx";
+
+  /** The playlist page's button (`open` pages only), next after the title's box. */
+  const listButtonOf = (/** @type {import("playwright-core").Page} */ page) =>
+    page.evaluate(() => {
+      const host = document.getElementById("box")?.nextElementSibling;
+      const button = host?.shadowRoot?.querySelector("button");
+      if (!button) return null;
+      const box = button.getBoundingClientRect();
+      return { text: button.textContent, dir: button.dir, state: button.dataset.state, mark: button.querySelectorAll("svg path").length, x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+  /** Where the host after the title's box is, without opening it. */
+  const hostAt = (/** @type {import("playwright-core").Page} */ page) =>
+    page.evaluate(() => {
+      const host = document.getElementById("box")?.nextElementSibling;
+      if (!host || host.id === "by") return null;
+      const box = host.getBoundingClientRect();
+      return { x: box.x + 20, y: box.y + box.height / 2, open: host.shadowRoot !== null };
+    });
+  const allSent = (/** @type {import("playwright-core").Page} */ page) => page.evaluate(() => /** @type {any} */ (window).sent);
+
+  it("a playlist's page gets a button beside its title, always there, in Zajil's language; a click sends only that it was pressed", async () => {
+    const page = await pageWith(HEADER, { url: LIST, open: true });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    const button = await listButtonOf(page);
+    expect(button).toMatchObject({ text: "نزّل قائمة التشغيل بزاجِل", dir: "rtl", state: "idle", mark: 3 });
+    // Below the title, before what followed it.
+    expect(await page.evaluate(() => document.getElementById("by")?.previousElementSibling?.previousElementSibling?.id)).toBe("box");
+    await page.mouse.click(/** @type {any} */ (button).x, /** @type {any} */ (button).y);
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.shadowRoot?.querySelector("button")?.dataset.state === "done");
+    expect(await allSent(page)).toEqual([{ type: "video-button-texts" }, { type: "playlist-button" }]);
+    await page.close();
+  });
+
+  it("pressed, it says it is working until Zajil answers, then why when it did not take it", async () => {
+    const page = await pageWith(HEADER, { url: LIST, open: true });
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.press = () => new Promise((done) => (w.answer = done));
+    });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    const button = /** @type {any} */ (await listButtonOf(page));
+    await page.mouse.click(button.x, button.y);
+    expect(await listButtonOf(page)).toMatchObject({ state: "working", text: "يُرسَل إلى زاجِل…" });
+    // A second press while it works sends nothing more.
+    await page.mouse.click(button.x, button.y);
+    await page.evaluate(() => /** @type {any} */ (window).answer({ taken: false, error: "زاجِل لا يعمل الآن." }));
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.shadowRoot?.querySelector("button")?.dataset.state === "error");
+    expect(await listButtonOf(page)).toMatchObject({ text: "زاجِل لا يعمل الآن." });
+    expect((await allSent(page)).filter((/** @type {any} */ m) => m.type === "playlist-button")).toHaveLength(1);
+    await page.close();
+  });
+
+  it("is out of the page's reach: a closed root, and a click a script makes sends nothing", async () => {
+    const page = await pageWith(HEADER, { url: LIST });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    expect(await hostAt(page)).toMatchObject({ open: false });
+    await page.close();
+    const opened = await pageWith(HEADER, { url: LIST, open: true });
+    await opened.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    await opened.evaluate(() => {
+      const button = document.getElementById("box")?.nextElementSibling?.shadowRoot?.querySelector("button");
+      button?.click();
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    });
+    await opened.waitForTimeout(100);
+    expect(await allSent(opened)).toEqual([{ type: "video-button-texts" }]);
+    await opened.close();
+  });
+
+  it("only on a YouTube playlist's own page: not a Mix, another page or another site", async () => {
+    for (const url of [
+      "https://www.youtube.com/watch?v=abc&list=PLx",
+      "https://www.youtube.com/playlist?list=RDabc",
+      "https://www.youtube.com/playlist",
+      "https://example.com/playlist?list=PLx",
+    ]) {
+      const page = await pageWith(HEADER, { url });
+      await page.waitForTimeout(150);
+      expect(await hostAt(page), url).toBeNull();
+      // Nothing asked of the background either.
+      expect(await allSent(page), url).toEqual([]);
+      await page.close();
+    }
+  });
+
+  it("follows YouTube's changes of page without a load, and a title drawn again", async () => {
+    const page = await pageWith(HEADER, { url: LIST, open: true });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    // To a video: gone.
+    await page.evaluate(() => {
+      history.pushState(null, "", "/watch?v=abc");
+      document.body.append(document.createElement("i"));
+    });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id === "by");
+    // To another playlist, its title drawn again: back, at rest.
+    await page.evaluate(() => {
+      history.pushState(null, "", "/playlist?list=PLy");
+      const box = /** @type {HTMLElement} */ (document.getElementById("box"));
+      box.replaceWith(box.cloneNode(true));
+    });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    expect(await listButtonOf(page)).toMatchObject({ state: "idle", text: "نزّل قائمة التشغيل بزاجِل" });
+    await page.close();
+  });
+
+  it("is gone with the extension, with no error in the page", async () => {
+    const page = await pageWith(HEADER, { url: LIST });
+    /** @type {string[]} */
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id !== "by");
+    await page.evaluate(() => {
+      const runtime = /** @type {any} */ (window).chrome.runtime;
+      runtime.id = undefined;
+      runtime.sendMessage = () => {
+        throw new Error("Extension context invalidated.");
+      };
+      document.body.append(document.createElement("i"));
+    });
+    await page.waitForFunction(() => document.getElementById("box")?.nextElementSibling?.id === "by");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  /** The menu's choices (`open` pages only). */
+  const menuOf = (/** @type {import("playwright-core").Page} */ page) =>
+    page.evaluate(() => {
+      const menu = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector(".menu");
+      if (!menu) return null;
+      return {
+        hidden: /** @type {HTMLElement} */ (menu).hidden,
+        dir: /** @type {HTMLElement} */ (menu).dir,
+        items: [...menu.querySelectorAll("button")].map((b) => {
+          const box = b.getBoundingClientRect();
+          return { text: b.textContent, x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        }),
+      };
+    });
+  const WATCH = "https://www.youtube.com/watch?v=abc&list=PLx";
+
+  it("on a video played from a playlist, the button offers «This video» and «The whole playlist»", async () => {
+    for (const [pick, expected] of /** @type {[number, any][]} */ ([
+      [0, { type: "video-button", src: "https://media.invalid/v.mp4" }],
+      [1, { type: "video-button", whole: true }],
+    ])) {
+      const page = await pageWith(VIDEO, { url: WATCH, open: true });
+      await page.mouse.move(400, 200);
+      await page.mouse.click(AT.x, AT.y);
+      // Nothing sent yet: the choices first.
+      const menu = /** @type {any} */ (await menuOf(page));
+      expect(menu).toMatchObject({ hidden: false, dir: "rtl" });
+      expect(menu.items.map((/** @type {any} */ i) => i.text)).toEqual(["هذا الفيديو", "قائمة التشغيل كلها"]);
+      expect(await sent(page)).toEqual([]);
+      await page.mouse.click(menu.items[pick].x, menu.items[pick].y);
+      expect(await sent(page)).toEqual([expected]);
+      expect(await menuOf(page)).toMatchObject({ hidden: true });
+      await page.waitForFunction(() => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.dataset.state === "done");
+      await page.close();
+    }
+  });
+
+  it("the choices take no click a script makes, and Escape or the pointer leaving closes them", async () => {
+    const page = await pageWith(VIDEO, { url: WATCH, open: true });
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    await page.evaluate(() => {
+      for (const b of [...document.documentElement.children].at(-1)?.shadowRoot?.querySelectorAll(".menu button") ?? []) {
+        /** @type {HTMLElement} */ (b).click();
+      }
+    });
+    expect(await sent(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    expect(await menuOf(page)).toMatchObject({ hidden: true });
+    await page.mouse.click(AT.x, AT.y);
+    expect(await menuOf(page)).toMatchObject({ hidden: false });
+    await page.mouse.move(900, 650);
+    await page.waitForFunction(() => /** @type {HTMLElement | null | undefined} */ ([...document.documentElement.children].at(-1)?.shadowRoot?.querySelector(".menu"))?.hidden === true, null, { timeout: 5000 });
+    expect(await sent(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("on a video of a Mix, or not on YouTube, a click sends the video at once", async () => {
+    for (const url of ["https://www.youtube.com/watch?v=abc&list=RDabc", "https://example.com/watch?v=abc&list=PLx"]) {
+      const page = await pageWith(VIDEO, { url, open: true });
+      await page.mouse.move(400, 200);
+      await page.mouse.click(AT.x, AT.y);
+      expect(await sent(page), url).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4" }]);
       await page.close();
     }
   });

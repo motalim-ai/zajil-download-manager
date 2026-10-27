@@ -147,7 +147,7 @@
     "message": "Zajil cannot read this page: it is not an http or https page."
   },
   "sitesVideo": {
-    "message": "Video: of a page, the extension learns only where its videos are and their addresses. Playlist addresses stay in memory, for each tab, are forgotten when it closes or opens another page, and go to Zajil only when you press. The extension watches requests and never stops or changes them, and notes nothing from a private window."
+    "message": "Video: of a page, the extension learns only where its videos are and their addresses, and on YouTube where a playlist's title is. Playlist addresses stay in memory, for each tab, are forgotten when it closes or opens another page, and go to Zajil only when you press. The extension watches requests and never stops or changes them, and notes nothing from a private window."
   },
   "videoButton": {
     "message": "Download video"
@@ -160,6 +160,18 @@
   },
   "videoButtonFailed": {
     "message": "The video did not reach Zajil."
+  },
+  "playlistButton": {
+    "message": "Download the playlist with Zajil"
+  },
+  "videoButtonThis": {
+    "message": "This video"
+  },
+  "videoButtonWholeList": {
+    "message": "The whole playlist"
+  },
+  "playlistNotHere": {
+    "message": "Zajil found no playlist on this page."
   },
   "hostNotRunning": {
     "message": "Zajil is not running. Start it, then try again."

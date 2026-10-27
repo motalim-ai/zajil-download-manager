@@ -28,6 +28,16 @@
 // own page, a Short or an embedded player: not on the home page, search or
 // a channel, whose previews play as the pointer passes.
 //
+// YouTube's playlists (owner's decision, 2026-10-28): a playlist's page has
+// no video, so it gets a button of its own, always there, beside the
+// playlist's title: "Download the playlist with Zajil". And on a video
+// played from a playlist (`/watch?v=…&list=…`), the button offers two
+// choices: "This video" and "The whole playlist". Both send the background
+// only what was chosen: the playlist's page comes from the tab's own
+// address (`playlistPage` in capture.js), not from here. Same language,
+// same "Sending…", same protections (a closed shadow root, `isTrusted`). A
+// Mix (`list=RD…`) is no playlist: YouTube makes it as you watch.
+//
 // Updated, reloaded or turned off, the extension leaves this script in the
 // open tabs, cut off from it: `runtime.id` is gone, and `sendMessage`
 // throws at once ("Extension context invalidated"), not a refused promise.
@@ -68,6 +78,7 @@
     for (const remove of added.splice(0)) remove();
     clearTimeout(hiding);
     host.remove();
+    listHost.remove();
   };
   /** Asks the background; null when it gives no answer. Once the extension
    * went, null at once, and the script stops.
@@ -110,6 +121,18 @@
   /** YouTube: a video's own page, a Short, or an embedded player only. */
   const YOUTUBE = /(^|\.)(youtube\.com|youtube-nocookie\.com)$/;
   const wantedHere = () => !YOUTUBE.test(location.hostname) || /^\/(watch|shorts\/|embed\/|live\/)/.test(location.pathname);
+  /** A YouTube playlist here, at `path` (`/playlist`, or `/watch` for a
+   * video played from it), in the top frame: as `playlistPage` in
+   * capture.js, which a content script cannot import.
+   * @param {string} path */
+  const LIST_SITE = /^(www\.|m\.)?youtube\.com$/;
+  const LIST_ID = /^(?!RD)[\w-]{2,200}$/;
+  const listHere = (/** @type {string} */ path) =>
+    window === window.top &&
+    location.protocol === "https:" &&
+    LIST_SITE.test(location.hostname) &&
+    location.pathname === path &&
+    LIST_ID.test(new URLSearchParams(location.search).get("list") ?? "");
 
   const host = document.createElement("div");
   const root = host.attachShadow({ mode: "closed" });
@@ -119,8 +142,9 @@
       all: initial !important; display: block !important; opacity: 1 !important;
       visibility: visible !important; filter: none !important;
     }
+    .main, .menu { position: fixed; z-index: 2147483647; }
     button {
-      position: fixed; z-index: 2147483647; margin: 0; max-width: 360px;
+      margin: 0; max-width: 360px;
       display: flex; align-items: center; gap: 6px;
       font: 600 13px/1.3 system-ui, "Segoe UI", "IBM Plex Sans Arabic", sans-serif; color: #fff;
       background: rgba(16, 38, 61, 0.9); border: 1px solid rgba(255, 255, 255, 0.35);
@@ -139,33 +163,74 @@
     button[data-state="working"] .spin { display: block; }
     @keyframes zajil-spin { to { transform: rotate(1turn); } }
     @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+    .menu {
+      display: flex; flex-direction: column; gap: 2px; padding: 3px;
+      background: rgba(16, 38, 61, 0.95); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px;
+    }
+    .menu[hidden] { display: none; }
+    .menu button { width: 100%; background: transparent; border-color: transparent; }
   `;
-  const button = document.createElement("button");
-  button.type = "button";
+  /** A button with Zajil's mark, its spinner and its text.
+   * @param {string} name its class */
+  const makeButton = (name) => {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.className = name;
+    made.dataset.state = "idle";
+    const SVG = "http://www.w3.org/2000/svg";
+    const mark = document.createElementNS(SVG, "svg");
+    mark.setAttribute("viewBox", MARK_VIEWBOX);
+    mark.setAttribute("fill", "currentColor");
+    mark.setAttribute("aria-hidden", "true");
+    for (const d of MARK_PATHS) {
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", d);
+      mark.append(path);
+    }
+    const spin = document.createElement("span");
+    spin.className = "spin";
+    const text = document.createElement("span");
+    text.setAttribute("aria-live", "polite");
+    made.append(mark, spin, text);
+    return { button: made, label: text };
+  };
+  const main = { ...makeButton("main"), rest: (/** @type {Texts} */ t) => t.button };
+  const button = main.button;
   button.hidden = true;
-  button.dataset.state = "idle";
-  const SVG = "http://www.w3.org/2000/svg";
-  const mark = document.createElementNS(SVG, "svg");
-  mark.setAttribute("viewBox", MARK_VIEWBOX);
-  mark.setAttribute("fill", "currentColor");
-  mark.setAttribute("aria-hidden", "true");
-  for (const d of MARK_PATHS) {
-    const path = document.createElementNS(SVG, "path");
-    path.setAttribute("d", d);
-    mark.append(path);
-  }
-  const spin = document.createElement("span");
-  spin.className = "spin";
-  const label = document.createElement("span");
-  label.setAttribute("aria-live", "polite");
-  button.append(mark, spin, label);
-  root.append(style, button);
+  // On a video played from a playlist: its two choices, under the button.
+  const menu = document.createElement("div");
+  menu.className = "menu";
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+  const choice = () => {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.setAttribute("role", "menuitem");
+    return made;
+  };
+  const thisVideo = choice();
+  const wholeList = choice();
+  menu.append(thisVideo, wholeList);
+  root.append(style, button, menu);
+
+  // A playlist's page: its own button, in a host of its own beside the
+  // title, in the page's flow (not over it).
+  const listHost = document.createElement("div");
+  const listRoot = listHost.attachShadow({ mode: "closed" });
+  const listStyle = document.createElement("style");
+  listStyle.textContent = `${style.textContent}
+    :host { margin: 8px 0 !important; }
+    .page { width: fit-content; }
+  `;
+  const page = { ...makeButton("page"), rest: (/** @type {Texts} */ t) => t.playlist };
+  listRoot.append(listStyle, page.button);
 
   /** The button's texts, in Zajil's language, from the background (asked
    * once, at the first video). Until they come the button is not shown at
    * all, so it never shows in another language first (owner's decision on
    * #264); if they never come, it never shows.
-   * @type {{ dir: string, button: string, working: string, done: string, failed: string } | null} */
+   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string }} Texts
+   * @type {Texts | null} */
   let texts = null;
   /** The video the pointer was on while the texts were on their way. */
   /** @type {HTMLVideoElement | null} */
@@ -177,24 +242,33 @@
     void ask({ type: "video-button-texts" }).then((/** @type {any} */ answer) => {
       const given = answer?.texts;
       if (stopped || !given || typeof given !== "object") return;
-      for (const key of ["button", "working", "done", "failed"]) {
+      const keys = /** @type {const} */ (["button", "working", "done", "failed", "playlist", "thisVideo", "wholeList"]);
+      for (const key of keys) {
         if (typeof given[key] !== "string" || !given[key]) return;
       }
-      texts = { dir: answer.lang === "en" ? "ltr" : "rtl", button: given.button, working: given.working, done: given.done, failed: given.failed };
+      const dir = answer.lang === "en" ? "ltr" : "rtl";
+      texts = /** @type {Texts} */ ({ dir, ...Object.fromEntries(keys.map((key) => [key, given[key]])) });
       setState("idle");
+      setState("idle", undefined, page);
+      menu.dir = dir;
+      thisVideo.textContent = texts.thisVideo;
+      wholeList.textContent = texts.wholeList;
       const found = waiting;
       waiting = null;
       if (found?.isConnected) show(found);
+      syncList();
     });
   };
 
-  /** Only once the texts came (the button shows only then). @param {"idle" | "working" | "done" | "error"} state @param {string} [text] */
-  const setState = (state, text) => {
+  /** Only once the texts came (the buttons show only then).
+   * @param {"idle" | "working" | "done" | "error"} state @param {string} [text]
+   * @param {typeof main} [which] the video's button, or the playlist page's */
+  const setState = (state, text, which = main) => {
     if (!texts) return;
-    button.dataset.state = state;
-    button.dir = texts.dir;
-    button.setAttribute("aria-busy", String(state === "working"));
-    label.textContent = text ?? (state === "working" ? texts.working : state === "done" ? texts.done : texts.button);
+    which.button.dataset.state = state;
+    which.button.dir = texts.dir;
+    which.button.setAttribute("aria-busy", String(state === "working"));
+    which.label.textContent = text ?? (state === "working" ? texts.working : state === "done" ? texts.done : which.rest(texts));
   };
 
   /** Videos that fired `encrypted`: played through EME. */
@@ -218,8 +292,20 @@
   /** Pressed, and not yet back to rest: it stays on its video. */
   const busy = () => button.dataset.state !== "idle";
 
+  const closeMenu = () => {
+    menu.hidden = true;
+    button.removeAttribute("aria-expanded");
+  };
+  /** Under the button, at the same right edge. */
+  const placeMenu = () => {
+    menu.style.top = `${button.getBoundingClientRect().bottom + 4}px`;
+    menu.style.right = button.style.right;
+    menu.style.left = "auto";
+  };
+
   const hide = () => {
     if (busy()) return;
+    closeMenu();
     button.hidden = true;
     video = null;
   };
@@ -232,6 +318,7 @@
     button.style.top = `${Math.max(box.top, 0) + 8}px`;
     button.style.right = `${Math.max(width - Math.min(box.right, width), 0) + 8}px`;
     button.style.left = "auto";
+    if (!menu.hidden) placeMenu();
   };
 
   /** @param {HTMLVideoElement} found */
@@ -246,6 +333,7 @@
     }
     // Last in the page each time, above what the page added since.
     if (host !== document.documentElement.lastElementChild) document.documentElement.append(host);
+    if (found !== video) closeMenu();
     video = found;
     place(found);
     button.hidden = false;
@@ -310,35 +398,147 @@
     }, ms);
   };
 
-  listen(button, "click", async (event) => {
+  /** Whether the page left the button seen (else no press counts).
+   * Both spellings: `opacityProperty` and `visibilityProperty` came in
+   * Chrome 121, the older names work from Chrome 105 (review).
+   * @param {HTMLElement} which its host */
+  const seen = (which) =>
+    which.checkVisibility(/** @type {any} */ ({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true }));
+
+  /** The background's answer to a press, or null after `ANSWER_MS`. Gone
+   * while it waited (its answer never came): the script stops.
+   * @param {object} message */
+  const answerTo = async (message) => {
+    /** @type {any} */
+    const answer = await Promise.race([ask(message), new Promise((done) => setTimeout(() => done(null), ANSWER_MS))]);
+    if (!stopped && !alive()) stop();
+    return answer;
+  };
+  /** What a press that did not work says. @param {any} answer */
+  const why = (answer) => (typeof answer?.error === "string" && answer.error ? answer.error : (texts?.failed ?? "✗"));
+
+  /** A real press, on a button the page left seen, over its video. @param {Event} event */
+  const pressable = (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (busy() || !event.isTrusted || !video || isProtected(video)) return;
-    // Not pressed for real if the page made it unseen.
-    // Both spellings: `opacityProperty` and `visibilityProperty` came in
-    // Chrome 121, the older names work from Chrome 105 (review).
-    const seen = host.checkVisibility(
-      /** @type {any} */ ({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true }),
-    );
-    if (!seen) return;
+    return !busy() && event.isTrusted && video != null && !isProtected(video) && seen(host);
+  };
+
+  /** Sends the video, or the whole playlist it is played from.
+   * @param {boolean} whole */
+  const press = async (whole) => {
+    if (!video) return;
     const src = video.currentSrc || video.src || "";
     setState("working");
     // A longer address is left out, never cut into another one (review).
-    /** @type {any} */
-    const answer = await Promise.race([
-      ask({ type: "video-button", src: src.length <= 8192 ? src : "" }),
-      new Promise((done) => setTimeout(() => done(null), ANSWER_MS)),
-    ]);
-    // Gone while it waited (its answer never came): it stops now.
-    if (!stopped && !alive()) stop();
+    const answer = await answerTo(whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "" });
     if (stopped) return;
     if (answer?.taken === true) {
       setState("done");
       rest(DONE_MS);
     } else {
-      const why = typeof answer?.error === "string" && answer.error ? answer.error : (texts?.failed ?? "✗");
-      setState("error", why);
+      setState("error", why(answer));
       rest(ERROR_MS);
     }
+  };
+
+  listen(button, "click", (event) => {
+    if (!pressable(event)) return;
+    // Played from a playlist: the two choices first.
+    if (!listHere("/watch")) void press(false);
+    else if (!menu.hidden) closeMenu();
+    else {
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      placeMenu();
+    }
   });
+  for (const [item, whole] of /** @type {[HTMLButtonElement, boolean][]} */ ([
+    [thisVideo, false],
+    [wholeList, true],
+  ])) {
+    listen(item, "click", (event) => {
+      if (menu.hidden || !pressable(event)) return;
+      closeMenu();
+      void press(whole);
+    });
+  }
+  listen(document, "keydown", (event) => {
+    if (event.key === "Escape") closeMenu();
+  });
+
+  /** Where a playlist's title is, by YouTube's pages of today first, then
+   * older ones, then any heading. */
+  const TITLES = [
+    "yt-page-header-view-model h1",
+    "ytd-playlist-header-renderer yt-dynamic-sizing-formatted-string",
+    "ytd-playlist-header-renderer h1",
+    "ytd-playlist-sidebar-primary-info-renderer #title",
+    "h1",
+  ];
+  /** @param {Element} found */
+  const visible = (found) => found.checkVisibility() && found.getBoundingClientRect().width > 0;
+  /** The playlist page the page's button is for, and its press under way: a
+   * press for another page says nothing on this one. */
+  let listFor = "";
+  let listPress = 0;
+
+  /** The playlist page's button, after the title's box, while the tab is on
+   * a playlist's page (YouTube changes pages without loading them). */
+  const syncList = () => {
+    if (stopped) return;
+    if (!listHere("/playlist")) {
+      listHost.remove();
+      return;
+    }
+    if (!texts) {
+      askTexts();
+      return;
+    }
+    if (location.href !== listFor) {
+      listFor = location.href;
+      listPress += 1;
+      setState("idle", undefined, page);
+    }
+    const title = TITLES.map((selector) => [...document.querySelectorAll(selector)].find(visible)).find(Boolean);
+    if (!title) {
+      listHost.remove();
+      return;
+    }
+    const box = title.closest("yt-dynamic-text-view-model, yt-dynamic-sizing-formatted-string") ?? title;
+    if (box.nextElementSibling !== listHost) box.after(listHost);
+  };
+
+  listen(page.button, "click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.isTrusted || !texts || page.button.dataset.state !== "idle" || !listHere("/playlist") || !seen(listHost)) return;
+    listPress += 1;
+    const mine = listPress;
+    setState("working", undefined, page);
+    const answer = await answerTo({ type: "playlist-button" });
+    if (stopped || mine !== listPress) return;
+    const taken = answer?.taken === true;
+    setState(taken ? "done" : "error", taken ? undefined : why(answer), page);
+    setTimeout(() => mine === listPress && setState("idle", undefined, page), taken ? DONE_MS : ERROR_MS);
+  });
+
+  // On YouTube's own site, in the top frame: each change of the page, once
+  // a frame, looks for a playlist's page.
+  if (window === window.top && LIST_SITE.test(location.hostname)) {
+    let queued = false;
+    const later = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        syncList();
+      });
+    };
+    const watcher = new MutationObserver(() => (alive() ? later() : stop()));
+    watcher.observe(document.documentElement, { childList: true, subtree: true });
+    added.push(() => watcher.disconnect());
+    listen(window, "popstate", later);
+    later();
+  }
 })();

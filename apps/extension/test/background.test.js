@@ -493,6 +493,62 @@ describe("the background", () => {
     expect(fake.done.cookieReads).toEqual([]);
   });
 
+  describe("a YouTube playlist, from the button", () => {
+    /** Sends `message` from `sender` as the button's script does, and waits for the answer. */
+    const press = (fake, message, sender) =>
+      new Promise((resolve) => {
+        expect(fake.listeners.message(message, sender, resolve)).toBe(true);
+      });
+    const videos = (fake) => fake.done.sent.filter((m) => m.type === "video");
+
+    it("the playlist page's button sends that page, from the tab's own address, and never the tab's stream", async () => {
+      const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+      await load(fake);
+      await flush();
+      fake.session["streams:4"] = [{ url: "https://cdn.example/now.m3u8", kind: "hls", frame: 0, origin: "https://www.youtube.com" }];
+      const sender = { id: "zajil", tab: { id: 4, url: "https://www.youtube.com/playlist?list=PLx" }, frameId: 0, url: "https://www.youtube.com/playlist?list=PLx" };
+      expect(await press(fake, { type: "playlist-button" }, sender)).toEqual({ taken: true });
+      expect(videos(fake)).toEqual([{ type: "video", protocol_version: 1, page: "https://www.youtube.com/playlist?list=PLx", cookies: "sid=abc" }]);
+    });
+
+    it("«The whole playlist» on a video played from one sends the playlist's page, not the video's", async () => {
+      const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+      await load(fake);
+      await flush();
+      const url = "https://www.youtube.com/watch?v=abc&list=PLx&index=2";
+      const sender = { id: "zajil", tab: { id: 5, url }, frameId: 0, url };
+      expect(await press(fake, { type: "video-button", whole: true, src: "https://cdn.example/v.mp4" }, sender)).toEqual({ taken: true });
+      expect(videos(fake)).toEqual([{ type: "video", protocol_version: 1, page: "https://www.youtube.com/playlist?list=PLx", cookies: "sid=abc" }]);
+    });
+
+    it("from a private window: no cookies, marked private", async () => {
+      const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+      await load(fake);
+      await flush();
+      const url = "https://www.youtube.com/playlist?list=PLx";
+      await press(fake, { type: "playlist-button" }, { id: "zajil", tab: { id: 6, url, incognito: true }, frameId: 0, url });
+      expect(videos(fake)).toEqual([{ type: "video", protocol_version: 1, page: url, private: true }]);
+      expect(fake.done.cookieReads).toEqual([]);
+    });
+
+    it("sends nothing but says so when the tab is on no playlist, or the ask is from a frame", async () => {
+      const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
+      await load(fake);
+      await flush();
+      for (const [url, frameId] of /** @type {[string, number][]} */ ([
+        ["https://www.youtube.com/watch?v=abc", 0],
+        ["https://www.youtube.com/watch?v=abc&list=RDabc", 0],
+        ["https://example.com/playlist?list=PLx", 0],
+        ["https://www.youtube.com/playlist?list=PLx", 2],
+      ])) {
+        const answer = await press(fake, { type: "playlist-button" }, { id: "zajil", tab: { id: 7, url }, frameId, url });
+        expect(answer, url).toEqual({ taken: false, error: "playlistNotHere" });
+        expect(await press(fake, { type: "video-button", whole: true }, { id: "zajil", tab: { id: 7, url }, frameId, url })).toEqual(answer);
+      }
+      expect(videos(fake)).toEqual([]);
+    });
+  });
+
   describe("the button's answers, in Zajil's language", () => {
     const locales = {
       ar: JSON.parse(readFileSync(new URL("../src/_locales/ar/messages.json", import.meta.url), "utf8")),
@@ -524,7 +580,15 @@ describe("the background", () => {
       for (const answer of answers) {
         expect(answer).toEqual({
           lang: "en",
-          texts: { button: locales.en.videoButton.message, working: locales.en.videoButtonWorking.message, done: locales.en.videoButtonDone.message, failed: locales.en.videoButtonFailed.message },
+          texts: {
+            button: locales.en.videoButton.message,
+            working: locales.en.videoButtonWorking.message,
+            done: locales.en.videoButtonDone.message,
+            failed: locales.en.videoButtonFailed.message,
+            playlist: locales.en.playlistButton.message,
+            thisVideo: locales.en.videoButtonThis.message,
+            wholeList: locales.en.videoButtonWholeList.message,
+          },
         });
       }
       expect(pings(fake)).toEqual([{ type: "ping", protocol_version: 1 }]);

@@ -176,6 +176,30 @@ export function videoMessage(info, extra = {}) {
   return message;
 }
 
+/** YouTube's own sites, where a playlist has a page of its own. */
+const YOUTUBE_SITE = /^(www\.|m\.)?youtube\.com$/;
+
+/** A playlist's id as YouTube makes them (letters, digits, `-` and `_`).
+ * A Mix (`RD…`) is not one: YouTube makes it up as you watch, and it has no
+ * page of its own. */
+const LIST_ID = /^(?!RD)[\w-]{2,200}$/;
+
+/**
+ * The page of the playlist `url` is about, for "Download the playlist with
+ * Zajil" and the button's "The whole playlist": `url` is a YouTube
+ * playlist's page (`/playlist?list=…`) or a video played from one
+ * (`/watch?v=…&list=…`), and the page is `https://<the same site>/playlist?list=…`,
+ * which Zajil's «Video quality» opens as a playlist. Else null.
+ * @param {string | undefined} url
+ */
+export function playlistPage(url) {
+  if (!isWeb(url)) return null;
+  const { protocol, hostname, pathname, searchParams } = new URL(/** @type {string} */ (url));
+  const list = searchParams.get("list") ?? "";
+  if (protocol !== "https:" || !YOUTUBE_SITE.test(hostname) || !["/playlist", "/watch"].includes(pathname) || !LIST_ID.test(list)) return null;
+  return `https://${hostname}/playlist?list=${list}`;
+}
+
 /** Whether Zajil refused because the link is a web page, not a file
  * (the desktop app's `not_the_file`; a test reads its text there).
  * @param {Result | null} result */

@@ -8,6 +8,7 @@ import {
   downloadMessage,
   extensionOf,
   menuMessage,
+  playlistPage,
   send,
   shouldCapture,
   takeOver,
@@ -394,6 +395,35 @@ describe("a new download in Chrome waits for the extension to decide", () => {
       expect(second).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("a YouTube playlist's page", () => {
+  it("is that of a playlist's page, or of a video played from a playlist, on the same site", () => {
+    expect(playlistPage("https://www.youtube.com/playlist?list=PLx_1-a")).toBe("https://www.youtube.com/playlist?list=PLx_1-a");
+    expect(playlistPage("https://www.youtube.com/watch?v=abc&list=PLx&index=3&pp=iAQB")).toBe("https://www.youtube.com/playlist?list=PLx");
+    expect(playlistPage("https://m.youtube.com/watch?list=OLAK5uy_x&v=abc")).toBe("https://m.youtube.com/playlist?list=OLAK5uy_x");
+    expect(playlistPage("https://youtube.com/playlist?list=WL")).toBe("https://youtube.com/playlist?list=WL");
+  });
+
+  it("is none for a Mix, another page or site, or a list id YouTube never makes", () => {
+    for (const url of [
+      "https://www.youtube.com/watch?v=abc&list=RDabc&start_radio=1",
+      "https://www.youtube.com/watch?v=abc",
+      "https://www.youtube.com/playlist",
+      "https://www.youtube.com/@channel/playlists?list=PLx",
+      "https://www.youtube.com/embed/videoseries?list=PLx",
+      "http://www.youtube.com/playlist?list=PLx",
+      "https://youtube.com.example.test/playlist?list=PLx",
+      "https://music.youtube.com/playlist?list=PLx",
+      "https://www.youtube.com/playlist?list=PL%2F..%2Fx",
+      "https://www.youtube.com/playlist?list=P",
+      `https://www.youtube.com/playlist?list=${"a".repeat(201)}`,
+      "https://user:pass@www.youtube.com/playlist?list=PLx",
+      undefined,
+    ]) {
+      expect(playlistPage(url), String(url)).toBeNull();
     }
   });
 });

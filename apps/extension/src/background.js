@@ -5,7 +5,7 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely, withDownloadUiHidden } from "./compat.js";
-import { HOST, HOST_PROBLEMS, PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
+import { HOST, HOST_PROBLEMS, PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, playlistPage, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
 import { cookieHeader, cookiesAllowed, otherSite, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
@@ -336,9 +336,11 @@ async function openBehind(url, tab) {
  * @param {string} [doc] the document that asked (the button's sender), so
  *   only its own playlist goes
  * @param {boolean} [quiet]
+ * @param {boolean} [list] a YouTube playlist's page (`playlistPage`): no
+ *   stream of the tab goes with it, that is the video playing now
  * @returns {Promise<import("./capture.js").Result | "not-web">}
  */
-async function sendVideo(info, tab, doc, quiet = false) {
+async function sendVideo(info, tab, doc, quiet = false, list = false) {
   const isPrivate = Boolean(tab?.incognito);
   const page = videoMessage(info);
   if (!page) {
@@ -348,7 +350,7 @@ async function sendVideo(info, tab, doc, quiet = false) {
   const cookies = isPrivate ? null : await cookieHeader(api, /** @type {string} */ (page.page), tab?.cookieStoreId);
   // The playlist the tab loaded for it (nothing is noted in a private one).
   // Only while the permission lasts (review: none noted before it went).
-  const noted = !isPrivate && Number.isSafeInteger(tab?.id) && (await videoAllowed(api));
+  const noted = !list && !isPrivate && Number.isSafeInteger(tab?.id) && (await videoAllowed(api));
   const want = { frame: Number.isSafeInteger(info.frameId) ? info.frameId : 0, doc, origin: originOf(info.frameUrl ?? info.pageUrl) };
   const stream = noted ? await streamFor(api, tab.id, want) : undefined;
   const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
@@ -430,10 +432,12 @@ async function hostText(code) {
 /** The button's texts, in Zajil's language. */
 async function buttonTexts() {
   const lang = await zajilLanguage();
-  const [button, working, done, failed] = await Promise.all(
-    ["videoButton", "videoButtonWorking", "videoButtonDone", "videoButtonFailed"].map((key) => textIn(lang, key)),
+  const [button, working, done, failed, playlist, thisVideo, wholeList] = await Promise.all(
+    ["videoButton", "videoButtonWorking", "videoButtonDone", "videoButtonFailed", "playlistButton", "videoButtonThis", "videoButtonWholeList"].map((key) =>
+      textIn(lang, key),
+    ),
   );
-  return { lang, texts: { button, working, done, failed } };
+  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList } };
 }
 
 /**
@@ -473,6 +477,17 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
   }
   if (message?.type === "video-button-texts") {
     void buttonTexts().then(sendResponse, () => sendResponse(null));
+    return true;
+  }
+  // A YouTube playlist (`playlist-button`, or the button's "The whole
+  // playlist"): its page, from the tab's own address (the browser's word),
+  // in the top frame only.
+  if (message?.type === "playlist-button" || (message?.type === "video-button" && message.whole === true)) {
+    const list = sender.frameId === 0 ? playlistPage(sender.tab.url) : null;
+    const sent = list
+      ? sendVideo({ pageUrl: list, frameId: 0 }, sender.tab, undefined, true, true).then(buttonAnswer)
+      : zajilLanguage().then(async (lang) => ({ taken: false, error: await textIn(lang, "playlistNotHere") }));
+    void sent.then(sendResponse, () => sendResponse(null));
     return true;
   }
   if (message?.type !== "video-button") return;
