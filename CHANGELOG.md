@@ -9,7 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [1.0.0] - 2026-10-27
 
-The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). This list is the titles of the pull requests merged after 0.2.0.
+The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). A first 1.0.0 draft was tried by hand on macOS and Windows and never published; it and its tag were removed (owner's decision of 2026-10-27), and the fixes after it (#251 to #278) are here too. This list is the titles of the pull requests merged after 0.2.0.
+
+Mind: the extension's «Also take any file larger than 5 MB» (on from the start) works even for the types a user removed from the list (#263).
 
 ### Features
 
@@ -18,6 +20,9 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 - feat(core): a queued download's own number of connections (#211) (#215)
 - feat(desktop): «Site grabber», as IDM's: check a site, choose its files, and queue them politely (#214)
 - feat(grab): each file refused over --max-total is counted as left out (#212) (#222)
+- feat(extension): more types by default, as IDM's, and any file larger than 5 MB goes to Zajil (#256)
+- feat(extension): the video button as IDM's: top right, Zajil's mark and language, working until Zajil answers, and only on YouTube's video pages (#261)
+- feat(video): yt-dlp's official zip on macOS and Windows, unpacked once, checked whole before every run, and started once offline after it is downloaded (#278)
 
 ### Fixes
 
@@ -36,6 +41,22 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 - fix(desktop): on macOS, one Zajil per user through its own channel, not a socket in /tmp (#60) (#243)
 - fix(desktop): «Batch download» and «Site grabber» fit their window without a page scroll (#245)
 - fix(desktop): the start line says the release's version, not 0.0.0 (#248) (#250)
+- fix(platform): a tool Zajil starts on Windows opens no console window (#251)
+- fix(desktop): a download from the browser opens its own «Download file info», as in IDM (#255)
+- fix(desktop): a small «Download file info», as IDM's (#257)
+- fix(video): a page with no format for its cookies is asked again without them (#254)
+- fix(video): yt-dlp's failures are told in the user's language, its words under «Details» (#260)
+- fix(desktop): the progress window keeps the height the user gives it (#270)
+- fix(desktop): a speed limit applies as soon as it changes, with no «Save» (#271)
+- fix(video): a video's file gets one extension, yt-dlp's (#262)
+- fix(release): zajil-jsbox ships in every installer, and each check runs it through the pinned qjs (#252)
+- fix(extension): Chrome and Edge do not show a download while it goes to Zajil (#253)
+- fix(desktop): «Unfinished», «Finished» and «Waiting» under «All downloads», each with its categories (#273)
+- fix(video): a playlist's chosen videos join the list at once and download in turn (#266)
+- fix(video): a merge's progress adds up, and the default is an MP4 the window and the engine agree on (#267)
+- fix(video): the video's own link is asked when yt-dlp cannot read its page; a private window's video is never written down (#268)
+- fix(extension): ts is not a default type; a large video with it goes by its size (#276)
+- fix(desktop): «Video quality» stays in front, can be cancelled, and waits visibly in the main window (#277)
 
 ### Documentation
 
@@ -54,6 +75,7 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 
 - ci: the GUI libraries come from the cache when it has them (#119) (#223)
 - ci(ffmpeg): no build for pins or README, a weekly run, cancel on PRs only, current comments (#173) (#228)
+- ci(release): the Linux GUI libraries in up to three tries, each with its own time limit (#265) (#269)
 
 ## [0.2.0] - 2026-10-26
 
