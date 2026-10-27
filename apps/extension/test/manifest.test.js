@@ -37,9 +37,12 @@ describe("the manifests", () => {
 
   it("ask for the same few permissions, and no site", () => {
     const wanted = ["downloads", "contextMenus", "nativeMessaging", "storage", "notifications"];
+    // `downloads.ui` (Chrome and Edge only, no warning): the browser's
+    // download UI is hidden while a download goes to Zajil.
+    expect([...chrome.permissions].sort()).toEqual([...wanted, "downloads.ui"].sort());
+    expect([...firefox.permissions].sort()).toEqual([...wanted].sort());
     for (const m of [chrome, firefox]) {
       expect(m.manifest_version).toBe(3);
-      expect([...m.permissions].sort()).toEqual([...wanted].sort());
       expect(m.host_permissions).toBeUndefined();
       // The cookie permission only, asked for with a button, never at
       // install (owner's decision on #7); nothing else.
@@ -47,8 +50,8 @@ describe("the manifests", () => {
       expect(m.optional_host_permissions).toEqual(["<all_urls>"]);
       expect(m.content_scripts).toBeUndefined();
     }
-    const { key: _key, background: cb, minimum_chrome_version: _min, ...chromeRest } = chrome;
-    const { browser_specific_settings: _bss, background: fb, ...firefoxRest } = firefox;
+    const { key: _key, background: cb, minimum_chrome_version: _min, permissions: _cp, ...chromeRest } = chrome;
+    const { browser_specific_settings: _bss, background: fb, permissions: _fp, ...firefoxRest } = firefox;
     expect(chromeRest).toEqual(firefoxRest);
     expect(cb).toEqual({ service_worker: "background.js", type: "module" });
     expect(fb).toEqual({ scripts: ["background.js"], type: "module" });

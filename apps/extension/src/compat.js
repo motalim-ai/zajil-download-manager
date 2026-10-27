@@ -38,3 +38,30 @@ export function onNewDownload(browserApi, handler) {
     downloads.onCreated.addListener(handler);
   }
 }
+
+/** How many downloads are being handed to Zajil now, with the browser's own
+ * download UI hidden (`withDownloadUiHidden`). */
+let handingOver = 0;
+
+/**
+ * Runs `work` with the browser's own download UI (the bubble or bar)
+ * hidden, so a download Zajil takes does not show in the browser
+ * (`downloads.setUiOptions`, Chrome and Edge, with the `downloads.ui`
+ * permission). It comes back once no hand-over is left, even when `work`
+ * fails. Firefox has no such call: there `work` just runs.
+ *
+ * @template T
+ * @param {any} browserApi
+ * @param {() => Promise<T>} work
+ * @returns {Promise<T>}
+ */
+export async function withDownloadUiHidden(browserApi, work) {
+  const downloads = browserApi.downloads;
+  if (typeof downloads.setUiOptions !== "function") return work();
+  if (handingOver++ === 0) await downloads.setUiOptions({ enabled: false }).catch(() => {});
+  try {
+    return await work();
+  } finally {
+    if (--handingOver === 0) await downloads.setUiOptions({ enabled: true }).catch(() => {});
+  }
+}

@@ -11,7 +11,7 @@ import {
   takeOver,
   videoMessage,
 } from "../src/capture.js";
-import { pausesSafely } from "../src/compat.js";
+import { pausesSafely, withDownloadUiHidden } from "../src/compat.js";
 import { defaults } from "../src/settings.js";
 
 const item = (over = {}) => ({
@@ -251,5 +251,50 @@ describe("videoMessage (M6)", () => {
     const sent = videoMessage({ pageUrl: "https://example.com/v" }, { cookies: "a=1", private: true });
     expect(sent).toMatchObject({ private: true });
     expect(sent?.cookies).toBeUndefined();
+  });
+});
+
+describe("the browser's download UI while Zajil takes a download", () => {
+  /** Chrome's `downloads.setUiOptions`, recording what it was told. */
+  function uiApi() {
+    const told = [];
+    return { told, downloads: { setUiOptions: vi.fn(async (options) => void told.push(options.enabled)) } };
+  }
+
+  it("is hidden while the download is handed over, and comes back after", async () => {
+    const browserApi = uiApi();
+    const seen = await withDownloadUiHidden(browserApi, async () => [...browserApi.told]);
+    expect(seen).toEqual([false]);
+    expect(browserApi.told).toEqual([false, true]);
+  });
+
+  it("comes back when the hand-over fails", async () => {
+    const browserApi = uiApi();
+    await expect(withDownloadUiHidden(browserApi, async () => Promise.reject(new Error("no")))).rejects.toThrow("no");
+    expect(browserApi.told).toEqual([false, true]);
+  });
+
+  it("stays hidden until the last of two hand-overs at once is done", async () => {
+    const browserApi = uiApi();
+    /** @type {() => void} */
+    let finishFirst = () => {};
+    const first = withDownloadUiHidden(browserApi, () => new Promise((done) => (finishFirst = () => done(1))));
+    const second = withDownloadUiHidden(browserApi, async () => 2);
+    expect(await second).toBe(2);
+    expect(browserApi.told).toEqual([false]);
+    finishFirst();
+    expect(await first).toBe(1);
+    expect(browserApi.told).toEqual([false, true]);
+  });
+
+  it("is left alone in Firefox, which has no such call", async () => {
+    const browserApi = { downloads: {} };
+    expect(await withDownloadUiHidden(browserApi, async () => "ran")).toBe("ran");
+  });
+
+  it("a refused call does not stop the hand-over", async () => {
+    const browserApi = { downloads: { setUiOptions: vi.fn(async () => Promise.reject(new Error("no permission"))) } };
+    expect(await withDownloadUiHidden(browserApi, async () => "ran")).toBe("ran");
+    expect(browserApi.downloads.setUiOptions).toHaveBeenCalledTimes(2);
   });
 });
