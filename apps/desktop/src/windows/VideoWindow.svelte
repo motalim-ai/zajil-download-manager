@@ -11,6 +11,7 @@
   import { size } from "../lib/format";
   import { startWindow } from "../lib/windowStart";
   import { fileName, options, picked, type Option } from "../lib/videoChoices";
+  import { errorDetails, errorKey } from "../lib/videoErrors";
   import type { ToolView } from "../lib/bindings/ToolView";
   import type { VideoInfoView } from "../lib/bindings/VideoInfoView";
   import type { VideoErrorView } from "../lib/bindings/VideoErrorView";
@@ -198,8 +199,6 @@
 
   const quality = (o: Option) =>
     o.choice.kind === "audio_only" ? locale.t("video-audio-only", { format: "m4a" }) : `${o.height}p${o.fps && o.fps > 30 ? ` ${Math.round(o.fps)}fps` : ""} · ${o.ext.toUpperCase()}`;
-  const errorText = (e: VideoErrorView | string) =>
-    typeof e === "string" ? e : e.kind === "drm" ? locale.t("video-drm") : e.kind === "tools_missing" ? locale.t("video-tools-missing") : e.message;
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && void close()} />
@@ -313,7 +312,10 @@
     </section>
   {:else}
     <section class="col">
-      <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{errorText(step.error)}</p>
+      <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{locale.t(errorKey(step.error))}</p>
+      {#if errorDetails(step.error)}
+        <details class="why"><summary>{locale.t("video-error-details")}</summary><p dir="ltr">{errorDetails(step.error)}</p></details>
+      {/if}
       <div class="actions"><button class="btn" onclick={() => void close()} data-first>{locale.t("progress-close")}</button></div>
     </section>
   {/if}
@@ -473,6 +475,15 @@
   }
   .waiting {
     color: var(--muted);
+  }
+  .why {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .why p {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+    user-select: text;
   }
   .problem {
     display: flex;

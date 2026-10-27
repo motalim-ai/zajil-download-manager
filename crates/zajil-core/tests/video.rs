@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use zajil_core::tools::{Pinned, Tool, ToolError, Toolbox};
 use zajil_core::video::{
-    Choice, Download, Format, JsRuntime, Probed, Runs, VideoError, VideoEvent, VideoRunner,
+    Choice, Download, Format, JsRuntime, Probed, Runs, ToolProblem, VideoError, VideoEvent,
+    VideoRunner,
 };
 use zajil_core::{Engine, Options, Stop};
 
@@ -595,6 +596,63 @@ async fn cookies_that_work_are_kept_and_another_error_is_not_asked_again() {
         .await
         .unwrap_err();
     assert_eq!(calls(&s.control).len(), 1);
+}
+
+#[tokio::test]
+async fn what_a_failure_of_yt_dlp_s_comes_to_is_read_from_its_words() {
+    let cases = [
+        (
+            "fail [youtube] abc: Requested format is not available. Use --list-formats",
+            Some(ToolProblem::NoFormats),
+        ),
+        (
+            "fail [youtube] abc: Sign in to confirm your age. This video may be inappropriate",
+            Some(ToolProblem::SignIn),
+        ),
+        (
+            "fail [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies-from-browser",
+            Some(ToolProblem::SignIn),
+        ),
+        (
+            "fail [youtube] abc: Private video. Sign in if you've been granted access",
+            Some(ToolProblem::Private),
+        ),
+        (
+            "fail Unsupported URL: https://example.com/v?token=SECRET",
+            Some(ToolProblem::Unsupported),
+        ),
+        ("fail Unable to download webpage: HTTP Error 500", None),
+    ];
+    for (script, problem) in cases {
+        let s = setup(script);
+        let err = s
+            .runner
+            .probe("https://example.com/v", None, &Stop::new())
+            .await
+            .unwrap_err();
+        assert_eq!(err.problem(), problem, "{script}");
+        assert!(!err.to_string().contains("SECRET"), "{err}");
+    }
+
+    // YouTube's challenge went unsolved: only a warning says so, before
+    // the error that names what followed. That warning is the cause.
+    let s = setup("signed-in");
+    let err = s
+        .runner
+        .probe(
+            "https://www.youtube.com/watch?v=abc",
+            Some("SID=x"),
+            &Stop::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.problem(), Some(ToolProblem::Challenge));
+    let shown = err.to_string();
+    assert!(
+        shown.contains("n challenge solving failed")
+            && shown.contains("Requested format is not available"),
+        "{shown}"
+    );
 }
 
 #[tokio::test]

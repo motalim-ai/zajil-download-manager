@@ -1050,6 +1050,62 @@ fn says_no_format(message: &str) -> bool {
     message.contains("Requested format is not available")
 }
 
+/// yt-dlp's words when YouTube's JavaScript challenge went unsolved.
+fn says_challenge(message: &str) -> bool {
+    message.contains("challenge solving failed")
+}
+
+/// What a failure of yt-dlp's comes to, when its words say: the user is
+/// told that in their language, and yt-dlp's own text is only the detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProblem {
+    /// No format the page offers could be chosen.
+    NoFormats,
+    /// The site wants the user signed in (an age check, members only, a
+    /// bot check).
+    SignIn,
+    /// The video is private.
+    Private,
+    /// yt-dlp knows no way to read this site.
+    Unsupported,
+    /// YouTube's JavaScript challenge went unsolved.
+    Challenge,
+}
+
+impl VideoError {
+    /// What yt-dlp's failure comes to, when its words say.
+    pub fn problem(&self) -> Option<ToolProblem> {
+        let VideoError::Tool(message) = self else {
+            return None;
+        };
+        let lower = message.to_ascii_lowercase();
+        let says = |phrases: &[&str]| phrases.iter().any(|p| lower.contains(p));
+        // The cause before what it caused: an unsolved challenge leaves no
+        // format, and a private video asks to sign in.
+        Some(if says_challenge(message) {
+            ToolProblem::Challenge
+        } else if says(&["private video", "video is private"]) {
+            ToolProblem::Private
+        } else if says(&[
+            "sign in to confirm",
+            "login required",
+            "use --cookies",
+            "--cookies-from-browser",
+            "only available for registered users",
+            "members-only",
+            "join this channel",
+        ]) {
+            ToolProblem::SignIn
+        } else if says(&["unsupported url"]) {
+            ToolProblem::Unsupported
+        } else if says_no_format(message) || says(&["no video formats found"]) {
+            ToolProblem::NoFormats
+        } else {
+            return None;
+        })
+    }
+}
+
 /// One video download. Its `Debug` shows neither its link nor its cookies.
 #[derive(Clone, Copy)]
 pub struct Download<'a> {
@@ -1617,12 +1673,23 @@ fn read_output(
 ) -> ReadOutput {
     let errors = std::thread::spawn(move || {
         let mut last = None;
+        // A warning that says why, when the error names only what followed
+        // (no format left after YouTube's challenge went unsolved).
+        let mut cause = None;
         for line in bounded_lines(stderr) {
             if let Some(rest) = line.strip_prefix("ERROR:") {
                 last = Some(shown_message(rest.trim()));
+            } else if let Some(rest) = line.strip_prefix("WARNING:")
+                && cause.is_none()
+                && says_challenge(rest)
+            {
+                cause = Some(shown_message(rest.trim()));
             }
         }
-        last
+        match (cause, last) {
+            (Some(cause), Some(last)) => Some(format!("{cause} / {last}")),
+            (cause, last) => last.or(cause),
+        }
     });
     let mut json = Vec::new();
     let mut final_path = None;

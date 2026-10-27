@@ -23,7 +23,7 @@ use zajil_core::Stop;
 use crate::view::{DetailsView, DownloadView, StatusView};
 use zajil_core::tools::{Tool, Toolbox};
 use zajil_core::video::{
-    Choice, Download, Format, Probed, Runs, VideoError, VideoEvent, VideoRunner,
+    Choice, Download, Format, Probed, Runs, ToolProblem, VideoError, VideoEvent, VideoRunner,
 };
 
 const TOOLS: [Tool; 4] = Tool::ALL;
@@ -570,7 +570,8 @@ pub enum VideoInfoView {
 #[ts(export)]
 pub struct VideoErrorView {
     /// `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped` or
-    /// `io`.
+    /// `io`; for a failure of yt-dlp's whose words say what it comes to,
+    /// `no_formats`, `sign_in`, `private`, `unsupported` or `challenge`.
     pub kind: String,
     pub message: String,
 }
@@ -581,7 +582,14 @@ impl From<VideoError> for VideoErrorView {
             VideoError::Drm => "drm",
             VideoError::Tools(_) => "tools_missing",
             VideoError::Refused(_) => "refused",
-            VideoError::Tool(_) => "tool",
+            VideoError::Tool(_) => match e.problem() {
+                Some(ToolProblem::NoFormats) => "no_formats",
+                Some(ToolProblem::SignIn) => "sign_in",
+                Some(ToolProblem::Private) => "private",
+                Some(ToolProblem::Unsupported) => "unsupported",
+                Some(ToolProblem::Challenge) => "challenge",
+                None => "tool",
+            },
             VideoError::Output(_) => "output",
             VideoError::Stopped => "stopped",
             VideoError::Io(_) => "io",
@@ -590,6 +598,38 @@ impl From<VideoError> for VideoErrorView {
             kind: kind.into(),
             message: e.to_string(),
         }
+    }
+}
+
+impl VideoErrorView {
+    /// What the list says of it, in `lang`: a sentence, and yt-dlp's own
+    /// words after it when no sentence says what it comes to.
+    fn text(&self, lang: zajil_core::settings::Language) -> String {
+        let lang = match lang {
+            zajil_core::settings::Language::Ar => zajil_i18n::Lang::Ar,
+            zajil_core::settings::Language::En => zajil_i18n::Lang::En,
+        };
+        let localizer = zajil_i18n::Localizer::new(lang);
+        let key = match self.kind.as_str() {
+            "drm" => "video-drm",
+            "tools_missing" => "video-tools-missing",
+            "no_formats" => "video-error-no_formats",
+            "sign_in" => "video-error-sign_in",
+            "private" => "video-error-private",
+            "unsupported" => "video-error-unsupported",
+            "challenge" => "video-error-challenge",
+            _ => {
+                return localizer
+                    .text(
+                        "video-error-other-details",
+                        &[("details", zajil_i18n::Arg::Text(&self.message))],
+                    )
+                    .unwrap_or_else(|_| self.message.clone());
+            }
+        };
+        localizer
+            .text(key, &[])
+            .unwrap_or_else(|_| self.message.clone())
     }
 }
 
@@ -787,6 +827,12 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         state.downloads.lock().unwrap().remove(&id);
         state.told.lock().unwrap().remove(&id);
         let result = result.map_err(VideoErrorView::from);
+        let lang = handle
+            .state::<crate::App>()
+            .settings
+            .load()
+            .map(|s| s.language)
+            .unwrap_or_default();
         with_row(&state, id, |row| match &result {
             Ok(file) => {
                 row.status = StatusView::Done;
@@ -800,7 +846,7 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
             }
             Err(e) => {
                 row.status = StatusView::Failed;
-                row.error = Some(e.message.clone());
+                row.error = Some(e.text(lang));
             }
         });
         save_rows(&handle.state::<crate::App>(), &state);
@@ -1022,6 +1068,32 @@ mod tests {
                 video: "137".into(),
                 audio: "140".into()
             }
+        );
+    }
+
+    /// A failed video says in the list what it comes to, in the user's
+    /// language; yt-dlp's words follow only when no sentence names it.
+    #[test]
+    fn a_failure_is_told_in_the_user_s_language() {
+        use zajil_core::settings::Language;
+        let known = VideoErrorView::from(VideoError::Tool(
+            "[youtube] abc: Sign in to confirm your age".into(),
+        ));
+        assert_eq!(known.kind, "sign_in");
+        let text = known.text(Language::Ar);
+        assert!(text.contains("تسجيل الدخول"), "{text}");
+        assert!(!text.contains("Sign in"), "{text}");
+        let other = VideoErrorView::from(VideoError::Tool("HTTP Error 500".into()));
+        assert_eq!(other.kind, "tool");
+        let text = other.text(Language::Ar);
+        assert!(
+            text.contains("تعذّر تحميل هذا الفيديو") && text.contains("HTTP Error 500"),
+            "{text}"
+        );
+        assert!(
+            VideoErrorView::from(VideoError::Drm)
+                .text(Language::En)
+                .contains("protected")
         );
     }
 }

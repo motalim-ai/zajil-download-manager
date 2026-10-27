@@ -797,6 +797,8 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("footer-selected", &["number"]),
     // A file format's name (m4a).
     ("video-audio-only", &["format"]),
+    // yt-dlp's own words, when no sentence says what its failure is.
+    ("video-error-other-details", &["details"]),
     ("about-ffmpeg", &["license"]),
     ("about-tool", &["license", "source", "tool", "version"]),
     (
@@ -1371,6 +1373,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "video-audio-only",
         ar: (&[("format", "m4a")], "صوت فقط (m4a)"),
         en: (&[("format", "m4a")], "Sound only (m4a)"),
+    },
+    Whole {
+        key: "video-error-other-details",
+        ar: (
+            &[("details", "yt-dlp: HTTP Error 500")],
+            "تعذّر تحميل هذا الفيديو. التفاصيل: yt-dlp: HTTP Error 500",
+        ),
+        en: (
+            &[("details", "yt-dlp: HTTP Error 500")],
+            "This video could not be downloaded. Details: yt-dlp: HTTP Error 500",
+        ),
     },
     Whole {
         key: "footer-selected",
