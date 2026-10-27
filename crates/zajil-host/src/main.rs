@@ -28,7 +28,8 @@ use std::time::Duration;
 
 use zajil_host::{
     CHANNEL_TIMEOUT, FrameError, FromLink, HostProblem, LINK_ANSWER, MAX_REQUEST, MAX_RESPONSE,
-    PROTOCOL_VERSION, Request, Response, ToExtension, parse, read_frame, write_frame, write_json,
+    PROTOCOL_VERSION, Request, Response, ToExtension, parse, read_frame, starts_zajil, write_frame,
+    write_json,
 };
 use zajil_platform::AppPaths;
 
@@ -203,7 +204,7 @@ fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, (HostProblem, 
     let mut stream = match zajil_platform::ipc::connect(data_dir, Duration::from_millis(500)) {
         Ok(stream) => stream,
         Err(err) if not_running(&err) => {
-            if std::env::var_os("ZAJIL_NO_LAUNCH").is_some() {
+            if std::env::var_os("ZAJIL_NO_LAUNCH").is_some() || !starts_zajil(request) {
                 return Err((NotRunning, err.to_string()));
             }
             start_app(data_dir)?;

@@ -1066,6 +1066,18 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                     );
                     return zajil_host::Response::ok();
                 }
+                // The button showed over a video: its page is read now, in
+                // the background, so its qualities wait for the press.
+                if let zajil_host::Request::PeekVideo {
+                    page,
+                    media,
+                    cookies,
+                    ..
+                } = &request
+                {
+                    video::read_ahead(&handle, page.clone(), media.clone(), cookies.clone());
+                    return zajil_host::Response::ok();
+                }
                 // The last private window closed: its videos leave the list
                 // too (the queues' downloads go below).
                 if let zajil_host::Request::PrivateClosed { .. } = &request {
@@ -1875,7 +1887,9 @@ fn from_extension_with(
         }
         // Video downloads (M6) are not in the program yet: the extension
         // is told so, in the user's language, and nothing else happens.
-        zajil_host::Request::Video { .. } => zajil_host::Response::refused(video_soon(lang)),
+        zajil_host::Request::Video { .. } | zajil_host::Request::PeekVideo { .. } => {
+            zajil_host::Response::refused(video_soon(lang))
+        }
         zajil_host::Request::PrivateClosed { .. } => match discard_private(store) {
             Ok(()) => zajil_host::Response::ok(),
             Err(err) => zajil_host::Response::refused(err.to_string()),

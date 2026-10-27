@@ -63,6 +63,92 @@ pub struct VideoState {
     /// When each running one last told the list (at most four times a
     /// second, as the queues' downloads).
     told: Mutex<HashMap<u64, Instant>>,
+    /// The videos read ahead, while the pointer was on them.
+    ahead: Mutex<Aheads>,
+}
+
+/// How long a video read ahead is kept (owner, 2026-10-28): in memory
+/// only, never written anywhere.
+const AHEAD_FOR: Duration = Duration::from_secs(10 * 60);
+/// At most this many are read ahead at once; another one meanwhile is not
+/// (yt-dlp solving YouTube's JavaScript takes seconds of a core each).
+const AHEAD_RUNNING: usize = 2;
+/// At most this many are kept; the oldest goes first.
+const AHEAD_KEPT: usize = 20;
+
+/// A read ahead: none while it runs, then what it found (none if it
+/// failed: the click asks again).
+type AheadRead = tokio::sync::watch::Receiver<Option<Option<zajil_core::video::Sent>>>;
+type AheadDone = tokio::sync::watch::Sender<Option<Option<zajil_core::video::Sent>>>;
+
+/// The videos read ahead (owner, 2026-10-28, as IDM): when the extension's
+/// button shows over a video, its page is read in the background once, so
+/// its qualities are there when the button is pressed. Never from a
+/// private window (the extension sends none, and the host refuses them).
+#[derive(Default)]
+struct Aheads(HashMap<String, Ahead>);
+
+struct Ahead {
+    at: Instant,
+    media: Option<String>,
+    cookies: bool,
+    read: AheadRead,
+}
+
+impl Aheads {
+    fn forget_old(&mut self, now: Instant) {
+        self.0
+            .retain(|_, a| now.saturating_duration_since(a.at) < AHEAD_FOR);
+    }
+
+    /// Notes a read of `page` and returns where to put what it found;
+    /// none when it was read in the last ten minutes, or is being read,
+    /// or [`AHEAD_RUNNING`] are running.
+    fn begin(
+        &mut self,
+        page: &str,
+        media: Option<&str>,
+        cookies: bool,
+        now: Instant,
+    ) -> Option<AheadDone> {
+        self.forget_old(now);
+        let running = self.0.values().filter(|a| a.read.borrow().is_none());
+        if self.0.contains_key(page) || running.count() >= AHEAD_RUNNING {
+            return None;
+        }
+        if self.0.len() >= AHEAD_KEPT {
+            let oldest = self.0.iter().min_by_key(|(_, a)| a.at);
+            if let Some(oldest) = oldest.map(|(page, _)| page.clone()) {
+                self.0.remove(&oldest);
+            }
+        }
+        let (done, read) = tokio::sync::watch::channel(None);
+        let ahead = Ahead {
+            at: now,
+            media: media.map(str::to_owned),
+            cookies,
+            read,
+        };
+        self.0.insert(page.to_owned(), ahead);
+        Some(done)
+    }
+
+    /// The read of `page` the button's press can take: one of the last
+    /// ten minutes, of the same video, with cookies if the press has some
+    /// and without if not (signed in or not, yt-dlp finds other formats).
+    fn find(
+        &mut self,
+        page: &str,
+        media: Option<&str>,
+        cookies: bool,
+        now: Instant,
+    ) -> Option<AheadRead> {
+        self.forget_old(now);
+        self.0
+            .get(page)
+            .filter(|a| a.media.as_deref() == media && a.cookies == cookies)
+            .map(|a| a.read.clone())
+    }
 }
 
 /// At most this many video downloads run at once; the others wait in the
@@ -897,10 +983,29 @@ pub async fn video_probe(
     }
     let cookies = state.cookies.lock().unwrap().get(&url).cloned();
     let media = state.media.lock().unwrap().get(&url).cloned();
-    let sent = runner(&app)
-        .await
-        .probe_sent(&url, media.as_deref(), cookies.as_deref(), &stop)
-        .await?;
+    // Read ahead while the pointer was on it: taken, or waited for.
+    let ahead =
+        state
+            .ahead
+            .lock()
+            .unwrap()
+            .find(&url, media.as_deref(), cookies.is_some(), Instant::now());
+    let read = match ahead {
+        Some(mut ahead) => tokio::select! {
+            read = ahead.wait_for(Option::is_some) => read.ok().and_then(|r| r.clone().flatten()),
+            () = stop.requested() => return Err(VideoError::Stopped.into()),
+        },
+        None => None,
+    };
+    let sent = match read {
+        Some(sent) => sent,
+        None => {
+            runner(&app)
+                .await
+                .probe_sent(&url, media.as_deref(), cookies.as_deref(), &stop)
+                .await?
+        }
+    };
     state.probing.lock().unwrap().take();
     if !sent.cookies_kept {
         state.cookies.lock().unwrap().remove(&url);
@@ -942,6 +1047,35 @@ pub async fn video_probe(
                 .collect(),
         },
     })
+}
+
+/// The extension's button showed over a video: its page is read now, in
+/// the background, unless it was read in the last ten minutes ([`Aheads`]).
+/// Nothing is shown, and nothing of it is kept but in memory.
+pub fn read_ahead<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    page: String,
+    media: Option<String>,
+    cookies: Option<String>,
+) {
+    let begun = handle.state::<VideoState>().ahead.lock().unwrap().begin(
+        &page,
+        media.as_deref(),
+        cookies.is_some(),
+        Instant::now(),
+    );
+    let Some(done) = begun else {
+        return;
+    };
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let runner = runner(&handle.state::<crate::App>()).await;
+        let read = runner
+            .probe_sent(&page, media.as_deref(), cookies.as_deref(), &Stop::new())
+            .await
+            .ok();
+        let _ = done.send(Some(read));
+    });
 }
 
 /// Asks `url`'s page, with its cookies from the browser if any, else
@@ -1281,6 +1415,99 @@ mod tests {
         );
         // Nothing running: nothing to stop.
         give_up(&state);
+    }
+
+    fn sent(page: &str) -> zajil_core::video::Sent {
+        zajil_core::video::Sent {
+            probed: Probed::Playlist {
+                title: String::new(),
+                entries: Vec::new(),
+            },
+            url: page.into(),
+            cookies_kept: false,
+        }
+    }
+
+    /// A video is read ahead once in ten minutes, two at a time at most,
+    /// and twenty are kept at most, the oldest going first (owner,
+    /// 2026-10-28).
+    #[test]
+    fn a_video_is_read_ahead_once_in_ten_minutes_and_two_at_a_time() {
+        let mut aheads = Aheads::default();
+        let now = Instant::now();
+        let a = aheads.begin("https://a.example/", None, true, now).unwrap();
+        assert!(
+            aheads
+                .begin("https://a.example/", None, true, now)
+                .is_none()
+        );
+        let b = aheads
+            .begin("https://b.example/", None, false, now)
+            .unwrap();
+        // Two run: a third waits for a later pass of the pointer.
+        assert!(
+            aheads
+                .begin("https://c.example/", None, false, now)
+                .is_none()
+        );
+        a.send(Some(None)).unwrap();
+        assert!(
+            aheads
+                .begin("https://c.example/", None, false, now)
+                .is_some()
+        );
+        // Read, even if it failed: not again before ten minutes.
+        assert!(
+            aheads
+                .begin("https://a.example/", None, true, now)
+                .is_none()
+        );
+        b.send(Some(Some(sent("https://b.example/")))).unwrap();
+        let later = now + AHEAD_FOR;
+        assert!(
+            aheads
+                .begin("https://a.example/", None, true, later)
+                .is_some()
+        );
+        assert!(!aheads.0.contains_key("https://b.example/"));
+
+        let mut aheads = Aheads::default();
+        for i in 0..=AHEAD_KEPT {
+            let at = now + Duration::from_secs(i as u64);
+            let done = aheads.begin(&format!("https://{i}.example/"), None, false, at);
+            done.unwrap().send(Some(None)).unwrap();
+        }
+        assert_eq!(aheads.0.len(), AHEAD_KEPT);
+        assert!(!aheads.0.contains_key("https://0.example/"));
+    }
+
+    /// The press takes a read of the same video, made with cookies if it
+    /// has some and without if not, from the last ten minutes; it waits for
+    /// one still running.
+    #[test]
+    fn the_press_takes_the_read_of_its_own_video_or_waits_for_it() {
+        let mut aheads = Aheads::default();
+        let now = Instant::now();
+        let page = "https://www.youtube.com/watch?v=x";
+        let media = Some("https://cdn.example/v.mp4");
+        let done = aheads.begin(page, media, true, now).unwrap();
+        assert!(aheads.find(page, media, false, now).is_none());
+        assert!(aheads.find(page, None, true, now).is_none());
+        assert!(
+            aheads
+                .find("https://www.youtube.com/watch?v=y", media, true, now)
+                .is_none()
+        );
+        let mut read = aheads.find(page, media, true, now).unwrap();
+        let waited = tauri::async_runtime::block_on(async move {
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                done.send(Some(Some(sent(page)))).unwrap();
+            });
+            read.wait_for(Option::is_some).await.unwrap().clone()
+        });
+        assert_eq!(waited, Some(Some(sent(page))));
+        assert!(aheads.find(page, media, true, now + AHEAD_FOR).is_none());
     }
 
     /// «About» names each tool's source: its pinned release, or its

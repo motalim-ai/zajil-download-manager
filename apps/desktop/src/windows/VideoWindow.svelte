@@ -94,14 +94,17 @@
     step = { kind: "video", info, list };
   }
 
-  /** The tools first (asking once), then the page. */
+  /** The tools (asking once), then the page: asked while they are checked,
+   * so a page read ahead is shown without waiting for that check. */
   async function begin() {
+    const asked = api.videoProbe(url);
+    asked.catch(() => {});
     const tools = await api.videoToolsStatus().catch(() => []);
     if (tools.some((t) => !t.installed)) {
       step = { kind: "consent", tools };
       return;
     }
-    await probe();
+    await probe(asked);
   }
 
   async function install() {
@@ -116,10 +119,10 @@
     }
   }
 
-  async function probe() {
+  async function probe(asked?: Promise<VideoInfoView>) {
     step = { kind: "probing" };
     try {
-      const info = await api.videoProbe(url);
+      const info = await (asked ?? api.videoProbe(url));
       if (info.kind === "video") {
         const list = options(info.formats, info.best);
         pick = picked(list, info.best);

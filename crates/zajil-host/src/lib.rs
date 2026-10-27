@@ -120,6 +120,19 @@ pub enum Request {
         #[serde(default)]
         private: bool,
     },
+    /// The extension's video button showed over a video (owner,
+    /// 2026-10-28, as IDM): Zajil reads its page now, in the background,
+    /// so its qualities are there when the button is pressed. Never from a
+    /// private window, and it never starts Zajil.
+    PeekVideo {
+        protocol_version: u32,
+        /// As in [`Request::Video`].
+        page: String,
+        #[serde(default)]
+        media: Option<String>,
+        #[serde(default)]
+        cookies: Option<String>,
+    },
     /// The last private window closed (review of #91): Zajil takes every
     /// private window's download out of its queues and deletes their part
     /// and state files.
@@ -445,6 +458,24 @@ fn check_cookies(cookies: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn check_video(page: &str, media: Option<&str>, cookies: Option<&str>) -> Result<(), String> {
+    check_url(page, "page")?;
+    if let Some(media) = media {
+        check_url(media, "video URL")?;
+    }
+    if let Some(cookies) = cookies {
+        check_cookies(cookies)?;
+    }
+    Ok(())
+}
+
+/// Whether the host starts Zajil for `request` when it is not running: not
+/// for a video read ahead, which only the pointer passing over a video
+/// asked for.
+pub fn starts_zajil(request: &Request) -> bool {
+    !matches!(request, Request::PeekVideo { .. })
+}
+
 fn check(request: &Request) -> Result<(), String> {
     let version = match request {
         Request::Ping { protocol_version }
@@ -460,6 +491,9 @@ fn check(request: &Request) -> Result<(), String> {
             protocol_version, ..
         }
         | Request::Video {
+            protocol_version, ..
+        }
+        | Request::PeekVideo {
             protocol_version, ..
         } => *protocol_version,
     };
@@ -482,14 +516,14 @@ fn check(request: &Request) -> Result<(), String> {
             if *private && cookies.is_some() {
                 return Err("a private window's video comes without cookies".into());
             }
-            check_url(page, "page")?;
-            if let Some(media) = media {
-                check_url(media, "video URL")?;
-            }
-            if let Some(cookies) = cookies {
-                check_cookies(cookies)?;
-            }
+            check_video(page, media.as_deref(), cookies.as_deref())?;
         }
+        Request::PeekVideo {
+            page,
+            media,
+            cookies,
+            ..
+        } => check_video(page, media.as_deref(), cookies.as_deref())?,
         _ => {}
     }
     if let Request::Download {
@@ -911,6 +945,55 @@ mod tests {
                     r#"{{"type":"download","protocol_version":1,"url":"https://example.com/a","cookies":"{long_cookies}"}}"#
                 ),
                 "longer than",
+            ),
+        ] {
+            let err = parse(message.as_bytes()).expect_err(message);
+            assert!(err.contains(why), "{message}: {err}");
+        }
+    }
+
+    /// A video read ahead is checked as a video, has no private window's
+    /// flag (none is ever sent), and never starts Zajil.
+    #[test]
+    fn a_video_read_ahead_is_checked_and_never_starts_zajil() {
+        let peek = parse(
+            br#"{"type":"peek_video","protocol_version":1,"page":"https://example.com/watch","media":"https://cdn.example.com/v.mp4","cookies":"a=1"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            peek,
+            Request::PeekVideo {
+                protocol_version: 1,
+                page: "https://example.com/watch".into(),
+                media: Some("https://cdn.example.com/v.mp4".into()),
+                cookies: Some("a=1".into()),
+            }
+        );
+        assert!(!starts_zajil(&peek));
+        let video =
+            parse(br#"{"type":"video","protocol_version":1,"page":"https://example.com/"}"#)
+                .unwrap();
+        assert!(starts_zajil(&video));
+        for (message, why) in [
+            (
+                r#"{"type":"peek_video","protocol_version":1,"page":"file:///etc/passwd"}"#,
+                "page is refused",
+            ),
+            (
+                r#"{"type":"peek_video","protocol_version":1,"page":"https://example.com/","media":"blob:https://example.com/1"}"#,
+                "video URL is refused",
+            ),
+            (
+                r#"{"type":"peek_video","protocol_version":1,"page":"https://example.com/","cookies":"a=1\nX: 1"}"#,
+                "visible ASCII",
+            ),
+            (
+                r#"{"type":"peek_video","protocol_version":1,"page":"https://example.com/","private":true}"#,
+                "unknown field",
+            ),
+            (
+                r#"{"type":"peek_video","protocol_version":2,"page":"https://example.com/"}"#,
+                "protocol version 2",
             ),
         ] {
             let err = parse(message.as_bytes()).expect_err(message);
