@@ -8,6 +8,7 @@
   import { categoryName as nameOf } from "../categoryName";
   import { probeSentence, sizeText } from "../probeText";
   import { chosenFolder, savePath, typedPath } from "../addFolder";
+  import { fitWindow } from "../fitWindow";
   import type { ProbeView } from "../bindings/ProbeView";
   import type { AddRequest } from "../bindings/AddRequest";
   import type { QueueView } from "../bindings/QueueView";
@@ -168,7 +169,7 @@
 <svelte:window {onkeydown} />
 <svelte:document onpointerdown={(e) => later && !(e.target as Element).closest?.(".split") && (later = false)} />
 
-<main class="info" bind:this={main} aria-labelledby="add-title">
+<main class="info" bind:this={main} use:fitWindow aria-labelledby="add-title">
   <h1 id="add-title" class="visually-hidden">{locale.t("info-title")}</h1>
   <!-- What the server said, in one line (as IDM's). -->
   <div class="about" aria-live="polite" aria-label={locale.t("add-about-file")}>
@@ -311,12 +312,11 @@
 </main>
 
 <style>
+  /* At its own height: the window is made as tall (fitWindow). */
   .info {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    height: 100%;
-    overflow: auto;
     padding: 10px 16px 12px;
     background: var(--surface);
     box-sizing: border-box;
@@ -479,7 +479,6 @@
     display: flex;
     gap: 10px;
     align-items: center;
-    margin-top: auto;
   }
   .started,
   .check {

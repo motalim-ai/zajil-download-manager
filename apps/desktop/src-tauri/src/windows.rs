@@ -26,9 +26,11 @@ pub const PROGRESS_CAPABILITY: &str = include_str!("../runtime-capabilities/prog
 pub const LINK: &str = "add-link";
 pub const INFO: &str = "add-info";
 
-/// The «Add a link» window's size, in logical pixels.
+/// The «Add a link» window's size, in logical pixels: its width is also
+/// its least; its height only until the page makes it as tall as what it
+/// shows ([`fit_window`]).
 pub const LINK_SIZE: (f64, f64) = (560.0, 230.0);
-/// The «Download file info» window's.
+/// The «Download file info» window's, the same way.
 pub const INFO_SIZE: (f64, f64) = (560.0, 260.0);
 
 /// A progress window's size with its details shown (design window 4).
@@ -216,6 +218,47 @@ pub async fn open_add_info<R: tauri::Runtime>(
         .unwrap()
         .set_info(INFO, InfoStart { url, offer: None });
     open(&handle, INFO, &title, INFO_SIZE).map_err(|e| e.to_string())
+}
+
+/// Makes the add window that asks exactly as tall as what its page shows
+/// (`height`, in logical pixels, measured by the page whenever it
+/// changes), and never shorter: the owner's notes on 1.0, the content was
+/// cut at the top and a scroll bar came at a fixed 260. Its width stays
+/// the user's. In a scene, the main window that draws it fits it the same
+/// way, without the least size.
+#[tauri::command]
+pub async fn fit_window<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    height: f64,
+) -> Result<(), String> {
+    if !(height.is_finite() && height > 0.0) {
+        return Err(format!("not a height: {height}"));
+    }
+    let label = window.label();
+    let least = if label == LINK {
+        Some(LINK_SIZE.0)
+    } else if label.starts_with(INFO) {
+        Some(INFO_SIZE.0)
+    } else if label == "main" && crate::in_scene(window.app_handle()) {
+        None
+    } else {
+        return Err("not an add window".into());
+    };
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let width = window
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale)
+        .width;
+    // The least first: a window going shorter is not held by the old one.
+    if let Some(least) = least {
+        window
+            .set_min_size(Some(tauri::LogicalSize::new(least, height)))
+            .map_err(|e| e.to_string())?;
+    }
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|e| e.to_string())
 }
 
 /// What [`open_add_info`] answers while «Download file info» is open: the

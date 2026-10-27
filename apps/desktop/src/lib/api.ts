@@ -119,6 +119,9 @@ export const api = {
   openProgress: (id: number, title: string) => invoke<void>("open_progress", { id, title }),
   /** A download's own speed limit, bytes per second; `null`: none. */
   setLimit: (id: number, limit: number | null) => invoke<void>("set_limit", { id, limit }),
+  /** The add window that asks becomes `height` tall (logical pixels), and
+   * no shorter. */
+  fitWindow: (height: number) => invoke<void>("fit_window", { height }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

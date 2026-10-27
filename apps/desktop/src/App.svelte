@@ -814,6 +814,40 @@
       await settle();
       languageSwitch = { before, after: seen() };
     }
+    // The add windows are as tall as what they show (the owner's notes
+    // on 1.0): once the window has taken the content's height (5 s at
+    // most; not at once on Linux and Windows), nothing is cut, at the
+    // top, the bottom or the sides, and nothing scrolls.
+    let fit: unknown = undefined;
+    const content = screen === "add" || screen === "link" ? document.querySelector<HTMLElement>("main.info, main.link") : null;
+    if (content) {
+      const bottom = () => Math.ceil(content.getBoundingClientRect().bottom);
+      for (let i = 0; i < 50 && Math.abs(window.innerHeight - bottom()) > 1; i++) await new Promise((r) => setTimeout(r, 100));
+      await settle();
+      const shown = (el: Element) => el.getClientRects().length > 0 && !el.closest(".visually-hidden");
+      const name = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${el.classList.length ? `.${[...el.classList].join(".")}` : ""}`;
+      const all = [...content.querySelectorAll("*")].filter(shown);
+      // What a box inside clips on purpose (a long link or path ends in
+      // its box) is that box's: the box itself is checked.
+      const clippedInside = (el: Element) => {
+        for (let p = el.parentElement; p && p !== content; p = p.parentElement) {
+          const style = getComputedStyle(p);
+          if (style.overflowX !== "visible" || style.overflowY !== "visible") return true;
+        }
+        return false;
+      };
+      const cut = all
+        .filter((el) => !clippedInside(el))
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.top < -0.5 || r.left < -0.5 || r.bottom > window.innerHeight + 0.5 || r.right > window.innerWidth + 0.5;
+        })
+        .map(name);
+      const scrolls = [document.scrollingElement, content, ...all]
+        .filter((el): el is Element => el !== null && el.scrollHeight > el.clientHeight + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowY)))
+        .map(name);
+      fit = { content: bottom(), window: window.innerHeight, cut, scrolls };
+    }
     if (screen !== "names") {
       // Automatic accessibility check of what is on screen (axe-core,
       // a test-only dependency loaded only in this build).
@@ -829,7 +863,7 @@
       const { checkNames } = await import("./uitest/names");
       const known = [...snapshot.downloads.map((d) => d.name), ...(windowScene ? [windowScene.complete.name] : [])];
       const names = checkNames(document.body, known);
-      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch, names });
+      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch, names, fit });
     }
     return true;
   }

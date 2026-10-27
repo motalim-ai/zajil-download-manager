@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import { locale } from "../i18n.svelte";
+  import { fitWindow } from "../fitWindow";
 
   // «Add a link» (M5.5, the design of #83, window 2): a window of its own,
   // its box filled from the clipboard when a link was copied, and saying
@@ -46,7 +47,7 @@
 
 <svelte:window {onkeydown} />
 
-<main class="link" aria-labelledby="addlink-title">
+<main class="link" use:fitWindow aria-labelledby="addlink-title">
   <h1 id="addlink-title" class="visually-hidden">{locale.t("addlink-title")}</h1>
   <form onsubmit={submit}>
     <div class="row">
@@ -81,8 +82,8 @@
 </main>
 
 <style>
+  /* At its own height: the window is made as tall (fitWindow). */
   .link {
-    height: 100%;
     padding: 22px 24px 18px;
     background: var(--surface);
     box-sizing: border-box;
@@ -90,7 +91,6 @@
   form {
     display: flex;
     flex-direction: column;
-    height: 100%;
   }
   .row {
     display: grid;
@@ -147,7 +147,6 @@
   .actions {
     display: flex;
     gap: 8px;
-    margin-top: auto;
     padding-top: 16px;
   }
 </style>

@@ -14,7 +14,9 @@
 // Each scenario also carries an axe-core check of the page: a critical or
 // serious problem fails the run. And every file name a scene shows must
 // be drawn as the FileName component draws it (M5.5: mixed names right
-// in every window); the views below must show at least one.
+// in every window); the views below must show at least one. The add
+// windows («add», «link») must be as tall as their content, with nothing
+// cut and nothing scrolling.
 //
 // macOS: screencapture (needs the Screen Recording permission); Linux:
 // ImageMagick `import` on the X display (Xvfb in CI); Windows: .NET
@@ -109,7 +111,7 @@ for (const scenario of scenarios) {
   else {
     // Let the window manager finish drawing the frame.
     await sleep(800);
-    const { window, accessibility = [], languageSwitch, names } = JSON.parse(readFileSync(report, "utf8"));
+    const { window, accessibility = [], languageSwitch, names, fit } = JSON.parse(readFileSync(report, "utf8"));
     // Any critical or serious accessibility problem fails (M4 criterion);
     // the others are listed.
     for (const v of accessibility) {
@@ -123,6 +125,18 @@ for (const scenario of scenarios) {
       if (!names) fail("the page did not say which file names it drew");
       else if ((SHOW_NAMES.includes(view) || SHOW_NAMES.includes(`${view}-${theme}`)) && names.drawn === 0) fail("no mixed file name shown, so none was checked");
       else console.log(`${scenario}: ${names.drawn} mixed file names drawn as FileName draws them`);
+    }
+    // The add windows: as tall as what they show, nothing cut, nothing
+    // scrolling (the owner's notes on 1.0).
+    if (/^(add|link)-/.test(scenario)) {
+      if (!fit) fail("the page did not say whether its content fits");
+      else {
+        if (Math.abs(fit.window - fit.content) > 1) fail(`the window is ${fit.window} tall, its content ${fit.content}`);
+        for (const el of fit.cut) fail(`cut by the window: ${el}`);
+        for (const el of fit.scrolls) fail(`scrolls: ${el}`);
+        if (Math.abs(fit.window - fit.content) <= 1 && fit.cut.length === 0 && fit.scrolls.length === 0)
+          console.log(`${scenario}: the window is as tall as its content (${fit.content}), nothing cut or scrolling`);
+      }
     }
     if (scenario.startsWith("switch-")) {
       const { before, after } = languageSwitch ?? {};
