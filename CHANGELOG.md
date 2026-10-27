@@ -35,6 +35,7 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 - fix(desktop): the Mac menu works from any window, a moved file says so, Ctrl+, on Arabic (#98) (#239)
 - fix(desktop): on macOS, one Zajil per user through its own channel, not a socket in /tmp (#60) (#243)
 - fix(desktop): «Batch download» and «Site grabber» fit their window without a page scroll (#245)
+- fix(desktop): the start line says the release's version, not 0.0.0 (#248) (#250)
 
 ### Documentation
 
@@ -47,6 +48,7 @@ The first published release: 0.2.0 was a test draft that was never published. Si
 - test(core): the site-wait stop test stops the slow download once it has written (#224) (#225)
 - test(desktop): every window in the CI screenshots, with axe and its file names checked (M5.5) (#226)
 - test(desktop): the session-end test says how long each window took to answer (#244) (#246)
+- test(grab): the max-total test's last check is only that the server did not send it all (#221) (#249)
 
 ### CI
 
