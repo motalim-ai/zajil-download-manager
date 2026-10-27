@@ -66,6 +66,9 @@ function show(settings) {
   $("browser-keys").value = keys.browser;
   $("capture").checked = settings.capture;
   $("extensions").value = settings.extensions.join(" ");
+  $("big-files").checked = settings.bigFiles;
+  $("big-file-mb").value = String(settings.bigFileMb);
+  $("big-file-mb").disabled = !settings.bigFiles;
   $("sites").value = settings.excludedSites.join("\n");
 }
 
@@ -74,11 +77,19 @@ const words = (text) => text.split(/[\s,]+/).filter(Boolean);
 /** Sites: one per line (or separated by commas). @param {string} text */
 const lines = (text) => text.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 
+$("big-files").addEventListener("change", () => {
+  $("big-file-mb").disabled = !$("big-files").checked;
+});
+
 $("settings").addEventListener("submit", async (/** @type {Event} */ event) => {
   event.preventDefault();
   await save(api, {
     capture: $("capture").checked,
     extensions: words($("extensions").value),
+    bigFiles: $("big-files").checked,
+    // Checked by the form (a whole number from 1 to 100,000); a wrong one
+    // falls back to the default when saved.
+    bigFileMb: Number($("big-file-mb").value),
     excludedSites: lines($("sites").value),
     useKeys: $("use-keys").checked,
     // This system's default is kept as "the default" (null), so a later

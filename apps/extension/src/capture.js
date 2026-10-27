@@ -61,11 +61,22 @@ function onSite(host, site) {
   return host === site || host.endsWith(`.${site}`);
 }
 
+/** The download's size in bytes, when the browser knows it (Chrome and
+ * Firefox say 0 or -1 when they do not).
+ * @param {{ totalBytes?: number, fileSize?: number }} item */
+export function sizeOf(item) {
+  for (const size of [item.totalBytes, item.fileSize]) {
+    if (typeof size === "number" && Number.isFinite(size) && size > 0) return size;
+  }
+  return null;
+}
+
 /**
  * Whether a new browser download goes to Zajil: capture is on, it is not a
  * private window's, it is an http(s) download the host would accept, of a
- * listed type, and neither its first URL, its final URL (after redirects)
- * nor the page it came from is on an excluded site.
+ * listed type or (when that is on) larger than the size set, and neither
+ * its first URL, its final URL (after redirects) nor the page it came from
+ * is on an excluded site.
  *
  * @param {any} item a `downloads.DownloadItem`
  * @param {import("./settings.js").Settings} settings
@@ -78,7 +89,9 @@ export function shouldCapture(item, settings, ownId) {
   if (ownId && item.byExtensionId === ownId) return false;
   const url = item.finalUrl || item.url;
   if (!isWeb(url)) return false;
-  if (!settings.extensions.includes(extensionOf(item))) return false;
+  const size = sizeOf(item);
+  const big = settings.bigFiles && size !== null && size > settings.bigFileMb * 1024 * 1024;
+  if (!big && !settings.extensions.includes(extensionOf(item))) return false;
   for (const page of [item.url, item.finalUrl, item.referrer]) {
     if (!page) continue;
     let host;

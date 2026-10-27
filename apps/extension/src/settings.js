@@ -5,17 +5,30 @@
 /** The file types captured by default: Zajil's built-in categories
  * (`zajil_core::category::CategoriesFile::built_in`). */
 export const DEFAULT_EXTENSIONS = [
-  "exe", "msi", "msix", "dmg", "pkg", "deb", "rpm", "appimage", "apk", "flatpak", "iso", "img",
+  "exe", "msi", "msix", "msu", "dmg", "pkg", "deb", "rpm", "appimage", "apk", "flatpak", "iso", "img", "bin",
   "mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "mpg", "mpeg",
-  "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma",
+  "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "ts", "vob", "asf", "qt", "f4v",
+  "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aif", "aiff", "ra",
   "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "epub", "txt", "rtf", "csv",
-  "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst",
+  "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "arj", "lzh", "cab",
+  // The parts of a split RAR, as IDM's R0* and R1*.
+  "r00", "r01", "r02", "r03", "r04", "r05", "r06", "r07", "r08", "r09", "r10", "r11", "r12", "r13", "r14", "r15", "r16", "r17", "r18", "r19",
 ];
+
+/** A file larger than this goes to Zajil whatever its type, by default
+ * (owner's decision, 2026-10-27: on from the start, 5 MB). */
+export const DEFAULT_BIG_FILE_MB = 5;
+/** The largest size the setting takes, in MB. */
+export const MAX_BIG_FILE_MB = 100000;
 
 /**
  * @typedef {object} Settings
  * @property {boolean} capture Downloads of the listed types go to Zajil.
  * @property {string[]} extensions File types captured, lower case, no dot.
+ * @property {boolean} bigFiles A file larger than `bigFileMb` goes to Zajil
+ *   too, whatever its type, when the browser knows its size.
+ * @property {number} bigFileMb That size, in MB of 1,048,576 bytes (as Zajil shows sizes), a whole
+ *   number from 1 to `MAX_BIG_FILE_MB`.
  * @property {string[]} excludedSites Sites whose downloads stay in the
  *   browser: a host and its subdomains.
  * @property {boolean} useKeys The keys of a click are in use: off by
@@ -57,12 +70,24 @@ export function clickKeys(settings, mac) {
   return { send, browser: browser === send ? "off" : browser };
 }
 
+/** @param {unknown} value @returns {number | null} */
+const sizeOrNull = (value) => (Number.isInteger(value) && /** @type {number} */ (value) >= 1 && /** @type {number} */ (value) <= MAX_BIG_FILE_MB ? /** @type {number} */ (value) : null);
+
 /** @param {unknown} value @returns {string | null} */
 const keysOrNull = (value) => (typeof value === "string" && KEY_CHOICES.includes(value) ? value : null);
 
 /** @returns {Settings} */
 export function defaults() {
-  return { capture: true, extensions: [...DEFAULT_EXTENSIONS], excludedSites: [], useKeys: false, sendKeys: null, browserKeys: null };
+  return {
+    capture: true,
+    extensions: [...DEFAULT_EXTENSIONS],
+    bigFiles: true,
+    bigFileMb: DEFAULT_BIG_FILE_MB,
+    excludedSites: [],
+    useKeys: false,
+    sendKeys: null,
+    browserKeys: null,
+  };
 }
 
 /**
@@ -76,6 +101,8 @@ export async function load(browserApi) {
   return {
     capture: typeof stored.capture === "boolean" ? stored.capture : base.capture,
     extensions: Array.isArray(stored.extensions) ? normalizeExtensions(stored.extensions) : base.extensions,
+    bigFiles: typeof stored.bigFiles === "boolean" ? stored.bigFiles : base.bigFiles,
+    bigFileMb: sizeOrNull(stored.bigFileMb) ?? base.bigFileMb,
     excludedSites: Array.isArray(stored.excludedSites) ? normalizeSites(stored.excludedSites) : base.excludedSites,
     useKeys: stored.useKeys === true,
     sendKeys: keysOrNull(stored.sendKeys),
@@ -92,6 +119,8 @@ export async function save(browserApi, settings) {
     settings: {
       capture: settings.capture,
       extensions: normalizeExtensions(settings.extensions),
+      bigFiles: settings.bigFiles === true,
+      bigFileMb: sizeOrNull(settings.bigFileMb) ?? DEFAULT_BIG_FILE_MB,
       excludedSites: normalizeSites(settings.excludedSites),
       useKeys: settings.useKeys === true,
       sendKeys: keysOrNull(settings.sendKeys),

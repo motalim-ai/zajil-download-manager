@@ -62,6 +62,24 @@ select {
   gap: 8px;
   align-items: center;
 }
+.size-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.size-row .choice {
+  margin-top: 0;
+}
+.size-row input[type="number"] {
+  width: 7em;
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: inherit;
+}
 .hint {
   margin: 0;
   color: var(--faint);

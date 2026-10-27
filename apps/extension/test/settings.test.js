@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_EXTENSIONS, KEY_CHOICES, clickKeys, defaultKeys, defaults, isMac, load, normalizeExtensions, normalizeSites, save } from "../src/settings.js";
+import { DEFAULT_BIG_FILE_MB, DEFAULT_EXTENSIONS, KEY_CHOICES, MAX_BIG_FILE_MB, clickKeys, defaultKeys, defaults, isMac, load, normalizeExtensions, normalizeSites, save } from "../src/settings.js";
 import { readFileSync } from "node:fs";
 
 function fakeStorage(initial) {
@@ -32,8 +32,23 @@ describe("settings", () => {
   it("are cleaned when saved and when read", async () => {
     const api = fakeStorage();
     await save(api, { capture: false, extensions: [".ZIP", " mp4 ", "", "a b", "zip", "x".repeat(17)], excludedSites: ["https://Example.com/path", "sub.test.", "not a site", "", "example.com"] });
-    expect(await load(api)).toEqual({ capture: false, extensions: ["zip", "mp4"], excludedSites: ["example.com", "sub.test"], useKeys: false, sendKeys: null, browserKeys: null });
+    expect(await load(api)).toEqual({ capture: false, extensions: ["zip", "mp4"], bigFiles: false, bigFileMb: 5, excludedSites: ["example.com", "sub.test"], useKeys: false, sendKeys: null, browserKeys: null });
     expect(await load(fakeStorage({ capture: "yes", extensions: "zip", excludedSites: [42] }))).toEqual({ ...defaults(), excludedSites: [] });
+  });
+
+  it("take any file larger than 5 MB from the start, and keep a size from 1 to 100,000 MB", async () => {
+    expect(defaults()).toMatchObject({ bigFiles: true, bigFileMb: DEFAULT_BIG_FILE_MB });
+    expect(DEFAULT_BIG_FILE_MB).toBe(5);
+    const api = fakeStorage();
+    await save(api, { ...defaults(), bigFiles: false, bigFileMb: 250 });
+    expect(await load(api)).toMatchObject({ bigFiles: false, bigFileMb: 250 });
+    for (const odd of [0, -3, 2.5, MAX_BIG_FILE_MB + 1, NaN, "40", null]) {
+      await save(api, { ...defaults(), bigFileMb: odd });
+      expect((await load(api)).bigFileMb).toBe(DEFAULT_BIG_FILE_MB);
+      expect(await load(fakeStorage({ bigFileMb: odd, bigFiles: "no" }))).toMatchObject({ bigFiles: true, bigFileMb: DEFAULT_BIG_FILE_MB });
+    }
+    await save(api, { ...defaults(), bigFileMb: MAX_BIG_FILE_MB });
+    expect((await load(api)).bigFileMb).toBe(MAX_BIG_FILE_MB);
   });
 
   it("normalize odd entries away", () => {

@@ -149,19 +149,24 @@ impl CategoriesFile {
                 cat(
                     "programs",
                     &[
-                        "exe", "msi", "msix", "dmg", "pkg", "deb", "rpm", "appimage", "apk",
-                        "flatpak", "iso", "img",
+                        "exe", "msi", "msix", "msu", "dmg", "pkg", "deb", "rpm", "appimage", "apk",
+                        "flatpak", "iso", "img", "bin",
                     ],
                 ),
                 cat(
                     "video",
                     &[
                         "mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "mpg", "mpeg",
+                        "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "ts", "vob", "asf", "qt",
+                        "f4v",
                     ],
                 ),
                 cat(
                     "music",
-                    &["mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma"],
+                    &[
+                        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aif", "aiff",
+                        "ra",
+                    ],
                 ),
                 cat(
                     "documents",
@@ -172,7 +177,13 @@ impl CategoriesFile {
                 ),
                 cat(
                     "archives",
-                    &["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst"],
+                    // r00 to r19: the parts of a split RAR, as IDM's R0* and R1*.
+                    &[
+                        "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "arj", "lzh",
+                        "cab", "r00", "r01", "r02", "r03", "r04", "r05", "r06", "r07", "r08",
+                        "r09", "r10", "r11", "r12", "r13", "r14", "r15", "r16", "r17", "r18",
+                        "r19",
+                    ],
                 ),
             ],
             updated_at: now_rfc3339(),

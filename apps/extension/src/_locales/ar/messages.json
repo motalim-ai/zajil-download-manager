@@ -29,6 +29,15 @@
   "optionsExtensionsHint": {
     "message": "امتدادات بلا نقطة، تفصل بينها مسافة."
   },
+  "optionsBigFiles": {
+    "message": "خذ أيضًا أي ملف أكبر من"
+  },
+  "optionsBigFilesUnit": {
+    "message": "ميجابايت"
+  },
+  "optionsBigFilesHint": {
+    "message": "أيًّا كان نوعه، حين يعرف المتصفح حجمه. والمواقع المستثناة تبقى في المتصفح."
+  },
   "optionsSites": {
     "message": "المواقع المستثناة"
   },

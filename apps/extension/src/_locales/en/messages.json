@@ -29,6 +29,15 @@
   "optionsExtensionsHint": {
     "message": "Extensions without the dot, separated by spaces."
   },
+  "optionsBigFiles": {
+    "message": "Also take any file larger than"
+  },
+  "optionsBigFilesUnit": {
+    "message": "MB"
+  },
+  "optionsBigFilesHint": {
+    "message": "Whatever its type, when the browser knows its size. Excluded sites stay in the browser."
+  },
   "optionsSites": {
     "message": "Excluded sites"
   },

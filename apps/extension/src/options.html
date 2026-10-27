@@ -17,6 +17,15 @@
         <label for="extensions" data-i18n="optionsExtensions"></label>
         <p class="hint" id="extensions-hint" data-i18n="optionsExtensionsHint"></p>
         <textarea id="extensions" rows="4" dir="ltr" spellcheck="false" aria-describedby="extensions-hint"></textarea>
+        <div class="size-row">
+          <label class="choice">
+            <input type="checkbox" id="big-files" aria-describedby="big-files-hint" />
+            <span id="big-files-label" data-i18n="optionsBigFiles"></span>
+          </label>
+          <input type="number" id="big-file-mb" min="1" max="100000" step="1" required aria-labelledby="big-files-label big-files-unit" />
+          <span id="big-files-unit" data-i18n="optionsBigFilesUnit"></span>
+        </div>
+        <p class="hint" id="big-files-hint" data-i18n="optionsBigFilesHint"></p>
         <label for="sites" data-i18n="optionsSites"></label>
         <p class="hint" id="sites-hint" data-i18n="optionsSitesHint"></p>
         <textarea id="sites" rows="4" dir="ltr" spellcheck="false" aria-describedby="sites-hint"></textarea>

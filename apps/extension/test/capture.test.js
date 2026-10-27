@@ -72,6 +72,36 @@ describe("which downloads go to Zajil", () => {
     expect(shouldCapture(item(), { ...s, extensions: ["zip"] })).toBe(false);
   });
 
+  it("takes a file of any type larger than the size set, when the browser knows its size", () => {
+    const s = defaults();
+    const MB = 1024 * 1024;
+    const page = { finalUrl: "https://example.com/get?id=3", url: "https://example.com/get?id=3", filename: "" };
+    expect(shouldCapture(item({ ...page, totalBytes: 5 * MB + 1 }), s)).toBe(true);
+    expect(shouldCapture(item({ ...page, fileSize: 40 * MB, totalBytes: 0 }), s)).toBe(true);
+    // At the size or under it, or not known (Chrome 0, Firefox -1): the
+    // type decides, as before.
+    for (const size of [{ totalBytes: 5 * MB }, { totalBytes: 0 }, { totalBytes: -1 }, {}]) {
+      expect(shouldCapture(item({ ...page, ...size }), s), JSON.stringify(size)).toBe(false);
+    }
+    expect(shouldCapture(item({ totalBytes: 10 }), s)).toBe(true);
+    expect(shouldCapture(item({ ...page, totalBytes: 50 * MB }), { ...s, bigFiles: false })).toBe(false);
+    expect(shouldCapture(item({ ...page, totalBytes: 50 * MB }), { ...s, bigFileMb: 100 })).toBe(false);
+    // Every other rule still holds.
+    for (const over of [{ incognito: true }, { state: "complete" }, { finalUrl: "blob:https://example.com/1", url: "blob:https://example.com/1" }]) {
+      expect(shouldCapture(item({ ...page, totalBytes: 50 * MB, ...over }), s), JSON.stringify(over)).toBe(false);
+    }
+    expect(shouldCapture(item({ ...page, totalBytes: 50 * MB }), { ...s, excludedSites: ["example.com"] })).toBe(false);
+    expect(shouldCapture(item({ ...page, totalBytes: 50 * MB }), { ...s, capture: false })).toBe(false);
+  });
+
+  it("captures the new types too: split RAR parts and more video", () => {
+    const s = defaults();
+    for (const name of ["movie.part.r00", "movie.r19", "clip.3gp", "film.rmvb", "stream.m2ts", "update.msu", "firmware.bin", "a.ts"]) {
+      expect(shouldCapture(item({ finalUrl: `https://example.com/${name}` }), s), name).toBe(true);
+    }
+    expect(shouldCapture(item({ finalUrl: "https://example.com/movie.r20" }), s)).toBe(false);
+  });
+
   it("respects excluded sites, for the file and for the page it came from", () => {
     const s = { ...defaults(), excludedSites: ["example.com"] };
     expect(shouldCapture(item(), s)).toBe(false);
