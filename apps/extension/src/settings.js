@@ -7,7 +7,7 @@
 export const DEFAULT_EXTENSIONS = [
   "exe", "msi", "msix", "msu", "dmg", "pkg", "deb", "rpm", "appimage", "apk", "flatpak", "iso", "img", "bin",
   "mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "mpg", "mpeg",
-  "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "ts", "vob", "asf", "qt", "f4v",
+  "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "vob", "asf", "qt", "f4v",
   "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aif", "aiff", "ra",
   "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "epub", "txt", "rtf", "csv",
   "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "arj", "lzh", "cab",

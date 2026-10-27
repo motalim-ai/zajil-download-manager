@@ -157,7 +157,7 @@ impl CategoriesFile {
                     "video",
                     &[
                         "mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v", "mpg", "mpeg",
-                        "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "ts", "vob", "asf", "qt",
+                        "3gp", "3g2", "rmvb", "rm", "ogv", "m2ts", "mts", "vob", "asf", "qt",
                         "f4v",
                     ],
                 ),

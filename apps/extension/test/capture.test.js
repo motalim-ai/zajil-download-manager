@@ -96,10 +96,14 @@ describe("which downloads go to Zajil", () => {
 
   it("captures the new types too: split RAR parts and more video", () => {
     const s = defaults();
-    for (const name of ["movie.part.r00", "movie.r19", "clip.3gp", "film.rmvb", "stream.m2ts", "update.msu", "firmware.bin", "a.ts"]) {
+    for (const name of ["movie.part.r00", "movie.r19", "clip.3gp", "film.rmvb", "stream.m2ts", "update.msu", "firmware.bin"]) {
       expect(shouldCapture(item({ finalUrl: `https://example.com/${name}` }), s), name).toBe(true);
     }
     expect(shouldCapture(item({ finalUrl: "https://example.com/movie.r20" }), s)).toBe(false);
+    // Not `ts` (owner's decision, 2026-10-27: TypeScript files have it too);
+    // a large video with it goes by its size.
+    expect(shouldCapture(item({ finalUrl: "https://example.com/app.ts", totalBytes: 2048 }), s)).toBe(false);
+    expect(shouldCapture(item({ finalUrl: "https://example.com/live.ts", totalBytes: 50 * 1024 * 1024 }), s)).toBe(true);
   });
 
   it("respects excluded sites, for the file and for the page it came from", () => {
