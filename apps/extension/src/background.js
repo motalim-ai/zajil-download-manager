@@ -5,7 +5,7 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely, withDownloadUiHidden } from "./compat.js";
-import { PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
+import { HOST, PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
 import { cookieHeader, cookiesAllowed, otherSite, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
@@ -324,16 +324,20 @@ async function openBehind(url, tab) {
  * "Download video with Zajil" (M6): the video's page goes to Zajil, which
  * shows its formats. The page's cookies go with it when the user allowed
  * them, never from a private window; it is checked before any is read.
+ * From the menu, what came of it is a notification; from the button
+ * (`quiet`), the button says it, so nothing more is shown.
  * @param {any} info @param {any} tab
  * @param {string} [doc] the document that asked (the button's sender), so
  *   only its own playlist goes
+ * @param {boolean} [quiet]
+ * @returns {Promise<import("./capture.js").Result | "not-web">}
  */
-async function sendVideo(info, tab, doc) {
+async function sendVideo(info, tab, doc, quiet = false) {
   const isPrivate = Boolean(tab?.incognito);
   const page = videoMessage(info);
   if (!page) {
-    await notify(t("videoNotWeb"));
-    return;
+    if (!quiet) await notify(t("videoNotWeb"));
+    return "not-web";
   }
   const cookies = isPrivate ? null : await cookieHeader(api, /** @type {string} */ (page.page), tab?.cookieStoreId);
   // The playlist the tab loaded for it (nothing is noted in a private one).
@@ -344,13 +348,83 @@ async function sendVideo(info, tab, doc) {
   const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
   const result = await send(api, message);
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
-  await report(result, "video");
+  if (!quiet) await report(result, "video");
+  return result;
+}
+
+/** How long Zajil's language is kept before zajil-host is asked again. */
+const LANGUAGE_MS = 60_000;
+
+/**
+ * Zajil's own language, "ar" or "en", for the video button (owner's
+ * decision, 2026-10-27): zajil-host says it in its answer to `ping`, from
+ * Zajil's settings. Asked at most once a minute (each ask starts
+ * zajil-host); the browser's language when Zajil does not say.
+ * @returns {Promise<"ar" | "en">}
+ */
+async function zajilLanguage() {
+  const { zajilLanguage: kept } = await api.storage.session.get("zajilLanguage").catch(() => ({}));
+  if ((kept?.lang === "ar" || kept?.lang === "en") && Date.now() - kept.at < LANGUAGE_MS) return kept.lang;
+  /** @type {"ar" | "en" | undefined} */
+  let lang;
+  try {
+    const answer = await api.runtime.sendNativeMessage(HOST, { type: "ping", protocol_version: PROTOCOL_VERSION });
+    if (answer?.language === "ar" || answer?.language === "en") lang = answer.language;
+  } catch {
+    // Zajil is not there: the browser's language.
+  }
+  lang ??= t("lang") === "en" ? "en" : "ar";
+  await api.storage.session.set({ zajilLanguage: { lang, at: Date.now() } }).catch(() => {});
+  return lang;
+}
+
+/** Each language's texts, read once from the extension's own files. */
+const localeTexts = new Map();
+
+/**
+ * The text of `key` in `lang`, from `_locales/<lang>/messages.json`, not
+ * the browser's language (`i18n.getMessage` knows only that one).
+ * @param {"ar" | "en"} lang @param {string} key
+ */
+async function textIn(lang, key) {
+  if (!localeTexts.has(lang)) {
+    const read = fetch(api.runtime.getURL(`_locales/${lang}/messages.json`))
+      .then((r) => r.json())
+      .catch(() => ({}));
+    localeTexts.set(lang, read);
+  }
+  const all = await localeTexts.get(lang);
+  return typeof all?.[key]?.message === "string" ? all[key].message : t(key);
+}
+
+/** The button's texts, in Zajil's language. */
+async function buttonTexts() {
+  const lang = await zajilLanguage();
+  const [button, working, done, failed] = await Promise.all(
+    ["videoButton", "videoButtonWorking", "videoButtonDone", "videoButtonFailed"].map((key) => textIn(lang, key)),
+  );
+  return { lang, texts: { button, working, done, failed } };
+}
+
+/**
+ * What the button says when Zajil did not take the video: Zajil's own
+ * answer when it refused (already in its language), else the extension's
+ * text for it, in Zajil's language.
+ * @param {import("./capture.js").Result | "not-web"} result
+ */
+async function buttonAnswer(result) {
+  if (result !== "not-web" && result.outcome === "taken") return { taken: true };
+  if (result !== "not-web" && result.outcome === "refused" && result.error) return { taken: false, error: result.error.slice(0, 300) };
+  const lang = await zajilLanguage();
+  const key = result === "not-web" ? "videoNotWeb" : TEXTS.video[/** @type {"refused" | "unknown" | "unreachable"} */ (result.outcome)];
+  return { taken: false, error: await textIn(lang, key) };
 }
 
 // The "Download video" button (`video-button.js`) was pressed: the page,
 // its frame and its tab are the browser's word (the sender), never the
-// message's; only the video's address comes from the page.
-api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} */ sender) => {
+// message's; only the video's address comes from the page. The button
+// waits for the answer (`sendResponse`, kept open by returning true).
+api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} */ sender, /** @type {(answer: unknown) => void} */ sendResponse) => {
   if (sender?.id !== api.runtime.id || !sender.tab) return;
   if (message?.type === "click-browser") {
     // Noted at once, before any wait, so its download finds it (review of
@@ -366,6 +440,10 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     void clicked(message.href, sender);
     return;
   }
+  if (message?.type === "video-button-texts") {
+    void buttonTexts().then(sendResponse, () => sendResponse(null));
+    return true;
+  }
   if (message?.type !== "video-button") return;
   const frameId = Number.isSafeInteger(sender.frameId) ? sender.frameId : 0;
   const info = {
@@ -374,7 +452,10 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     srcUrl: typeof message.src === "string" ? message.src : undefined,
     frameId,
   };
-  void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined);
+  void sendVideo(info, sender.tab, typeof sender.documentId === "string" ? sender.documentId : undefined, true)
+    .then(buttonAnswer)
+    .then(sendResponse, () => sendResponse(null));
+  return true;
 });
 
 /**

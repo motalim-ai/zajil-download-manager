@@ -263,6 +263,10 @@ pub struct Response {
     /// Why it was refused or failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Zajil's language, `ar` or `en`, in the answer to a ping only: the
+    /// extension's video button speaks it (owner's decision, 2026-10-27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 impl Response {
@@ -271,6 +275,7 @@ impl Response {
             protocol_version: PROTOCOL_VERSION,
             ok: true,
             error: None,
+            language: None,
         }
     }
 
@@ -279,6 +284,16 @@ impl Response {
             protocol_version: PROTOCOL_VERSION,
             ok: false,
             error: Some(why.into()),
+            language: None,
+        }
+    }
+
+    /// The answer to a ping, with Zajil's language when its settings could
+    /// be read.
+    pub fn pong(language: Option<&str>) -> Self {
+        Response {
+            language: language.map(str::to_owned),
+            ..Response::ok()
         }
     }
 }

@@ -143,6 +143,15 @@
   "videoButton": {
     "message": "نزّل الفيديو"
   },
+  "videoButtonWorking": {
+    "message": "يُرسَل إلى زاجِل…"
+  },
+  "videoButtonDone": {
+    "message": "أُرسل إلى زاجِل"
+  },
+  "videoButtonFailed": {
+    "message": "لم يصل الفيديو إلى زاجِل."
+  },
   "sitesPartly": {
     "message": "جزء من الإذن موجود: كوكيز رابط التحميل تذهب مع تحميله إلى زاجِل، لكن زر «نزّل الفيديو» يحتاج أن تكمل الإذن. ويمكنك سحبه كله."
   },

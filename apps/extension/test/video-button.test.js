@@ -24,22 +24,32 @@ afterAll(async () => {
 
 /** A page with `body`, and the button's script with a fake `chrome` that
  * records what is sent. `open`: the test opens the button's shadow root, to
- * reach the button as no page can.
- * @param {string} body @param {{ open?: boolean }} [how] */
+ * reach the button as no page can. `url`: where the page is. The
+ * background's answers: `window.texts` to the texts asked for (none by
+ * default), `window.press()` to a press (taken by default).
+ * @param {string} body @param {{ open?: boolean, url?: string }} [how] */
 async function pageWith(body, how = {}) {
+  const url = how.url ?? "https://page.invalid/";
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
   // The page itself is served here; anything else it asks for is refused.
   await page.route("**/*", (route) =>
-    route.request().url() === "https://page.invalid/"
+    route.request().url() === url
       ? route.fulfill({ contentType: "text/html", body: `<!doctype html><body style="margin:0">${body}</body>` })
       : route.abort(),
   );
   await page.addInitScript(() => {
-    /** @type {any} */ (window).sent = [];
-    /** @type {any} */ (window).chrome = {
+    const w = /** @type {any} */ (window);
+    w.sent = [];
+    w.texts = null;
+    w.press = async () => ({ taken: true });
+    w.chrome = {
       runtime: {
         id: "zajil",
-        sendMessage: async (/** @type {unknown} */ m) => /** @type {any} */ (window).sent.push(m),
+        sendMessage: async (/** @type {any} */ m) => {
+          w.sent.push(m);
+          if (m.type === "video-button-texts") return w.texts;
+          if (m.type === "video-button") return w.press();
+        },
       },
       i18n: { getMessage: (/** @type {string} */ k) => ({ videoButton: "نزّل الفيديو", lang: "ar" })[k] ?? "" },
     };
@@ -52,12 +62,36 @@ async function pageWith(body, how = {}) {
       };
     });
   }
-  await page.goto("https://page.invalid/");
+  await page.goto(url);
   await page.addScriptTag({ content: script });
   return page;
 }
 
-const sent = (/** @type {import("playwright-core").Page} */ page) => page.evaluate(() => /** @type {any} */ (window).sent);
+/** The presses sent (not the asks for texts). */
+const sent = (/** @type {import("playwright-core").Page} */ page) =>
+  page.evaluate(() => /** @type {any} */ (window).sent.filter((/** @type {any} */ m) => m.type === "video-button"));
+
+/** Inside the button, at the video's top right: the video's right edge is
+ * at 740, the button's at 740 - 8. */
+const AT = { x: 715, y: 66 };
+
+/** The button as no page can reach it (`open` pages only). */
+const buttonOf = (/** @type {import("playwright-core").Page} */ page) =>
+  page.evaluate(() => {
+    const button = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button");
+    if (!button) return null;
+    const box = button.getBoundingClientRect();
+    return {
+      hidden: button.hidden,
+      state: button.dataset.state,
+      busy: button.getAttribute("aria-busy"),
+      dir: button.dir,
+      text: button.textContent,
+      right: Math.round(box.right),
+      top: Math.round(box.top),
+      mark: button.querySelectorAll("svg path").length,
+    };
+  });
 
 const VIDEO = `<video src="https://media.invalid/v.mp4" style="position:absolute;left:100px;top:50px;width:640px;height:360px"></video>`;
 
@@ -65,8 +99,8 @@ describe("the Download video button", () => {
   it("shows over a video, and a click sends only its address", async () => {
     const page = await pageWith(VIDEO);
     await page.mouse.move(400, 200);
-    // The button is at the video's corner (left 100 + 8, top 50 + 8).
-    await page.mouse.click(120, 66);
+    // The button is at the video's top right (740 - 8, top 50 + 8).
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4" }]);
     await page.close();
   });
@@ -74,7 +108,7 @@ describe("the Download video button", () => {
   it("shows under a player's own controls covering the video", async () => {
     const page = await pageWith(`${VIDEO}<div style="position:absolute;left:100px;top:50px;width:640px;height:360px;z-index:5"></div>`);
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toHaveLength(1);
     await page.close();
   });
@@ -84,7 +118,7 @@ describe("the Download video button", () => {
     const page = await pageWith(VIDEO);
     await page.evaluate(() => document.querySelector("video")?.dispatchEvent(new Event("encrypted")));
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     await page.close();
   });
@@ -103,12 +137,12 @@ describe("the Download video button", () => {
     // Shown first; the keys come before the click: nothing is sent.
     await page.mouse.move(400, 200);
     expect(await setKeys()).toBe(true);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     // And no button over it from now on.
     await page.mouse.move(10, 600);
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     await page.close();
   });
@@ -116,7 +150,7 @@ describe("the Download video button", () => {
   it("does not show over a small video (an icon, a preview)", async () => {
     const page = await pageWith(`<video src="https://media.invalid/v.mp4" style="position:absolute;left:100px;top:50px;width:150px;height:100px"></video>`);
     await page.mouse.move(150, 90);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     await page.close();
   });
@@ -125,12 +159,12 @@ describe("the Download video button", () => {
     const page = await pageWith(VIDEO);
     // What is at the button's place, without moving the pointer there (that
     // would bring it back): the button's host, or the video.
-    const atCorner = () => page.evaluate(() => document.elementFromPoint(120, 66)?.tagName);
+    const atCorner = () => page.evaluate(() => document.elementFromPoint(715, 66)?.tagName);
     await page.mouse.move(400, 200);
     expect(await atCorner()).toBe("DIV");
     await page.mouse.move(900, 600);
     expect(await atCorner()).toBe("DIV");
-    await page.waitForFunction(() => document.elementFromPoint(120, 66)?.tagName === "VIDEO", null, { timeout: 5000 });
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "VIDEO", null, { timeout: 5000 });
     await page.close();
   });
 
@@ -138,7 +172,7 @@ describe("the Download video button", () => {
     const page = await pageWith(VIDEO);
     await page.mouse.move(400, 200);
     const seen = await page.evaluate(() => {
-      const host = document.elementFromPoint(120, 66);
+      const host = document.elementFromPoint(715, 66);
       /** @type {any} */ (host)?.click();
       host?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
       return {
@@ -155,9 +189,9 @@ describe("the Download video button", () => {
   it("a click a script makes on the button itself sends nothing: only a real click counts", async () => {
     const page = await pageWith(VIDEO, { open: true });
     await page.mouse.move(400, 200);
-    await page.waitForFunction(() => document.elementFromPoint(120, 66)?.tagName === "DIV");
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "DIV");
     const reached = await page.evaluate(() => {
-      const button = document.elementFromPoint(120, 66)?.shadowRoot?.querySelector("button");
+      const button = document.elementFromPoint(715, 66)?.shadowRoot?.querySelector("button");
       button?.click();
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
       return Boolean(button);
@@ -165,7 +199,7 @@ describe("the Download video button", () => {
     expect(reached).toBe(true);
     expect(await sent(page)).toEqual([]);
     // And the same button, clicked for real, sends.
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toHaveLength(1);
     await page.close();
   });
@@ -174,7 +208,7 @@ describe("the Download video button", () => {
     const style = `<style>div { display: none !important; opacity: 0 !important; visibility: hidden !important; }</style>`;
     const page = await pageWith(`${style}${VIDEO}`);
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toHaveLength(1);
     await page.close();
   });
@@ -182,7 +216,7 @@ describe("the Download video button", () => {
   it("a page made unseen as a whole gets no press", async () => {
     const page = await pageWith(`<style>html { opacity: 0; }</style>${VIDEO}`);
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([]);
     await page.close();
   });
@@ -191,7 +225,7 @@ describe("the Download video button", () => {
     const long = `https://media.invalid/${"a".repeat(9000)}.mp4`;
     const page = await pageWith(`<video src="${long}" style="position:absolute;left:100px;top:50px;width:640px;height:360px"></video>`);
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toEqual([{ type: "video-button", src: "" }]);
     await page.close();
   });
@@ -200,8 +234,100 @@ describe("the Download video button", () => {
     const page = await pageWith(VIDEO);
     await page.addScriptTag({ content: script });
     await page.mouse.move(400, 200);
-    await page.mouse.click(120, 66);
+    await page.mouse.click(AT.x, AT.y);
     expect(await sent(page)).toHaveLength(1);
     await page.close();
+  });
+
+  it("sits at the video's top right, with Zajil's mark, in either language", async () => {
+    for (const lang of ["ar", "en"]) {
+      const page = await pageWith(VIDEO, { open: true });
+      if (lang === "en") await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }));
+      await page.mouse.move(400, 200);
+      await page.waitForFunction(() => true);
+      const button = await buttonOf(page);
+      expect(button).toMatchObject({ hidden: false, right: 732, top: 58, mark: 3 });
+      await page.close();
+    }
+  });
+
+  it("speaks Zajil's language, not the browser's", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }));
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => {
+      const button = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button");
+      return button?.textContent === "Download video";
+    });
+    expect(await buttonOf(page)).toMatchObject({ dir: "ltr", text: "Download video" });
+    await page.close();
+  });
+
+  it("pressed, it stays and says it is working until Zajil answers", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.press = () => new Promise((done) => (w.answer = done));
+    });
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    // The pointer leaves, and the page scrolls: it stays.
+    await page.mouse.move(900, 650);
+    await page.waitForTimeout(1800);
+    expect(await buttonOf(page)).toMatchObject({ hidden: false, state: "working", busy: "true" });
+    // A second press while it works sends nothing more.
+    await page.mouse.click(AT.x, AT.y);
+    expect(await sent(page)).toHaveLength(1);
+    await page.evaluate(() => /** @type {any} */ (window).answer({ taken: true }));
+    await page.waitForFunction(() => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.dataset.state === "done");
+    await page.close();
+  });
+
+  it("says why when Zajil does not take the video, or cannot be reached", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.evaluate(() => void (/** @type {any} */ (window).press = async () => ({ taken: false, error: "زاجِل لا يحمّل هذا الفيديو." })));
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    await page.waitForFunction(() => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.dataset.state === "error");
+    expect(await buttonOf(page)).toMatchObject({ hidden: false, text: "زاجِل لا يحمّل هذا الفيديو." });
+    await page.close();
+    // The background gone (the extension updated under the page): its own text.
+    const gone = await pageWith(VIDEO, { open: true });
+    await gone.evaluate(() => void (/** @type {any} */ (window).press = async () => Promise.reject(new Error("Extension context invalidated."))));
+    await gone.mouse.move(400, 200);
+    await gone.mouse.click(AT.x, AT.y);
+    await gone.waitForFunction(() => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.dataset.state === "error");
+    expect(await buttonOf(gone)).toMatchObject({ text: "✗" });
+    await gone.close();
+  });
+
+  it("on YouTube, only on a video's page, a Short or an embedded player", async () => {
+    for (const [url, shown] of /** @type {[string, boolean][]} */ ([
+      ["https://www.youtube.com/", false],
+      ["https://www.youtube.com/results?search_query=zajil", false],
+      ["https://www.youtube.com/@channel/videos", false],
+      ["https://www.youtube.com/watch?v=abc", true],
+      ["https://m.youtube.com/shorts/abc", true],
+      ["https://www.youtube-nocookie.com/embed/abc", true],
+    ])) {
+      const page = await pageWith(VIDEO, { url });
+      await page.mouse.move(400, 200);
+      await page.mouse.click(AT.x, AT.y);
+      expect(await sent(page), url).toHaveLength(shown ? 1 : 0);
+      await page.close();
+    }
+  });
+});
+
+describe("Zajil's mark in the button", () => {
+  it("is the mark of assets/icon/zajil-mark.svg, drawn by the script", () => {
+    const svg = readFileSync(new URL("../../../assets/icon/zajil-mark.svg", import.meta.url), "utf8");
+    const paths = [...svg.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1]);
+    const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1];
+    expect(paths).toHaveLength(3);
+    for (const d of paths) expect(script).toContain(`"${d}"`);
+    expect(script).toContain(`const MARK_VIEWBOX = "${viewBox}";`);
+    // Drawn in the page, never loaded from the extension's files.
+    expect(script).toContain("createElementNS");
   });
 });

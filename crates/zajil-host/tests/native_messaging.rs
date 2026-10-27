@@ -95,9 +95,18 @@ fn a_correct_message_reaches_the_app_and_wrong_ones_never_do() {
         }
     );
 
-    // A ping is answered by the host itself.
+    // A ping is answered by the host itself, with Zajil's language: Arabic
+    // while there are no settings yet, then what the settings say.
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
-    assert_eq!(answer(&mut host), Response::ok());
+    assert_eq!(answer(&mut host), Response::pong(Some("ar")));
+    zajil_core::settings::SettingsStore::new(data.path())
+        .update(|s| {
+            s.language = zajil_core::settings::Language::En;
+            Ok(())
+        })
+        .unwrap();
+    send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
+    assert_eq!(answer(&mut host), Response::pong(Some("en")));
 
     for wrong in [
         "{not json",
@@ -156,7 +165,7 @@ fn without_the_app_a_download_is_refused_clearly() {
     assert!(!response.ok);
     assert_eq!(response.error.as_deref(), Some("Zajil is not running"));
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
-    assert_eq!(answer(&mut host), Response::ok());
+    assert_eq!(answer(&mut host), Response::pong(Some("ar")));
 }
 
 /// #60: only another start of Zajil asks for its window; from the
@@ -218,7 +227,7 @@ fn an_app_that_never_answers_does_not_hold_the_browser() {
         "took {took:?}"
     );
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
-    assert_eq!(answer(&mut host), Response::ok());
+    assert_eq!(answer(&mut host), Response::pong(Some("ar")));
 }
 
 /// M5, after a restart: the extension's link (`runtime.connectNative`).

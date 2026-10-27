@@ -143,6 +143,15 @@
   "videoButton": {
     "message": "Download video"
   },
+  "videoButtonWorking": {
+    "message": "Sending to Zajil…"
+  },
+  "videoButtonDone": {
+    "message": "Sent to Zajil"
+  },
+  "videoButtonFailed": {
+    "message": "The video did not reach Zajil."
+  },
   "sitesPartly": {
     "message": "Partly allowed: a download link's cookies go to Zajil with its download, but the “Download video” button needs the rest of the permission. You can also take it all back."
   },
