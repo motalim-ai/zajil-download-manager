@@ -55,10 +55,9 @@ export function picked(list: Option[], best: ChoiceView | null): number {
   return at >= 0 ? at : 0;
 }
 
-/** The file name a choice gives: the title, without what a file name
- * cannot hold, and the extension (the engine cleans it again). */
-export function fileName(title: string, option: Option | undefined): string {
-  const base = title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim() || "video";
-  const ext = option?.choice.kind === "audio_only" ? "m4a" : option?.choice.kind === "merge" ? "mkv" : (option?.ext ?? "mp4");
-  return `${base}.${ext}`;
+/** The file's name: the title, without what a file name cannot hold
+ * (the engine cleans it again). No extension: the engine adds the one
+ * yt-dlp's file has, which only it knows (a merge may give mp4 or mkv). */
+export function fileName(title: string): string {
+  return title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim() || "video";
 }

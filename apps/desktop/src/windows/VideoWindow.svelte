@@ -91,7 +91,7 @@
     };
     const list = options(info.formats);
     pick = picked(list, info.best);
-    name = fileName(info.title, list[pick]);
+    name = fileName(info.title);
     step = { kind: "video", info, list };
   }
 
@@ -122,7 +122,7 @@
       if (info.kind === "video") {
         const list = options(info.formats);
         pick = picked(list, info.best);
-        name = fileName(info.title, list[pick]);
+        name = fileName(info.title);
         step = { kind: "video", info, list };
       } else step = { kind: "playlist", info, chosen: info.entries.map(() => true) };
       await tick();
@@ -180,7 +180,7 @@
       const list = options(probed.formats);
       const option = list[picked(list, probed.best)];
       if (!option) continue;
-      const ok = await download(option.choice, fileName(probed.title, option), `${i + 1}/${items.length}: ${probed.title}`);
+      const ok = await download(option.choice, fileName(probed.title), `${i + 1}/${items.length}: ${probed.title}`);
       if (!ok) return;
     }
   }
@@ -249,7 +249,7 @@
         <legend>{locale.t("video-quality")}</legend>
         {#each step.list as o, i (i)}
           <label class="q" class:on={pick === i}>
-            <input type="radio" name="quality" checked={pick === i} onchange={() => ((pick = i), (name = fileName(info.title, o)))} data-first={i === 0 ? true : undefined} />
+            <input type="radio" name="quality" checked={pick === i} onchange={() => (pick = i)} data-first={i === 0 ? true : undefined} />
             <span>{quality(o)}</span>
             <span class="muted num">{o.size === null ? locale.t("add-size-unknown") : size(locale.lang, locale.digits, o.size)}</span>
           </label>

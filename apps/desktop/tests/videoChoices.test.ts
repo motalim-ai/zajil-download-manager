@@ -36,10 +36,9 @@ describe("the quality choices", () => {
     expect(picked(list, null)).toBe(0);
   });
 
-  it("names the file after the title, with what the choice gives", () => {
-    const list = options(formats);
-    expect(fileName("درس: الجزء 1/2", list[0])).toBe("درس الجزء 1 2.mkv");
-    expect(fileName("Talk", list[2])).toBe("Talk.mp4");
-    expect(fileName("", list.at(-1))).toBe("video.m4a");
+  it("names the file after the title, with no extension (the engine adds yt-dlp's)", () => {
+    expect(fileName("درس: الجزء 1/2")).toBe("درس الجزء 1 2");
+    expect(fileName("Talk")).toBe("Talk");
+    expect(fileName("")).toBe("video");
   });
 });

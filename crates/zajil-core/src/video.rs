@@ -1594,7 +1594,7 @@ impl Finish {
                 !e.is_empty() && e.len() <= 8 && e.bytes().all(|b| b.is_ascii_alphanumeric())
             })
             .ok_or_else(|| io::Error::other("yt-dlp's file has no usable extension"))?;
-        let base = crate::sanitize::sanitize_file_name(&self.name);
+        let base = crate::sanitize::sanitize_file_name(without_media_extension(&self.name));
         let base = if base.is_empty() {
             "video".to_owned()
         } else {
@@ -1620,6 +1620,24 @@ impl Finish {
             }
         }
         Err(io::Error::other(format!("no free name for {wanted}")))
+    }
+}
+
+/// `name` without a video or sound extension at its end: the file gets
+/// the one yt-dlp chose, and a name that came with one would end
+/// `Title.mkv.mp4`.
+fn without_media_extension(name: &str) -> &str {
+    const MEDIA: [&str; 15] = [
+        "3gp", "aac", "avi", "flac", "flv", "m4a", "m4v", "mkv", "mov", "mp3", "mp4", "ogg",
+        "opus", "wav", "webm",
+    ];
+    match name.trim_end().rsplit_once('.') {
+        Some((base, ext))
+            if !base.trim().is_empty() && MEDIA.iter().any(|m| ext.eq_ignore_ascii_case(m)) =>
+        {
+            base
+        }
+        _ => name,
     }
 }
 

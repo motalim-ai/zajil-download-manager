@@ -488,6 +488,33 @@ async fn a_download_takes_the_page_s_title_safely_and_never_replaces_a_file() {
 }
 
 #[tokio::test]
+async fn a_name_that_came_with_an_extension_gets_only_yt_dlp_s() {
+    for (name, wanted) in [
+        ("Talk.mkv", "Talk.mp4"),
+        ("Talk.MP4", "Talk.mp4"),
+        ("Talk", "Talk.mp4"),
+        // Not a video's extension: part of the name.
+        ("Rust v1.2", "Rust v1.2.mp4"),
+    ] {
+        let s = setup("download mp4");
+        let request = Download {
+            url: "https://example.com/v",
+            choice: &Choice::Format("hls-360".into()),
+            formats: known(),
+            cookies: None,
+            dest: &s.dest,
+            name,
+        };
+        let file = s
+            .runner
+            .download(&request, &Stop::new(), &mut |_| {})
+            .await
+            .unwrap();
+        assert_eq!(file.file_name().unwrap().to_str(), Some(wanted), "{name}");
+    }
+}
+
+#[tokio::test]
 async fn a_file_printed_outside_the_output_folder_is_refused() {
     let s = setup("escape");
     let request = Download {
