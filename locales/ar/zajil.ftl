@@ -735,6 +735,8 @@ settings-progress-minimized = تظهر مصغّرة
 settings-progress-hidden = لا تظهر
 settings-start-while-open = ابدأ التحميل والنافذة مفتوحة
 settings-start-while-open-hint = يبدأ التحميل في الخلفية بمجرد أن يرد السيرفر، وأنت ما زلت في «معلومات ملف التحميل». و«إلغاء» يحذفه ويحذف ملفه الناقص.
+settings-browser-at-once = ابدأ تحميلات المتصفح على طول من غير سؤال
+settings-browser-at-once-hint = يبدأ التحميل القادم من المتصفح دون «معلومات ملف التحميل». أما البرامج (مثل exe) فتسأل أولًا دائمًا.
 add-started-note = بدأ التحميل في الخلفية، فاسمه ومجلده لم يعودا يتغيّران. الفئة والوصف يتغيّران.
 
 ## Batch download (M7)

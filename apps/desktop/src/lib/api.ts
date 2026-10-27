@@ -10,6 +10,8 @@ import type { PendingLink } from "./bindings/PendingLink";
 import type { Sounds } from "./bindings/Sounds";
 import type { AddPrefs } from "./bindings/AddPrefs";
 import type { ProbeView } from "./bindings/ProbeView";
+import type { InfoStart } from "./bindings/InfoStart";
+import type { OfferView } from "./bindings/OfferView";
 import type { ToolView } from "./bindings/ToolView";
 import type { BatchRequest } from "./bindings/BatchRequest";
 import type { BatchPreview } from "./bindings/BatchPreview";
@@ -103,7 +105,14 @@ export const api = {
     listen<PendingLink>("pending-link", (event) => handler(event.payload)),
   /** «Download file info» for `url`; «Add a link» closes. */
   openAddInfo: (url: string, title: string) => invoke<void>("open_add_info", { url, title }),
-  pendingInfo: () => invoke<string | null>("pending_info"),
+  /** What this «Download file info» window is for. */
+  pendingInfo: () => invoke<InfoStart | null>("pending_info"),
+  /** A download from the browser: what Zajil learned of the file, once it
+   * has reached it. */
+  offerAnswer: (offer: number) => invoke<OfferView>("offer_answer", { offer }),
+  /** Adds a download from the browser as its window says; `early`: started
+   * in the background while the window is open. */
+  addOffer: (offer: number, request: AddRequest, early: boolean) => invoke<number>("add_offer", { offer, request, early }),
   /** A download's progress window (M5.5), titled `title` until it names
    * itself. */
   openProgress: (id: number, title: string) => invoke<void>("open_progress", { id, title }),

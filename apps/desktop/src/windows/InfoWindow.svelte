@@ -12,8 +12,11 @@
 
   // The «Download file info» window: asks the server about the link, then
   // adds the download as the user says, and closes. Closing it gives up a
-  // check still running (Rust).
+  // check still running (Rust). A download from the browser has a window
+  // of its own (`offers.rs`): Zajil asks the server with the browser's
+  // cookies, and the window waits for that answer.
   let url = $state("");
+  let offer: number | null = null;
   let probe = $state<ProbeView | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
@@ -29,7 +32,9 @@
   onMount(() => {
     void (async () => {
       await startWindow();
-      url = (await api.pendingInfo().catch(() => null)) ?? "";
+      const start = await api.pendingInfo().catch(() => null);
+      url = start?.url ?? "";
+      offer = start?.offer ?? null;
       try {
         const snapshot = await api.snapshot();
         queues = snapshot.queues;
@@ -37,16 +42,23 @@
       } catch {
         queues = [{ name: "main", max_active: 1, active: 0, window: null }];
       }
+      // A file that can run code never starts before «Start download».
+      let runsCode = false;
       try {
-        probe = await api.probe(url);
+        if (offer !== null) {
+          const answer = await api.offerAnswer(offer);
+          probe = answer.probe;
+          runsCode = answer.runs_code;
+        } else probe = await api.probe(url);
       } catch (e) {
         error = String(e);
         return;
       }
       const prefs = await api.addPrefs().catch(() => null);
-      if (prefs?.start_while_open && !probe.page) {
+      if (prefs?.start_while_open && !probe.page && !runsCode) {
+        const request = { url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null };
         try {
-          started = await api.add({ url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null });
+          started = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
           void api.openStartedProgress(started, probe.name).catch(() => {});
         } catch {
           started = null;
@@ -69,7 +81,9 @@
         if (request.queue && request.queue !== "main") await api.moveToQueue([started], request.queue);
         added = true;
       } else {
-        const id = await api.add(request);
+        // From the browser, «Start download» is the user's OK for a file
+        // that can run code: it is not held again.
+        const id = offer !== null ? await api.addOffer(offer, request, false) : await api.add(request);
         added = true;
         // A download that starts shows its progress, as in IDM (as the
         // settings say: shown, minimized, or not).

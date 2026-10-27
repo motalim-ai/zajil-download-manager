@@ -16,6 +16,7 @@ mod dropbox;
 mod grab;
 mod live;
 mod menu;
+mod offers;
 mod removal;
 mod saving;
 mod schedule;
@@ -217,6 +218,7 @@ pub fn run() {
         ))
         .manage(app)
         .manage(windows::Shared::default())
+        .manage(offers::Offers::default())
         .manage(video::VideoState::default())
         .manage(batch::Pending::default())
         .manage(grab::GrabState::default())
@@ -459,6 +461,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_link,
         windows::open_add_info,
         windows::pending_info,
+        offers::offer_answer,
+        offers::add_offer,
         windows::close_window,
         windows::show_main_view,
         windows::open_progress,
@@ -552,6 +556,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_link,
         windows::open_add_info,
         windows::pending_info,
+        offers::offer_answer,
+        offers::add_offer,
         windows::close_window,
         windows::show_main_view,
         windows::open_progress,
@@ -977,7 +983,7 @@ async fn add<R: tauri::Runtime>(
     let id = tokio::task::spawn_blocking(move || {
         let given = chosen_folder(request.folder.as_deref(), &download_dir(&settings, &system))
             .map_err(StoreError::Refused)?;
-        add_blocking(&store, &request, &given, None, false, false, false)
+        add_blocking(&store, &request, &given, None, false, false, false, false)
     })
     .await
     .map_err(blocking_err)?
@@ -1052,6 +1058,11 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                         .ask(instance, file, store, ticket, DRIVE_ASK_PATIENCE)
                         .flatten()
                 };
+                // A download opens its own «Download file info», as in IDM,
+                // and the main window stays as it is (`offers.rs`).
+                if let zajil_host::Request::Download { .. } = &request {
+                    return offers::from_browser(&handle, &request, lang, drive_cookies);
+                }
                 let answer = from_extension_with(
                     &app.store,
                     &request,
@@ -1842,60 +1853,18 @@ fn from_extension_with(
             Ok(()) => zajil_host::Response::ok(),
             Err(err) => zajil_host::Response::refused(err.to_string()),
         },
-        zajil_host::Request::Download {
-            url,
-            filename,
-            referrer,
-            cookies,
-            instance,
-            store: cookie_store,
-            ticket,
-            private,
-            ..
-        } => {
-            if let Err(err) = zajil_core::queue::check_url(url) {
-                return zajil_host::Response::refused(err.to_string());
-            }
-            // The browser's cookies (when the user allowed them) and page,
-            // for the check and then the download: in memory only.
-            let mut from =
-                zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
-            // A Google Drive file's page link is downloaded from Drive's
-            // download address, another origin of the same site: that
-            // address's own cookies are asked for.
-            if from.has_cookies()
-                && let Some(file) = zajil_core::drive::download_link(url)
-            {
-                from = from.and_cookies_for(&file, drive_cookies(&file).as_deref());
-            }
-            let probe = match reach(url, &from) {
-                Ok(probe) => probe,
-                Err(why) => {
-                    return zajil_host::Response::refused(format!(
-                        "Zajil cannot download it: {why}"
-                    ));
-                }
+        zajil_host::Request::Download { .. } => {
+            let page = match from_page(request, drive_cookies) {
+                Some(Ok(page)) => page,
+                Some(Err(why)) => return zajil_host::Response::refused(why),
+                None => return zajil_host::Response::refused("not a download"),
             };
-            if let Some(why) = not_the_file(&probe, filename.as_deref()) {
-                return zajil_host::Response::refused(format!("Zajil cannot download it: {why}"));
-            }
-            // A file that can run code, from a page: never started by
-            // itself, the user starts it (security review #84). By the
-            // server's name, the browser's, and the link's.
-            let from_link = zajil_core::Url::parse(url).ok().and_then(|u| {
-                u.path_segments()
-                    .and_then(|mut s| s.next_back().map(str::to_owned))
-            });
-            let runs_code = [
-                Some(probe.name.as_str()),
-                filename.as_deref(),
-                from_link.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            .any(zajil_core::category::runs_code);
+            let (_, runs_code) = match reached(&page, reach) {
+                Ok(reached) => reached,
+                Err(why) => return zajil_host::Response::refused(why),
+            };
             let add = AddRequest {
-                url: url.clone(),
+                url: page.url.clone(),
                 name: None,
                 category: None,
                 description: None,
@@ -1904,38 +1873,150 @@ fn from_extension_with(
                 start: !runs_code,
                 limit: None,
             };
-            // Where it came from, so that browser can be asked for the
-            // cookies again after a restart: never the cookies themselves
-            // (owner's decision on #7).
-            // The page without its `#` part (owner's decision on #80).
-            let page = referrer.as_deref().and_then(|r| {
-                let mut page = zajil_core::Url::parse(r).ok()?;
-                page.set_fragment(None);
-                Some(page.to_string())
-            });
-            // A private window's download keeps nothing of where it came
-            // from (security review #84).
-            let source = instance.as_ref().filter(|_| !*private).map(|instance| {
-                zajil_core::queue::BrowserSource {
-                    instance: instance.clone(),
-                    store: cookie_store.clone(),
-                    cookies: cookies.is_some(),
-                    referrer: page,
-                    ticket: ticket.clone(),
-                }
-            });
-            match add_blocking(store, &add, given, source, runs_code, true, *private) {
-                Ok(id) => {
-                    headers
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(id, from);
-                    zajil_host::Response::ok()
-                }
+            match add_from_page(store, &page, &add, given, headers, runs_code, false) {
+                Ok(_) => zajil_host::Response::ok(),
                 Err(err) => zajil_host::Response::refused(err.to_string()),
             }
         }
     }
+}
+
+/// A download the browser sent, before Zajil has reached the file: its
+/// link, the browser's name for it, its cookies and page (in memory only),
+/// and where it came from.
+#[derive(Clone)]
+pub(crate) struct FromPage {
+    pub url: String,
+    filename: Option<String>,
+    from: zajil_core::FromBrowser,
+    source: Option<zajil_core::queue::BrowserSource>,
+    private: bool,
+}
+
+/// What a [`zajil_host::Request::Download`] sends, checked as adding would
+/// check it; `None` for another request. `drive_cookies`: as in
+/// [`from_extension_with`].
+pub(crate) fn from_page(
+    request: &zajil_host::Request,
+    drive_cookies: impl FnOnce(&str) -> Option<String>,
+) -> Option<Result<FromPage, String>> {
+    let zajil_host::Request::Download {
+        url,
+        filename,
+        referrer,
+        cookies,
+        instance,
+        store: cookie_store,
+        ticket,
+        private,
+        ..
+    } = request
+    else {
+        return None;
+    };
+    if let Err(err) = zajil_core::queue::check_url(url) {
+        return Some(Err(err.to_string()));
+    }
+    // The browser's cookies (when the user allowed them) and page, for the
+    // check and then the download: in memory only.
+    let mut from = zajil_core::FromBrowser::new(url, cookies.as_deref(), referrer.as_deref());
+    // A Google Drive file's page link is downloaded from Drive's download
+    // address, another origin of the same site: that address's own
+    // cookies are asked for.
+    if from.has_cookies()
+        && let Some(file) = zajil_core::drive::download_link(url)
+    {
+        from = from.and_cookies_for(&file, drive_cookies(&file).as_deref());
+    }
+    // Where it came from, so that browser can be asked for the cookies
+    // again after a restart: never the cookies themselves (owner's
+    // decision on #7). The page without its `#` part (owner's decision on
+    // #80).
+    let page = referrer.as_deref().and_then(|r| {
+        let mut page = zajil_core::Url::parse(r).ok()?;
+        page.set_fragment(None);
+        Some(page.to_string())
+    });
+    // A private window's download keeps nothing of where it came from
+    // (security review #84).
+    let source =
+        instance
+            .as_ref()
+            .filter(|_| !*private)
+            .map(|instance| zajil_core::queue::BrowserSource {
+                instance: instance.clone(),
+                store: cookie_store.clone(),
+                cookies: cookies.is_some(),
+                referrer: page,
+                ticket: ticket.clone(),
+            });
+    Some(Ok(FromPage {
+        url: url.clone(),
+        filename: filename.clone(),
+        from,
+        source,
+        private: *private,
+    }))
+}
+
+/// The file `page` names, as Zajil reaches it (`reach`), and whether it can
+/// run code; refused when it is not that file (review of #70), with what
+/// the extension tells the user.
+pub(crate) fn reached(
+    page: &FromPage,
+    reach: impl FnOnce(&str, &zajil_core::FromBrowser) -> Result<zajil_core::Probe, String>,
+) -> Result<(zajil_core::Probe, bool), String> {
+    let probe =
+        reach(&page.url, &page.from).map_err(|why| format!("Zajil cannot download it: {why}"))?;
+    if let Some(why) = not_the_file(&probe, page.filename.as_deref()) {
+        return Err(format!("Zajil cannot download it: {why}"));
+    }
+    // A file that can run code, from a page: never started by itself, the
+    // user starts it (security review #84). By the server's name, the
+    // browser's, and the link's.
+    let from_link = zajil_core::Url::parse(&page.url).ok().and_then(|u| {
+        u.path_segments()
+            .and_then(|mut s| s.next_back().map(str::to_owned))
+    });
+    let runs_code = [
+        Some(probe.name.as_str()),
+        page.filename.as_deref(),
+        from_link.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(zajil_core::category::runs_code);
+    Ok((probe, runs_code))
+}
+
+/// Adds `page`'s download as `add` says, with the browser's headers in
+/// memory (`headers`). A file that can run code waits for the user's OK
+/// (`runs_code`) unless the user gave it already (`ok_given`: «Start
+/// download» in its «Download file info»).
+pub(crate) fn add_from_page(
+    store: &QueueStore,
+    page: &FromPage,
+    add: &AddRequest,
+    given: &Path,
+    headers: &zajil_core::queue::FromBrowserById,
+    runs_code: bool,
+    ok_given: bool,
+) -> Result<u64, StoreError> {
+    let id = add_blocking(
+        store,
+        add,
+        given,
+        page.source.clone(),
+        runs_code && !ok_given,
+        ok_given,
+        true,
+        page.private,
+    )?;
+    headers
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, page.from.clone());
+    Ok(id)
 }
 
 /// «Video downloads are coming soon», in `lang` (the translations' own
@@ -1952,12 +2033,14 @@ fn video_soon(lang: zajil_core::settings::Language) -> String {
 
 /// Nothing is created here: the download makes its folder when it starts,
 /// so a refused add leaves nothing behind (review of #48).
+#[allow(clippy::too_many_arguments)]
 fn add_blocking(
     store: &QueueStore,
     request: &AddRequest,
     given: &Path,
     browser: Option<zajil_core::queue::BrowserSource>,
     needs_ok: bool,
+    ok_given: bool,
     from_page: bool,
     private: bool,
 ) -> Result<u64, StoreError> {
@@ -1996,6 +2079,7 @@ fn add_blocking(
         }
         // In the same write: the queue never sees it waiting.
         item.needs_ok = needs_ok;
+        item.ok_given = ok_given;
         item.from_page = from_page;
         Ok(id)
     })
@@ -2563,7 +2647,17 @@ mod tests {
             start: false,
             limit: None,
         };
-        let id = add_blocking(&store, &request, data.path(), None, false, false, false).unwrap();
+        let id = add_blocking(
+            &store,
+            &request,
+            data.path(),
+            None,
+            false,
+            false,
+            false,
+            false,
+        )
+        .unwrap();
         let queues = store.load().unwrap();
         let item = queues.item(id).unwrap();
         assert_eq!(item.name.as_deref(), Some("درس أول.mp4"));
@@ -2576,7 +2670,17 @@ mod tests {
             description: Some("".into()),
             ..request
         };
-        let id = add_blocking(&store, &plain, data.path(), None, false, false, false).unwrap();
+        let id = add_blocking(
+            &store,
+            &plain,
+            data.path(),
+            None,
+            false,
+            false,
+            false,
+            false,
+        )
+        .unwrap();
         let queues = store.load().unwrap();
         let item = queues.item(id).unwrap();
         assert_eq!(

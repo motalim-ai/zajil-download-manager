@@ -555,7 +555,7 @@ jobs:
       # info», the progress window and «Download complete» to «Open
       # folder», with the copy of the build that has the UI test pages
       # (the step above made it).
-      - name: End-to-end test, from a link to «Open folder»
+      - name: End-to-end tests, from a link and from the browser to «Open folder»
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |

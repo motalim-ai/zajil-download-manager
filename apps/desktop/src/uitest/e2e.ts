@@ -4,7 +4,10 @@
 // its own button found by the label the user reads: the main window's
 // «Add link», then «OK» with the link, «Start download», and «Open folder»
 // in «Download complete». Each says its step to Rust, which writes it down
-// for the test (and writes down the folder instead of opening it).
+// for the test (and writes down the folder instead of opening it). With
+// `--ui-test-e2e browser`, the download comes from the browser instead
+// (the test sends it as the extension would): the main window does
+// nothing, and «Download file info» opens by itself.
 import { invoke } from "@tauri-apps/api/core";
 import { locale } from "../lib/i18n.svelte";
 
@@ -36,6 +39,7 @@ export async function drive(win: string | null): Promise<void> {
   // The window's page runs (Windows: the main one's did not, #220).
   if (win === null) await step("start");
   if (win === null) {
+    if (link === "browser") return;
     (await until("«Add link» in the toolbar", () => button("tb-add"))).click();
   } else if (win === "add-link") {
     const box = await until("the link box", () => document.getElementById("addlink-url") as HTMLInputElement | null);

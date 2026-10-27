@@ -665,6 +665,8 @@ settings-progress-minimized = Shown minimized
 settings-progress-hidden = Not shown
 settings-start-while-open = Start downloading while the window is open
 settings-start-while-open-hint = The download starts in the background as soon as the server answers, while you are still in “Download file info”. “Cancel” removes it and deletes its unfinished file.
+settings-browser-at-once = Start browser downloads at once, without asking
+settings-browser-at-once-hint = A download from the browser starts without “Download file info”. Programs (such as .exe) still ask first.
 add-started-note = The download has started in the background, so its name and folder can no longer change. The category and description can.
 
 ## Batch download (M7)

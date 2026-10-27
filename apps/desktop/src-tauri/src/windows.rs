@@ -48,11 +48,32 @@ pub struct PendingLink {
     pub from_clipboard: bool,
 }
 
-/// What each add window starts with.
+/// What a «Download file info» window starts with: the link, and the
+/// browser's download it is for (`offers.rs`), if it came from there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct InfoStart {
+    pub url: String,
+    #[ts(type = "number | null")]
+    pub offer: Option<u64>,
+}
+
+/// What each add window starts with: «Download file info» windows by
+/// label (one per download from the browser, as in IDM).
 #[derive(Debug, Default)]
 pub struct Pending {
     link: Option<PendingLink>,
-    info: Option<String>,
+    info: std::collections::HashMap<String, InfoStart>,
+}
+
+impl Pending {
+    pub fn set_info(&mut self, label: &str, start: InfoStart) {
+        self.info.insert(label.to_owned(), start);
+    }
+
+    pub fn forget_info(&mut self, label: &str) {
+        self.info.remove(label);
+    }
 }
 
 pub type Shared = Mutex<Pending>;
@@ -113,7 +134,7 @@ pub(crate) fn open_page<R: tauri::Runtime>(
         .inner_size(width, height)
         .min_inner_size(
             width,
-            height.min(if label == INFO || label == LINK {
+            height.min(if label.starts_with(INFO) || label == LINK {
                 height
             } else {
                 320.0
@@ -190,7 +211,10 @@ pub async fn open_add_info<R: tauri::Runtime>(
     if let Some(link) = handle.get_webview_window(LINK) {
         let _ = link.close();
     }
-    pending.lock().unwrap().info = Some(url);
+    pending
+        .lock()
+        .unwrap()
+        .set_info(INFO, InfoStart { url, offer: None });
     open(&handle, INFO, &title, INFO_SIZE).map_err(|e| e.to_string())
 }
 
@@ -248,10 +272,13 @@ pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     });
 }
 
-/// The link «Download file info» is for.
+/// What the «Download file info» window that asks is for.
 #[tauri::command]
-pub fn pending_info(pending: State<'_, Shared>) -> Option<String> {
-    pending.lock().unwrap().info.clone()
+pub fn pending_info<R: tauri::Runtime>(
+    pending: State<'_, Shared>,
+    window: tauri::WebviewWindow<R>,
+) -> Option<InfoStart> {
+    pending.lock().unwrap().info.get(window.label()).cloned()
 }
 
 /// Closes the window that asks.
@@ -290,7 +317,7 @@ mod tests {
     #[test]
     fn a_window_starts_with_nothing_waiting() {
         let pending = Pending::default();
-        assert!(pending.link.is_none() && pending.info.is_none());
+        assert!(pending.link.is_none() && pending.info.is_empty());
         assert_eq!(LINK, "add-link");
         assert_eq!(INFO, "add-info");
         assert_eq!(progress_label(7), "progress-7");
@@ -318,7 +345,10 @@ mod tests {
     #[test]
     fn the_add_windows_have_only_their_own_permissions() {
         let capability: serde_json::Value = serde_json::from_str(CAPABILITY).unwrap();
-        assert_eq!(capability["windows"], serde_json::json!([LINK, INFO]));
+        assert_eq!(
+            capability["windows"],
+            serde_json::json!([LINK, INFO, "add-info-*"])
+        );
         assert_eq!(
             capability["permissions"],
             serde_json::json!(["core:event:default", "dialog:allow-open"])

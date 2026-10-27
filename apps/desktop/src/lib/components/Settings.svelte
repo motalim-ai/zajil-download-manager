@@ -114,7 +114,7 @@
     ["minimized", "settings-progress-minimized"],
     ["hidden", "settings-progress-hidden"],
   ] as const;
-  let addPrefs = $state<AddPrefs>({ progress_window: "shown", start_while_open: false });
+  let addPrefs = $state<AddPrefs>({ progress_window: "shown", start_while_open: false, browser_at_once: false });
   onMount(() => {
     api.addPrefs().then(
       (p) => (addPrefs = p),
@@ -376,6 +376,11 @@
       <span>{locale.t("settings-start-while-open")}</span>
     </label>
     <p class="hint">{locale.t("settings-start-while-open-hint")}</p>
+    <label class="choice">
+      <input type="checkbox" checked={addPrefs.browser_at_once} onchange={(e) => void setAddPrefs({ ...addPrefs, browser_at_once: e.currentTarget.checked })} />
+      <span>{locale.t("settings-browser-at-once")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-browser-at-once-hint")}</p>
   </fieldset>
 
   <fieldset>

@@ -3,7 +3,10 @@
 //!   minimized, or not shown (the menu and a double-click always show it);
 //! - «Start downloading while the window is open»: the download starts in
 //!   the background as soon as the server answers, while the user is still
-//!   in «Download file info»; «Cancel» then removes it with its files.
+//!   in «Download file info»; «Cancel» then removes it with its files;
+//! - «Start browser downloads at once, without asking»: a download from the
+//!   browser starts without its «Download file info» (`offers.rs`); a file
+//!   that can run code still asks.
 //!
 //! Kept with the window preferences (`window.json`).
 
@@ -30,6 +33,8 @@ pub struct AddPrefs {
     pub progress_window: ProgressShow,
     #[serde(default)]
     pub start_while_open: bool,
+    #[serde(default)]
+    pub browser_at_once: bool,
 }
 
 #[tauri::command]
@@ -51,13 +56,28 @@ pub async fn open_started_progress<R: tauri::Runtime>(
     title: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let show = closing.prefs().add.progress_window;
+    if crate::in_scene(&handle) {
+        return Ok(());
+    }
+    show_started(&handle, closing.prefs().add.progress_window, id, &title)
+}
+
+/// Download `id`'s progress window, as `show` says. Not on the main
+/// thread (`windows::open`).
+pub(crate) fn show_started<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    show: ProgressShow,
+    id: u64,
+    title: &str,
+) -> Result<(), String> {
     if show == ProgressShow::Hidden {
         return Ok(());
     }
-    crate::windows::open_progress(id, title, handle.clone()).await?;
+    let label = crate::windows::progress_label(id);
+    crate::windows::open(handle, &label, title, crate::windows::PROGRESS_SIZE)
+        .map_err(|e| e.to_string())?;
     if show == ProgressShow::Minimized
-        && let Some(window) = handle.get_webview_window(&crate::windows::progress_label(id))
+        && let Some(window) = handle.get_webview_window(&label)
     {
         window.minimize().map_err(|e| e.to_string())?;
     }
@@ -76,7 +96,8 @@ mod tests {
             AddPrefs::default(),
             AddPrefs {
                 progress_window: ProgressShow::Shown,
-                start_while_open: false
+                start_while_open: false,
+                browser_at_once: false
             }
         );
         let old: crate::closing::WindowPrefs = serde_json::from_str("{}").unwrap();
@@ -97,6 +118,8 @@ mod tests {
         );
         assert_eq!(prefs.add.progress_window, ProgressShow::Shown);
         assert!(!prefs.add.start_while_open);
+        // A download from the browser asks first, as in IDM.
+        assert!(!prefs.add.browser_at_once);
         assert!(!zajil_core::settings::SettingsFile::default().clipboard);
     }
 
