@@ -1416,9 +1416,10 @@ impl VideoRunner {
     /// the system checks each of its files the first time, so it happens
     /// while Zajil says it is preparing the tools, not at the first video.
     /// The run itself fails (it has no network) and that is fine, once
-    /// yt-dlp has said which request handlers it loaded; without that, or
-    /// a tool that cannot be checked or started, or after [`WARM_UP_TIME`],
-    /// it is an error ([`VideoError::NotReady`]), and so is a stop.
+    /// yt-dlp has said which request handlers it loaded. Without that, or
+    /// after [`WARM_UP_TIME`], it is [`VideoError::NotReady`]; a tool that
+    /// cannot be checked is [`VideoError::Tools`], one that cannot be
+    /// started [`VideoError::Io`], and a stop [`VideoError::Stopped`].
     pub async fn warm_up(&self, stop: &Stop) -> Result<(), VideoError> {
         let url = checked(WARM_UP_URL)?;
         // Every request of the run comes here, and is dropped at once: a

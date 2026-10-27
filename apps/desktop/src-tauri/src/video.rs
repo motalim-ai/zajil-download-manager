@@ -626,17 +626,15 @@ pub async fn video_tools_install<R: tauri::Runtime>(
 }
 
 /// [`VideoRunner::warm_up`] after an install: a yt-dlp that did not get as
-/// far as loading what it needs fails the preparing of the tools, in the
-/// user's words (`not_ready`, owner's decision on #279); a stop is said
-/// too. Anything else goes to the log (the first video will say why).
+/// far as loading what it needs, or that could not be checked or started
+/// at all, fails the preparing of the tools in the user's words
+/// (`not_ready`, owner's decision on #279), with why under «Details»; a
+/// stop is said too.
 async fn warm_up(app: &crate::App, stop: &Stop) -> Result<(), VideoErrorView> {
     match runner(app).await.warm_up(stop).await {
-        Err(e @ (VideoError::Stopped | VideoError::NotReady(_))) => Err(e.into()),
-        Err(e) => {
-            eprintln!("zajil: the video tools' first run: {e}");
-            Ok(())
-        }
         Ok(()) => Ok(()),
+        Err(e @ (VideoError::Stopped | VideoError::NotReady(_))) => Err(e.into()),
+        Err(e) => Err(VideoError::NotReady(e.to_string()).into()),
     }
 }
 

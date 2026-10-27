@@ -241,6 +241,11 @@
     },
     { passive: true, capture: true },
   );
+  // The pointer left the page while the texts were on their way: nothing
+  // to show when they come.
+  document.addEventListener("pointerout", (event) => {
+    if (!event.relatedTarget) waiting = null;
+  });
   // Pressed, it follows its video while the video is there (else it stays
   // where it was); at rest, it goes.
   addEventListener("scroll", () => (busy() && video?.isConnected ? place(video) : hide()), { passive: true, capture: true });
@@ -283,7 +288,7 @@
       setState("done");
       rest(DONE_MS);
     } else {
-      const why = typeof answer?.error === "string" && answer.error ? answer.error : (texts?.failed ?? "");
+      const why = typeof answer?.error === "string" && answer.error ? answer.error : (texts?.failed ?? "✗");
       setState("error", why);
       rest(ERROR_MS);
     }
