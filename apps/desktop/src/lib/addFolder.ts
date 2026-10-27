@@ -22,3 +22,23 @@ export function chosenFolder(opts: {
   const shown = categoryFolder(opts.categories, opts.picked, opts.downloadFolder);
   return { shown, request: shown };
 }
+
+/** «Save as» (the owner's notes on 1.0): the folder and the name in one
+ * path, with the folder's own separator. */
+export function savePath(folder: string, name: string): string {
+  if (!folder) return name;
+  const sep = folder.includes("\\") && !folder.includes("/") ? "\\" : "/";
+  return (folder.endsWith(sep) ? folder : folder + sep) + name;
+}
+
+/** What the user typed in «Save as»: its last part is the name (empty: the
+ * server's), the rest the folder, `null` when it is the shown one or there
+ * is none. */
+export function typedPath(text: string, shown: string): { folder: string | null; name: string } {
+  const trimmed = text.trim();
+  const at = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  const name = trimmed.slice(at + 1).trim();
+  if (at <= 0) return { folder: null, name };
+  const dir = trimmed.slice(0, at);
+  return { folder: dir === shown.replace(/[\\/]+$/, "") ? null : dir, name };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryFolder, chosenFolder } from "../src/lib/addFolder";
+import { categoryFolder, chosenFolder, savePath, typedPath } from "../src/lib/addFolder";
 import type { CategoryView } from "../src/lib/bindings/CategoryView";
 
 // «Download file info»: the folder follows the picked category until the
@@ -33,5 +33,22 @@ describe("the info window's folder", () => {
     expect(categoryFolder(categories, "video", "/d")).toBe("/d/Videos");
     expect(categoryFolder(categories, "music", "/d")).toBe("/d");
     expect(categoryFolder(categories, "gone", "/d")).toBe("/d");
+  });
+});
+
+describe("«Save as»", () => {
+  it("shows the folder and the name as one path, with the folder's separator", () => {
+    expect(savePath("/d/Videos", "a.mp4")).toBe("/d/Videos/a.mp4");
+    expect(savePath("/d/", "a.mp4")).toBe("/d/a.mp4");
+    expect(savePath("C:\\Users\\me\\Downloads", "a.mp4")).toBe("C:\\Users\\me\\Downloads\\a.mp4");
+    expect(savePath("", "a.mp4")).toBe("a.mp4");
+  });
+  it("reads a typed path as a folder and a name", () => {
+    expect(typedPath("/d/Videos/b.mp4", "/d/Videos")).toEqual({ folder: null, name: "b.mp4" });
+    expect(typedPath(" /e/Films/b.mp4 ", "/d/Videos")).toEqual({ folder: "/e/Films", name: "b.mp4" });
+    expect(typedPath("C:\\Films\\b.mp4", "C:\\Users\\me")).toEqual({ folder: "C:\\Films", name: "b.mp4" });
+    // A name alone keeps the folder; an emptied name means the server's.
+    expect(typedPath("b.mp4", "/d")).toEqual({ folder: null, name: "b.mp4" });
+    expect(typedPath("/d/Videos/", "/d/Videos")).toEqual({ folder: null, name: "" });
   });
 });

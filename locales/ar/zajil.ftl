@@ -628,6 +628,8 @@ add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، �
 ## «Download file info»: the user's name, category and description (#103, #95)
 add-description = الوصف
 add-description-hint = اختياري
+add-save-as = احفظ باسم
+add-choose-folder = اختر مجلدًا
 last-try-yesterday = أمس { $time }
 
 ## The toolbar as the user leaves it (M5.5, an IDM touch)

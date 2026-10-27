@@ -570,6 +570,8 @@ add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way 
 ## «Download file info»: the user's name, category and description (#103, #95)
 add-description = Description
 add-description-hint = Optional
+add-save-as = Save as
+add-choose-folder = Choose a folder
 last-try-yesterday = Yesterday { $time }
 
 ## The toolbar as the user leaves it (M5.5, an IDM touch)

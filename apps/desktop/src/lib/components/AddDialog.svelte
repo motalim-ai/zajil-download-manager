@@ -7,14 +7,16 @@
   import { locale } from "../i18n.svelte";
   import { categoryName as nameOf } from "../categoryName";
   import { probeSentence, sizeText } from "../probeText";
-  import { chosenFolder } from "../addFolder";
+  import { chosenFolder, savePath, typedPath } from "../addFolder";
   import type { ProbeView } from "../bindings/ProbeView";
   import type { AddRequest } from "../bindings/AddRequest";
   import type { QueueView } from "../bindings/QueueView";
   import type { CategoryView } from "../bindings/CategoryView";
 
   // «Download file info» (M5.5, the design of #83, window 3): what the
-  // server said of the file, where it goes, and when. A window of its own;
+  // server said of the file, where it goes, and when. Small, as IDM's
+  // (the owner's notes on 1.0): the file's kind and size in one line, the
+  // path in one «Save as» box, the three buttons together. A window of its own;
   // the UI test scene draws it in the main one. The file name and the
   // category can be changed once zajil-core keeps them (#103), the
   // description once it has one (#95).
@@ -86,15 +88,32 @@
 
   // The name and the description as the user leaves them (#103, #95).
   let name = $state("");
-  // The name box is being edited: until then the name is drawn as
-  // FileName draws it (a box orders a mixed name as one paragraph, the
-  // rendering the owner rejected in M4).
-  let editing = $state(false);
   let description = $state("");
   $effect(() => {
     if (probe) name = probe.name;
   });
+  // «Save as»: one box with the whole path, the folder and the name (as
+  // IDM's). Typed, its last part is the name and the rest the folder.
+  const fullPath = $derived(savePath(where.shown, name));
+  // The box is being edited: until then the path is drawn with the name as
+  // FileName draws it (a box orders a mixed name as one paragraph, the
+  // rendering the owner rejected in M4).
+  let editing = $state(false);
+  let typed = $state("");
+  function startEditing() {
+    typed = fullPath;
+    editing = true;
+  }
+  /** What the user typed in «Save as», as a folder and a name. */
+  function takeTyped() {
+    editing = false;
+    const said = typedPath(typed, where.shown);
+    // An emptied name means the server's.
+    name = said.name || (probe?.name ?? "");
+    if (said.folder !== null) folder = said.folder;
+  }
   function add(start: boolean, queue = "main") {
+    if (editing) takeTyped();
     later = false;
     const own = name.trim();
     const request = {
@@ -128,8 +147,15 @@
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
     items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
   }
-  // Escape closes the queues, then the window.
+  // Enter starts the download (as IDM's), except on a button, which does
+  // its own, and on a web page; Escape closes the queues, then cancels.
   function onkeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      if (event.target instanceof HTMLButtonElement || later || !probe || busy || page || event.isComposing) return;
+      event.preventDefault();
+      add(true);
+      return;
+    }
     if (event.key !== "Escape") return;
     event.preventDefault();
     if (later) {
@@ -144,82 +170,90 @@
 
 <main class="info" bind:this={main} aria-labelledby="add-title">
   <h1 id="add-title" class="visually-hidden">{locale.t("info-title")}</h1>
-  {#if page}
-    <p class="page" role="alert"><Icon name="circle-alert" size={16} /><span>{locale.t("add-web-page")}</span></p>
-  {/if}
-  <div class="body">
-    <div class="fields">
-      <span class="label">{locale.t("add-url")}</span>
-      <div class="value ltr"><bdi dir="ltr">{url}</bdi><Icon name="link" /></div>
+  <!-- What the server said, in one line (as IDM's). -->
+  <div class="about" aria-live="polite" aria-label={locale.t("add-about-file")}>
+    {#if error}
+      <p class="problem" role="alert"><Icon name="alert" size={15} /><span>{error}</span></p>
+    {:else if page}
+      <p class="page" role="alert"><Icon name="circle-alert" size={15} /><span>{locale.t("add-web-page")}</span></p>
+    {:else if probe}
+      <p class="known" title={probeSentence(locale.t, locale.lang, locale.digits, probe)}>
+        <span class="type" aria-hidden="true"><Icon name={categoryIcon(probe.category)} size={15} /></span>
+        <strong>{sizeText(locale.t, locale.lang, locale.digits, probe)}</strong>
+        <span class="kind">{probe.category ? categoryName(probe.category) : locale.t("category-none")} {extension}</span>
+        <span class="resume" class:no={!probe.resumable}>
+          <Icon name={probe.resumable ? "check" : "circle-alert"} size={14} />{locale.t(probe.resumable ? "add-resumable" : "add-not-resumable")}
+        </span>
+      </p>
+    {:else}
+      <p class="waiting" role="status">{locale.t("add-checking")}</p>
+    {/if}
+  </div>
 
-      {#if probe}
-        <span class="label">{locale.t("add-category")}</span>
-        <div class="with">
-          <label class="value pick">
-            <Icon name={categoryIcon(category)} />
-            <select
-              aria-label={locale.t("add-category")}
-              value={category ?? ""}
-              onchange={(e) => (picked = e.currentTarget.value || null)}
-            >
-              {#each categories as c (c.id)}
-                <option value={c.id}>
-                  {#if c.id === probe.category && probe.category_site}
-                    {locale.t("add-category-site", { category: categoryName(c.id), site: probe.category_site })}
-                  {:else if c.id === probe.category && probe.category_extension}
-                    {locale.t("add-category-extension", { category: categoryName(c.id), extension: probe.category_extension })}
-                  {:else}
-                    {categoryName(c.id)}
-                  {/if}
-                </option>
-              {/each}
-              <option value="">{locale.t("category-none")}</option>
-            </select>
-          </label>
-          <button class="btn square" title={locale.t("add-new-category")} aria-label={locale.t("add-new-category")} onclick={onnewcategory}>
-            <Icon name="circle-plus" />
-          </button>
-        </div>
+  <div class="fields">
+    <span class="label">{locale.t("add-url")}</span>
+    <div class="value"><bdi dir="ltr" class="text">{url}</bdi></div>
 
-        <label class="label" for="add-name">{locale.t("add-file-name")}</label>
-        <!-- The name it is saved under: the server's, or the user's own
-             (#103); never empty (an emptied box means the server's). -->
+    {#if probe}
+      <span class="label">{locale.t("add-category")}</span>
+      <div class="with">
+        <label class="value pick">
+          <Icon name={categoryIcon(category)} size={15} />
+          <select
+            aria-label={locale.t("add-category")}
+            value={category ?? ""}
+            onchange={(e) => (picked = e.currentTarget.value || null)}
+          >
+            {#each categories as c (c.id)}
+              <option value={c.id}>
+                {#if c.id === probe.category && probe.category_site}
+                  {locale.t("add-category-site", { category: categoryName(c.id), site: probe.category_site })}
+                {:else if c.id === probe.category && probe.category_extension}
+                  {locale.t("add-category-extension", { category: categoryName(c.id), extension: probe.category_extension })}
+                {:else}
+                  {categoryName(c.id)}
+                {/if}
+              </option>
+            {/each}
+            <option value="">{locale.t("category-none")}</option>
+          </select>
+        </label>
+        <button class="btn square" title={locale.t("add-new-category")} aria-label={locale.t("add-new-category")} onclick={onnewcategory}>
+          <Icon name="circle-plus" size={15} />
+        </button>
+      </div>
+
+      <label class="label" for="add-name">{locale.t("add-save-as")}</label>
+      <div class="with">
+        <!-- The whole path: the folder, then the name it is saved under
+             (the server's, or the user's own, #103). -->
         <div class="namebox">
           <input
             id="add-name"
             class="value name"
-            class:quiet={!editing && name !== ""}
-            dir="auto"
+            class:quiet={!editing}
+            dir="ltr"
             autocomplete="off"
             spellcheck="false"
-            bind:value={name}
+            value={editing ? typed : fullPath}
             readonly={started}
-            onfocus={() => (editing = true)}
-            onblur={() => (editing = false)}
+            oninput={(e) => (typed = e.currentTarget.value)}
+            onfocus={startEditing}
+            onblur={takeTyped}
           />
-          <!-- Only drawn: the box holds the name for the keyboard and
+          <!-- Only drawn: the box holds the path for the keyboard and
                screen readers, and clicks go through to it. -->
-          {#if !editing && name !== ""}<span class="value name shown" dir={nameDir(name)} aria-hidden="true"><FileName {name} /></span>{/if}
+          {#if !editing}
+            <span class="value name shown" dir="ltr" aria-hidden="true">
+              <bdi class="dir">{fullPath.slice(0, fullPath.length - name.length)}</bdi><span class="file" dir={nameDir(name)}><FileName {name} /></span>
+            </span>
+          {/if}
         </div>
+        <button class="btn square" disabled={started} title={locale.t("add-choose-folder")} aria-label={locale.t("add-choose-folder")} onclick={() => void change()}>...</button>
+      </div>
 
-        <span class="label">{locale.t("add-folder")}</span>
-        <div class="with">
-          <div class="value"><Icon name="folder" /><bdi dir="ltr" class="text">{where.shown}</bdi></div>
-          <button class="btn" disabled={started} onclick={() => void change()}>{locale.t("add-change")}</button>
-        </div>
-        {#if started}
-          <span></span>
-          <p class="started" role="status">{locale.t("add-started-note")}</p>
-        {/if}
-
-        {#if category}
-          <span></span>
-          <label class="check" class:off={folder === null}>
-            <input type="checkbox" bind:checked={remember} disabled={folder === null} />
-            {locale.t("add-remember", { category: categoryName(category) })}
-          </label>
-        {/if}
-
+      <!-- Not for a web page: its warning takes the room. -->
+      {#if !page}
         <label class="label" for="add-description">{locale.t("add-description")}</label>
         <input
           id="add-description"
@@ -230,55 +264,49 @@
           bind:value={description}
         />
       {/if}
-    </div>
-
-    <aside class="card" aria-live="polite" aria-label={locale.t("add-about-file")}>
-      {#if error}
-        <p class="problem" role="alert"><Icon name="alert" />{error}</p>
-      {:else if probe}
-        <span class="type" aria-hidden="true"><Icon name={categoryIcon(probe.category)} size={30} /></span>
-        <strong class="size">{sizeText(locale.t, locale.lang, locale.digits, probe)}</strong>
-        <span class="kind">{probe.category ? categoryName(probe.category) : locale.t("category-none")} {extension}</span>
-        <span class="resume" class:no={!probe.resumable}>
-          <Icon name={probe.resumable ? "check" : "circle-alert"} size={15} />{locale.t(probe.resumable ? "add-resumable" : "add-not-resumable")}
-        </span>
-        <p class="why">{probeSentence(locale.t, locale.lang, locale.digits, probe)}</p>
-      {:else}
-        <p class="waiting" role="status">{locale.t("add-checking")}</p>
-      {/if}
-    </aside>
+    {/if}
   </div>
 
   <div class="actions">
-    <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
-      <Icon name="down" />{locale.t("add-start")}
-    </button>
-    <div class="split">
-      <button class="btn" disabled={!probe || busy} onclick={() => add(false)}>
-        <Icon name="list-ordered" />{locale.t("add-later")}
+    {#if started}
+      <p class="started" role="status">{locale.t("add-started-note")}</p>
+    {:else if probe && category && folder !== null}
+      <label class="check">
+        <input type="checkbox" bind:checked={remember} />
+        {locale.t("add-remember", { category: categoryName(category) })}
+      </label>
+    {/if}
+    <div class="buttons">
+      <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
+        <Icon name="down" size={15} />{locale.t("add-start")}
       </button>
-      <button
-        id="add-later-more"
-        class="btn more"
-        disabled={!probe || busy}
-        aria-label={locale.t("add-later-queue")}
-        aria-haspopup="menu"
-        aria-expanded={later}
-        onclick={() => void openLater()}
-      >
-        <Icon name="chevron-down" size={15} />
-      </button>
-      {#if later}
-        <div class="queues" role="menu" tabindex="-1" aria-label={locale.t("add-later-queue")} onkeydown={onQueuesKey}>
-          {#each queues as q (q.name)}
-            <button class="q" role="menuitem" onclick={() => add(false, q.name)}>
-              <bdi>{q.name === "main" ? locale.t("queue-main") : q.name}</bdi>
-            </button>
-          {/each}
-        </div>
-      {/if}
+      <div class="split">
+        <button class="btn" disabled={!probe || busy} onclick={() => add(false)}>
+          <Icon name="list-ordered" size={15} />{locale.t("add-later")}
+        </button>
+        <button
+          id="add-later-more"
+          class="btn more"
+          disabled={!probe || busy}
+          aria-label={locale.t("add-later-queue")}
+          aria-haspopup="menu"
+          aria-expanded={later}
+          onclick={() => void openLater()}
+        >
+          <Icon name="chevron-down" size={14} />
+        </button>
+        {#if later}
+          <div class="queues" role="menu" tabindex="-1" aria-label={locale.t("add-later-queue")} onkeydown={onQueuesKey}>
+            {#each queues as q (q.name)}
+              <button class="q" role="menuitem" onclick={() => add(false, q.name)}>
+                <bdi>{q.name === "main" ? locale.t("queue-main") : q.name}</bdi>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <button class="btn" class:primary={page} onclick={oncancel} data-autofocus={page ? true : undefined}>{locale.t("add-cancel")}</button>
     </div>
-    <button class="btn end" class:primary={page} onclick={oncancel} data-autofocus={page ? true : undefined}>{locale.t("add-cancel")}</button>
   </div>
 </main>
 
@@ -286,23 +314,69 @@
   .info {
     display: flex;
     flex-direction: column;
+    gap: 8px;
     height: 100%;
     overflow: auto;
-    padding: 20px 24px 18px;
+    padding: 10px 16px 12px;
     background: var(--surface);
     box-sizing: border-box;
   }
-  .body {
-    flex: 1;
+  .about p {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 0;
+    min-height: 22px;
+    font-size: 13px;
+  }
+  .known {
+    flex-wrap: wrap;
+  }
+  .type {
     display: grid;
-    grid-template-columns: 1fr 190px;
-    gap: 24px;
-    min-height: 0;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--sel);
+    color: var(--accent);
+  }
+  .kind {
+    color: var(--muted);
+  }
+  .resume {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    color: var(--green);
+  }
+  .resume.no {
+    color: var(--amber);
+  }
+  .waiting {
+    color: var(--muted);
+  }
+  .problem {
+    color: var(--red);
+  }
+  .problem span,
+  .page span {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .page {
+    padding: 4px 8px;
+    border-radius: 7px;
+    background: var(--amber-bg);
+    color: var(--ink);
   }
   .fields {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 10px 18px;
+    gap: 8px 14px;
     align-content: start;
     align-items: center;
     min-width: 0;
@@ -313,10 +387,10 @@
   }
   .with {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
   }
-  .with .value {
+  .with > :first-child {
     flex: 1;
   }
   .value {
@@ -325,17 +399,13 @@
     gap: 8px;
     border: 1px solid var(--line);
     background: var(--sunken);
-    border-radius: 8px;
-    padding: 6px 10px;
-    min-height: 34px;
+    border-radius: 7px;
+    padding: 4px 9px;
+    min-height: 30px;
     min-width: 0;
     box-sizing: border-box;
     overflow: hidden;
   }
-  .value.ltr {
-    justify-content: space-between;
-  }
-  .value bdi,
   .text {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -364,25 +434,29 @@
   .name.quiet {
     color: transparent;
   }
+  /* The folder gives way first, so the name stays in sight. */
   .name.shown {
     pointer-events: none;
     background: transparent;
     border-color: transparent;
+    gap: 0;
+    white-space: nowrap;
+  }
+  .shown .dir {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--muted);
+  }
+  .shown .file {
+    flex: 0 0 auto;
+    max-width: 85%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .name::placeholder {
     color: var(--faint);
-  }
-  .page {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    margin: 0 0 14px;
-    padding: 10px 12px;
-    border-radius: 9px;
-    background: var(--amber-bg);
-    color: var(--ink);
-    font-size: 13px;
   }
   .pick select {
     flex: 1;
@@ -396,87 +470,36 @@
   .pick:focus-within {
     border-color: var(--accent);
   }
-  .started {
-    margin: 0;
-    font-size: 12px;
-    color: var(--muted);
-  }
   .square {
     padding-inline: 8px;
-  }
-  .check {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 13px;
-  }
-  .check.off {
-    color: var(--faint);
-  }
-  .card {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--sunken);
-    padding: 16px 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    text-align: center;
-    align-self: start;
-  }
-  .type {
-    display: grid;
-    place-items: center;
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
-    background: var(--sel);
-    color: var(--accent);
-  }
-  .size {
-    font-size: 18px;
-  }
-  .kind {
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .resume {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    color: var(--green);
-    font-size: 13px;
-  }
-  .resume.no {
-    color: var(--amber);
-  }
-  .why {
-    margin: 4px 0 0;
-    font-size: 11.5px;
-    color: var(--muted);
-  }
-  .waiting {
-    margin: 0;
-    color: var(--muted);
-  }
-  .problem {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    margin: 0;
-    color: var(--red);
-    font-size: 13px;
-    text-align: start;
+    min-width: 32px;
+    justify-content: center;
   }
   .actions {
     display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: auto;
+  }
+  .started,
+  .check {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 0;
+  }
+  .check {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--ink);
+  }
+  .buttons {
+    display: flex;
     gap: 8px;
     align-items: center;
-    padding-top: 16px;
-  }
-  .end {
     margin-inline-start: auto;
+    flex-shrink: 0;
   }
   .split {
     position: relative;
@@ -490,7 +513,7 @@
     border-start-start-radius: 0;
     border-end-start-radius: 0;
     border-inline-start: 0;
-    padding-inline: 8px;
+    padding-inline: 7px;
   }
   .queues {
     position: absolute;

@@ -47,7 +47,9 @@ export async function drive(win: string | null): Promise<void> {
   } else if (win === "add-info") {
     // Enabled once the link has been checked.
     const start = await until("«Start download»", () => button("add-start"));
-    await step("info", { name: (document.getElementById("add-name") as HTMLInputElement | null)?.value ?? null });
+    // «Save as» holds the whole path: the name is its last part.
+    const path = (document.getElementById("add-name") as HTMLInputElement | null)?.value ?? null;
+    await step("info", { name: path?.split(/[\\/]/).pop() ?? null });
     start.click();
   } else if (/^progress-\d+$/.test(win)) {
     // It draws its name only in its title bar; its heading for screen
