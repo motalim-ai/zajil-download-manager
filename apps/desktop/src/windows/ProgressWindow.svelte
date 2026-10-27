@@ -93,10 +93,15 @@
       .catch(() => {});
   });
 
+  // A video has no parts to show (#149). A value of its own: the effect
+  // below runs only when it or `more` changes, not at every update of the
+  // download (the owner's notes on 1.0: it took the user's height back to
+  // 640 four times a second, so the window could not be made taller).
+  const video = $derived(d?.video === true);
+
   // With the details, the window is taller; its width stays the user's.
   $effect(() => {
-    // A video has no parts to show (#149).
-    const height = more && !d?.video ? 640 : 430;
+    const height = more && !video ? 640 : 430;
     // The page's own width is the window's, in logical pixels: no
     // permission to read the window (review of #111).
     void getCurrentWindow()
