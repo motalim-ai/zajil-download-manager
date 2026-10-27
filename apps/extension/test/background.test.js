@@ -8,7 +8,7 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const session = {};
-  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [], scripts: [], watched: [], tabOptions: [] };
+  const done = { tabs: [], notifications: [], downloads: [], sent: [], cleared: [], cookieReads: [], ports: [], downloadOptions: [], menus: [], scripts: [], watched: [], tabOptions: [], order: [] };
   // What "Allow Zajil on sites" gave: the cookies, the video features.
   const have = new Set([...(granted ? ["cookies"] : []), ...(video ? ["scripting", "webRequest"] : [])]);
   const local = {};
@@ -92,6 +92,7 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
     contextMenus: { create: (item) => done.menus.push(item), onClicked: on("menu") },
     downloads: {
       onDeterminingFilename: on("filename"),
+      setUiOptions: async (options) => void done.order.push(options.enabled ? "ui shown" : "ui hidden"),
       download: async (options) => {
         done.downloads.push(options.url);
         done.downloadOptions.push(options);
@@ -138,6 +139,30 @@ describe("the background", () => {
     expect(fake.listeners.startup).toBeTypeOf("function");
     expect(fake.done.ports).toHaveLength(1);
     expect(fake.done.ports[0].sent[0]).toMatchObject({ type: "link", protocol_version: 1 });
+  });
+
+  it("hides the browser's download UI before Chrome settles a download Zajil takes, and not otherwise", async () => {
+    const fake = fakeChrome({ granted: false, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    // Shown again at every start, in case a stopped background left it hidden.
+    expect(fake.done.order).toEqual(["ui shown"]);
+    fake.done.order.length = 0;
+    // Taken: hidden, then settled, then shown once Zajil has it.
+    const suggested = vi.fn(() => fake.done.order.push("suggest"));
+    const back = fake.listeners.filename({ id: 8, url: "https://example.com/a.zip", finalUrl: "https://example.com/a.zip", state: "in_progress" }, suggested);
+    expect(back).toBe(true);
+    expect(suggested).not.toHaveBeenCalled();
+    await flush();
+    expect(fake.done.order).toEqual(["ui hidden", "suggest", "ui shown"]);
+    expect(fake.done.sent.at(-1)).toMatchObject({ type: "download", url: "https://example.com/a.zip" });
+    // Not a listed type: settled as it is, the UI never touched.
+    fake.done.order.length = 0;
+    const page = vi.fn(() => fake.done.order.push("suggest"));
+    fake.listeners.filename({ id: 9, url: "https://example.com/page.html", finalUrl: "https://example.com/page.html", state: "in_progress" }, page);
+    await flush();
+    expect(fake.done.order).toEqual(["suggest"]);
+    expect(page).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a ticket only for a download Zajil took with cookies, with its store", async () => {

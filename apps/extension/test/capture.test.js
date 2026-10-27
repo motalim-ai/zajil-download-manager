@@ -11,7 +11,7 @@ import {
   takeOver,
   videoMessage,
 } from "../src/capture.js";
-import { pausesSafely, withDownloadUiHidden } from "../src/compat.js";
+import { DECIDE_MS, onNewDownload, pausesSafely, withDownloadUiHidden } from "../src/compat.js";
 import { defaults } from "../src/settings.js";
 
 const item = (over = {}) => ({
@@ -296,5 +296,53 @@ describe("the browser's download UI while Zajil takes a download", () => {
     const browserApi = { downloads: { setUiOptions: vi.fn(async () => Promise.reject(new Error("no permission"))) } };
     expect(await withDownloadUiHidden(browserApi, async () => "ran")).toBe("ran");
     expect(browserApi.downloads.setUiOptions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a new download in Chrome waits for the extension to decide", () => {
+  /** Chrome's `onDeterminingFilename`, with the listener the extension added. */
+  function chromeApi() {
+    /** @type {any} */
+    let listener;
+    return { fire: (/** @type {any} */ item, /** @type {() => void} */ suggest) => listener(item, suggest), downloads: { onDeterminingFilename: { addListener: (/** @type {any} */ l) => (listener = l) } } };
+  }
+
+  it("settles once the handler is ready, and only once", async () => {
+    const browser = chromeApi();
+    /** @type {() => void} */
+    let goOn = () => {};
+    onNewDownload(browser, (_item, ready) => new Promise((done) => (goOn = () => { ready(); done(undefined); })));
+    const suggest = vi.fn();
+    expect(browser.fire({ id: 1 }, suggest)).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(suggest).not.toHaveBeenCalled();
+    goOn();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(suggest).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles when the handler fails, or takes too long", async () => {
+    const failing = chromeApi();
+    onNewDownload(failing, async () => {
+      throw new Error("storage");
+    });
+    const first = vi.fn();
+    failing.fire({ id: 2 }, first);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(first).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      const slow = chromeApi();
+      onNewDownload(slow, () => new Promise(() => {}));
+      const second = vi.fn();
+      slow.fire({ id: 3 }, second);
+      await vi.advanceTimersByTimeAsync(DECIDE_MS - 1);
+      expect(second).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(second).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

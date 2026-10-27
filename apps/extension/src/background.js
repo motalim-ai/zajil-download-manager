@@ -188,16 +188,22 @@ function leftToBrowser(item) {
   });
 }
 
-onNewDownload(api, (item) => {
-  void (async () => {
-    const settings = await load(api);
-    if (!shouldCapture(item, settings, api.runtime.id)) return;
-    if (await leftToBrowser(item)) return;
-    // Hidden from here, so the browser does not show a download Zajil
-    // takes; back once it is handed over (it shows again if Zajil does not
-    // take it).
-    await withDownloadUiHidden(api, () => handOver(item));
-  })();
+// The browser's download UI back at every start of the background: one
+// stopped in the middle of a hand-over left it hidden (review of #253;
+// Chrome forgets it only when the extension is unloaded). Before any
+// listener can hide it again.
+void api.downloads.setUiOptions?.({ enabled: true })?.catch(() => {});
+
+onNewDownload(api, async (item, ready) => {
+  const settings = await load(api);
+  if (!shouldCapture(item, settings, api.runtime.id)) return;
+  if (await leftToBrowser(item)) return;
+  // Hidden before Chrome settles the download (`ready`), so the browser
+  // does not show a download Zajil takes; back once it is handed over.
+  await withDownloadUiHidden(api, () => {
+    ready();
+    return handOver(item);
+  });
 });
 
 /**
