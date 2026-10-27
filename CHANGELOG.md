@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [1.0.0] - 2026-10-27
 
-The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). A first 1.0.0 draft was tried by hand on macOS and Windows and never published; it and its tag were removed (owner's decision of 2026-10-27), and the fixes after it (#251 to #278) are here too. This list is the titles of the pull requests merged after 0.2.0.
+The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). A first 1.0.0 draft was tried by hand on macOS and Windows and never published; it and its tag were removed (owner's decision of 2026-10-27), and the fixes after it (#251 to #280) are here too. This list is the titles of the pull requests merged after 0.2.0.
 
 Mind: the extension's «Also take any file larger than 5 MB» (on from the start) works even for the types a user removed from the list (#263).
 
@@ -57,6 +57,7 @@ Mind: the extension's «Also take any file larger than 5 MB» (on from the start
 - fix(video): the video's own link is asked when yt-dlp cannot read its page; a private window's video is never written down (#268)
 - fix(extension): ts is not a default type; a large video with it goes by its size (#276)
 - fix(desktop): «Video quality» stays in front, can be cancelled, and waits visibly in the main window (#277)
+- fix: zajil-host's own failures said in Zajil's language with no path, the video button only once Zajil's texts came, and yt-dlp's first run done only once it loaded its handlers (#280)
 
 ### Documentation
 
