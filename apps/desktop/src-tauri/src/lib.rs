@@ -123,14 +123,19 @@ fn data_dir(args: &[String]) -> Result<PathBuf, String> {
         .to_path_buf())
 }
 
+/// The first line Zajil says: its release's version (`zajil_core::VERSION`;
+/// this crate's own is always 0.0.0, #248) and its process.
+fn start_line(process: u32) -> String {
+    format!(
+        "zajil: starting (version {}, process {process})",
+        zajil_core::VERSION
+    )
+}
+
 pub fn run() {
     // Said at once, as each stage of the start below (#220: a start whose
     // window never came said nothing at all).
-    eprintln!(
-        "zajil: starting (version {}, process {})",
-        env!("CARGO_PKG_VERSION"),
-        std::process::id()
-    );
+    eprintln!("{}", start_line(std::process::id()));
     let args: Vec<String> = std::env::args().collect();
     let data = data_dir(&args).unwrap_or_else(|e| panic!("no data folder: {e}"));
     let system_download_dir = SystemPaths::new()
@@ -2521,6 +2526,25 @@ async fn remove<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #248: the start line said 0.0.0, this crate's version, whatever the
+    /// installer's was.
+    #[test]
+    fn the_start_line_says_the_release_s_version() {
+        let line = start_line(42);
+        assert!(!line.contains("0.0.0"), "{line}");
+        let release: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../scripts/release/tauri.release.json"
+        ))
+        .unwrap();
+        let version = release["version"]
+            .as_str()
+            .expect("the installer's version");
+        assert_eq!(
+            line,
+            format!("zajil: starting (version {version}, process 42)")
+        );
+    }
 
     /// «Download file info» adds the download with the user's own name,
     /// category and description (#103, #95); an empty name or description
