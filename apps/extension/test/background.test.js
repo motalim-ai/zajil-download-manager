@@ -559,6 +559,21 @@ describe("the background", () => {
       expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: false, error: locales.ar.videoNotAnswered.message });
       expect(fake.done.notifications).toEqual([]);
     });
+
+    it("zajil-host's own failure is said in Zajil's language, with nothing of the system (#264)", async () => {
+      let next = { ok: false, error: "Zajil's program was not found", code: "not_found" };
+      const fake = fakeChrome({ granted: false, video: true, answer: (m) => (m.type === "ping" ? { ok: true, language: "en" } : next) });
+      await load(fake);
+      await flush();
+      expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: false, error: locales.en.hostNotFound.message });
+      next = { ok: false, error: "Zajil is not running", code: "not_running" };
+      expect(await ask(fake, { type: "video-button", src: "https://cdn.example/v.mp4" })).toEqual({ taken: false, error: locales.en.hostNotRunning.message });
+      // From the menu: the notification says the same, in Zajil's language.
+      next = { ok: false, error: "cannot reach Zajil", code: "unreachable" };
+      fake.listeners.menu({ menuItemId: "zajil-download-video", pageUrl: "https://example.com/v", srcUrl: "https://cdn.example/v.mp4" }, { id: 1, url: "https://example.com/v" });
+      await flush();
+      expect(fake.done.notifications.at(-1)?.message).toBe(locales.en.hostUnreachable.message);
+    });
   });
 
   it("a message not from the button's script, or not from a tab, is ignored", async () => {

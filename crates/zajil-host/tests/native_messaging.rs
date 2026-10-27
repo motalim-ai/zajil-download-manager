@@ -169,6 +169,8 @@ fn without_the_app_a_download_is_refused_clearly() {
     let response = answer(&mut host);
     assert!(!response.ok);
     assert_eq!(response.error.as_deref(), Some("Zajil is not running"));
+    // Its code, for the extension to say it in Zajil's language (#264).
+    assert_eq!(response.code.as_deref(), Some("not_running"));
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
     assert_eq!(answer(&mut host), Response::pong(Some("ar")));
 }
@@ -223,10 +225,9 @@ fn an_app_that_never_answers_does_not_hold_the_browser() {
     let response = answer(&mut host);
     let took = started.elapsed();
     assert!(!response.ok);
-    assert!(
-        response.error.unwrap().contains("did not answer"),
-        "the reason is said"
-    );
+    assert_eq!(response.code.as_deref(), Some("no_answer"));
+    // No detail of the system in it (#264): only what the code says.
+    assert_eq!(response.error.as_deref(), Some("Zajil did not answer"));
     assert!(
         took < zajil_host::CHANNEL_TIMEOUT + Duration::from_secs(5),
         "took {took:?}"

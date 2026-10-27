@@ -161,6 +161,18 @@
   "videoButtonFailed": {
     "message": "The video did not reach Zajil."
   },
+  "hostNotRunning": {
+    "message": "Zajil is not running. Start it, then try again."
+  },
+  "hostNotFound": {
+    "message": "Zajil was not found where it should be. Install it again, or open its settings and choose “Fix the browser integration”."
+  },
+  "hostUnreachable": {
+    "message": "Zajil could not be reached. Restart it, then try again."
+  },
+  "hostNoAnswer": {
+    "message": "Zajil did not answer in time, and may have it: look in Zajil."
+  },
   "sitesPartly": {
     "message": "Partly allowed: a download link's cookies go to Zajil with its download, but the “Download video” button needs the rest of the permission. You can also take it all back."
   },

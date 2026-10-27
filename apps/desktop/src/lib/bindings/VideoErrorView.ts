@@ -6,8 +6,9 @@
  */
 export type VideoErrorView = { 
 /**
- * `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped` or
- * `io`; for a failure of yt-dlp's whose words say what it comes to,
+ * `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped`,
+ * `io`, or `not_ready` when yt-dlp did not start after its download;
+ * for a failure of yt-dlp's whose words say what it comes to,
  * `no_formats`, `sign_in`, `private`, `unsupported` or `challenge`;
  * `playlist` for a playlist's item that is a playlist itself.
  */

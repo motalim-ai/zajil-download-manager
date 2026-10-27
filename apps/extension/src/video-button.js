@@ -110,15 +110,15 @@
   button.append(mark, spin, label);
   root.append(style, button);
 
-  /** The button's texts: the browser's language until the background gives
-   * Zajil's (asked once, at the first video). */
-  let texts = {
-    dir: api.i18n.getMessage("lang") === "en" ? "ltr" : "rtl",
-    button: api.i18n.getMessage("videoButton") || "Zajil",
-    working: api.i18n.getMessage("videoButtonWorking") || "…",
-    done: api.i18n.getMessage("videoButtonDone") || "✓",
-    failed: api.i18n.getMessage("videoButtonFailed") || "✗",
-  };
+  /** The button's texts, in Zajil's language, from the background (asked
+   * once, at the first video). Until they come the button is not shown at
+   * all, so it never shows in another language first (owner's decision on
+   * #264); if they never come, it never shows.
+   * @type {{ dir: string, button: string, working: string, done: string, failed: string } | null} */
+  let texts = null;
+  /** The video the pointer was on while the texts were on their way. */
+  /** @type {HTMLVideoElement | null} */
+  let waiting = null;
   let asked = false;
   const askTexts = () => {
     if (asked) return;
@@ -132,19 +132,22 @@
           if (typeof given[key] !== "string" || !given[key]) return;
         }
         texts = { dir: answer.lang === "en" ? "ltr" : "rtl", button: given.button, working: given.working, done: given.done, failed: given.failed };
-        if (button.dataset.state === "idle") setState("idle");
+        setState("idle");
+        const found = waiting;
+        waiting = null;
+        if (found?.isConnected) show(found);
       })
       .catch(() => {});
   };
 
-  /** @param {"idle" | "working" | "done" | "error"} state @param {string} [text] */
+  /** Only once the texts came (the button shows only then). @param {"idle" | "working" | "done" | "error"} state @param {string} [text] */
   const setState = (state, text) => {
+    if (!texts) return;
     button.dataset.state = state;
     button.dir = texts.dir;
     button.setAttribute("aria-busy", String(state === "working"));
     label.textContent = text ?? (state === "working" ? texts.working : state === "done" ? texts.done : texts.button);
   };
-  setState("idle");
 
   /** Videos that fired `encrypted`: played through EME. */
   const encrypted = new WeakSet();
@@ -187,7 +190,11 @@
     if (busy()) return;
     const box = found.getBoundingClientRect();
     if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT || isProtected(found) || !wantedHere()) return;
-    askTexts();
+    if (!texts) {
+      waiting = found;
+      askTexts();
+      return;
+    }
     // Last in the page each time, above what the page added since.
     if (host !== document.documentElement.lastElementChild) document.documentElement.append(host);
     video = found;
@@ -210,6 +217,9 @@
     const found = document.elementsFromPoint(at.x, at.y).find((e) => e instanceof HTMLVideoElement);
     if (found) {
       show(/** @type {HTMLVideoElement} */ (found));
+    } else if (!texts) {
+      // Left before the texts came: nothing to show then.
+      waiting = null;
     } else if (!button.hidden) {
       clearTimeout(hiding);
       hiding = setTimeout(hide, LINGER_MS);
@@ -273,7 +283,7 @@
       setState("done");
       rest(DONE_MS);
     } else {
-      const why = typeof answer?.error === "string" && answer.error ? answer.error : texts.failed;
+      const why = typeof answer?.error === "string" && answer.error ? answer.error : (texts?.failed ?? "");
       setState("error", why);
       rest(ERROR_MS);
     }

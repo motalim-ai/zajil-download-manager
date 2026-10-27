@@ -360,6 +360,10 @@ async fn install(toolbox: &Toolbox, engine: &Engine, yes: bool, data_dir: &Path)
     };
     match runner.warm_up(&stop).await {
         Err(VideoError::Stopped) => return crate::fail("stopped"),
+        // It did not get as far as loading what it needs (#279).
+        Err(err @ VideoError::NotReady(_)) => {
+            return crate::fail(&format!("the video tools are not ready: {err}"));
+        }
         Err(err) => eprintln!("note: the tools' first run: {err}"),
         Ok(()) => {}
     }

@@ -558,6 +558,10 @@ pub enum VideoError {
     Output(String),
     #[error("stopped")]
     Stopped,
+    /// yt-dlp's first run after its download ([`VideoRunner::warm_up`])
+    /// did not get as far as loading what it needs.
+    #[error("yt-dlp could not start: {0}")]
+    NotReady(String),
     /// A tool is missing, or is not the checked file (ADR-0009).
     #[error(transparent)]
     Tools(#[from] crate::tools::ToolError),
@@ -1411,9 +1415,10 @@ impl VideoRunner {
     /// 2026-10-27): the first start of a newly unpacked yt-dlp is slow, as
     /// the system checks each of its files the first time, so it happens
     /// while Zajil says it is preparing the tools, not at the first video.
-    /// The run itself fails (it has no network) and that is fine; a tool
-    /// that cannot be checked or started is an error, and so is a stop.
-    /// It ends after [`WARM_UP_TIME`] at most.
+    /// The run itself fails (it has no network) and that is fine, once
+    /// yt-dlp has said which request handlers it loaded; without that, or
+    /// a tool that cannot be checked or started, or after [`WARM_UP_TIME`],
+    /// it is an error ([`VideoError::NotReady`]), and so is a stop.
     pub async fn warm_up(&self, stop: &Stop) -> Result<(), VideoError> {
         let url = checked(WARM_UP_URL)?;
         // Every request of the run comes here, and is dropped at once: a
@@ -1429,13 +1434,25 @@ impl VideoRunner {
         let mut args = base_args();
         args.push(Arg::WarmUp(port));
         let mut ignore = |_| {};
-        let run = self.run(&url, args, None, None, stop, &mut ignore);
+        let run = self.run_unjudged(&url, args, None, None, stop, &mut ignore);
         let ran = tokio::time::timeout(WARM_UP_TIME, run).await;
         dropping.abort();
         match ran {
+            // Its request fails (no network), and that is fine; it worked
+            // only if yt-dlp said which request handlers it loaded (review
+            // of #278: one that crashed while loading Python counted as
+            // done).
+            Ok(Ok(output)) if output.loaded => Ok(()),
+            Ok(Ok(output)) => {
+                Err(VideoError::NotReady(output.error.unwrap_or_else(|| {
+                    "it ended before loading what it needs".into()
+                })))
+            }
             // Dropped: the run's tree is ended and its folders removed.
-            Err(_elapsed) => Ok(()),
-            Ok(Ok(_) | Err(VideoError::Tool(_) | VideoError::Drm)) => Ok(()),
+            Err(_elapsed) => Err(VideoError::NotReady(format!(
+                "it did not finish within {} s",
+                WARM_UP_TIME.as_secs()
+            ))),
             Ok(Err(err)) => Err(err),
         }
     }
@@ -1607,8 +1624,36 @@ impl VideoRunner {
         }
     }
 
-    /// One run of yt-dlp, from start to the end of its whole tree.
+    /// One run of yt-dlp, from start to the end of its whole tree; an
+    /// error if it failed.
     async fn run(
+        &self,
+        url: &reqwest::Url,
+        args: Vec<Arg>,
+        cookies: Option<&str>,
+        finish: Option<Finish>,
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(VideoEvent) + Send),
+    ) -> Result<Output, VideoError> {
+        let finished = self
+            .run_unjudged(url, args, cookies, finish, stop, on_event)
+            .await?;
+        if !finished.status_ok {
+            let message = finished
+                .error
+                .unwrap_or_else(|| "it failed without a message".into());
+            return Err(if says_drm(&message) {
+                VideoError::Drm
+            } else {
+                VideoError::Tool(message)
+            });
+        }
+        Ok(finished)
+    }
+
+    /// One run of yt-dlp, from start to the end of its whole tree, and what
+    /// it said, whether it succeeded or not (a stop is still an error).
+    async fn run_unjudged(
         &self,
         url: &reqwest::Url,
         mut args: Vec<Arg>,
@@ -1744,6 +1789,7 @@ impl VideoRunner {
                 placed: None,
                 status_ok: status.success(),
                 error: read.error,
+                loaded: read.loaded,
                 js: if uses_qjs {
                     js_held(
                         js_reports(&run.dir.join(JS_REPORTS)),
@@ -1775,16 +1821,6 @@ impl VideoRunner {
         if was_stopped {
             return Err(VideoError::Stopped);
         }
-        if !finished.status_ok {
-            let message = finished
-                .error
-                .unwrap_or_else(|| "it failed without a message".into());
-            return Err(if says_drm(&message) {
-                VideoError::Drm
-            } else {
-                VideoError::Tool(message)
-            });
-        }
         Ok(finished)
     }
 }
@@ -1794,6 +1830,9 @@ struct Output {
     placed: Option<io::Result<PathBuf>>,
     status_ok: bool,
     error: Option<String>,
+    /// yt-dlp said which request handlers it has (`--verbose`): it started
+    /// and loaded its libraries.
+    loaded: bool,
     /// What `zajil-jsbox`'s sandbox held, if it ran.
     js: Option<JsSandbox>,
 }
@@ -1907,7 +1946,13 @@ struct ReadOutput {
     json: Vec<u8>,
     final_path: Option<PathBuf>,
     error: Option<String>,
+    /// [`Output::loaded`].
+    loaded: bool,
 }
+
+/// What yt-dlp's verbose header says once it has loaded its request
+/// handlers (and with them its libraries).
+const LOADED_LINE: &str = "[debug] Request Handlers";
 
 /// Reads yt-dlp's output until it closes: the JSON of a probe (bounded),
 /// or the progress and final path of a download; and the last error line.
@@ -1922,7 +1967,9 @@ fn read_output(
         // A warning that says why, when the error names only what followed
         // (no format left after YouTube's challenge went unsolved).
         let mut cause = None;
+        let mut loaded = false;
         for line in bounded_lines(stderr) {
+            loaded |= line.starts_with(LOADED_LINE);
             if let Some(rest) = line.strip_prefix("ERROR:") {
                 last = Some(shown_message(rest.trim()));
             } else if let Some(rest) = line.strip_prefix("WARNING:")
@@ -1932,10 +1979,11 @@ fn read_output(
                 cause = Some(shown_message(rest.trim()));
             }
         }
-        match (cause, last) {
+        let error = match (cause, last) {
             (Some(cause), Some(last)) => Some(format!("{cause} / {last}")),
             (cause, last) => last.or(cause),
-        }
+        };
+        (error, loaded)
     });
     let mut json = Vec::new();
     let mut final_path = None;
@@ -1952,11 +2000,12 @@ fn read_output(
     } else {
         let _ = stdout.take(MAX_JSON).read_to_end(&mut json);
     }
-    let error = errors.join().unwrap_or(None);
+    let (error, loaded) = errors.join().unwrap_or((None, false));
     ReadOutput {
         json,
         final_path,
         error,
+        loaded,
     }
 }
 

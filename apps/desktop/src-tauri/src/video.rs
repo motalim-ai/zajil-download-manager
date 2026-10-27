@@ -585,7 +585,7 @@ pub async fn video_tools_install<R: tauri::Runtime>(
     app: State<'_, crate::App>,
     state: State<'_, VideoState>,
     handle: tauri::AppHandle<R>,
-) -> Result<(), String> {
+) -> Result<(), VideoErrorView> {
     let stop = Stop::new();
     *state.installing.lock().unwrap() = Some(stop.clone());
     // After an update at start that is under way: then what it brought
@@ -613,7 +613,10 @@ pub async fn video_tools_install<R: tauri::Runtime>(
                 }
             })
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| VideoErrorView {
+                kind: "tool".into(),
+                message: e.to_string(),
+            })?;
     }
     if installed {
         warm_up(&app, &stop).await?;
@@ -622,11 +625,13 @@ pub async fn video_tools_install<R: tauri::Runtime>(
     Ok(())
 }
 
-/// [`VideoRunner::warm_up`] after an install: only a stop is said; a run
-/// that could not start goes to the log (the first video will say why).
-async fn warm_up(app: &crate::App, stop: &Stop) -> Result<(), String> {
+/// [`VideoRunner::warm_up`] after an install: a yt-dlp that did not get as
+/// far as loading what it needs fails the preparing of the tools, in the
+/// user's words (`not_ready`, owner's decision on #279); a stop is said
+/// too. Anything else goes to the log (the first video will say why).
+async fn warm_up(app: &crate::App, stop: &Stop) -> Result<(), VideoErrorView> {
     match runner(app).await.warm_up(stop).await {
-        Err(zajil_core::video::VideoError::Stopped) => Err("stopped".into()),
+        Err(e @ (VideoError::Stopped | VideoError::NotReady(_))) => Err(e.into()),
         Err(e) => {
             eprintln!("zajil: the video tools' first run: {e}");
             Ok(())
@@ -795,8 +800,9 @@ pub enum VideoInfoView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export)]
 pub struct VideoErrorView {
-    /// `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped` or
-    /// `io`; for a failure of yt-dlp's whose words say what it comes to,
+    /// `drm`, `tools_missing`, `refused`, `tool`, `output`, `stopped`,
+    /// `io`, or `not_ready` when yt-dlp did not start after its download;
+    /// for a failure of yt-dlp's whose words say what it comes to,
     /// `no_formats`, `sign_in`, `private`, `unsupported` or `challenge`;
     /// `playlist` for a playlist's item that is a playlist itself.
     pub kind: String,
@@ -820,6 +826,7 @@ impl From<VideoError> for VideoErrorView {
             VideoError::Output(_) => "output",
             VideoError::Stopped => "stopped",
             VideoError::Io(_) => "io",
+            VideoError::NotReady(_) => "not_ready",
         };
         VideoErrorView {
             kind: kind.into(),
@@ -846,6 +853,7 @@ impl VideoErrorView {
             "unsupported" => "video-error-unsupported",
             "challenge" => "video-error-challenge",
             "playlist" => "video-error-playlist",
+            "not_ready" => "video-tools-not-ready",
             _ => {
                 return localizer
                     .text(

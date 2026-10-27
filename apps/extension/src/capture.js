@@ -199,8 +199,21 @@ export function needsSignIn(result) {
  * `alsoInBrowser`: taken, but the browser had finished it meanwhile
  * (Firefox, a small file): it is kept in the browser's list too.
  *
- * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string, alsoInBrowser?: boolean }} Result
+ * `code`: when zajil-host itself could not hand it to Zajil, why
+ * (`HOST_PROBLEMS`), to be said in Zajil's language (#264).
+ *
+ * @typedef {{ outcome: "taken" | "refused" | "unknown" | "unreachable", error?: string, code?: string, alsoInBrowser?: boolean }} Result
  */
+
+/** zajil-host's own failures (`zajil_host::HostProblem`), each with the
+ * text that says it: Zajil is not running, its program was not found, it
+ * cannot be reached, or it did not answer (and may have it). */
+export const HOST_PROBLEMS = {
+  not_running: "hostNotRunning",
+  not_found: "hostNotFound",
+  unreachable: "hostUnreachable",
+  no_answer: "hostNoAnswer",
+};
 
 /**
  * Sends `message` to Zajil through the host.
@@ -217,7 +230,10 @@ export async function send(browserApi, message) {
   }
   if (answer && answer.ok === true) return { outcome: "taken" };
   const error = typeof answer?.error === "string" ? answer.error : "no answer";
-  return { outcome: NO_ANSWER.some((start) => error.startsWith(start)) ? "unknown" : "refused", error };
+  const code = typeof answer?.code === "string" && Object.hasOwn(HOST_PROBLEMS, answer.code) ? answer.code : undefined;
+  // A host of before the codes says "no answer" in its text only.
+  const unknown = code ? code === "no_answer" : NO_ANSWER.some((start) => error.startsWith(start));
+  return code ? { outcome: unknown ? "unknown" : "refused", error, code } : { outcome: unknown ? "unknown" : "refused", error };
 }
 
 /**

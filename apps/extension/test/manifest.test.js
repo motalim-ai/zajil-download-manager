@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { HOST, MAX_NAME, MAX_URL, NO_ANSWER, PROTOCOL_VERSION } from "../src/capture.js";
+import { HOST, HOST_PROBLEMS, MAX_NAME, MAX_URL, NO_ANSWER, PROTOCOL_VERSION } from "../src/capture.js";
 import { MAX_COOKIES } from "../src/cookies.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -83,12 +83,17 @@ describe("the protocol, as zajil-host has it", () => {
     expect(rustConst(host, "MAX_URL")).toBe("8 * 1024");
     expect(MAX_URL).toBe(8 * 1024);
     expect(Number(rustConst(host, "MAX_NAME"))).toBe(MAX_NAME);
-    expect(hostMain).toContain(`"${NO_ANSWER[0]} within {} s"`);
     expect(rustConst(host, "MAX_COOKIES")).toBe("16 * 1024");
     expect(MAX_COOKIES).toBe(16 * 1024);
     // How Zajil says the server wanted a sign-in (`needsSignIn`).
     expect(read("../../../crates/zajil-core/src/engine.rs")).toContain('#[error("the server answered {0}")]');
-    expect(hostMain).toContain(`"${NO_ANSWER[0]}: {e}"`);
-    expect(hostMain).toContain(`"${NO_ANSWER[1]}: {e}"`);
+    // The host's own failures (#264): the same codes, each said here; and
+    // "no answer" in words an extension of before the codes reads as such.
+    for (const [code, key] of Object.entries(HOST_PROBLEMS)) {
+      expect(host).toContain(`=> "${code}",`);
+      expect(key).toMatch(/^host[A-Z]/);
+    }
+    expect([...host.matchAll(/HostProblem::\w+ => "([a-z_]+)",/g)].map((m) => m[1]).sort()).toEqual(Object.keys(HOST_PROBLEMS).sort());
+    expect(host).toContain(`HostProblem::NoAnswer => "${NO_ANSWER[0]}",`);
   });
 });

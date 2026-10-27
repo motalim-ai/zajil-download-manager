@@ -1324,3 +1324,25 @@ async fn the_sweep_follows_no_link_and_leaves_a_live_run_alone() {
     request_stop.request();
     assert!(matches!(live.await.unwrap(), Err(VideoError::Stopped)));
 }
+
+/// The first run after the tools are downloaded (#279): its request fails
+/// (no network), and that is fine once yt-dlp said which request handlers
+/// it loaded; without that line it is not ready, and says why. Every
+/// request went to Zajil's own port on this machine.
+#[tokio::test]
+async fn the_warm_up_is_done_only_once_yt_dlp_said_it_loaded_its_handlers() {
+    let s = setup("warm");
+    s.runner.warm_up(&Stop::new()).await.unwrap();
+    let call = &calls(&s.control)[0];
+    let args = args(call);
+    let proxy = &args[args.iter().position(|a| a == "--proxy").unwrap() + 1];
+    assert!(proxy.starts_with("http://127.0.0.1:"), "{proxy}");
+    assert!(args.contains(&"--verbose".to_owned()));
+
+    let s = setup("fail Failed to load Python DLL");
+    let err = s.runner.warm_up(&Stop::new()).await.unwrap_err();
+    assert!(
+        matches!(&err, VideoError::NotReady(why) if why.contains("Failed to load Python DLL")),
+        "{err}"
+    );
+}

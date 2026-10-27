@@ -20,6 +20,12 @@ describe("a video's failure", () => {
     expect(errorDetails("network down")).toBe("network down");
   });
 
+  it("says when yt-dlp did not start after its download, with its words under «Details» (#279)", () => {
+    const e = { kind: "not_ready", message: "yt-dlp could not start: Failed to load Python DLL" };
+    expect(errorKey(e)).toBe("video-tools-not-ready");
+    expect(errorDetails(e)).toBe(e.message);
+  });
+
   it("needs no details where Zajil says it all", () => {
     expect(errorKey({ kind: "drm", message: "protected" })).toBe("video-drm");
     expect(errorDetails({ kind: "drm", message: "protected" })).toBeNull();

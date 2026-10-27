@@ -110,7 +110,9 @@
       await api.videoToolsInstall();
       await probe();
     } catch (e) {
-      step = { kind: "failed", error: String(e) };
+      // Why, in the user's words (`not_ready`: yt-dlp did not start after
+      // its download), and its own text under «Details».
+      step = { kind: "failed", error: typeof e === "string" ? e : (e as VideoErrorView) };
     }
   }
 

@@ -12,6 +12,7 @@ const SENTENCE: Record<string, string> = {
   unsupported: "video-error-unsupported",
   challenge: "video-error-challenge",
   playlist: "video-error-playlist",
+  not_ready: "video-tools-not-ready",
 };
 
 /** The sentence's key: its own for a known failure, else a general one. */

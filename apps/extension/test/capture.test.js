@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   HOST,
+  HOST_PROBLEMS,
   MAX_URL,
   NO_ANSWER,
   downloadMessage,
@@ -251,6 +253,21 @@ describe("handing a download over, in Chrome and Edge", () => {
       const api = fakeApi({ answer: { protocol_version: 1, ok: false, error } });
       expect((await takeOver(api, item(), { pause: true })).outcome, error).toBe("unknown");
       expect(api.calls.map((c) => c[0])).toEqual(["pause", "native"]);
+    }
+  });
+
+  it("zajil-host's own failures come with their code; only no answer is unknown", async () => {
+    const answer = (code, error) => fakeApi({ answer: { protocol_version: 1, ok: false, error, code } });
+    expect(await send(answer("no_answer", "Zajil did not answer"), {})).toEqual({ outcome: "unknown", error: "Zajil did not answer", code: "no_answer" });
+    for (const code of ["not_running", "not_found", "unreachable"]) {
+      expect(await send(answer(code, "x"), {}), code).toEqual({ outcome: "refused", error: "x", code });
+    }
+    // A code it does not know is not passed on: the text decides, as before.
+    expect(await send(answer("weird", "Zajil did not answer"), {})).toEqual({ outcome: "unknown", error: "Zajil did not answer" });
+    // Every code has its text in both languages.
+    for (const lang of ["ar", "en"]) {
+      const texts = JSON.parse(readFileSync(new URL(`../src/_locales/${lang}/messages.json`, import.meta.url), "utf8"));
+      for (const key of Object.values(HOST_PROBLEMS)) expect(texts[key]?.message, `${lang} ${key}`).toBeTruthy();
     }
   });
 

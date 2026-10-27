@@ -267,6 +267,49 @@ pub struct Response {
     /// extension's video button speaks it (owner's decision, 2026-10-27).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// When the host itself could not hand the message to Zajil: why, as a
+    /// [`HostProblem`] code the extension says in Zajil's language (owner's
+    /// decision on #264). `error` then says it in English, with no path or
+    /// detail of the system (those go to the host's log).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+/// Why the host could not hand a message to Zajil.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostProblem {
+    /// Zajil is not running, and the host was told not to start it.
+    NotRunning,
+    /// Zajil's program is not next to the host.
+    NotFound,
+    /// The host could not reach Zajil, or start it: the message never
+    /// reached it.
+    Unreachable,
+    /// The message was sent, and no valid answer came: Zajil may have it.
+    NoAnswer,
+}
+
+impl HostProblem {
+    /// Its code in [`Response::code`].
+    pub fn code(self) -> &'static str {
+        match self {
+            HostProblem::NotRunning => "not_running",
+            HostProblem::NotFound => "not_found",
+            HostProblem::Unreachable => "unreachable",
+            HostProblem::NoAnswer => "no_answer",
+        }
+    }
+
+    /// What `error` says. "Zajil did not answer" is what an extension of
+    /// before the codes reads as "Zajil may have it" (`NO_ANSWER` there).
+    pub fn text(self) -> &'static str {
+        match self {
+            HostProblem::NotRunning => "Zajil is not running",
+            HostProblem::NotFound => "Zajil's program was not found",
+            HostProblem::Unreachable => "cannot reach Zajil",
+            HostProblem::NoAnswer => "Zajil did not answer",
+        }
+    }
 }
 
 impl Response {
@@ -276,6 +319,7 @@ impl Response {
             ok: true,
             error: None,
             language: None,
+            code: None,
         }
     }
 
@@ -285,6 +329,15 @@ impl Response {
             ok: false,
             error: Some(why.into()),
             language: None,
+            code: None,
+        }
+    }
+
+    /// The host's own failure to hand the message to Zajil.
+    pub fn host_problem(problem: HostProblem) -> Self {
+        Response {
+            code: Some(problem.code().to_owned()),
+            ..Response::refused(problem.text())
         }
     }
 
@@ -692,6 +745,43 @@ impl Links {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The host's own failures: a code the extension says in Zajil's
+    /// language, and an English text with no path or detail (#264), the
+    /// one for "no answer" as extensions of before the codes read it.
+    #[test]
+    fn the_host_s_own_failures_have_a_code_and_no_detail() {
+        let all = [
+            HostProblem::NotRunning,
+            HostProblem::NotFound,
+            HostProblem::Unreachable,
+            HostProblem::NoAnswer,
+        ];
+        let codes: Vec<&str> = all.iter().map(|p| p.code()).collect();
+        assert_eq!(
+            codes,
+            ["not_running", "not_found", "unreachable", "no_answer"]
+        );
+        for problem in all {
+            let json = serde_json::to_value(Response::host_problem(problem)).unwrap();
+            assert_eq!(json["ok"], false);
+            assert_eq!(json["code"], problem.code());
+            let text = json["error"].as_str().unwrap();
+            assert!(!text.contains(['/', '\\', ':']), "{text}");
+        }
+        assert!(
+            HostProblem::NoAnswer
+                .text()
+                .starts_with("Zajil did not answer")
+        );
+        // Other answers carry no code.
+        assert!(
+            serde_json::to_value(Response::refused("no"))
+                .unwrap()
+                .get("code")
+                .is_none()
+        );
+    }
 
     fn framed(json: &str) -> Vec<u8> {
         let mut out = Vec::new();

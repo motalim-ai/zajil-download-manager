@@ -636,6 +636,7 @@ video-error-playlist = This link is a playlist, not a video. Open it in «Video 
 video-done = The video has downloaded.
 video-drm = This video is protected, and Zajil does not download protected content.
 video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.
+video-tools-not-ready = yt-dlp was downloaded but did not start, so the video tools are not ready. Try again, and if it happens again, tell us what «Details» says.
 video-error-no_formats = Zajil found no quality it can download for this video. Try again in a little while.
 video-error-sign_in = This video opens only when signed in to its site. Sign in in the browser and let the extension send cookies, then try again.
 video-error-private = This video is private: only those its owner allowed can see it.

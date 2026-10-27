@@ -91,6 +91,16 @@ fn main() {
             eprintln!("ERROR: {}", message.join(" "));
             std::process::exit(1);
         }
+        // The warm-up as yt-dlp runs it with no network: its verbose
+        // header, then the request fails.
+        "warm" => {
+            eprintln!("[debug] Optional libraries: certifi, requests");
+            eprintln!("[debug] Request Handlers: urllib, requests");
+            eprintln!(
+                "ERROR: [youtube] abc: Unable to download API page: Unable to connect to proxy"
+            );
+            std::process::exit(1);
+        }
         // Says it started, then waits to be ended (a stop, a crash).
         "hang" => {
             std::fs::write(control.join("started"), b"").unwrap();

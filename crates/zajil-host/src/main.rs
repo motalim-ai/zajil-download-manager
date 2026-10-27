@@ -25,7 +25,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Duration;
 
 use zajil_host::{
-    CHANNEL_TIMEOUT, FrameError, FromLink, LINK_ANSWER, MAX_REQUEST, MAX_RESPONSE,
+    CHANNEL_TIMEOUT, FrameError, FromLink, HostProblem, LINK_ANSWER, MAX_REQUEST, MAX_RESPONSE,
     PROTOCOL_VERSION, Request, Response, ToExtension, parse, read_frame, write_frame, write_json,
 };
 use zajil_platform::AppPaths;
@@ -78,7 +78,12 @@ fn main() -> ExitCode {
             }
             Ok(request) => match forward(&data_dir, &request) {
                 Ok(app_answer) => write_frame(&mut output, &app_answer),
-                Err(err) => write_json(&mut output, &Response::refused(err)),
+                Err((problem, detail)) => {
+                    // The detail (a path, the system's words) for the log
+                    // only (#264).
+                    eprintln!("zajil-host: {}: {detail}", problem.text());
+                    write_json(&mut output, &Response::host_problem(problem))
+                }
             },
         };
         if let Err(err) = answer {
@@ -189,20 +194,25 @@ fn data_dir() -> Result<PathBuf, String> {
 }
 
 /// Hands `request` to the app and returns its answer, as the app wrote it
-/// (checked to be a [`Response`]).
-fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, String> {
+/// (checked to be a [`Response`]); or why not, and its detail for the log.
+fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, (HostProblem, String)> {
+    use HostProblem::{NoAnswer, NotRunning, Unreachable};
     // A short wait: the app may be busy accepting another connection.
     let mut stream = match zajil_platform::ipc::connect(data_dir, Duration::from_millis(500)) {
         Ok(stream) => stream,
         Err(err) if not_running(&err) => {
             if std::env::var_os("ZAJIL_NO_LAUNCH").is_some() {
-                return Err("Zajil is not running".into());
+                return Err((NotRunning, err.to_string()));
             }
             start_app(data_dir)?;
-            zajil_platform::ipc::connect(data_dir, START_PATIENCE)
-                .map_err(|e| format!("Zajil was started but does not answer: {e}"))?
+            zajil_platform::ipc::connect(data_dir, START_PATIENCE).map_err(|e| {
+                (
+                    Unreachable,
+                    format!("started, but its channel did not open: {e}"),
+                )
+            })?
         }
-        Err(err) => return Err(format!("cannot reach Zajil: {err}")),
+        Err(err) => return Err((Unreachable, err.to_string())),
     };
     // The talk runs on its own thread, so an app that never answers
     // cannot hold the browser's call: after CHANNEL_TIMEOUT the host
@@ -213,25 +223,25 @@ fn forward(data_dir: &Path, request: &Request) -> Result<Vec<u8>, String> {
         // A request that could not be written never reached the app (it
         // was busy and closed the connection, review of #70): that is not
         // "did not answer", which tells the extension the app may have it.
-        let mut talk = || -> Result<Vec<u8>, String> {
-            write_json(&mut stream, &request).map_err(|e| format!("cannot reach Zajil: {e}"))?;
+        let mut talk = || -> Result<Vec<u8>, (HostProblem, String)> {
+            write_json(&mut stream, &request).map_err(|e| (Unreachable, e.to_string()))?;
             read_frame(&mut stream, MAX_RESPONSE)
-                .map_err(|e| format!("Zajil did not answer: {e}"))?
-                .ok_or_else(|| "Zajil did not answer: the connection closed".to_owned())
+                .map_err(|e| (NoAnswer, e.to_string()))?
+                .ok_or_else(|| (NoAnswer, "the connection closed".to_owned()))
         };
         let _ = done.send(talk());
     });
     let answer = match wait.recv_timeout(CHANNEL_TIMEOUT) {
         Ok(answer) => answer?,
         Err(_) => {
-            return Err(format!(
-                "Zajil did not answer within {} s",
-                CHANNEL_TIMEOUT.as_secs()
+            return Err((
+                NoAnswer,
+                format!("nothing within {} s", CHANNEL_TIMEOUT.as_secs()),
             ));
         }
     };
     serde_json::from_slice::<Response>(&answer)
-        .map_err(|e| format!("Zajil's answer is not valid: {e}"))?;
+        .map_err(|e| (NoAnswer, format!("its answer is not valid: {e}")))?;
     Ok(answer)
 }
 
@@ -246,17 +256,18 @@ fn not_running(err: &io::Error) -> bool {
 /// folder, detached from the browser: no pipes of its, its own process
 /// group on macOS and Linux, and on Windows out of the browser's job when
 /// the job allows it (Firefox kills its hosts' job when it closes them).
-fn start_app(data_dir: &Path) -> Result<(), String> {
-    let here = std::env::current_exe().map_err(|e| format!("cannot find myself: {e}"))?;
+fn start_app(data_dir: &Path) -> Result<(), (HostProblem, String)> {
+    let here = std::env::current_exe()
+        .map_err(|e| (HostProblem::NotFound, format!("cannot find myself: {e}")))?;
     let app = here.with_file_name(if cfg!(windows) {
         "zajil-desktop.exe"
     } else {
         "zajil-desktop"
     });
     if !app.is_file() {
-        return Err(format!(
-            "Zajil is not running, and {} was not found",
-            app.display()
+        return Err((
+            HostProblem::NotFound,
+            format!("{} is not there", app.display()),
         ));
     }
     let command = || {
@@ -286,5 +297,5 @@ fn start_app(data_dir: &Path) -> Result<(), String> {
     let spawned = command().spawn();
     spawned
         .map(drop)
-        .map_err(|e| format!("cannot start Zajil: {e}"))
+        .map_err(|e| (HostProblem::Unreachable, format!("cannot start it: {e}")))
 }

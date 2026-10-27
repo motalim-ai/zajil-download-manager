@@ -25,8 +25,9 @@ afterAll(async () => {
 /** A page with `body`, and the button's script with a fake `chrome` that
  * records what is sent. `open`: the test opens the button's shadow root, to
  * reach the button as no page can. `url`: where the page is. The
- * background's answers: `window.texts` to the texts asked for (none by
- * default), `window.press()` to a press (taken by default).
+ * background's answers: `window.texts` to the texts asked for (Zajil's, in
+ * Arabic, by default; a function's promise when it is one), `window.press()`
+ * to a press (taken by default).
  * @param {string} body @param {{ open?: boolean, url?: string }} [how] */
 async function pageWith(body, how = {}) {
   const url = how.url ?? "https://page.invalid/";
@@ -40,14 +41,14 @@ async function pageWith(body, how = {}) {
   await page.addInitScript(() => {
     const w = /** @type {any} */ (window);
     w.sent = [];
-    w.texts = null;
+    w.texts = { lang: "ar", texts: { button: "نزّل الفيديو", working: "يُرسَل إلى زاجِل…", done: "أُرسل إلى زاجِل", failed: "✗" } };
     w.press = async () => ({ taken: true });
     w.chrome = {
       runtime: {
         id: "zajil",
         sendMessage: async (/** @type {any} */ m) => {
           w.sent.push(m);
-          if (m.type === "video-button-texts") return w.texts;
+          if (m.type === "video-button-texts") return typeof w.texts === "function" ? w.texts() : w.texts;
           if (m.type === "video-button") return w.press();
         },
       },
@@ -262,6 +263,46 @@ describe("the Download video button", () => {
     });
     expect(await buttonOf(page)).toMatchObject({ dir: "ltr", text: "Download video" });
     await page.close();
+  });
+
+  it("shows nothing until Zajil's texts come, then only in Zajil's language", async () => {
+    const page = await pageWith(VIDEO, { open: true });
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.texts = () => new Promise((give) => (w.give = give));
+    });
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => typeof (/** @type {any} */ (window).give) === "function");
+    // Asked, and not shown in the meantime, in no language.
+    expect((await buttonOf(page))?.hidden ?? true).toBe(true);
+    await page.mouse.click(AT.x, AT.y);
+    expect(await sent(page)).toEqual([]);
+    await page.evaluate(() =>
+      /** @type {any} */ (window).give({ lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil." } }),
+    );
+    // Then shown over the video the pointer is on, in Zajil's language.
+    await page.waitForFunction(() => {
+      const button = [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button");
+      return button && !button.hidden && button.textContent === "Download video";
+    });
+    expect(await buttonOf(page)).toMatchObject({ dir: "ltr", right: 732 });
+    await page.close();
+  });
+
+  it("never shows when Zajil's texts do not come", async () => {
+    for (const texts of [null, "reject"]) {
+      const page = await pageWith(VIDEO, { open: true });
+      await page.evaluate((how) => {
+        const w = /** @type {any} */ (window);
+        w.texts = how === "reject" ? () => Promise.reject(new Error("gone")) : null;
+      }, texts);
+      await page.mouse.move(400, 200);
+      await page.waitForTimeout(200);
+      await page.mouse.click(AT.x, AT.y);
+      expect((await buttonOf(page))?.hidden ?? true, String(texts)).toBe(true);
+      expect(await sent(page)).toEqual([]);
+      await page.close();
+    }
   });
 
   it("pressed, it stays and says it is working until Zajil answers", async () => {
