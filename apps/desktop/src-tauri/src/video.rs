@@ -621,11 +621,7 @@ pub async fn video_probe(
     if let Some(old) = state.probing.lock().unwrap().replace(stop.clone()) {
         old.request();
     }
-    let cookies = state.cookies.lock().unwrap().get(&url).cloned();
-    let probed = runner(&app)
-        .await
-        .probe(&url, cookies.as_deref(), &stop)
-        .await?;
+    let probed = probe(&state, &runner(&app).await, &url, &stop).await?;
     state.probing.lock().unwrap().take();
     Ok(match probed {
         Probed::Video(video) => {
@@ -654,6 +650,25 @@ pub async fn video_probe(
                 .collect(),
         },
     })
+}
+
+/// Asks `url`'s page, with its cookies from the browser if any, else
+/// without them ([`VideoRunner::probe_with_or_without_cookies`]). Cookies
+/// that left no format are forgotten, so the download goes the same way.
+async fn probe(
+    state: &VideoState,
+    runner: &VideoRunner,
+    url: &str,
+    stop: &Stop,
+) -> Result<Probed, VideoError> {
+    let cookies = state.cookies.lock().unwrap().get(url).cloned();
+    let (probed, kept) = runner
+        .probe_with_or_without_cookies(url, cookies.as_deref(), stop)
+        .await?;
+    if !kept {
+        state.cookies.lock().unwrap().remove(url);
+    }
+    Ok(probed)
 }
 
 #[tauri::command]
@@ -716,13 +731,19 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
     };
     let stop = Stop::new();
     state.downloads.lock().unwrap().insert(id, stop.clone());
-    let cookies = state.cookies.lock().unwrap().get(&row.url).cloned();
     let known = state.formats.lock().unwrap().get(&row.url).cloned();
     tauri::async_runtime::spawn(async move {
         let runner = runner(&handle.state::<crate::App>()).await;
         let formats = match known.filter(|_| !ask) {
             Some(formats) => Ok(formats),
-            None => match runner.probe(&row.url, cookies.as_deref(), &stop).await {
+            None => match probe(
+                handle.state::<VideoState>().inner(),
+                &runner,
+                &row.url,
+                &stop,
+            )
+            .await
+            {
                 Ok(Probed::Video(video)) => Ok(video.formats),
                 Ok(Probed::Playlist { .. }) => {
                     Err(VideoError::Refused("the page is a playlist now".into()))
@@ -730,6 +751,14 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 Err(e) => Err(e),
             },
         };
+        // After the probe: the cookies it went with, if any.
+        let cookies = handle
+            .state::<VideoState>()
+            .cookies
+            .lock()
+            .unwrap()
+            .get(&row.url)
+            .cloned();
         let choice = Choice::from(row.choice.clone());
         let result = match formats {
             Ok(formats) => {

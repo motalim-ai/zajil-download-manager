@@ -42,6 +42,21 @@ fn main() {
             println!("zajil-progress 1000 1000 NA NA");
             println!("{}", file.display());
         }
+        // Signed in to YouTube with no JavaScript runtime: with a cookie
+        // file only pictures are left and it fails as yt-dlp does; without
+        // one it prints probe.json.
+        "signed-in" => {
+            if cookies.is_some() {
+                eprintln!("WARNING: [youtube] abc: n challenge solving failed");
+                eprintln!(
+                    "ERROR: [youtube] abc: Requested format is not available. \
+                     Use --list-formats for a list of available formats"
+                );
+                std::process::exit(1);
+            }
+            let json = std::fs::read(control.join("probe.json")).unwrap();
+            std::io::stdout().write_all(&json).unwrap();
+        }
         // Prints a path outside its folder.
         "escape" => {
             let outside = control.join("outside.mp4");

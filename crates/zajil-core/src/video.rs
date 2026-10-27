@@ -1045,6 +1045,11 @@ fn says_drm(message: &str) -> bool {
         .any(|phrase| lower.contains(phrase))
 }
 
+/// yt-dlp's words when nothing but pictures was left to choose from.
+fn says_no_format(message: &str) -> bool {
+    message.contains("Requested format is not available")
+}
+
 /// One video download. Its `Debug` shows neither its link nor its cookies.
 #[derive(Clone, Copy)]
 pub struct Download<'a> {
@@ -1250,6 +1255,26 @@ impl VideoRunner {
                 .filter(|f| !f.is_protected())
                 .collect(),
         }))
+    }
+
+    /// [`probe`](Self::probe) with the browser's cookies, and once more
+    /// without them when that found no format at all. Signed in to YouTube,
+    /// yt-dlp asks only the players that need JavaScript; with no runtime
+    /// for it only pictures are left, while the player it asks without
+    /// cookies needs none. Also says whether the cookies were kept: the
+    /// download must go the same way, or it would meet the same wall.
+    pub async fn probe_with_or_without_cookies(
+        &self,
+        url: &str,
+        cookies: Option<&str>,
+        stop: &Stop,
+    ) -> Result<(Probed, bool), VideoError> {
+        match self.probe(url, cookies, stop).await {
+            Err(VideoError::Tool(message)) if cookies.is_some() && says_no_format(&message) => {
+                Ok((self.probe(url, None, stop).await?, false))
+            }
+            probed => Ok((probed?, cookies.is_some())),
+        }
     }
 
     /// Downloads `request.choice` of `request.url` into `request.dest`, as

@@ -547,6 +547,57 @@ async fn yt_dlp_s_errors_hide_link_secrets_and_drm_is_its_own_error() {
 }
 
 #[tokio::test]
+async fn a_page_with_no_format_for_its_cookies_is_asked_once_more_without_them() {
+    let s = setup("signed-in");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    let (probed, kept) = s
+        .runner
+        .probe_with_or_without_cookies(
+            "https://www.youtube.com/watch?v=abc",
+            Some("SID=x"),
+            &Stop::new(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(probed, Probed::Video(_)));
+    assert!(!kept, "the download must go without the cookies too");
+    let runs = calls(&s.control);
+    assert_eq!(runs.len(), 2);
+    assert!(args(&runs[0]).contains(&"--cookies".to_owned()));
+    assert!(!args(&runs[1]).contains(&"--cookies".to_owned()));
+}
+
+#[tokio::test]
+async fn cookies_that_work_are_kept_and_another_error_is_not_asked_again() {
+    let s = setup("probe");
+    fs::write(s.control.join("probe.json"), PROBE).unwrap();
+    let (_, kept) = s
+        .runner
+        .probe_with_or_without_cookies("https://example.com/v", Some("sid=x"), &Stop::new())
+        .await
+        .unwrap();
+    assert!(kept);
+    assert_eq!(calls(&s.control).len(), 1);
+
+    let s = setup("fail Sign in to confirm your age");
+    let err = s
+        .runner
+        .probe_with_or_without_cookies("https://example.com/v", Some("sid=x"), &Stop::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, VideoError::Tool(_)), "{err}");
+    assert_eq!(calls(&s.control).len(), 1);
+
+    // With no cookies, there is nothing to try without.
+    let s = setup("fail [youtube] abc: Requested format is not available");
+    s.runner
+        .probe_with_or_without_cookies("https://example.com/v", None, &Stop::new())
+        .await
+        .unwrap_err();
+    assert_eq!(calls(&s.control).len(), 1);
+}
+
+#[tokio::test]
 async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     let s = setup("hang");
     let stop = Stop::new();
