@@ -371,7 +371,14 @@ describe("the Download video button", () => {
     await page.mouse.move(410, 210);
     await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "VIDEO", null, { timeout: 2000 });
     // Gone for good: the extension back, the script still does nothing.
-    await page.evaluate(() => void (/** @type {any} */ (window).chrome.runtime.id = "zajil"));
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.chrome.runtime.id = "zajil";
+      w.chrome.runtime.sendMessage = async (/** @type {any} */ m) => {
+        w.sent.push(m);
+        return m.type === "video-button" ? { taken: true } : w.texts;
+      };
+    });
     await page.mouse.move(400, 200);
     await page.mouse.click(AT.x, AT.y);
     await page.waitForTimeout(100);
@@ -404,6 +411,27 @@ describe("the Download video button", () => {
     expect((await buttonOf(still))?.hidden ?? true).toBe(true);
     expect(stillErrors).toEqual([]);
     await still.close();
+  });
+
+  it("gone while a press waits for its answer: the button goes once the wait ends", async () => {
+    const page = await pageWith(VIDEO);
+    const errors = errorsOf(page);
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.press = () => new Promise((done) => (w.answer = done));
+    });
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    await page.waitForFunction(() => typeof (/** @type {any} */ (window).answer) === "function");
+    // Cut off, and the answer that comes is none (as after a 45 s wait).
+    await page.evaluate(() => {
+      const w = /** @type {any} */ (window);
+      w.chrome.runtime.id = undefined;
+      w.answer(null);
+    });
+    await page.waitForFunction(() => document.elementFromPoint(715, 66)?.tagName === "VIDEO", null, { timeout: 2000 });
+    expect(errors).toEqual([]);
+    await page.close();
   });
 
   it("gone between showing and the press: the press sends nothing and the button goes", async () => {

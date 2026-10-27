@@ -329,6 +329,8 @@
       ask({ type: "video-button", src: src.length <= 8192 ? src : "" }),
       new Promise((done) => setTimeout(() => done(null), ANSWER_MS)),
     ]);
+    // Gone while it waited (its answer never came): it stops now.
+    if (!stopped && !alive()) stop();
     if (stopped) return;
     if (answer?.taken === true) {
       setState("done");
