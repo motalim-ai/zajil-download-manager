@@ -37,7 +37,11 @@ export function checkNames(root: HTMLElement, names: string[]): NamesSeen {
   for (const input of root.querySelectorAll<HTMLInputElement>("input[id$='-name']")) {
     if (!isMixed(input.value)) continue;
     const over = input.parentElement?.querySelector<HTMLElement>("bdi.fn");
-    if (over?.title === input.value && getComputedStyle(input).color === "rgba(0, 0, 0, 0)") continue;
+    // The box holds the name, or a path that ends in it («Save as» in
+    // «Download file info»), and FileName draws that name over it.
+    const name = over?.title;
+    const holds = name !== undefined && (input.value === name || input.value.endsWith(`/${name}`) || input.value.endsWith(`\\${name}`));
+    if (holds && getComputedStyle(input).color === "rgba(0, 0, 0, 0)") continue;
     raw.push(`${input.value} in the box #${input.id}`);
   }
   return { drawn, raw };
