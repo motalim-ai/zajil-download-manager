@@ -16,7 +16,7 @@ use std::time::Duration;
 use zajil_core::limit::{Clock, ManualClock, SpeedLimit};
 use zajil_core::queue::{QueueStore, Runner};
 use zajil_core::{Engine, Options, Stop};
-use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
+use zajil_testserver::{FileSpec, Gate, TestServer, random_bytes, sha256_hex};
 
 const MIB: u64 = 1024 * 1024;
 
@@ -256,17 +256,33 @@ async fn a_running_download_takes_a_new_limit_of_its_own() {
 
     // No limit, then one: the case of the «Speed limit» tab on a download
     // that runs without one. On one connection and on four (the split
-    // download takes its limits elsewhere). The server sends at 8 MiB/s on
-    // the real clock, so that the change comes while the data does.
-    server.put(
-        "/slow.bin",
-        FileSpec::new(random_bytes(6 * MIB as usize, 708)).throttle(8 * MIB),
-    );
+    // download takes its limits elsewhere). The server holds every
+    // response at three places, each until the test opens its gate: the
+    // change comes while the first one holds them, so it comes while the
+    // data does; the rate is measured between the second and the third,
+    // where every byte that came is written and paid for, and nothing is
+    // in flight. Measured between moments of steady flow instead, four
+    // connections had up to a piece each taken but not yet reported on
+    // either side (#274: 1.103 × the limit, 3 pieces of 64 KiB over 2 MiB).
+    let slow = random_bytes(6 * MIB as usize, 708);
     for connections in [1, 4] {
+        // From the first byte of each response: four of 1.5 MiB, or one of
+        // 6 MiB; 3 MiB between the second and third holds either way.
+        let holds = if connections == 1 {
+            [MIB / 4, MIB, 4 * MIB]
+        } else {
+            [MIB / 4, MIB / 2, 5 * MIB / 4]
+        };
+        let gates = [Gate::new(), Gate::new(), Gate::new()];
+        let mut spec = FileSpec::new(slow.clone());
+        for (at, gate) in holds.iter().zip(&gates) {
+            spec = spec.hold_after(*at, gate);
+        }
+        server.put("/slow.bin", spec);
         let clock = ManualClock::new();
         let limit = SpeedLimit::new(None, clock.clone());
         let limited = engine(&clock, connections).with_own_limit(limit.clone());
-        let marks = [MIB, 5 * MIB / 2, 9 * MIB / 2];
+        let all = connections as u64;
         let mut seen: Vec<(u64, Duration)> = Vec::new();
         let mut paid = 0;
         let at = clock.clone();
@@ -278,18 +294,23 @@ async fn a_running_download_takes_a_new_limit_of_its_own() {
                 // One connection reports a piece before it waits for it.
                 let before = std::mem::replace(&mut paid, done);
                 let counted = if connections == 1 { before } else { done };
-                if marks.get(seen.len()).is_some_and(|&mark| done >= mark) {
+                if !gates[0].is_open() {
+                    assert_eq!(at.now(), Duration::ZERO, "it waited without a limit");
+                    limit.set_rate(Some(MIB / 4));
+                    gates[0].open();
+                } else if !gates[1].is_open() && done == all * holds[1] {
                     seen.push((counted, at.now()));
-                    if seen.len() == 1 {
-                        assert_eq!(at.now(), Duration::ZERO, "it waited without a limit");
-                        limit.set_rate(Some(MIB / 4));
-                    }
+                    gates[1].open();
+                } else if !gates[2].is_open() && done == all * holds[2] {
+                    seen.push((counted, at.now()));
+                    gates[2].open();
                 }
             })
             .await
             .unwrap();
-        assert_eq!(seen.len(), 3, "{connections}: {seen:?}");
-        assert_rate(seen[2].0 - seen[1].0, seen[2].1 - seen[1].1, MIB / 4);
+        assert_eq!(seen.len(), 2, "{connections}: {seen:?}");
+        assert_eq!(fs::read(&finished.file).unwrap(), slow);
+        assert_rate(seen[1].0 - seen[0].0, seen[1].1 - seen[0].1, MIB / 4);
         fs::remove_file(&finished.file).unwrap();
     }
 
