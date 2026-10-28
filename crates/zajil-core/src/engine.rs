@@ -7,7 +7,8 @@
 //!    before any file is created.
 //! 3. A free name is reserved in the download folder: `<name>.zajil-part`
 //!    (locked while we use it) and `<name>.zajil-state`, and the part file is
-//!    given its size (`zajil_platform::fs::allocate`).
+//!    given its size (`zajil_platform::fs::allocate`: a sparse file, nothing
+//!    is reserved).
 //! 4. A server that announces ranges, the size and a strong validator gets
 //!    several connections (`segmented`); otherwise the body of the probe is
 //!    written on one connection. Every `save_interval` the data is synced and
@@ -1563,6 +1564,7 @@ impl Engine {
             last_save: Instant::now(),
             save_interval: self.options.save_interval,
             saved: false,
+            disk_failed: false,
             cleanup,
         }
     }
@@ -1911,6 +1913,11 @@ struct Transfer {
     /// A save of this transfer has succeeded: a stop then needs no save of
     /// its own (#132).
     saved: bool,
+    /// Writing the part file or saving the state failed (a full disk). A
+    /// write is reported failed only at the next one, after its bytes were
+    /// counted, so no save follows: the state file saved last counts only
+    /// bytes that are on disk, and the download resumes from there.
+    disk_failed: bool,
     /// Set for a new download until its first byte is written. Declared
     /// last, so the part file is closed before it is removed.
     cleanup: Option<EmptyDownloadCleanup>,
@@ -2063,7 +2070,8 @@ impl Transfer {
                 ));
             }
             if let Err(err) = self.file.write_all(&chunk).await {
-                return Err(Halt::Fatal(err.to_string()));
+                self.disk_failed = true;
+                return Err(Halt::Fatal(format!("could not write the file: {err}")));
             }
             if let Some(cleanup) = self.cleanup.take() {
                 cleanup.disarm();
@@ -2115,10 +2123,9 @@ impl Transfer {
         // Owner's decision on #132: after a save, a stop does not save
         // again (the state file counts only synced bytes; about one
         // `save_interval` of progress is downloaded again on resume).
-        if !self.saved
-            && let Err(err) = self.checkpoint().await
-        {
-            return err;
+        if !self.saved && !self.disk_failed {
+            // A failed save leaves the state file saved last.
+            let _ = self.checkpoint().await;
         }
         // Waits for anything the file still does, then closes it.
         drop(self.file.into_std().await);
@@ -2138,6 +2145,14 @@ impl Transfer {
     /// slow save does not stretch the time between them (#132).
     async fn checkpoint(&mut self) -> Result<(), Error> {
         self.last_save = Instant::now();
+        let saved = self.sync_and_save().await;
+        // Bytes counted may not be on disk, or the disk is full: no save is
+        // tried again (`disk_failed`).
+        self.disk_failed |= saved.is_err();
+        saved
+    }
+
+    async fn sync_and_save(&mut self) -> Result<(), Error> {
         self.file.flush().await?;
         self.file.sync_data().await?;
         let watch = self.cleanup.as_ref().and_then(EmptyDownloadCleanup::watch);
@@ -2146,15 +2161,17 @@ impl Transfer {
         Ok(())
     }
 
-    /// Saves what we have and turns `reason` into a resumable error. A new
-    /// download that has nothing written yet is not resumable: its files are
-    /// removed (when `self` is dropped) and the error says so.
+    /// Saves what we have (unless a write failed: see `disk_failed`) and
+    /// turns `reason` into a resumable error. A new download that has
+    /// nothing written yet is not resumable: its files are removed (when
+    /// `self` is dropped) and the error says so.
     async fn interrupt(mut self, reason: String) -> Error {
         if self.cleanup.is_some() {
             return Error::NoData(reason);
         }
-        if let Err(err) = self.checkpoint().await {
-            return err;
+        if !self.disk_failed {
+            // A failed save leaves the state file saved last.
+            let _ = self.checkpoint().await;
         }
         Error::Interrupted {
             state_file: self.state_file,
@@ -2166,7 +2183,12 @@ impl Transfer {
         if let Some(cleanup) = self.cleanup.take() {
             cleanup.disarm(); // an empty file is a complete download
         }
-        self.file.flush().await?;
+        if let Err(err) = self.file.flush().await {
+            self.disk_failed = true;
+            return Err(self
+                .interrupt(format!("could not write the file: {err}"))
+                .await);
+        }
         let file = self.file.into_std().await;
         finish_download(file, self.state, self.final_path, on_event).await
     }

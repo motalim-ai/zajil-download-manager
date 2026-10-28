@@ -4,7 +4,9 @@
 //! `AGENTS.md`: a server that ignores `Range`, a connection cut in the middle,
 //! a file that changes on the server (new `ETag`), slow or stalled transfers,
 //! `429` with `Retry-After`, `403` after some requests, redirects and
-//! dangerous names in `Content-Disposition`. Every request is logged with the
+//! dangerous names in `Content-Disposition`, and bodies held at a
+//! [`Gate`] until the test (or a number of responses at once) opens it.
+//! Every request is logged with the
 //! number of body bytes the server sent, so tests can check what was asked
 //! for twice, with the connection it came on and how many responses for the
 //! same file were being sent at that moment.
@@ -26,7 +28,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::channel::{Channel, Sender};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty};
 use hyper::body::{Frame, Incoming, SizeHint};
@@ -36,7 +37,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -53,6 +54,55 @@ pub struct Failure {
     pub status: u16,
     /// Seconds for the `Retry-After` header.
     pub retry_after: Option<u64>,
+}
+
+/// Holds response bodies ([`FileSpec::hold_after`]) until it opens: when
+/// the test calls [`Gate::open`], or, for [`Gate::when_together`], when
+/// that many bodies of its file are being sent at once. Once open, it stays
+/// open. Clones share it.
+#[derive(Debug, Clone)]
+pub struct Gate {
+    open: Arc<tokio::sync::watch::Sender<bool>>,
+    together: Option<usize>,
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Gate {
+    /// A gate that only [`Gate::open`] opens.
+    pub fn new() -> Self {
+        Gate {
+            open: Arc::new(tokio::sync::watch::Sender::new(false)),
+            together: None,
+        }
+    }
+
+    /// A gate that the server opens once `bodies` bodies of the file it
+    /// holds are being sent at the same moment: what a test of downloads
+    /// at once needs, as each one waits until the others have started.
+    pub fn when_together(bodies: usize) -> Self {
+        Gate {
+            together: Some(bodies),
+            ..Self::new()
+        }
+    }
+
+    pub fn open(&self) {
+        self.open.send_replace(true);
+    }
+
+    pub fn is_open(&self) -> bool {
+        *self.open.borrow()
+    }
+
+    async fn opened(&self) {
+        let mut open = self.open.subscribe();
+        let _ = open.wait_for(|open| *open).await;
+    }
 }
 
 /// A file served at one path, and how the server misbehaves for it.
@@ -73,6 +123,7 @@ pub struct FileSpec {
     content_type: Option<String>,
     cut_after: Option<(u64, usize)>,
     stall_after: Option<u64>,
+    holds: Vec<(u64, Gate)>,
     bytes_per_sec: Option<u64>,
     slow_at: Option<(u64, u64)>,
     fail_first: Vec<Failure>,
@@ -105,6 +156,7 @@ impl FileSpec {
             content_type: None,
             cut_after: None,
             stall_after: None,
+            holds: Vec::new(),
             bytes_per_sec: None,
             slow_at: None,
             fail_first: Vec::new(),
@@ -212,6 +264,16 @@ impl FileSpec {
     /// the connection open.
     pub fn stall_after(mut self, bytes: u64) -> Self {
         self.stall_after = Some(bytes);
+        self
+    }
+
+    /// Every GET response sends `bytes` body bytes, then holds the rest
+    /// (keeping the connection open) until `gate` opens; once open, it holds
+    /// nothing. Several holds can be set, each at its own place, so a test
+    /// can stop every connection at known points one after the other.
+    pub fn hold_after(mut self, bytes: u64, gate: &Gate) -> Self {
+        self.holds.push((bytes, gate.clone()));
+        self.holds.sort_by_key(|(at, _)| *at);
         self
     }
 
@@ -898,6 +960,11 @@ fn handle(
         {
             let (now, guard) = served.sending.start();
             record.concurrent = now;
+            for (_, gate) in &served.spec.holds {
+                if gate.together.is_some_and(|bodies| now >= bodies) {
+                    gate.open();
+                }
+            }
             response.map(|inner| {
                 Counted {
                     inner,
@@ -1017,7 +1084,7 @@ fn respond(
         .cut_after
         .filter(|&(_, times)| get_index < times)
         .map(|(bytes, _)| bytes);
-    let (sender, channel) = Channel::<Bytes, BoxError>::new(1);
+    let (sender, channel) = FrameChannel::new();
     // A response that announced more than it has stalls at the end of what
     // it has, keeping the connection open. Closing it would make Windows
     // send a reset that can drop the headers before the client reads them.
@@ -1030,15 +1097,56 @@ fn respond(
         Some((slow, bytes_per_sec)) if slow == start => Some(bytes_per_sec),
         _ => spec.bytes_per_sec,
     };
-    tokio::spawn(stream_body(sender, body, cut, stall, throttle, bytes_sent));
+    let holds = spec.holds.clone();
+    tokio::spawn(stream_body(
+        sender, body, cut, stall, holds, throttle, bytes_sent,
+    ));
     builder.body(channel.boxed()).unwrap()
 }
 
+/// What [`stream_body`] hands a response body: a chunk of data, or the
+/// error that cuts the response.
+type FrameSender = mpsc::Sender<Result<Frame<Bytes>, BoxError>>;
+
+/// A response body fed by [`stream_body`] through a single channel: every
+/// chunk sent arrives, in order, before the end or the cut.
+///
+/// Not `http_body_util::channel::Channel`: it keeps the chunks and the
+/// error in two channels, and looks at the second after finding the first
+/// empty. A last chunk sent from another thread between the two looks is
+/// lost when the sender is dropped (the body ends one chunk short of its
+/// `Content-Length`, and hyper cuts the connection with "early end,
+/// expected N more bytes"), or comes after the cut when it aborts. Seen on
+/// windows-latest in #50, #272 and #275.
+struct FrameChannel(mpsc::Receiver<Result<Frame<Bytes>, BoxError>>);
+
+impl FrameChannel {
+    /// One chunk in flight at a time, as before: a slow client holds the
+    /// rest back.
+    fn new() -> (FrameSender, Self) {
+        let (sender, receiver) = mpsc::channel(1);
+        (sender, Self(receiver))
+    }
+}
+
+impl hyper::body::Body for FrameChannel {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        self.0.poll_recv(cx)
+    }
+}
+
 async fn stream_body(
-    mut sender: Sender<Bytes, BoxError>,
+    sender: FrameSender,
     body: Bytes,
     cut: Option<u64>,
     stall: Option<u64>,
+    holds: Vec<(u64, Gate)>,
     bytes_per_sec: Option<u64>,
     bytes_sent: Arc<AtomicU64>,
 ) {
@@ -1055,12 +1163,24 @@ async fn stream_body(
 
     let mut offset = 0;
     while offset < limit {
-        let next = (offset + chunk).min(limit);
+        let mut next = (offset + chunk).min(limit);
+        // Held at each place reached until its gate opens, and never sent
+        // past the next one.
+        for (at, gate) in &holds {
+            let at = usize::try_from(*at).unwrap_or(usize::MAX);
+            if offset >= at {
+                gate.opened().await;
+            } else {
+                next = next.min(at);
+                break;
+            }
+        }
         let sent = next - offset;
         // Count before handing the chunk over, so the count is complete by
         // the time the client has read everything.
         bytes_sent.fetch_add(sent as u64, Ordering::SeqCst);
-        if sender.send_data(body.slice(offset..next)).await.is_err() {
+        let frame = Frame::data(body.slice(offset..next));
+        if sender.send(Ok(frame)).await.is_err() {
             bytes_sent.fetch_sub(sent as u64, Ordering::SeqCst);
             return; // client went away
         }
@@ -1074,7 +1194,10 @@ async fn stream_body(
         return; // complete
     }
     if cut.is_some_and(|c| c as usize == offset) {
-        sender.abort(Box::new(io::Error::other("cut by test server")));
+        // After every chunk before it. A client that went away does not
+        // need the cut.
+        let cut = Box::new(io::Error::other("cut by test server"));
+        let _ = sender.send(Err(cut)).await;
         return;
     }
     // Stalled: keep the connection open and send nothing.
@@ -1362,5 +1485,74 @@ mod tests {
         let a = FileSpec::new(&b"x"[..]);
         let b = FileSpec::new(&b"x"[..]);
         assert_ne!(a.current_etag(), b.current_etag());
+    }
+
+    /// Sends `chunks` one-byte chunks, then cuts the body if `cut`, then
+    /// drops the sender: what `stream_body` does.
+    async fn feed(sender: FrameSender, chunks: u8, cut: bool) {
+        for i in 0..chunks {
+            let chunk = Frame::data(Bytes::from(vec![i]));
+            if sender.send(Ok(chunk)).await.is_err() {
+                return;
+            }
+        }
+        if cut {
+            let _ = sender.send(Err(io::Error::other("cut").into())).await;
+        }
+    }
+
+    /// Every chunk the body gives, and whether it ended with the cut.
+    async fn drain(mut body: FrameChannel) -> (Vec<u8>, bool) {
+        let mut seen = Vec::new();
+        while let Some(frame) = body.frame().await {
+            match frame {
+                Ok(frame) => seen.extend_from_slice(&frame.into_data().unwrap()),
+                Err(_) => return (seen, true),
+            }
+        }
+        (seen, false)
+    }
+
+    #[test]
+    fn a_body_gives_every_chunk_before_its_end_or_its_cut() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for cut in [false, true] {
+            let (sender, body) = FrameChannel::new();
+            let (seen, was_cut) = runtime.block_on(async {
+                tokio::spawn(feed(sender, 4, cut));
+                drain(body).await
+            });
+            assert_eq!(seen, [0, 1, 2, 3], "cut: {cut}");
+            assert_eq!(was_cut, cut);
+        }
+    }
+
+    /// The race of #50, #272 and #275: the last chunk is sent, and the
+    /// sender dropped or the body cut, from another thread while the body
+    /// is being read. With `http_body_util::channel::Channel`, a loop like
+    /// this one lost that chunk once in each of two runs of 200,000 rounds
+    /// on macOS (once at the end, once before the cut); a single channel
+    /// cannot. A pass here does not prove the race is gone, since it is
+    /// rare: the single channel does.
+    #[test]
+    fn a_body_fed_from_another_thread_loses_no_chunk() {
+        let reader = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        let writer = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        for round in 0..10_000 {
+            let cut = round % 2 == 1;
+            let (sender, body) = FrameChannel::new();
+            writer.spawn(feed(sender, 4, cut));
+            let (seen, was_cut) = reader.block_on(reader.spawn(drain(body))).unwrap();
+            assert_eq!(seen, [0, 1, 2, 3], "round {round}, cut: {cut}");
+            assert_eq!(was_cut, cut, "round {round}");
+        }
     }
 }

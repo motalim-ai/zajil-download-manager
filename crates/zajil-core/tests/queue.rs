@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use zajil_core::queue::{QueueEvent, QueueStore, Runner, Status, StoreError};
 use zajil_core::{Engine, Options, Stop};
-use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
+use zajil_testserver::{FileSpec, Gate, TestServer, random_bytes, sha256_hex};
 
 const MIB: usize = 1024 * 1024;
 
@@ -88,12 +88,18 @@ async fn ten_downloads_with_two_at_once_never_run_more_than_two() {
 }
 
 /// Each queue has its own number: two queues of 1 run 2 downloads at once.
+/// The server holds the first body until a second one is being sent too:
+/// the two at once are then certain, and no longer a race between how fast
+/// a download ends and how fast the next one starts (#292: on Windows CI
+/// each request came about a second after the one before, and each
+/// download, 512 KiB at 2 MiB/s, took a quarter of one). With only one at
+/// a time, the first would wait for ever: so the run has a deadline.
 #[tokio::test]
 async fn each_queue_has_its_own_number_of_downloads_at_once() {
     let server = TestServer::http();
     server.put(
         "/f.bin",
-        FileSpec::new(random_bytes(MIB / 2, 401)).throttle(2 * MIB as u64),
+        FileSpec::new(random_bytes(MIB / 2, 401)).hold_after(0, &Gate::when_together(2)),
     );
     let data_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
@@ -104,7 +110,13 @@ async fn each_queue_has_its_own_number_of_downloads_at_once() {
             add(&store, queue, &server.url("/f.bin"), downloads.path());
         }
     }
-    let summary = runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let summary = tokio::time::timeout(
+        Duration::from_secs(60),
+        runner(&store).run(&Stop::new(), &mut |_| {}),
+    )
+    .await
+    .expect("no second download came while the first one ran")
+    .unwrap();
     assert_eq!(summary.finished, 6);
     assert_eq!(server.most_concurrent("/f.bin"), 2);
 }

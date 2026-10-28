@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use zajil_testserver::{Failure, FileSpec, TestServer, random_bytes};
+use zajil_testserver::{Failure, FileSpec, Gate, TestServer, random_bytes};
 
 struct Reply {
     status: u16,
@@ -189,6 +189,95 @@ fn stalls_without_closing() {
     assert!(started.elapsed() >= Duration::from_secs(2));
     assert!(reply.incomplete);
     assert_eq!(reply.body.len(), 1000);
+}
+
+/// Sends a GET for `path` and reads until the end of the response head;
+/// returns the stream and the body bytes read with the head.
+fn start_get(server: &TestServer, path: &str) -> (TcpStream, Vec<u8>) {
+    let mut stream = TcpStream::connect(server.addr()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let line = format!(
+        "GET {} HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+        server.path(path)
+    );
+    stream.write_all(line.as_bytes()).unwrap();
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = stream.read(&mut buf).unwrap();
+        assert!(n > 0, "the connection closed before the head");
+        raw.extend_from_slice(&buf[..n]);
+        if let Some(at) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            return (stream, raw[at + 4..].to_vec());
+        }
+    }
+}
+
+/// Reads body bytes until `body` holds `len` of them.
+fn read_up_to(stream: &mut TcpStream, body: &mut Vec<u8>, len: usize) {
+    let mut buf = [0u8; 65536];
+    while body.len() < len {
+        let n = stream.read(&mut buf).unwrap();
+        assert!(n > 0, "the body ended at {} bytes", body.len());
+        body.extend_from_slice(&buf[..n]);
+    }
+}
+
+#[test]
+fn holds_the_body_at_each_place_until_its_gate_opens() {
+    let server = TestServer::http();
+    let data = random_bytes(100_000, 7);
+    let (first, second) = (Gate::new(), Gate::new());
+    server.put(
+        "/f",
+        FileSpec::new(data.clone())
+            .hold_after(30_000, &second)
+            .hold_after(1_000, &first),
+    );
+    let (mut stream, mut body) = start_get(&server, "/f");
+    read_up_to(&mut stream, &mut body, 1_000);
+    assert_eq!(body.len(), 1_000);
+    // Held: a moment later nothing more has come. (Not a read that times
+    // out: on Windows a socket is not to be used after one.)
+    std::thread::sleep(Duration::from_millis(300));
+    stream.set_nonblocking(true).unwrap();
+    let mut buf = [0u8; 1024];
+    let more = stream.read(&mut buf);
+    assert!(
+        matches!(&more, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "sent past the first hold: {more:?}"
+    );
+    stream.set_nonblocking(false).unwrap();
+    assert_eq!(server.gets("/f")[0].bytes_sent, 1_000);
+
+    first.open();
+    read_up_to(&mut stream, &mut body, 30_000);
+    assert_eq!(body.len(), 30_000);
+    assert_eq!(server.gets("/f")[0].bytes_sent, 30_000);
+    second.open();
+    stream.read_to_end(&mut body).unwrap();
+    assert_eq!(body, data);
+    // Once open, a gate holds nothing: the next response comes whole.
+    assert_eq!(get(&server, "/f", &[]).body, data);
+}
+
+#[test]
+fn a_gate_for_bodies_together_opens_when_they_are_sent_at_once() {
+    let server = TestServer::http();
+    let data = random_bytes(100_000, 8);
+    let gate = Gate::when_together(2);
+    server.put("/f", FileSpec::new(data.clone()).hold_after(0, &gate));
+    let (mut one, mut body_one) = start_get(&server, "/f");
+    assert!(body_one.is_empty());
+    assert!(!gate.is_open(), "opened with one body");
+    let (mut two, mut body_two) = start_get(&server, "/f");
+    one.read_to_end(&mut body_one).unwrap();
+    two.read_to_end(&mut body_two).unwrap();
+    assert!(gate.is_open());
+    assert_eq!((body_one == data, body_two == data), (true, true));
+    assert_eq!(server.most_concurrent("/f"), 2);
 }
 
 #[test]
