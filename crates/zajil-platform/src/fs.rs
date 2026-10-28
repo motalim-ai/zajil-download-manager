@@ -303,19 +303,26 @@ pub fn available_space(dir: &Path) -> io::Result<u64> {
 /// Gives the empty `file` the length `len`, for a download whose size is
 /// known and whose pieces arrive in any order.
 ///
-/// - **Linux**: `fallocate` reserves the space for real. File systems
-///   without it get a plain `set_len` (a sparse file).
-/// - **macOS**: `F_PREALLOCATE` reserves the space where the file system
-///   supports it, then `set_len`.
-/// - **Windows**: the file is marked sparse, then `set_len`. Nothing is
-///   reserved: on NTFS a plain `set_len` would make every write far from the
-///   start fill the gap before it with zeros first, writing a split download
-///   about twice. Callers check [`available_space`] before starting instead
-///   (owner decision, M2).
+/// Nothing is reserved on any system (owner's decision, 2026-10-28): the
+/// file is sparse, and its blocks are taken only as data arrives. A file
+/// that took its whole size at once filled the disk before a byte came,
+/// and a second download of the same link then failed at once.
 ///
-/// File systems that cannot have holes (FAT and exFAT) may write zeros up to
-/// `len`, and FAT32 refuses files of 4 GiB or more; both are errors from the
-/// system, reported as they are. A `file` that is not empty is refused.
+/// - **macOS and Linux**: `set_len`. APFS, ext4 and btrfs keep the gap as
+///   a hole, and a write far from the start fills only its own blocks
+///   (`tests/sparse_volumes.rs`).
+/// - **Windows**: the file is marked sparse, then `set_len`. On NTFS a plain
+///   `set_len` would make every write far from the start fill the gap before
+///   it with zeros first, writing a split download about twice.
+///
+/// So callers check [`available_space`] before starting (owner decision,
+/// M2), and a disk that fills up later fails a write with the system's
+/// error (`ENOSPC`, `ERROR_DISK_FULL`).
+///
+/// File systems that cannot have holes (FAT and exFAT; HFS+, not tested)
+/// may write zeros up to `len`, and FAT32 refuses files of 4 GiB or more; both are
+/// errors from the system, reported as they are. A `file` that is not empty
+/// is refused.
 pub fn allocate(file: &File, len: u64) -> io::Result<()> {
     if file.metadata()?.len() != 0 {
         return Err(io::Error::new(
@@ -333,6 +340,12 @@ pub fn allocate(file: &File, len: u64) -> io::Result<()> {
         ));
     }
     imp::allocate(file, len)
+}
+
+/// Bytes the file at `path` takes on its volume. Less than its length for a
+/// sparse file: tests use it to show that [`allocate`] reserves nothing.
+pub fn size_on_disk(path: &Path) -> io::Result<u64> {
+    imp::size_on_disk(path)
 }
 
 /// The last-resort rename of [`rename_noreplace`]: fails with
@@ -374,7 +387,6 @@ mod imp {
     use std::io;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
-    use std::os::unix::io::AsRawFd;
     use std::path::Path;
 
     use super::{check_then_rename, not_regular};
@@ -676,22 +688,6 @@ mod imp {
         Ok(u64::from(stats.f_bavail).saturating_mul(u64::from(stats.f_frsize)))
     }
 
-    #[cfg(target_os = "linux")]
-    #[allow(unsafe_code)]
-    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
-        let len_off = len as libc::off_t; // checked by the caller
-        // SAFETY: the descriptor is open for the lifetime of `file`.
-        if unsafe { libc::fallocate(file.as_raw_fd(), 0, 0, len_off) } == 0 {
-            return Ok(());
-        }
-        let err = io::Error::last_os_error();
-        match err.raw_os_error() {
-            // The file system cannot reserve: a sparse file instead.
-            Some(libc::EOPNOTSUPP) | Some(libc::ENOSYS) => file.set_len(len),
-            _ => Err(err),
-        }
-    }
-
     #[cfg(target_os = "macos")]
     #[allow(unsafe_code)]
     pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
@@ -725,38 +721,6 @@ mod imp {
         Ok(stats.f_bavail.saturating_mul(u64::from(stats.f_bsize)))
     }
 
-    #[cfg(target_os = "macos")]
-    #[allow(unsafe_code)]
-    pub fn allocate(file: &File, len: u64) -> io::Result<()> {
-        let length = len as libc::off_t; // checked by the caller
-        // Contiguous space if possible, otherwise any space.
-        for flags in [
-            libc::F_ALLOCATECONTIG | libc::F_ALLOCATEALL,
-            libc::F_ALLOCATEALL,
-        ] {
-            let mut store = libc::fstore_t {
-                fst_flags: flags,
-                fst_posmode: libc::F_PEOFPOSMODE,
-                fst_offset: 0,
-                fst_length: length,
-                fst_bytesalloc: 0,
-            };
-            // SAFETY: the descriptor is open for the lifetime of `file`, and
-            // `store` is a valid fstore_t that outlives the call.
-            if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PREALLOCATE, &mut store) } != -1 {
-                return file.set_len(len);
-            }
-            let err = io::Error::last_os_error();
-            match err.raw_os_error() {
-                Some(libc::ENOSPC) if flags & libc::F_ALLOCATECONTIG != 0 => continue,
-                // The file system cannot reserve: a sparse file instead.
-                Some(libc::ENOTSUP) | Some(libc::EINVAL) => return file.set_len(len),
-                _ => return Err(err),
-            }
-        }
-        unreachable!("the last attempt always returns")
-    }
-
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
         link_then_unlink(from, to)
@@ -767,9 +731,16 @@ mod imp {
         Err(io::ErrorKind::Unsupported.into())
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     pub fn allocate(file: &File, len: u64) -> io::Result<()> {
+        // A sparse file: nothing is reserved (see `super::allocate`).
         file.set_len(len)
+    }
+
+    pub fn size_on_disk(path: &Path) -> io::Result<u64> {
+        // `st_blocks` counts 512-byte units on macOS and Linux alike.
+        Ok(std::fs::symlink_metadata(path)?
+            .blocks()
+            .saturating_mul(512))
     }
 
     /// `link` fails if `to` exists, so it is a no-replace rename on file
@@ -827,8 +798,9 @@ mod imp {
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateDirectoryW, CreateFileW,
         FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceExW,
-        GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetCompressedFileSizeW,
+        GetDiskFreeSpaceExW, GetFileInformationByHandle, INVALID_FILE_SIZE,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
@@ -1401,6 +1373,22 @@ mod imp {
         file.set_len(len)
     }
 
+    pub fn size_on_disk(path: &Path) -> io::Result<u64> {
+        let path_w = wide(path);
+        let mut high = 0u32;
+        // SAFETY: `path_w` is a NUL-terminated UTF-16 string and `high` a
+        // writable u32, both alive for the call. For a sparse file the
+        // result is the size of its allocated ranges.
+        let low = unsafe { GetCompressedFileSizeW(path_w.as_ptr(), &mut high) };
+        if low == INVALID_FILE_SIZE {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() != Some(0) {
+                return Err(err);
+            }
+        }
+        Ok((u64::from(high) << 32) | u64::from(low))
+    }
+
     fn link_count(file: &File) -> io::Result<u32> {
         // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value.
         let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
@@ -1685,9 +1673,62 @@ mod tests {
             let err = allocate(&file, len).unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::FileTooLarge, "{len}");
         }
-        // Valid as a number, but no disk is that large.
-        assert!(allocate(&file, i64::MAX as u64).is_err());
-        assert_eq!(file.metadata().unwrap().len(), 0);
+        // Valid as a number: APFS, ext4 and NTFS refuse a file that large; a
+        // file system that allows it makes a sparse file of it. Either way,
+        // no panic and nothing half done.
+        match allocate(&file, i64::MAX as u64) {
+            Err(_) => assert_eq!(file.metadata().unwrap().len(), 0),
+            Ok(()) => assert_eq!(file.metadata().unwrap().len(), i64::MAX as u64),
+        }
+    }
+
+    #[test]
+    fn allocate_reserves_nothing_and_far_writes_take_only_their_own_blocks() {
+        const GIB: u64 = 1 << 30;
+        const PIECE: usize = 64 << 10;
+        let dir = tempdir();
+        let path = dir.join("part");
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        allocate(&file, GIB).unwrap();
+        file.sync_all().unwrap();
+        let empty = size_on_disk(&path).unwrap();
+        eprintln!("1 GiB right after allocate: {empty} bytes on disk");
+        assert_eq!(file.metadata().unwrap().len(), GIB);
+        assert!(empty < 1 << 20, "{empty} bytes reserved");
+
+        // Pieces far apart, as the connections of a split download write
+        // them: the gaps stay holes, never zeros written to the disk.
+        let offsets = [0, GIB / 4, GIB / 2, GIB - PIECE as u64];
+        for (i, &at) in offsets.iter().enumerate() {
+            write_at(&file, &[i as u8 + 1; PIECE], at).unwrap();
+        }
+        file.sync_all().unwrap();
+        let used = size_on_disk(&path).unwrap();
+        eprintln!("after 4 pieces of 64 KiB: {used} bytes on disk");
+        assert!(used >= 4 * PIECE as u64 && used < 4 << 20, "{used} bytes");
+        drop(file);
+
+        let file = fs::File::open(&path).unwrap();
+        for (i, &at) in offsets.iter().enumerate() {
+            let mut piece = vec![0; PIECE];
+            read_exact_at(&file, &mut piece, at);
+            assert!(piece.iter().all(|&b| b == i as u8 + 1), "piece {i}");
+        }
+        let mut gap = vec![1; PIECE];
+        read_exact_at(&file, &mut gap, GIB / 8);
+        assert!(gap.iter().all(|&b| b == 0));
+    }
+
+    fn read_exact_at(file: &fs::File, buf: &mut [u8], at: u64) {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = file;
+        file.seek(SeekFrom::Start(at)).unwrap();
+        file.read_exact(buf).unwrap();
     }
 
     #[test]
@@ -1741,21 +1782,6 @@ mod tests {
         for code in [libc::EEXIST, libc::EACCES, libc::ENOSPC, libc::EXDEV] {
             assert!(!imp::links_unsupported(&io::Error::from_raw_os_error(code)));
         }
-    }
-
-    /// On the file systems CI and developers use (ext4, APFS) the space is
-    /// really reserved, not a sparse file.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    #[test]
-    fn allocate_reserves_blocks_on_linux_and_macos() {
-        use std::os::unix::fs::MetadataExt;
-        let dir = tempdir();
-        let file = fs::File::create(dir.join("part")).unwrap();
-        let len = 8 << 20;
-        allocate(&file, len).unwrap();
-        let meta = file.metadata().unwrap();
-        assert_eq!(meta.len(), len);
-        assert!(meta.blocks() * 512 >= len, "{} blocks", meta.blocks());
     }
 
     /// Creates a symbolic link, or reports that this machine cannot. On CI

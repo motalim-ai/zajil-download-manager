@@ -38,6 +38,11 @@
 //! resumable. A `429` makes every connection wait for `Retry-After`; a `429`
 //! or a `403` while other connections work means the server limits
 //! connections, so the limit drops to the connections it accepted.
+//!
+//! **A full disk** (nothing is reserved when a download starts): a write
+//! or a save that fails is not tried again. Every connection stops at once,
+//! and the download is resumable from the state file saved last, which
+//! counts only bytes on disk.
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -245,6 +250,9 @@ pub(crate) async fn run(
     let mut done = from;
     let mut restart = None;
     let mut stopped_by_user = false;
+    // The disk failed: the workers are stopping, and no periodic save
+    // starts (on a full disk it would fail too).
+    let mut disk_failed = false;
     // A periodic save has succeeded: the state file counts only synced
     // bytes, so a stop needs no save of its own (#132).
     let mut saved = false;
@@ -286,6 +294,10 @@ pub(crate) async fn run(
                     let _ = stop.send(true);
                 }
                 Some(Message::Restart { .. }) | None => {}
+                Some(Message::DiskFailed) => {
+                    disk_failed = true;
+                    let _ = stop.send(true);
+                }
             },
             joined = workers.join_next() => match joined {
                 Some(Ok(())) => {}
@@ -301,7 +313,7 @@ pub(crate) async fn run(
             // is the one #132 leaves out (#194). After the messages: an
             // event (a split) is said before the save that holds it (a
             // test stopping on a split's event relies on it).
-            _ = tick.tick(), if !stopped_by_user && restart.is_none() => {
+            _ = tick.tick(), if !stopped_by_user && restart.is_none() && !disk_failed => {
                 // A stop asked during a slow save reaches the workers at
                 // once, not when the save is done (review of #208: they
                 // wrote on for the whole save).
@@ -317,8 +329,16 @@ pub(crate) async fn run(
                         result = &mut save => break result,
                     }
                 };
-                result?;
-                saved = true;
+                match result {
+                    Ok(()) => saved = true,
+                    // The state file saved last stays, and counts only
+                    // bytes on disk: stop, resumable from it.
+                    Err(err) => {
+                        ctx.board().disk_failed(format!("{err}"));
+                        disk_failed = true;
+                        let _ = stop.send(true);
+                    }
+                }
             }
         }
     }
@@ -344,6 +364,8 @@ pub(crate) async fn run(
             Message::Restart { reason, response } => {
                 restart.get_or_insert((reason, response));
             }
+            // The board has it (`Board::disk_failed`).
+            Message::DiskFailed => {}
         }
     }
 
@@ -357,8 +379,10 @@ pub(crate) async fn run(
         // save again. On a slow disk (Windows, with an antivirus) a second
         // sync could take seconds; about one `save_interval` of progress is
         // downloaded again on resume, and nothing is lost or wrong.
-        if !saved {
-            checkpoint(&ctx, &state_file, None).await?;
+        if !saved && !disk_failed {
+            // A failed save leaves the state file saved last, which counts
+            // only bytes on disk.
+            let _ = checkpoint(&ctx, &state_file, None).await;
         }
         return Err(Error::Stopped {
             state_file: Some(state_file),
@@ -377,12 +401,13 @@ pub(crate) async fn run(
         });
     }
 
-    let (complete, failure, ranges_refused) = {
+    let (complete, failure, ranges_refused, disk_failed) = {
         let board = ctx.board();
         (
             board.complete(),
             board.failure.clone(),
             board.ranges_refused,
+            board.disk_failed,
         )
     };
     if complete {
@@ -410,7 +435,14 @@ pub(crate) async fn run(
         // `cleanup` is dropped (see `EmptyDownloadCleanup`).
         return Err(Error::NoData(reason));
     }
-    checkpoint(&ctx, &state_file, None).await?;
+    match checkpoint(&ctx, &state_file, None).await {
+        Ok(()) => {}
+        // On a full disk the save fails too. The state file saved last
+        // counts only bytes that are on disk, so the download resumes from
+        // there.
+        Err(_) if disk_failed => {}
+        Err(err) => return Err(err),
+    }
     Err(Error::Interrupted { state_file, reason })
 }
 
@@ -479,6 +511,8 @@ enum Message {
         reason: RestartReason,
         response: Option<Response>,
     },
+    /// Writing the file failed (a full disk): every connection stops.
+    DiskFailed,
 }
 
 /// The segments and who works on them.
@@ -496,8 +530,13 @@ struct Board {
     live: Vec<Live>,
     /// The server answered a range request with the whole file.
     ranges_refused: bool,
-    /// Why the first segment failed.
+    /// Why the first segment failed, or why the disk did.
     failure: Option<String>,
+    /// Writing the file or saving the state failed (a full disk). Trying
+    /// again would not help, so the download stops at once, resumable from
+    /// the state file saved last once there is room again (owner's
+    /// decision, 2026-10-28).
+    disk_failed: bool,
     /// Failures in a row after which a segment is given up (at least 1).
     max_failures: u32,
 }
@@ -551,6 +590,7 @@ impl Board {
             live,
             ranges_refused: false,
             failure: None,
+            disk_failed: false,
             max_failures: max_failures.max(1),
         }
     }
@@ -661,6 +701,15 @@ impl Board {
     fn fewer_connections(&mut self) -> usize {
         self.limit = self.limit.min(self.active.saturating_sub(1)).max(1);
         self.limit
+    }
+
+    /// The disk failed (`reason`): the reason the user needs, even after
+    /// another one.
+    fn disk_failed(&mut self, reason: String) {
+        if !self.disk_failed {
+            self.disk_failed = true;
+            self.failure = Some(reason);
+        }
     }
 
     /// Marks the segment starting at `start` failed (if any) and remembers
@@ -1252,7 +1301,11 @@ async fn write_batch(
                 Ok(()) => board.wrote(stream.segment, granted),
                 Err(err) => {
                     board.unreserve(stream.segment, granted);
-                    return Err(format!("could not write the file: {err}"));
+                    let reason = format!("could not write the file: {err}");
+                    board.disk_failed(reason.clone());
+                    drop(board);
+                    let _ = ctx.events.send(Message::DiskFailed);
+                    return Err(reason);
                 }
             }
         }

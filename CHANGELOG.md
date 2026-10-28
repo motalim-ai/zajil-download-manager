@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixes
+
+- fix: a download no longer reserves its whole size on disk when it starts, on any system: a second download of the same 6.2 GB file failed at once on a disk with 7 GB free. The part file is sparse; the free-space check before the start stays on all three systems, and a disk that fills up mid-download stops it at once, resumable from its last saved state.
+
 ## [1.0.0] - 2026-10-28
 
 The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). Three 1.0.0 drafts were tried by hand (the first on macOS and Windows) and never published; they and their tags were removed (owner's decisions of 2026-10-27 and 2026-10-28), and the fixes after them (#251 to #297) are here too. This list is the titles of the pull requests merged after 0.2.0.

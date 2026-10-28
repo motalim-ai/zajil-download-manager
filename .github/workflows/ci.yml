@@ -131,6 +131,31 @@ jobs:
           set -euo pipefail
           sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends zsh xvfb xauth
           zsh -c 'echo "zsh $ZSH_VERSION"'
+      # Nothing is reserved when a download starts (owner's decision,
+      # 2026-10-28): tests in zajil-platform and zajil-core check, on a
+      # small image of each file system downloads land on, that a part file
+      # is sparse and that a disk filling up mid-download stops and resumes
+      # cleanly. They fail on CI without them.
+      - name: Mount ext4 and btrfs test volumes (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+        run: |
+          set -euo pipefail
+          sudo apt-get $APT_OPTIONS install -y -q --no-install-recommends btrfs-progs
+          truncate -s 64M "$RUNNER_TEMP/ext4.img"
+          truncate -s 256M "$RUNNER_TEMP/btrfs.img"
+          mkfs.ext4 -q -L ZEXT4 "$RUNNER_TEMP/ext4.img"
+          mkfs.btrfs -q -L ZBTRFS "$RUNNER_TEMP/btrfs.img"
+          sudo mkdir -p /mnt/zext4 /mnt/zbtrfs
+          sudo mount -o loop "$RUNNER_TEMP/ext4.img" /mnt/zext4
+          sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/zbtrfs
+          sudo chown "$(id -u):$(id -g)" /mnt/zext4 /mnt/zbtrfs
+          test "$(findmnt -no FSTYPE /mnt/zext4)" = ext4
+          test "$(findmnt -no FSTYPE /mnt/zbtrfs)" = btrfs
+          echo "ZAJIL_TEST_EXT4=/mnt/zext4" >> "$GITHUB_ENV"
+          echo "ZAJIL_TEST_BTRFS=/mnt/zbtrfs" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (macOS)
         if: runner.os == 'macOS'
         timeout-minutes: 10
@@ -144,6 +169,15 @@ jobs:
           mount | grep -q '/Volumes/ZEXFAT (exfat'
           echo "ZAJIL_TEST_FAT32=/Volumes/ZFAT32" >> "$GITHUB_ENV"
           echo "ZAJIL_TEST_EXFAT=/Volumes/ZEXFAT" >> "$GITHUB_ENV"
+      - name: Mount an APFS test volume (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          hdiutil create -quiet -size 64m -fs APFS -volname ZAPFS "$RUNNER_TEMP/apfs.dmg"
+          hdiutil attach -quiet -nobrowse "$RUNNER_TEMP/apfs.dmg"
+          mount | grep -q '/Volumes/ZAPFS (apfs'
+          echo "ZAJIL_TEST_APFS=/Volumes/ZAPFS" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 10
@@ -175,6 +209,27 @@ jobs:
           if ((Get-Volume -DriveLetter Z).FileSystemType -ne 'exFAT') { throw 'Z: is not exFAT' }
           'ZAJIL_TEST_FAT32=Y:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           'ZAJIL_TEST_EXFAT=Z:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Mount an NTFS test volume (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ntfs = Join-Path $env:RUNNER_TEMP 'ntfs.vhdx'
+          $script = Join-Path $env:RUNNER_TEMP 'ntfs.txt'
+          @(
+            "create vdisk file=`"$ntfs`" maximum=64 type=expandable"
+            "select vdisk file=`"$ntfs`""
+            'attach vdisk'
+            'convert mbr'
+            'create partition primary'
+            'format fs=ntfs quick label=ZNTFS'
+            'assign letter=X'
+          ) | Set-Content -Encoding ascii $script
+          diskpart /s $script
+          if ($LASTEXITCODE -ne 0) { throw "diskpart failed: $LASTEXITCODE" }
+          if ((Get-Volume -DriveLetter X).FileSystemType -ne 'NTFS') { throw 'X: is not NTFS' }
+          'ZAJIL_TEST_NTFS=X:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       # The real tools for crates/zajil-core/tests/video_real.rs, each by its
       # pin (the same pins files Zajil reads): yt-dlp, QuickJS-NG, and our
       # ffmpeg and ffprobe from the published tools-ffmpeg release, never
