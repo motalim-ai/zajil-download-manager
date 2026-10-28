@@ -536,17 +536,6 @@ jobs:
           done
           echo "close_resume on Windows: $pass passed, $fail failed, of 10"
           [ "$fail" = 0 ]
-      - name: TEMPORARY the browser's restart test 30 times (Windows)
-        if: always() && runner.os == 'Windows'
-        working-directory: apps/desktop/src-tauri
-        shell: bash
-        run: |
-          pass=0; fail=0
-          for i in $(seq 1 30); do
-            if cargo test --locked --lib after_a_restart_the_browser > "$RUNNER_TEMP/restart-$i.log" 2>&1; then pass=$((pass + 1)); else fail=$((fail + 1)); grep -aE "panicked|^[0-9.]+(ms|s)$" "$RUNNER_TEMP/restart-$i.log"; fi
-          done
-          echo "after_a_restart on Windows: $pass passed, $fail failed, of 30"
-          [ "$fail" = 0 ]
       - name: Build the app with its UI test pages
         shell: bash
         run: |
