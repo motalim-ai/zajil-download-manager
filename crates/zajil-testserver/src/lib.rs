@@ -4,7 +4,9 @@
 //! `AGENTS.md`: a server that ignores `Range`, a connection cut in the middle,
 //! a file that changes on the server (new `ETag`), slow or stalled transfers,
 //! `429` with `Retry-After`, `403` after some requests, redirects and
-//! dangerous names in `Content-Disposition`. Every request is logged with the
+//! dangerous names in `Content-Disposition`, and bodies held at a
+//! [`Gate`] until the test (or a number of responses at once) opens it.
+//! Every request is logged with the
 //! number of body bytes the server sent, so tests can check what was asked
 //! for twice, with the connection it came on and how many responses for the
 //! same file were being sent at that moment.
@@ -55,6 +57,55 @@ pub struct Failure {
     pub retry_after: Option<u64>,
 }
 
+/// Holds response bodies ([`FileSpec::hold_after`]) until it opens: when
+/// the test calls [`Gate::open`], or, for [`Gate::when_together`], when
+/// that many bodies of its file are being sent at once. Once open, it stays
+/// open. Clones share it.
+#[derive(Debug, Clone)]
+pub struct Gate {
+    open: Arc<tokio::sync::watch::Sender<bool>>,
+    together: Option<usize>,
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Gate {
+    /// A gate that only [`Gate::open`] opens.
+    pub fn new() -> Self {
+        Gate {
+            open: Arc::new(tokio::sync::watch::Sender::new(false)),
+            together: None,
+        }
+    }
+
+    /// A gate that the server opens once `bodies` bodies of the file it
+    /// holds are being sent at the same moment: what a test of downloads
+    /// at once needs, as each one waits until the others have started.
+    pub fn when_together(bodies: usize) -> Self {
+        Gate {
+            together: Some(bodies),
+            ..Self::new()
+        }
+    }
+
+    pub fn open(&self) {
+        self.open.send_replace(true);
+    }
+
+    pub fn is_open(&self) -> bool {
+        *self.open.borrow()
+    }
+
+    async fn opened(&self) {
+        let mut open = self.open.subscribe();
+        let _ = open.wait_for(|open| *open).await;
+    }
+}
+
 /// A file served at one path, and how the server misbehaves for it.
 #[derive(Debug, Clone)]
 pub struct FileSpec {
@@ -73,6 +124,7 @@ pub struct FileSpec {
     content_type: Option<String>,
     cut_after: Option<(u64, usize)>,
     stall_after: Option<u64>,
+    holds: Vec<(u64, Gate)>,
     bytes_per_sec: Option<u64>,
     slow_at: Option<(u64, u64)>,
     fail_first: Vec<Failure>,
@@ -105,6 +157,7 @@ impl FileSpec {
             content_type: None,
             cut_after: None,
             stall_after: None,
+            holds: Vec::new(),
             bytes_per_sec: None,
             slow_at: None,
             fail_first: Vec::new(),
@@ -212,6 +265,16 @@ impl FileSpec {
     /// the connection open.
     pub fn stall_after(mut self, bytes: u64) -> Self {
         self.stall_after = Some(bytes);
+        self
+    }
+
+    /// Every GET response sends `bytes` body bytes, then holds the rest
+    /// (keeping the connection open) until `gate` opens; once open, it holds
+    /// nothing. Several holds can be set, each at its own place, so a test
+    /// can stop every connection at known points one after the other.
+    pub fn hold_after(mut self, bytes: u64, gate: &Gate) -> Self {
+        self.holds.push((bytes, gate.clone()));
+        self.holds.sort_by_key(|(at, _)| *at);
         self
     }
 
@@ -898,6 +961,11 @@ fn handle(
         {
             let (now, guard) = served.sending.start();
             record.concurrent = now;
+            for (_, gate) in &served.spec.holds {
+                if gate.together.is_some_and(|bodies| now >= bodies) {
+                    gate.open();
+                }
+            }
             response.map(|inner| {
                 Counted {
                     inner,
@@ -1030,7 +1098,10 @@ fn respond(
         Some((slow, bytes_per_sec)) if slow == start => Some(bytes_per_sec),
         _ => spec.bytes_per_sec,
     };
-    tokio::spawn(stream_body(sender, body, cut, stall, throttle, bytes_sent));
+    let holds = spec.holds.clone();
+    tokio::spawn(stream_body(
+        sender, body, cut, stall, holds, throttle, bytes_sent,
+    ));
     builder.body(channel.boxed()).unwrap()
 }
 
@@ -1039,6 +1110,7 @@ async fn stream_body(
     body: Bytes,
     cut: Option<u64>,
     stall: Option<u64>,
+    holds: Vec<(u64, Gate)>,
     bytes_per_sec: Option<u64>,
     bytes_sent: Arc<AtomicU64>,
 ) {
@@ -1055,7 +1127,18 @@ async fn stream_body(
 
     let mut offset = 0;
     while offset < limit {
-        let next = (offset + chunk).min(limit);
+        let mut next = (offset + chunk).min(limit);
+        // Held at each place reached until its gate opens, and never sent
+        // past the next one.
+        for (at, gate) in &holds {
+            let at = usize::try_from(*at).unwrap_or(usize::MAX);
+            if offset >= at {
+                gate.opened().await;
+            } else {
+                next = next.min(at);
+                break;
+            }
+        }
         let sent = next - offset;
         // Count before handing the chunk over, so the count is complete by
         // the time the client has read everything.
