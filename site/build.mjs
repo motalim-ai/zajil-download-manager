@@ -43,6 +43,7 @@ const TEXT = {
       ["download", "/download/", "التحميل"],
       ["faq", "/faq/", "أسئلة شائعة"],
       ["privacy", "/privacy/", "الخصوصية"],
+      ["support", "/support/", "ادعم زاجِل"],
     ],
     other: "English",
     otherLabel: "الموقع بالإنجليزية",
@@ -53,6 +54,7 @@ const TEXT = {
       ["/download/#install", "خطوات التثبيت"],
       ["/faq/", "أسئلة شائعة"],
       ["/privacy/", "سياسة الخصوصية"],
+      ["/support/", "ادعم زاجِل"],
     ],
     footerRepo: [
       [REPO, "GitHub"],
@@ -84,6 +86,7 @@ const TEXT = {
       ["download", "/en/download/", "Download"],
       ["faq", "/en/faq/", "FAQ"],
       ["privacy", "/en/privacy/", "Privacy"],
+      ["support", "/en/support/", "Support Zajil"],
     ],
     other: "العربية",
     otherLabel: "الموقع بالعربية",
@@ -94,6 +97,7 @@ const TEXT = {
       ["/en/download/#install", "Install steps"],
       ["/en/faq/", "FAQ"],
       ["/en/privacy/", "Privacy policy"],
+      ["/en/support/", "Support Zajil"],
     ],
     footerRepo: [
       [REPO, "GitHub"],

@@ -344,7 +344,8 @@ main:focus { outline: none; }
 .nav-toggle[aria-expanded="true"] .icon--open { display: none; }
 .nav-toggle[aria-expanded="true"] .icon--close { display: block; }
 
-@media (max-width: 1060px) {
+/* The menu has eight links and a language link: below 1240px it folds into the button. */
+@media (max-width: 1240px) {
   .nav-toggle { display: inline-grid; }
   .nav {
     position: absolute;
@@ -1501,4 +1502,11 @@ pre code { padding: 0; border: 0; background: none; color: inherit; font-size: 0
   .brand__name { font-size: 1.25rem; }
   .lang-link { padding-inline: 10px; font-size: 0.9rem; }
   .site-header .icon-btn { width: 40px; height: 40px; }
+}
+
+/* Just above the fold point, the menu's links sit a little closer. */
+@media (min-width: 1241px) and (max-width: 1340px) {
+  .site-header__inner { gap: 16px; }
+  .nav__list { gap: 0; }
+  .nav__list a { padding-inline: 9px; }
 }
