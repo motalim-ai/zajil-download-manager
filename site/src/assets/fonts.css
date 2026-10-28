@@ -1,3 +1,38 @@
+/* Thmanyah Sans, the owner's choice, only where the visitor already has it
+   installed: its licence forbids hosting, sharing or converting its files, so
+   no file of it is in the site or the repository. Everyone else gets the
+   self-hosted fonts below (SIL Open Font License). */
+@font-face {
+  font-family: 'Thmanyah Sans';
+  font-style: normal;
+  font-weight: 300;
+  src: local('thmanyah sans Light'), local('thmanyahsans-Light');
+}
+@font-face {
+  font-family: 'Thmanyah Sans';
+  font-style: normal;
+  font-weight: 400;
+  src: local('thmanyah sans Regular'), local('thmanyahsans-Regular');
+}
+@font-face {
+  font-family: 'Thmanyah Sans';
+  font-style: normal;
+  font-weight: 500;
+  src: local('thmanyah sans Medium'), local('thmanyahsans-Medium');
+}
+@font-face {
+  font-family: 'Thmanyah Sans';
+  font-style: normal;
+  font-weight: 600 700;
+  src: local('thmanyah sans Bold'), local('thmanyahsans-Bold');
+}
+@font-face {
+  font-family: 'Thmanyah Sans';
+  font-style: normal;
+  font-weight: 800 900;
+  src: local('thmanyah sans Black'), local('thmanyahsans-Black');
+}
+
 /* Self-hosted fonts (SIL Open Font License). No request leaves this site. */
 @font-face {
   font-family: 'Alexandria';

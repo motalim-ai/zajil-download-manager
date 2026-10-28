@@ -30,8 +30,8 @@
   --shadow-sm: 0 10px 30px -18px rgba(23, 71, 201, 0.45);
   --header-bg: rgba(244, 248, 255, 0.78);
 
-  --font-display: 'Alexandria', 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --font-body: 'IBM Plex Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
+  --font-display: 'Thmanyah Sans', 'Alexandria', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-body: 'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
 
   --wrap: 1200px;
   --gutter: clamp(16px, 4vw, 40px);
