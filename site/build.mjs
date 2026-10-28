@@ -20,6 +20,20 @@ const PAGES = join(SRC, "pages");
 const OUT = join(SITE, "dist");
 
 export const ORIGIN = "https://zajil.by-wow.com";
+
+// GitHub Pages sets no headers of ours, so the policy goes in each page's
+// head. Scripts, styles, images and fonts come from the site only; the one
+// address beyond it is GitHub's API, for the download buttons.
+export const CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self'",
+  "font-src 'self'",
+  "connect-src https://api.github.com",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
 export const REPO = "https://github.com/motalim-ai/zajil-download-manager";
 
 const TEXT = {
@@ -183,6 +197,8 @@ function layout({ lang, url, meta, body, icons }) {
 <html lang="${lang}" dir="${t.dir}">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="${CSP}">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escape(meta.title)}</title>
   <meta name="description" content="${escape(meta.description)}">${robots}
@@ -309,7 +325,6 @@ export function build() {
   }
 
   cpSync(join(SRC, "assets"), join(OUT, "assets"), { recursive: true });
-  cpSync(join(SRC, "_headers"), join(OUT, "_headers"));
   cpSync(join(ROOT, "docs", "screenshots"), join(OUT, "screenshots"), { recursive: true });
   for (const name of ["zajil-icon.svg", "zajil-mark.svg"]) {
     cpSync(join(ROOT, "assets", "icon", name), join(OUT, "assets", name));

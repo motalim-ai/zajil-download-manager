@@ -19,9 +19,9 @@
 | `src/assets/theme.js` | يضع الوضع الفاتح أو الداكن المحفوظ قبل أن تظهر الصفحة |
 | `src/assets/main.js` | زر الوضع، وقائمة الهاتف، وتبويبات الصور، ومحاكاة التحميل بالأجزاء |
 | `src/assets/download.js` | يضع رابط كل ملف في زره (انظر أدناه) |
-| `src/_headers` | ترويسات الأمان في Cloudflare Pages، ومنها Content-Security-Policy |
-| `build.mjs` | يلف كل صفحة بالقالب (الرأس والقائمة والتذييل) ويكتب الموقع في `dist/` |
-| `check.mjs` | يبني الموقع ثم يفحصه، ويعمل في الـ CI |
+| `build.mjs` | يلف كل صفحة بالقالب (الرأس والقائمة والتذييل)، ويضع في رأس كل صفحة Content-Security-Policy وسياسة الـ referrer، ويكتب الموقع في `dist/` |
+| `check.mjs` | يبني الموقع ثم يفحصه، ويعمل في الـ CI وقبل كل نشر |
+| `../.github/workflows/site.yml` | ينشر الموقع على GitHub Pages |
 
 الصور تُنسخ وقت البناء من `docs/screenshots/`، والأيقونة من `assets/icon/` و`apps/desktop/src-tauri/icons/`. لا نسخة ثانية منها هنا.
 
@@ -41,37 +41,28 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory site/dist
 
 أسماء ملفات الإصدار فيها رقمه (`Zajil_1.0.0_universal.dmg`)، فلا يمكن كتابة رابط `releases/latest/download/<الاسم>` مقدمًا. لذلك كل زر يبدأ برابط صفحة آخر إصدار على GitHub (`releases/latest`)، وهو يعمل دائمًا. ثم يسأل `download.js` واجهة GitHub مرة واحدة عن آخر إصدار، فإن ردّت وضع في كل زر رابط ملفه مباشرة، واسمه وحجمه. ولا يقبل إلا رابطًا تحت `github.com/motalim-ai/zajil-download-manager/releases/download/`. وإن لم ترد الواجهة (بلا شبكة، أو تجاوز حد الطلبات) يبقى رابط صفحة الإصدار.
 
-## النشر على Cloudflare Pages
+## النشر على GitHub Pages
 
-المالك وحده يُنشئ المشروع ويربط النطاق، من لوحة Cloudflare للحساب الذي فيه `by-wow.com`. الخطوات بالترتيب:
+الموقع على **GitHub Pages**، بالنطاق `zajil.by-wow.com`. والإعداد في المستودع جاهز: Pages مفعّل بمصدر **GitHub Actions**، والنطاق مضبوط في **Settings** ← **Pages** ← **Custom domain**. فلا ملف `CNAME` في الموقع.
 
-1. **ربط المستودع:** **Workers & Pages** ← **Create application** ← تبويب **Pages** ← **Connect to Git**. سجّل الدخول إلى GitHub بحساب `motalim-ai`، وحين يسأل GitHub عن صلاحيات تطبيق Cloudflare اختر **Only select repositories** ← `zajil-download-manager` وحده. ثم اختر المستودع واضغط **Begin setup**.
-2. **إعدادات البناء** (في نفس الصفحة):
+**كيف ينشر:** `.github/workflows/site.yml` يعمل عند كل دمج في `main` يغيّر `site/` أو `docs/screenshots/` أو `assets/icon/` (أو أيقونتي التطبيق اللتين ينسخهما البناء)، ويمكن تشغيله باليد من تبويب **Actions** ← **Website deploy** ← **Run workflow**. وهو:
 
-   | الإعداد | القيمة |
-   |---|---|
-   | Project name | `zajil` (ويصير عنوانه `zajil.pages.dev`، أو اسمًا قريبًا منه إن كان مأخوذًا) |
-   | Production branch | `main` |
-   | Framework preset | `None` |
-   | Build command | `node site/build.mjs` |
-   | Build output directory | `site/dist` |
-   | Root directory (advanced) | اتركه فارغًا: البناء يقرأ `docs/screenshots` و`assets/icon` من جذر المستودع |
-   | Environment variables (advanced) | `NODE_VERSION` = `24` |
+1. يشغّل `node site/check.mjs`: يبني الموقع في `site/dist` ويفحصه، ويتوقف إن وجد مشكلة، فلا يُنشر شيء مكسور.
+2. يرفع `site/dist` بـ `actions/upload-pages-artifact`، وينشره بـ `actions/deploy-pages` في البيئة `github-pages`.
 
-3. اضغط **Save and Deploy**، وانتظر أول بناء (أقل من دقيقة: لا تنزيلات). ثم افتح عنوان `pages.dev` الذي يظهر وتأكد أن الموقع يعمل، و`/en/` أيضًا.
-4. **النطاق:** في المشروع ← **Custom domains** ← **Set up a custom domain** ← اكتب `zajil.by-wow.com` ← **Continue** ← **Activate domain**.
-   - **سجل DNS الذي يضيفه Cloudflare بنفسه** في منطقة `by-wow.com`: نوعه **CNAME**، واسمه `zajil`، وقيمته عنوان المشروع (`zajil.pages.dev`)، **Proxied** (السحابة البرتقالية). لا تضفه يدويًا قبل هذه الخطوة.
-   - تصدر شهادة HTTPS وحدها، وقد يأخذ تفعيل النطاق بضع دقائق، والحالة تظهر **Active** حين ينتهي.
-5. **اختياري:** **Settings** ← **Build** ← **Build watch paths** ← Include: `site/*` و`docs/screenshots/*` و`assets/icon/*`، فلا يُعاد بناء الموقع مع كل تغيير في البرنامج.
-6. **لا تفعّل Web Analytics** ولا أي إحصاءات في المشروع: سياسة الخصوصية تقول إن الموقع بلا إحصاءات.
+ونشر واحد في الوقت نفسه (`concurrency: pages`). وكل Pull Request يُفحص في الـ CI (وظيفة «Website») ولا يُنشر.
 
-بعد ذلك، كل دمج في `main` ينشر الموقع وحده، وكل Pull Request يأخذ معاينة على عنوان `pages.dev` خاص به.
+**سجل DNS** في منطقة `by-wow.com` على Cloudflare (يضيفه المالك):
 
-ملف `_headers` يُنشر مع الموقع (ومنه Content-Security-Policy)، ومعه صفحتا `404.html` (عربية للجذر، وإنجليزية تحت `/en/`). وللتأكد من الترويسات بعد النشر:
+| النوع | الاسم | القيمة | Proxy |
+|---|---|---|---|
+| CNAME | `zajil` | `motalim-ai.github.io` | **DNS only** (السحابة الرمادية) |
 
-```bash
-curl -sI https://zajil.by-wow.com/ | grep -i -E 'content-security-policy|referrer-policy|x-content-type-options'
-```
+السحابة الرمادية ضرورية: بها يصل الزائر إلى GitHub مباشرة، ويصدر GitHub شهادة HTTPS للنطاق. وبعد أن تظهر الشهادة، فعّل **Enforce HTTPS** في إعدادات Pages.
+
+**الترويسات:** GitHub Pages لا يسمح بترويسات خاصة. لذلك Content-Security-Policy وسياسة الـ referrer في وسوم `<meta>` داخل كل صفحة، و`check.mjs` يتأكد من وجودهما. أما ما لا يُكتب في `<meta>` (`frame-ancestors` و`X-Frame-Options` و`X-Content-Type-Options` و`Permissions-Policy`) فلا يمكن ضبطه على GitHub Pages.
+
+وصفحة `404.html` في الجذر يعرضها GitHub Pages لأي عنوان غير موجود، والإنجليزية `/en/404.html` تبقى للروابط المباشرة.
 
 </div>
 
@@ -83,4 +74,4 @@ Zajil's public site, for `https://zajil.by-wow.com`: static HTML and CSS, a few 
 
 - `node site/check.mjs` builds into `site/dist` and checks every internal link and anchor, twin pages, and that nothing loads from outside or inline.
 - The download buttons link to `releases/latest` and, if GitHub's API answers, straight to each file (the asset names carry the version, so `releases/latest/download/<name>` cannot be written ahead).
-- **Cloudflare Pages:** Workers & Pages → Create application → Pages → Connect to Git, with the GitHub app limited to this repository; production branch `main`; framework preset None; build command `node site/build.mjs`; output directory `site/dist`; root directory empty (the repository root); `NODE_VERSION=24`; Save and Deploy. Then Custom domains → `zajil.by-wow.com`: Cloudflare adds a proxied CNAME `zajil` → the project's `pages.dev` address itself, and issues the certificate. Optional build watch paths `site/*`, `docs/screenshots/*`, `assets/icon/*`. Do not turn on Web Analytics.
+- **GitHub Pages:** `.github/workflows/site.yml` builds, checks and publishes `site/dist` on every merge to `main` that touches the site, the screenshots or the icon (or by hand). DNS: CNAME `zajil` → `motalim-ai.github.io`, DNS only (grey cloud), then Enforce HTTPS. GitHub Pages sets no custom headers, so the CSP and referrer policy are `<meta>` tags in each page.

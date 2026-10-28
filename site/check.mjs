@@ -2,13 +2,13 @@
 // image inside the site leads to a file there (and to an id on that page,
 // for a link with #), every Arabic page has its English twin, every page
 // says its language and direction, and nothing loads from outside the site
-// or inline (the Content-Security-Policy in _headers would block it).
+// or inline (the Content-Security-Policy in each page's head would block it).
 //
 // Run after the build: node site/build.mjs && node site/check.mjs
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { build } from "./build.mjs";
+import { CSP, build } from "./build.mjs";
 
 const OUT = join(import.meta.dirname, "dist");
 const files = build();
@@ -48,6 +48,8 @@ for (const page of pages) {
   const twin = english ? page.slice(3) : "en/" + page;
   if (!pages.includes(twin)) fail(page, `no twin page ${twin}`);
 
+  if (!html.includes('<meta http-equiv="Content-Security-Policy" content="' + CSP + '">')) fail(page, "no Content-Security-Policy meta");
+  if (!/<meta name="referrer" content="[^"]+">/.test(html)) fail(page, "no referrer meta");
   if (/<script(?![^>]*\ssrc=)[^>]*>/.test(html)) fail(page, "an inline <script>");
   if (/\sstyle="/.test(html) || /<style[\s>]/.test(html)) fail(page, "an inline style");
   if (/\son[a-z]+="/.test(html)) fail(page, "an inline event handler");
@@ -81,8 +83,6 @@ for (const page of pages) {
       fail(page, `a GitHub link outside Zajil's repository: ${m[1]}`);
   }
 }
-
-if (!files.includes("_headers")) problems.push("_headers: missing");
 
 if (problems.length) {
   console.error(problems.join("\n"));
