@@ -957,32 +957,40 @@ describe("the background", () => {
     await flush();
     fake.local.settings = { useKeys: true };
     const click = (page) => fake.listeners.message({ type: "click-link", href: "https://files.example/a.zip" }, { id: "zajil", tab: { id: 4, url: page }, frameId: 0, url: page });
+    // Two clicks at once reach Zajil in either order (each ticket's hash is
+    // made on Node's thread pool first, #206): each is found by its page.
+    const from = (page) => fake.done.sent.find((m) => m.referrer === page);
+    // Waits for Zajil to have `n` links, not a fixed time (a loaded runner
+    // takes longer than `flush`).
+    const reached = (n) => vi.waitFor(() => expect(fake.done.sent).toHaveLength(n));
     // Another site's page: no strict cookie.
     click("https://forum.example/thread");
-    await flush();
+    await reached(1);
     expect(fake.done.sent[0].cookies).toBe("l=2; n=3");
     // The same site (the cookie's own domain, or under it): all of them.
     click("https://files.example/list");
     click("https://www.files.example/list");
-    await flush();
-    expect(fake.done.sent[1].cookies).toBe("s=1; l=2; n=3");
-    expect(fake.done.sent[2].cookies).toBe("s=1; l=2; n=3");
+    await reached(3);
+    expect(from("https://files.example/list").cookies).toBe("s=1; l=2; n=3");
+    expect(from("https://www.files.example/list").cookies).toBe("s=1; l=2; n=3");
     // Another scheme is another site; and a look-alike is not under it.
     click("http://files.example/list");
     click("https://evilfiles.example/");
-    await flush();
-    expect(fake.done.sent[3].cookies).toBe("l=2; n=3");
-    expect(fake.done.sent[4].cookies).toBe("l=2; n=3");
+    await reached(5);
+    expect(from("http://files.example/list").cookies).toBe("l=2; n=3");
+    expect(from("https://evilfiles.example/").cookies).toBe("l=2; n=3");
     // From the menu, as before: all of them.
     fake.listeners.menu({ menuItemId: "zajil-download-link", linkUrl: "https://files.example/a.zip", pageUrl: "https://forum.example/thread" }, { id: 4 });
-    await flush();
+    await reached(6);
     expect(fake.done.sent[5].cookies).toBe("s=1; l=2; n=3");
     // Asked again after a restart: the link from another site still gets
-    // no strict cookie; the one from the same site does.
+    // no strict cookie; the one from the same host does, and the one from
+    // another host of the site not (`otherSite`: no page is kept to tell).
     const { answer } = await import("../src/link.js");
     const again = async (ticket) => (await answer(fake.chrome, { type: "cookies_wanted", ask: 1, url: "https://files.example/a.zip", ticket })).cookies;
     expect(await again(fake.done.sent[0].ticket)).toBe("l=2; n=3");
-    expect(await again(fake.done.sent[1].ticket)).toBe("s=1; l=2; n=3");
+    expect(await again(from("https://files.example/list").ticket)).toBe("s=1; l=2; n=3");
+    expect(await again(from("https://www.files.example/list").ticket)).toBe("l=2; n=3");
     expect(await again(fake.done.sent[5].ticket)).toBe("s=1; l=2; n=3");
   });
 });
