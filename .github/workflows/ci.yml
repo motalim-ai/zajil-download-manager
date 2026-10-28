@@ -318,6 +318,18 @@ jobs:
         run: cargo test --release --locked -p zajil-core --lib --test resume --test state_file
       # `test-support` lets tests trust their temporary CA. Only
       # dev-dependencies may enable it; a release build must not contain it.
+      # TEMPORARY (to be reverted before merge): #134, #102, #295, #177.
+      - name: TEMPORARY the stop-race tests 20 times (Windows, Linux)
+        if: always() && runner.os != 'macOS'
+        shell: bash
+        run: |
+          pass=0; fail=0
+          for i in $(seq 1 20); do
+            if cargo test --locked -p zajil-core --test item_details --test queue --test schedule --test stop_after_save > "$RUNNER_TEMP/loop-$i.log" 2>&1; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "round $i FAILED"; grep -aE "panicked|FAILED" "$RUNNER_TEMP/loop-$i.log" | head -20; fi
+            grep -aE "connection\(s\):" "$RUNNER_TEMP/loop-$i.log" | sed "s/^/round $i: /" || true
+          done
+          echo "the stop-race tests on $RUNNER_OS: $pass passed, $fail failed, of 20"
+          [ "$fail" = 0 ]
       - name: Release build has no test-only features
         shell: bash
         run: |
