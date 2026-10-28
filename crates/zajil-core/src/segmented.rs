@@ -299,8 +299,9 @@ pub(crate) async fn run(
             // No periodic save once the download stops (asked by the user,
             // or for a restart): the workers are ending, and a save then
             // is the one #132 leaves out (#194). After the messages: an
-            // event (a split) is said before the save that holds it (a
-            // test stopping on a split's event relies on it).
+            // event (a split) already sent is said before the save. One
+            // sent after that look but before the save copies the state is
+            // in that save and said after it (#177).
             _ = tick.tick(), if !stopped_by_user && restart.is_none() => {
                 // A stop asked during a slow save reaches the workers at
                 // once, not when the save is done (review of #208: they

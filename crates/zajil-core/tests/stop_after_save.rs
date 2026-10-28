@@ -187,21 +187,46 @@ async fn a_split_after_the_last_save_is_resumed_from_the_coarser_segments() {
     );
     let dir = tempfile::tempdir().unwrap();
     let stop = Stop::new();
-    let saves = count_saves(Stop::new(), usize::MAX);
+    // Every save counted, and where the segments of the last one start,
+    // read back from what it wrote.
+    let saves = Arc::new(AtomicUsize::new(0));
+    let saved_starts = Arc::new(Mutex::new(Vec::<u64>::new()));
+    let (seen, starts) = (saves.clone(), saved_starts.clone());
+    test_hooks::set_after_temporary_written(Some(Box::new(move |tmp| {
+        let state = DownloadState::load(tmp).unwrap();
+        *starts.lock().unwrap() = state.segments.iter().map(|s| s.start).collect();
+        seen.fetch_add(1, Ordering::SeqCst);
+    })));
     let engine = engine(4, Duration::from_millis(400), 64 * KIB);
     let splits = Arc::new(AtomicUsize::new(0));
     let at_stop = Arc::new(AtomicUsize::new(usize::MAX));
-    let (asked, counted, split_count, marker) =
-        (stop.clone(), saves.clone(), splits.clone(), at_stop.clone());
+    let stopped_at = Arc::new(Mutex::new(None));
+    let (asked, counted, split_count, marker, split_at, last_saved) = (
+        stop.clone(),
+        saves.clone(),
+        splits.clone(),
+        at_stop.clone(),
+        stopped_at.clone(),
+        saved_starts.clone(),
+    );
 
     let err = engine
         .download_until(&server.url("/f.bin"), dir.path(), &stop, &mut |e| {
-            // The first split once a periodic save is on disk: stop now,
-            // so the split is newer than the last save.
-            if let Event::Split { .. } = e {
+            // The first split that no save holds yet, once a periodic save
+            // is on disk: stop now, so the split is newer than the last
+            // save. The event alone does not say so: a connection on
+            // another thread can split between the download's look at its
+            // messages and the save's copy of the state, so that save holds
+            // a split whose event comes after it (#177: 7 and 8 segments on
+            // disk on Windows CI, 4 + every split seen).
+            if let Event::Split { at, .. } = e {
                 split_count.fetch_add(1, Ordering::SeqCst);
-                if counted.load(Ordering::SeqCst) >= 2 && !asked.is_requested() {
+                if counted.load(Ordering::SeqCst) >= 2
+                    && !asked.is_requested()
+                    && !last_saved.lock().unwrap().contains(&at)
+                {
                     marker.store(counted.load(Ordering::SeqCst), Ordering::SeqCst);
+                    *split_at.lock().unwrap() = Some(at);
                     asked.request();
                 }
             }
@@ -215,7 +240,7 @@ async fn a_split_after_the_last_save_is_resumed_from_the_coarser_segments() {
     else {
         panic!("{err:?}");
     };
-    assert!(splits.load(Ordering::SeqCst) >= 1, "no split happened");
+    let split_at = stopped_at.lock().unwrap().expect("no split to stop on");
     assert_eq!(
         saves.load(Ordering::SeqCst),
         at_stop.load(Ordering::SeqCst),
@@ -223,9 +248,15 @@ async fn a_split_after_the_last_save_is_resumed_from_the_coarser_segments() {
     );
     let on_disk = DownloadState::load(&state_file).unwrap();
     assert!(
+        on_disk.segments.iter().all(|s| s.start != split_at),
+        "the newest split is on disk: {:?}",
+        on_disk.segments
+    );
+    assert!(
         on_disk.segments.len() < 4 + splits.load(Ordering::SeqCst),
-        "the newest split is on disk: {} segments",
-        on_disk.segments.len()
+        "{} segments on disk, {} splits",
+        on_disk.segments.len(),
+        splits.load(Ordering::SeqCst)
     );
     resumes_from_the_last_save(&engine, &state_file, &data).await;
 }
