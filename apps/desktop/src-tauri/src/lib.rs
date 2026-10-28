@@ -4128,10 +4128,11 @@ mod tests {
             "went without its cookies"
         );
 
-        let linked_at = Instant::now();
         // The browser opens: its host links, and answers every question,
-        // the cookies with "sid=BACK"; what it is asked is recorded.
+        // the cookies with "sid=BACK"; what it is asked is recorded, with
+        // when, and when it linked.
         let (asked_tx, asked) = std::sync::mpsc::channel();
+        let (linked_tx, linked) = std::sync::mpsc::channel();
         {
             let path = base.path().to_path_buf();
             std::thread::spawn(move || {
@@ -4141,6 +4142,7 @@ mod tests {
                     br#"{"type":"link","protocol_version":1,"instance":"inst-1"}"#,
                 )
                 .unwrap();
+                let _ = linked_tx.send(Instant::now());
                 while let Ok(Some(question)) =
                     zajil_host::read_frame(&mut app, zajil_host::MAX_REQUEST)
                 {
@@ -4152,7 +4154,7 @@ mod tests {
                         ask: question.ask(),
                         cookies,
                     };
-                    let _ = asked_tx.send(question);
+                    let _ = asked_tx.send((question, Instant::now()));
                     if zajil_host::write_json(&mut app, &answer).is_err() {
                         break;
                     }
@@ -4164,15 +4166,17 @@ mod tests {
             .expect("it did not go")
             .unwrap()
             .unwrap();
-        // Asked at once when it links, not at the next retry (review of #80).
-        assert!(
-            linked_at.elapsed() < ASK_AGAIN / 2,
-            "{:?}",
-            linked_at.elapsed()
-        );
+        let linked_at = linked.recv().unwrap();
         let next = || asked.recv_timeout(Duration::from_secs(10)).unwrap();
         let mut seen = vec![next(), next()];
-        seen.sort_by_key(|q| matches!(q, zajil_host::ToExtension::CookiesWanted { .. }));
+        seen.sort_by_key(|(q, _)| matches!(q, zajil_host::ToExtension::CookiesWanted { .. }));
+        // Asked at once when it links, not at the next retry (review of
+        // #80): timed to the question itself, not to the end of the
+        // download after it (2.59 s once on Windows, the download and the
+        // queue's stop included).
+        let cookies_asked = seen[1].1.saturating_duration_since(linked_at);
+        assert!(cookies_asked < ASK_AGAIN / 2, "{cookies_asked:?}");
+        let seen: Vec<_> = seen.into_iter().map(|(q, _)| q).collect();
         // Told at once which of its downloads are open, then asked for this
         // one's cookies, by its ticket, from its store.
         assert!(
@@ -4186,7 +4190,7 @@ mod tests {
         );
         // Done: told again, and its ticket is no longer open.
         assert!(
-            matches!(next(), zajil_host::ToExtension::Keep { tickets, .. } if tickets.is_empty())
+            matches!(next().0, zajil_host::ToExtension::Keep { tickets, .. } if tickets.is_empty())
         );
         let item = store.load().unwrap().item(id).unwrap().clone();
         assert_eq!(item.status, Status::Done, "{item:?}");
