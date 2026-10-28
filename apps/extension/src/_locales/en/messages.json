@@ -90,10 +90,10 @@
     "message": "The cookies go to the Zajil program on this computer, and from it to their own site only, nowhere else."
   },
   "cookiesOnlyThisSite": {
-    "message": "For each download: only its link's site cookies, for its link only, and only when it goes to Zajil. No cookies from a private window."
+    "message": "For each download: only its link's site cookies, for its link only, and only when it goes to Zajil. For a video, its page's cookies, when you press or when the video button shows over it. No cookies from a private window."
   },
   "cookiesNotKept": {
-    "message": "Zajil does not write them to disk: they stay in memory until the download finishes or is removed."
+    "message": "Zajil does not write them to disk: they stay in memory until the download finishes or is removed. Except for a video: yt-dlp reads them from a temporary file in Zajil's data folder, deleted when it ends."
   },
   "cookiesOptional": {
     "message": "Without the permission the extension works as it is: files of sites that need a sign-in stay in the browser, and for videos there is “Download video with Zajil” in the right-click menu. You can take the permission back at any time in the settings."
@@ -147,7 +147,7 @@
     "message": "Zajil cannot read this page: it is not an http or https page."
   },
   "sitesVideo": {
-    "message": "Video: of a page, the extension learns only where its videos are and their addresses, and on YouTube where a playlist's title is. When the video button shows over a video, Zajil reads its page ahead: the page, the video's address (or the playlist the tab loaded for it) and the page's cookies go to Zajil then, once a page in ten minutes, and Zajil keeps what it read in memory only. Playlist addresses stay in memory, for each tab, and are forgotten when it closes or opens another page. The extension watches requests and never stops or changes them, notes nothing from a private window, and sends nothing from one before you press."
+    "message": "Video: of a page, the extension learns only where its videos are and their addresses, and on YouTube where a playlist's title is. When the video button shows over a video, Zajil reads its page ahead: the page, the video's address (or the playlist the tab loaded for it) and the page's cookies go to Zajil then; Zajil reads a page at most once in ten minutes, and keeps what it read in memory only. Playlist addresses stay in memory, for each tab, and are forgotten when it closes or opens another page. The extension watches requests and never stops or changes them, notes nothing from a private window, and sends nothing from one before you press."
   },
   "videoButton": {
     "message": "Download video"

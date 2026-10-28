@@ -6,8 +6,9 @@
 //
 // What is noted stays in memory (`storage.session`, never on disk), for its
 // tab only: forgotten when the tab loads another page or closes. It goes to
-// Zajil only when the user asks for that tab's video. Nothing is noted from
-// a private window.
+// Zajil with that tab's video: when the user asks for it, or when the video
+// button shows over it (Zajil reads it ahead, #291). Nothing is noted from a
+// private window.
 
 import { isWeb } from "./capture.js";
 
