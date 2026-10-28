@@ -6,8 +6,6 @@
   var root = document.documentElement;
   var rtl = root.dir !== 'ltr';
   var T = rtl ? {
-    toLight: 'التبديل إلى الوضع الفاتح',
-    toDark: 'التبديل إلى الوضع الداكن',
     navClose: 'إغلاق القائمة',
     navOpen: 'فتح القائمة',
     langBack: 'عد إلى العربية',
@@ -32,8 +30,6 @@
       return n + ' اتصالاً يعمل';
     }
   } : {
-    toLight: 'Switch to light mode',
-    toDark: 'Switch to dark mode',
     navClose: 'Close the menu',
     navOpen: 'Open the menu',
     langBack: 'Back to English',
@@ -75,7 +71,7 @@
   function syncThemeButton() {
     var btn = $('[data-theme-toggle]');
     if (!btn) return;
-    btn.setAttribute('aria-label', currentTheme() === 'dark' ? T.toLight : T.toDark);
+    btn.setAttribute('aria-checked', String(currentTheme() === 'dark'));
   }
 
   function themeChanged() {
@@ -115,6 +111,40 @@
         navBtn.focus();
       }
     });
+  }
+
+  /* ---------- The «Zajil» menu: the home page's sections ---------- */
+
+  var subBtn = $('[data-subnav]');
+  if (subBtn) {
+    var setSub = function (open) { subBtn.setAttribute('aria-expanded', String(open)); };
+    subBtn.addEventListener('click', function () {
+      setSub(subBtn.getAttribute('aria-expanded') !== 'true');
+    });
+    document.addEventListener('click', function (e) {
+      if (!subBtn.parentElement.contains(e.target)) setSub(false);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && subBtn.getAttribute('aria-expanded') === 'true') {
+        setSub(false);
+        subBtn.focus();
+      }
+    });
+    $$('a', subBtn.parentElement).forEach(function (a) { a.addEventListener('click', function () { setSub(false); }); });
+  }
+
+  /* ---------- Language switch: the knob slides, then the other page opens ---------- */
+
+  var langSwitch = $('[data-lang-switch]');
+  if (langSwitch) {
+    langSwitch.addEventListener('click', function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0 || reduceMotion.matches) return;
+      e.preventDefault();
+      langSwitch.classList.add('is-switching');
+      setTimeout(function () { window.location.href = langSwitch.href; }, 320);
+    });
+    // Coming back with the browser's Back button shows the page as it was left.
+    window.addEventListener('pageshow', function () { langSwitch.classList.remove('is-switching'); });
   }
 
   /* ---------- Lanes: one light pulse per "connection" ---------- */

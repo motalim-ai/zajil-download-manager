@@ -328,13 +328,6 @@ main:focus { outline: none; }
 
 .site-header__actions { display: flex; align-items: center; gap: 10px; }
 
-.theme-toggle .icon--sun { display: none; }
-:root[data-theme="dark"] .theme-toggle .icon--sun { display: block; }
-:root[data-theme="dark"] .theme-toggle .icon--moon { display: none; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-toggle .icon--sun { display: block; }
-  :root:not([data-theme="light"]) .theme-toggle .icon--moon { display: none; }
-}
 
 .nav__cta { display: none; }
 .nav__list .nav__cta a { color: var(--white); margin-top: 10px; }
@@ -344,8 +337,8 @@ main:focus { outline: none; }
 .nav-toggle[aria-expanded="true"] .icon--open { display: none; }
 .nav-toggle[aria-expanded="true"] .icon--close { display: block; }
 
-/* The menu has eight links and a language link: below 1240px it folds into the button. */
-@media (max-width: 1240px) {
+/* Below this width the menu folds into the button. */
+@media (max-width: 1100px) {
   .nav-toggle { display: inline-grid; }
   .nav {
     position: absolute;
@@ -1288,21 +1281,6 @@ main:focus { outline: none; }
 [dir="ltr"] .window--browser { transform: rotate(1.2deg); }
 [dir="ltr"] .window--browser .crop-video { margin-inline-start: -28.3%; }
 
-.lang-link {
-  display: inline-grid;
-  place-items: center;
-  height: 42px;
-  padding-inline: 14px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 600;
-  font-size: 0.95rem;
-  text-decoration: none;
-  transition: border-color 0.2s, color 0.2s;
-}
-.lang-link:hover { border-color: var(--accent); color: var(--accent-text); }
 .nav__list a[aria-current="page"] { color: var(--accent-text); background: var(--surface-2); }
 
 /* ---------- Inner pages: head ---------- */
@@ -1500,13 +1478,181 @@ pre code { padding: 0; border: 0; background: none; color: inherit; font-size: 0
   .brand { gap: 8px; }
   .brand__icon { width: 34px; height: 34px; }
   .brand__name { font-size: 1.25rem; }
-  .lang-link { padding-inline: 10px; font-size: 0.9rem; }
-  .site-header .icon-btn { width: 40px; height: 40px; }
 }
 
-/* Just above the fold point, the menu's links sit a little closer. */
-@media (min-width: 1241px) and (max-width: 1340px) {
-  .site-header__inner { gap: 16px; }
-  .nav__list { gap: 0; }
-  .nav__list a { padding-inline: 9px; }
+/* ---------- Header: the «Zajil» menu ---------- */
+
+.nav__list { align-items: center; }
+.nav__group { position: relative; }
+.nav__group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.97rem;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+}
+.nav__group-btn:hover,
+.nav__group-btn[aria-expanded="true"] { color: var(--text); background: var(--surface-2); }
+.nav__group-btn .icon { width: 16px; height: 16px; transition: transform 0.3s var(--ease-out); }
+.nav__group-btn[aria-expanded="true"] .icon { transform: rotate(180deg); }
+.nav__sub {
+  position: absolute;
+  top: calc(100% + 10px);
+  inset-inline-start: 0;
+  min-width: 210px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity 0.2s, transform 0.3s var(--ease-out), visibility 0.2s;
+}
+.nav__group-btn[aria-expanded="true"] + .nav__sub { opacity: 1; visibility: visible; transform: none; }
+.nav__sub a { white-space: nowrap; }
+
+/* ---------- Header: the support link stands out ---------- */
+
+.nav__list .nav__support a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #E0457B 45%, transparent);
+  background: color-mix(in srgb, #E0457B 10%, transparent);
+  color: #C2255C;
+  font-weight: 600;
+}
+.nav__list .nav__support a:hover,
+.nav__list .nav__support a[aria-current="page"] { background: #E0457B; border-color: #E0457B; color: var(--white); }
+.nav__support .icon { width: 17px; height: 17px; fill: currentColor; stroke: none; }
+:root[data-theme="dark"] .nav__list .nav__support a:not(:hover):not([aria-current="page"]) { color: #FF8FB5; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .nav__list .nav__support a:not(:hover):not([aria-current="page"]) { color: #FF8FB5; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav__support a:hover .icon { animation: beat 0.9s ease-in-out infinite; }
+}
+@keyframes beat { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.22); } 60% { transform: scale(0.95); } }
+
+/* ---------- Header: the language and theme switches ---------- */
+
+.switch {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 999px;
+  -webkit-tap-highlight-color: transparent;
+}
+.switch__track {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 82px;
+  height: 42px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  direction: ltr;
+  transition: border-color 0.2s, background-color 0.4s;
+}
+.switch:hover .switch__track { border-color: var(--accent); }
+.switch__knob {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1E5BDB 0%, var(--pigeon) 100%);
+  box-shadow: 0 6px 14px -6px rgba(23, 71, 201, 0.8);
+  transition: transform 0.45s var(--ease-out), background 0.4s;
+}
+.switch__opt {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--muted);
+  transition: color 0.3s, opacity 0.3s;
+}
+
+/* Language: EN on the left, ع on the right; the knob sits on this page's language
+   and slides to the other one when pressed. */
+.switch--lang .switch__opt--ar { font-family: var(--font-display); font-size: 1rem; }
+:root[lang="ar"] .switch--lang .switch__knob { transform: translateX(100%); }
+:root[lang="ar"] .switch--lang .switch__opt--ar,
+:root[lang="en"] .switch--lang .switch__opt--en { color: var(--white); }
+:root[lang="ar"] .switch--lang.is-switching .switch__knob { transform: translateX(0); }
+:root[lang="en"] .switch--lang.is-switching .switch__knob { transform: translateX(100%); }
+.switch--lang.is-switching .switch__opt { color: var(--muted); }
+:root[lang="ar"] .switch--lang.is-switching .switch__opt--en,
+:root[lang="en"] .switch--lang.is-switching .switch__opt--ar { color: var(--white); }
+
+/* Theme: the sun on the left, the moon on the right; the knob carries the
+   current one and turns as it slides. */
+.switch--theme .switch__opt { width: 16px; height: 16px; stroke-width: 1.8; }
+.switch--theme .switch__knob .icon {
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  color: var(--white);
+  stroke-width: 2;
+  transition: opacity 0.3s, transform 0.45s var(--ease-out);
+}
+.switch--theme .switch__knob .icon--moon { opacity: 0; transform: rotate(-90deg) scale(0.6); }
+:root[data-theme="dark"] .switch--theme .switch__knob { transform: translateX(100%); background: linear-gradient(135deg, #3FA5FF 0%, #1E5BDB 100%); }
+:root[data-theme="dark"] .switch--theme .switch__knob .icon--sun { opacity: 0; transform: rotate(90deg) scale(0.6); }
+:root[data-theme="dark"] .switch--theme .switch__knob .icon--moon { opacity: 1; transform: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .switch--theme .switch__knob { transform: translateX(100%); background: linear-gradient(135deg, #3FA5FF 0%, #1E5BDB 100%); }
+  :root:not([data-theme="light"]) .switch--theme .switch__knob .icon--sun { opacity: 0; transform: rotate(90deg) scale(0.6); }
+  :root:not([data-theme="light"]) .switch--theme .switch__knob .icon--moon { opacity: 1; transform: none; }
+}
+
+@media (max-width: 400px) {
+  .switch__track { width: 66px; height: 38px; }
+}
+
+/* ---------- Folded menu (phones and small windows) ---------- */
+
+@media (max-width: 1100px) {
+  .nav__list { align-items: stretch; }
+  .nav__group-btn { width: 100%; justify-content: space-between; padding: 13px 12px; font-size: 1.05rem; }
+  .nav__sub {
+    position: static;
+    min-width: 0;
+    padding: 0 12px 6px;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    display: none;
+  }
+  .nav__group-btn[aria-expanded="true"] + .nav__sub { display: block; }
+  .nav__sub a { padding-block: 10px; }
+  .nav__list .nav__support a { display: flex; margin: 8px 0 0; justify-content: center; padding: 12px; }
 }

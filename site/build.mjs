@@ -31,21 +31,23 @@ const TEXT = {
     home: "زاجِل، الصفحة الرئيسية",
     skip: "انتقل إلى المحتوى",
     menu: "أقسام الموقع",
-    themeLabel: "التبديل إلى الوضع الداكن",
+    themeLabel: "الوضع الداكن",
     menuLabel: "فتح القائمة",
     get: "احصل على زاجِل",
     getFree: "احصل على زاجِل مجاناً",
+    group: "زاجِل",
+    sections: [
+      ["/#journey", "كيف يعمل"],
+      ["/#features", "المزايا"],
+      ["/#screens", "صور البرنامج"],
+      ["/#extension", "إضافة المتصفح"],
+    ],
     nav: [
-      ["journey", "/#journey", "كيف يعمل"],
-      ["features", "/#features", "المزايا"],
-      ["screens", "/#screens", "صور البرنامج"],
-      ["extension", "/#extension", "إضافة المتصفح"],
       ["download", "/download/", "التحميل"],
       ["faq", "/faq/", "أسئلة شائعة"],
       ["privacy", "/privacy/", "الخصوصية"],
-      ["support", "/support/", "ادعم زاجِل"],
     ],
-    other: "English",
+    support: ["support", "/support/", "ادعم زاجِل"],
     otherLabel: "الموقع بالإنجليزية",
     footerNav: "روابط أسفل الصفحة",
     footerAbout: "برنامج مجاني ومفتوح المصدر بترخيص GPL-3.0، يوصل ملفك كاملاً مهما بعدت المسافة.",
@@ -74,21 +76,23 @@ const TEXT = {
     home: "Zajil, home page",
     skip: "Skip to content",
     menu: "Site sections",
-    themeLabel: "Switch to dark mode",
+    themeLabel: "Dark mode",
     menuLabel: "Open the menu",
     get: "Get Zajil",
     getFree: "Get Zajil for free",
+    group: "Zajil",
+    sections: [
+      ["/en/#journey", "How it works"],
+      ["/en/#features", "Features"],
+      ["/en/#screens", "Screenshots"],
+      ["/en/#extension", "Extension"],
+    ],
     nav: [
-      ["journey", "/en/#journey", "How it works"],
-      ["features", "/en/#features", "Features"],
-      ["screens", "/en/#screens", "Screenshots"],
-      ["extension", "/en/#extension", "Extension"],
       ["download", "/en/download/", "Download"],
       ["faq", "/en/faq/", "FAQ"],
       ["privacy", "/en/privacy/", "Privacy"],
-      ["support", "/en/support/", "Support Zajil"],
     ],
-    other: "العربية",
+    support: ["support", "/en/support/", "Support Zajil"],
     otherLabel: "الموقع بالعربية",
     footerNav: "Footer links",
     footerAbout: "Free and open-source software under GPL-3.0, that gets your file to you whole, however far it comes from.",
@@ -150,12 +154,18 @@ function layout({ lang, url, meta, body, icons }) {
   const enUrl = lang === "en" ? url : twin;
   const homeUrl = lang === "ar" ? "/" : "/en/";
   const downloadUrl = t.nav.find(([key]) => key === "download")[1];
-  const nav = t.nav
-    .map(([key, href, label]) => {
-      const current = key === meta.nav ? ' aria-current="page"' : "";
-      return `<li><a href="${href}"${current}>${label}</a></li>`;
-    })
-    .join("\n            ");
+  const current = (key) => (key === meta.nav ? ' aria-current="page"' : "");
+  const sections = t.sections.map(([href, label]) => `<li><a href="${href}">${label}</a></li>`).join("\n                ");
+  const nav = [
+    `<li class="nav__group">
+              <button class="nav__group-btn" type="button" aria-expanded="false" aria-controls="nav-sections" data-subnav>${t.group}<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></button>
+              <ul class="nav__sub" id="nav-sections">
+                ${sections}
+              </ul>
+            </li>`,
+    ...t.nav.map(([key, href, label]) => `<li><a href="${href}"${current(key)}>${label}</a></li>`),
+    `<li class="nav__support"><a href="${t.support[1]}"${current(t.support[0])}><svg class="icon" aria-hidden="true"><use href="#i-heart"/></svg>${t.support[2]}</a></li>`,
+  ].join("\n            ");
   const otherLang = lang === "ar" ? "en" : "ar";
   const scripts = (meta.script ? meta.script.split(/\s+/) : [])
     .map((s) => `\n  <script src="/assets/${s}.js" defer></script>`)
@@ -227,10 +237,22 @@ function layout({ lang, url, meta, body, icons }) {
       </nav>
 
       <div class="site-header__actions">
-        <a class="lang-link" href="${twin}" hreflang="${otherLang}" lang="${otherLang}" aria-label="${t.otherLabel}">${t.other}</a>
-        <button class="icon-btn theme-toggle" type="button" aria-label="${t.themeLabel}" data-theme-toggle>
-          <svg class="icon icon--moon" aria-hidden="true"><use href="#i-moon"/></svg>
-          <svg class="icon icon--sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        <a class="switch switch--lang" href="${twin}" hreflang="${otherLang}" aria-label="${t.otherLabel}" data-lang-switch>
+          <span class="switch__track" aria-hidden="true">
+            <span class="switch__knob"></span>
+            <span class="switch__opt switch__opt--en">EN</span>
+            <span class="switch__opt switch__opt--ar">ع</span>
+          </span>
+        </a>
+        <button class="switch switch--theme" type="button" role="switch" aria-checked="false" aria-label="${t.themeLabel}" data-theme-toggle>
+          <span class="switch__track" aria-hidden="true">
+            <span class="switch__knob">
+              <svg class="icon icon--sun"><use href="#i-sun"/></svg>
+              <svg class="icon icon--moon"><use href="#i-moon"/></svg>
+            </span>
+            <svg class="icon switch__opt switch__opt--sun"><use href="#i-sun"/></svg>
+            <svg class="icon switch__opt switch__opt--moon"><use href="#i-moon"/></svg>
+          </span>
         </button>
         <a class="btn btn--primary btn--sm header-cta" href="${downloadUrl}">${t.get}</a>
         <button class="icon-btn nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="${t.menuLabel}" data-nav-toggle>
