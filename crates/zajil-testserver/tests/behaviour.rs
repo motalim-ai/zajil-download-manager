@@ -205,6 +205,24 @@ fn throttles() {
 }
 
 #[test]
+fn answers_late() {
+    let server = TestServer::http();
+    server.put(
+        "/f",
+        FileSpec::new(vec![7u8; 10]).answer_after(Duration::from_millis(500)),
+    );
+    server.put("/g", FileSpec::new(vec![8u8; 10]));
+    let started = Instant::now();
+    let reply = get(&server, "/f", &[]);
+    assert_eq!(reply.body, vec![7u8; 10]);
+    assert!(started.elapsed() >= Duration::from_millis(500));
+    // Another file answers at once.
+    let started = Instant::now();
+    assert_eq!(get(&server, "/g", &[]).body, vec![8u8; 10]);
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
 fn fails_first_requests_then_serves() {
     let server = TestServer::http();
     server.put(

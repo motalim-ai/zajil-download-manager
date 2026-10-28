@@ -29,6 +29,38 @@ const SIZE: u64 = 8 * MIB;
 /// steps.
 static ONE_APP: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The server answers 1.5 s late: «Download file info» shows that it is
+/// asking, then the answer, as the owner saw it (the 1.0 draft: the focus
+/// then scrolled the page, and the window became shorter than what it
+/// showed, cut at the top).
+const LATE: Duration = Duration::from_millis(1500);
+
+/// An add window as its page reported it before its button was pressed:
+/// as tall as its content, or as it opened if that is taller, never
+/// scrolled, nothing cut at the top or the bottom, and room under the
+/// buttons.
+fn check_fit(step: &serde_json::Value, opened: (f64, f64)) {
+    let fit = &step["detail"]["fit"];
+    let n = |key: &str| {
+        fit[key]
+            .as_f64()
+            .unwrap_or_else(|| panic!("no {key} in {fit}"))
+    };
+    let (window, content) = (n("window"), n("content"));
+    assert_eq!(n("scroll"), 0.0, "the page is scrolled: {fit}");
+    assert!(n("top") >= 0.0, "cut at the top: {fit}");
+    assert!(content <= window + 1.0, "cut at the bottom: {fit}");
+    let wanted = content.max(opened.1);
+    assert!(
+        (window - wanted).abs() <= 1.0,
+        "the window should be {wanted} tall: {fit}"
+    );
+    assert!(
+        window - n("buttons") >= 8.0,
+        "no room under the buttons: {fit}"
+    );
+}
+
 /// The app never outlives the test (as in `close_resume.rs`).
 struct App(Child);
 
@@ -176,7 +208,9 @@ fn a_link_goes_from_add_link_to_open_folder() {
     let body = random_bytes(SIZE as usize, 55);
     server.put(
         "/lecture.bin",
-        FileSpec::new(body.clone()).throttle(256 * 1024),
+        FileSpec::new(body.clone())
+            .throttle(256 * 1024)
+            .answer_after(LATE),
     );
     let link = server.url("/lecture.bin");
     let Run {
@@ -191,8 +225,10 @@ fn a_link_goes_from_add_link_to_open_folder() {
     step(&out, &mut app, "start", 2 * minute);
     let link_step = step(&out, &mut app, "link", minute);
     assert_eq!(link_step["detail"]["url"], link.as_str());
+    check_fit(&link_step, zajil_desktop_lib::LINK_SIZE);
     let info = step(&out, &mut app, "info", minute);
     assert_eq!(info["detail"]["name"], "lecture.bin");
+    check_fit(&info, zajil_desktop_lib::INFO_SIZE);
     let progress = step(&out, &mut app, "progress", minute);
     assert_eq!(progress["detail"]["name"], "lecture.bin");
     let complete = step(&out, &mut app, "complete", 2 * minute);
@@ -218,7 +254,9 @@ fn a_download_from_the_browser_opens_its_own_info_window() {
     let body = random_bytes(SIZE as usize, 56);
     server.put(
         "/setup.exe",
-        FileSpec::new(body.clone()).throttle(256 * 1024),
+        FileSpec::new(body.clone())
+            .throttle(256 * 1024)
+            .answer_after(LATE),
     );
     let link = server.url("/setup.exe");
     let Run {
@@ -250,6 +288,7 @@ fn a_download_from_the_browser_opens_its_own_info_window() {
 
     let info = step(&out, &mut app, "info", minute);
     assert_eq!(info["detail"]["name"], "setup.exe");
+    check_fit(&info, zajil_desktop_lib::INFO_SIZE);
     let progress = step(&out, &mut app, "progress", minute);
     assert_eq!(progress["detail"]["name"], "setup.exe");
     let complete = step(&out, &mut app, "complete", 2 * minute);

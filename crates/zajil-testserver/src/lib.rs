@@ -80,6 +80,7 @@ pub struct FileSpec {
     busy_beyond: Option<(usize, Failure)>,
     fail_ranges: Option<Failure>,
     replaced_after: Option<(usize, Box<FileSpec>)>,
+    answer_after: Option<Duration>,
 }
 
 impl FileSpec {
@@ -111,6 +112,7 @@ impl FileSpec {
             busy_beyond: None,
             fail_ranges: None,
             replaced_after: None,
+            answer_after: None,
         }
     }
 
@@ -210,6 +212,13 @@ impl FileSpec {
     /// the connection open.
     pub fn stall_after(mut self, bytes: u64) -> Self {
         self.stall_after = Some(bytes);
+        self
+    }
+
+    /// Every request for it is answered only after `wait`: a server slow to
+    /// answer, so a window shows what it shows while it waits.
+    pub fn answer_after(mut self, wait: Duration) -> Self {
+        self.answer_after = Some(wait);
         self
     }
 
@@ -724,7 +733,12 @@ async fn serve(
                 service_fn(move |req| {
                     let shared = shared.clone();
                     let tls_version = tls_version.clone();
-                    async move { Ok::<_, Infallible>(handle(req, &shared, tls_version, connection)) }
+                    async move {
+                        if let Some(wait) = answer_after(&req, &shared) {
+                            tokio::time::sleep(wait).await;
+                        }
+                        Ok::<_, Infallible>(handle(req, &shared, tls_version, connection))
+                    }
                 })
             };
             let http = hyper::server::conn::http1::Builder::new();
@@ -756,6 +770,14 @@ async fn serve(
             }
         });
     }
+}
+
+/// How long the file a request is for waits before it is answered
+/// ([`FileSpec::answer_after`]).
+fn answer_after(req: &Request<Incoming>, shared: &Mutex<Shared>) -> Option<Duration> {
+    let shared = shared.lock().unwrap_or_else(|e| e.into_inner());
+    let path = req.uri().path().strip_prefix(shared.prefix.as_str())?;
+    shared.files.get(path)?.spec.answer_after
 }
 
 fn handle(

@@ -29,6 +29,10 @@ mod video;
 pub mod view;
 mod windows;
 
+/// The add windows' sizes when they open: the end-to-end test checks the
+/// windows against them.
+pub use windows::{INFO_SIZE, LINK_SIZE};
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

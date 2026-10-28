@@ -33,6 +33,32 @@ const button = (key: string) =>
 /** The name the window shows (drawn by FileName), if any. */
 const shownName = () => document.querySelector<HTMLElement>("bdi.fn")?.title ?? null;
 
+/** How an add window holds its content (the owner's notes on the 1.0
+ * draft: once the server answered, the focus scrolled the page, and the
+ * window was made shorter than its content, cut at the top): once its
+ * height has not changed for 1 s (10 s at most), its height, its
+ * content's from the page's top, the page's scroll, where the content
+ * starts, and where its buttons end. */
+async function fit(): Promise<Record<string, unknown>> {
+  let last = -1;
+  for (let i = 0, same = 0; i < 100 && same < 10; i++) {
+    same = window.innerHeight === last ? same + 1 : 0;
+    last = window.innerHeight;
+    await sleep(100);
+  }
+  const content = document.querySelector<HTMLElement>("main.info, main.link");
+  const scroll = document.scrollingElement?.scrollTop ?? 0;
+  const rect = content?.getBoundingClientRect();
+  const buttons = Math.max(...[...(content?.querySelectorAll("button") ?? [])].map((b) => b.getBoundingClientRect().bottom));
+  return {
+    window: window.innerHeight,
+    content: rect ? Math.ceil(rect.bottom + scroll) : null,
+    scroll,
+    top: rect?.top ?? null,
+    buttons: Math.ceil(buttons),
+  };
+}
+
 export async function drive(win: string | null): Promise<void> {
   const link = await invoke<string | null>("ui_test_e2e").catch(() => null);
   if (!link) return;
@@ -46,14 +72,14 @@ export async function drive(win: string | null): Promise<void> {
     box.value = link;
     box.dispatchEvent(new Event("input", { bubbles: true }));
     const ok = await until("«OK»", () => button("addlink-ok"));
-    await step("link", { url: box.value });
+    await step("link", { url: box.value, fit: await fit() });
     ok.click();
   } else if (win === "add-info") {
     // Enabled once the link has been checked.
     const start = await until("«Start download»", () => button("add-start"));
     // «Save as» holds the whole path: the name is its last part.
     const path = (document.getElementById("add-name") as HTMLInputElement | null)?.value ?? null;
-    await step("info", { name: path?.split(/[\\/]/).pop() ?? null });
+    await step("info", { name: path?.split(/[\\/]/).pop() ?? null, fit: await fit() });
     start.click();
   } else if (/^progress-\d+$/.test(win)) {
     // It draws its name only in its title bar; its heading for screen
