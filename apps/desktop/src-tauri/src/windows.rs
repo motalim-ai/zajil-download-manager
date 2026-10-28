@@ -232,13 +232,20 @@ pub async fn open_add_info<R: tauri::Runtime>(
 /// window shrank under its content). Its width stays the user's. In a
 /// scene, the main window that draws it fits it the same way, without the
 /// least size.
+///
+/// `page`: the page's own height now. On macOS it can be less than the
+/// window's content (the CI's windows: 32 pixels less, though Tauri gave
+/// the page's frame as the whole content); what a kind of window misses
+/// is learned at its first call, before anything resized it, and added
+/// from then on.
 #[tauri::command]
 pub async fn fit_window<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
     height: f64,
+    page: f64,
 ) -> Result<(), String> {
-    if !(height.is_finite() && height > 0.0) {
-        return Err(format!("not a height: {height}"));
+    if !(height.is_finite() && height > 0.0 && page.is_finite() && page > 0.0) {
+        return Err(format!("not a height: {height}, {page}"));
     }
     let label = window.label();
     let (kind, least, opened) = if label == LINK {
@@ -252,56 +259,30 @@ pub async fn fit_window<R: tauri::Runtime>(
     } else {
         return Err("not an add window".into());
     };
-    let wanted = height.max(opened);
-    // One at a time, in the order asked: a resize must not take another
-    // one's height for its own.
-    let _one = FITTING.lock().await;
-    let page = || -> Result<(f64, f64), String> {
-        let scale = window.scale_factor().map_err(|e| e.to_string())?;
-        let size = window
-            .inner_size()
-            .map_err(|e| e.to_string())?
-            .to_logical::<f64>(scale);
-        Ok((size.width, size.height))
-    };
-    let (width, _) = page()?;
-    let resize = |height: f64| -> Result<(), String> {
-        // The least first: a window going shorter is not held by the old one.
-        if let Some(least) = least {
-            window
-                .set_min_size(Some(tauri::LogicalSize::new(least, height)))
-                .map_err(|e| e.to_string())?;
-        }
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let now = window
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+    let missing = *MISSING
+        .lock()
+        .unwrap()
+        .entry(kind)
+        .or_insert((now.height - page).clamp(0.0, 100.0));
+    let height = height.max(opened) + missing;
+    // The least first: a window going shorter is not held by the old one.
+    if let Some(least) = least {
         window
-            .set_size(tauri::LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())
-    };
-    // The page may come out shorter or taller than the size asked for:
-    // on macOS the CI's windows gave the page 32 pixels less than their
-    // content's height (Tauri reads the page's own frame there). What a
-    // kind of window misses is learned once, from its first resize.
-    let missing = *MISSING.lock().unwrap().get(kind).unwrap_or(&0.0);
-    resize(wanted + missing)?;
-    // The resize is not done at once (Linux, Windows; macOS from another
-    // thread): 1 s at most.
-    let mut got = page()?.1;
-    for _ in 0..20 {
-        if (got - wanted).abs() <= 1.0 {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        got = page()?.1;
+            .set_min_size(Some(tauri::LogicalSize::new(least, height)))
+            .map_err(|e| e.to_string())?;
     }
-    let missing = missing + (wanted - got);
-    MISSING.lock().unwrap().insert(kind, missing);
-    resize(wanted + missing)
+    window
+        .set_size(tauri::LogicalSize::new(now.width, height))
+        .map_err(|e| e.to_string())
 }
 
-/// [`fit_window`] one at a time.
-static FITTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-/// What the page of each kind of add window misses of the height asked
-/// for ([`fit_window`]).
+/// What the page of each kind of add window misses of its content's
+/// height ([`fit_window`]).
 static MISSING: std::sync::LazyLock<Mutex<std::collections::HashMap<&'static str, f64>>> =
     std::sync::LazyLock::new(Default::default);
 

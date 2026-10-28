@@ -19,7 +19,7 @@ export function fitWindow(content: HTMLElement): { destroy: () => void } {
     const height = Math.ceil(content.getBoundingClientRect().bottom + page().scrollTop);
     if (height === asked) return;
     asked = height;
-    void api.fitWindow(height).then(unscroll, () => {});
+    void api.fitWindow(height, window.innerHeight).then(unscroll, () => {});
   });
   observer.observe(content);
   window.addEventListener("resize", unscroll);

@@ -120,8 +120,8 @@ export const api = {
   /** A download's own speed limit, bytes per second; `null`: none. */
   setLimit: (id: number, limit: number | null) => invoke<void>("set_limit", { id, limit }),
   /** The add window that asks becomes `height` tall (logical pixels), and
-   * no shorter. */
-  fitWindow: (height: number) => invoke<void>("fit_window", { height }),
+   * no shorter; `page`: the page's own height now. */
+  fitWindow: (height: number, page: number) => invoke<void>("fit_window", { height, page }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */
