@@ -500,42 +500,6 @@ jobs:
           else
             "${test[@]}"
           fi
-      # TEMPORARY (to be reverted before merge): the close tests 10 times on
-      # Windows, and the runner's disk and antivirus, for #81, #132, #258.
-      - name: TEMPORARY the runner's disk and antivirus (Windows)
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        run: |
-          cat > "$RUNNER_TEMP/probe.py" <<'PY'
-          import os, sys, time
-          for d in sys.argv[1:]:
-              p = os.path.join(d, "zajil-disk-probe.bin"); data = os.urandom(256 * 1024); ts = []
-              with open(p, "wb") as f:
-                  for i in range(300):
-                      t = time.perf_counter(); f.write(data); f.flush(); os.fsync(f.fileno()); ts.append(time.perf_counter() - t)
-              os.remove(p); ts.sort()
-              print(d, "256 KiB write+fsync x300: p50 %.1f ms, p95 %.1f ms, p99 %.1f ms, max %.1f ms" % (ts[150] * 1e3, ts[285] * 1e3, ts[297] * 1e3, ts[-1] * 1e3))
-          PY
-          python "$RUNNER_TEMP/probe.py" "$TEMP" "$RUNNER_TEMP"
-          powershell -NoProfile -Command "Get-MpComputerStatus | Select-Object AMRunningMode,AntivirusEnabled,RealTimeProtectionEnabled,OnAccessProtectionEnabled | Format-List; 'exclusions: ' + ((Get-MpPreference).ExclusionPath -join '; ')" || true
-      - name: TEMPORARY the close tests 10 times (Windows)
-        if: always() && runner.os == 'Windows'
-        working-directory: apps/desktop/src-tauri
-        shell: bash
-        run: |
-          export ZAJIL_DESKTOP_APP="$RUNNER_TEMP/zajil-desktop-test.exe"
-          pass=0; fail=0
-          for i in $(seq 1 10); do
-            log="$RUNNER_TEMP/close-$i.log"
-            if cargo test --locked --test close_resume -- --ignored --test-threads 1 --nocapture > "$log" 2>&1; then
-              pass=$((pass + 1))
-            else
-              fail=$((fail + 1)); echo "run $i FAILED:"; grep -aE "panicked|did not stop|^test result" "$log" || true
-            fi
-            grep -aE "^closing took|before Zajil|ready after|from the session end to" "$log" | sed "s/^/run $i: /" || true
-          done
-          echo "close_resume on Windows: $pass passed, $fail failed, of 10"
-          [ "$fail" = 0 ]
       - name: Build the app with its UI test pages
         shell: bash
         run: |
