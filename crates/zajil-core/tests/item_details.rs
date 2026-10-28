@@ -621,12 +621,13 @@ fn the_user_s_details_go_with_an_export_and_the_last_try_does_not() {
 async fn a_long_numbered_user_name_resumes() {
     let data = random_bytes(4 * 1024 * 1024, 958);
     let server = TestServer::http();
-    server.put(
-        "/get",
-        FileSpec::new(data.clone())
-            .content_disposition("attachment; filename=\"server.bin\"")
-            .throttle(2 * 1024 * 1024),
-    );
+    let spec =
+        FileSpec::new(data.clone()).content_disposition("attachment; filename=\"server.bin\"");
+    // Until the pause, each response stops after 512 KiB of its MiB and
+    // holds its connection: 2 MiB at most of the 4 can come, so the
+    // download cannot finish before the pause reaches it (#134: at 2 MiB/s
+    // a connection, the whole file came first on Windows CI).
+    server.put("/get", spec.clone().stall_after(512 * 1024));
     let data_dir = tempfile::tempdir().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data_dir.path());
@@ -670,6 +671,8 @@ async fn a_long_numbered_user_name_resumes() {
         "{state_name}"
     );
 
+    // The same file (same `ETag`), now sent whole.
+    server.put("/get", spec);
     set_status(&store, id, Status::Waiting);
     runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
     let item = store.load().unwrap().item(id).unwrap().clone();

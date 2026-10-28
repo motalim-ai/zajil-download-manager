@@ -167,7 +167,12 @@ async fn a_closing_window_stops_the_download_and_the_next_one_resumes_it() {
     let server = TestServer::http();
     let data = random_bytes(8 * MIB, 801);
     let spec = FileSpec::new(data.clone()).etag(Some("\"same\""));
-    server.put("/f.bin", spec.clone().throttle(MIB as u64));
+    // Until the window closes, each response stops after 512 KiB of its
+    // MiB and holds its connection: 4 MiB at most of the 8 can come, so the
+    // download cannot finish before the runner sees the window closed
+    // (#295: at 1 MiB/s on each of 8 connections, it finished first on
+    // Windows CI and the runner ended).
+    server.put("/f.bin", spec.clone().stall_after(512 * 1024));
     let (store, _dir, id) = set_up(&server, schedule("13:00:05", "13:00:10", vec![]));
     let mut run = Run::start(&store);
 

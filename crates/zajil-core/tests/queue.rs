@@ -116,12 +116,13 @@ async fn each_queue_has_its_own_number_of_downloads_at_once() {
 async fn pausing_and_resuming_an_item_through_the_queues_file() {
     let server = TestServer::http();
     let data = random_bytes(4 * MIB, 402);
-    // Slow enough that the pause lands long before the end, even on a
-    // slow machine: 256 KiB/s on each of its connections, 4 s for the
-    // whole, paused after 1 MiB. At 2 MiB/s each it finished in half a
-    // second, and on Windows CI it once finished before the pause reached
-    // it (#179).
-    server.put("/f.bin", FileSpec::new(data.clone()).throttle(256 * 1024));
+    // Until the pause, each response stops after 512 KiB of its MiB and
+    // holds its connection: 2 MiB at most of the 4 can come, so the
+    // download cannot finish before the pause reaches it, however slow the
+    // machine. At 2 MiB/s a connection it once finished first on Windows CI
+    // (#179), and a slower server only made that less likely (#102).
+    let spec = FileSpec::new(data.clone());
+    server.put("/f.bin", spec.clone().stall_after(512 * 1024));
     let data_dir = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let store = QueueStore::new(data_dir.path());
@@ -152,6 +153,8 @@ async fn pausing_and_resuming_an_item_through_the_queues_file() {
                 QueueEvent::Stopped { item } if !resumed => {
                     assert_eq!(*item, id);
                     resumed = true;
+                    // The same file (same `ETag`), now sent whole.
+                    server.put("/f.bin", spec.clone());
                     steering
                         .update(|q| {
                             let item = q.item_mut(id).unwrap();
