@@ -28,3 +28,37 @@ export async function launch(name) {
     clearInterval(waiting);
   }
 }
+
+/** Starts the browser once, and opens one page in it as the tests do,
+ * before any test file starts its own (#230, #296). On CI the runner's
+ * first Chrome is often slow, and so is its first page: from 5.4 s to
+ * 27.7 s to start in 27 of 40 jobs (and over 30 s in 2 more), then about a
+ * third of that for the first test of each file (over 5 s from a 14.3 s
+ * start), while the tests after it soon take their usual times. The two
+ * files' browsers finished starting within 5 ms of each other in 39 of the
+ * 40 jobs, though they began up to 0.6 s apart, and even with every other
+ * test file done: the runner held them, not the tests. Paid here once, no
+ * test or `beforeAll` pays it. A browser that cannot start here is left to
+ * each file's `beforeAll`, which says why. */
+export async function warmUp() {
+  const start = performance.now();
+  let browser;
+  try {
+    browser = await launch("warm-up");
+    const page = await browser.newPage({ viewport: { width: 800, height: 400 } });
+    await page.route("**/*", (route) =>
+      route.request().url() === "https://page.invalid/"
+        ? route.fulfill({ contentType: "text/html", body: `<!doctype html><body><p id="p">Zajil</p><video src="https://media.invalid/v.mp4"></video></body>` })
+        : route.abort(),
+    );
+    await page.goto("https://page.invalid/");
+    await page.addScriptTag({ content: "document.body.dataset.ready = '1';" });
+    await page.mouse.move(50, 50);
+    await page.click("#p", { modifiers: ["Shift"] });
+    say(`[warm-up] the browser and its first page took ${Math.round(performance.now() - start)} ms`);
+  } catch (err) {
+    say(`[warm-up] failed after ${Math.round(performance.now() - start)} ms: ${err}`);
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
