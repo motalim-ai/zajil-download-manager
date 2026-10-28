@@ -1,11 +1,11 @@
 // Builds Zajil's site into site/dist: plain static files, no packages.
 //
 // Each page in site/src/pages is its <main> only, after a short head of
-// `key: value` lines in an HTML comment (title, description, and an
+// `key: value` lines in an HTML comment (title, description, nav, and an
 // optional script). This file wraps it in the one layout (header, menu,
-// footer) for its language: pages under `en/` are English, the rest Arabic.
-// The screenshots and the icon are copied from where the repository keeps
-// them (docs/screenshots, assets/icon), never kept twice.
+// icons, footer) for its language: pages under `en/` are English, the rest
+// Arabic. The screenshots and the icon are copied from where the
+// repository keeps them (docs/screenshots, assets/icon), never kept twice.
 //
 // Run from anywhere: node site/build.mjs
 
@@ -27,51 +27,83 @@ const TEXT = {
     dir: "rtl",
     locale: "ar_AR",
     name: "زاجِل",
-    skip: "تخطَّ إلى المحتوى",
-    menu: "القائمة الرئيسية",
+    fullName: "زاجِل لإدارة التحميل",
+    home: "زاجِل، الصفحة الرئيسية",
+    skip: "انتقل إلى المحتوى",
+    menu: "أقسام الموقع",
+    themeLabel: "التبديل إلى الوضع الداكن",
+    menuLabel: "فتح القائمة",
+    get: "احصل على زاجِل",
+    getFree: "احصل على زاجِل مجاناً",
     nav: [
-      ["home", "/", "الرئيسية"],
-      ["shots", "/#screenshots", "الصور"],
+      ["journey", "/#journey", "كيف يعمل"],
+      ["features", "/#features", "المزايا"],
+      ["screens", "/#screens", "صور البرنامج"],
+      ["extension", "/#extension", "إضافة المتصفح"],
       ["download", "/download/", "التحميل"],
-      ["install", "/download/#install", "التثبيت"],
-      ["faq", "/faq/", "الأسئلة الشائعة"],
+      ["faq", "/faq/", "أسئلة شائعة"],
       ["privacy", "/privacy/", "الخصوصية"],
     ],
     other: "English",
-    footerLinks: [
-      [REPO, "الكود على GitHub"],
-      [`${REPO}/releases`, "كل الإصدارات"],
-      [`${REPO}/issues`, "أبلغ عن مشكلة"],
-      [`${REPO}/security/advisories/new`, "أبلغ عن ثغرة أمنية"],
+    otherLabel: "الموقع بالإنجليزية",
+    footerNav: "روابط أسفل الصفحة",
+    footerAbout: "برنامج مجاني ومفتوح المصدر بترخيص GPL-3.0، يوصل ملفك كاملاً مهما بعدت المسافة.",
+    footerSite: [
+      ["/download/", "التحميل"],
+      ["/download/#install", "خطوات التثبيت"],
+      ["/faq/", "أسئلة شائعة"],
       ["/privacy/", "سياسة الخصوصية"],
     ],
-    footer:
-      "زاجِل برنامج مجاني ومفتوح المصدر بترخيص GPL-3.0-or-later. مصادره الرسمية الوحيدة هذا الموقع ومستودعه على GitHub. وهذا الموقع بلا كوكيز ولا تتبع ولا إحصاءات.",
+    footerRepo: [
+      [REPO, "GitHub"],
+      [`${REPO}/releases`, "الإصدارات"],
+      [`${REPO}/blob/main/CONTRIBUTING.md`, "المساهمة"],
+      [`${REPO}/issues`, "أبلغ عن مشكلة"],
+      [`${REPO}/security/advisories/new`, "أبلغ عن ثغرة أمنية"],
+    ],
+    base: "زاجِل مشروع مستقل ومفتوح المصدر. مصادره الرسمية الوحيدة هذا الموقع ومستودعه على GitHub.",
+    toTop: "إلى أعلى الصفحة",
   },
   en: {
     dir: "ltr",
     locale: "en_US",
     name: "Zajil",
+    fullName: "Zajil Download Manager",
+    home: "Zajil, home page",
     skip: "Skip to content",
-    menu: "Main menu",
+    menu: "Site sections",
+    themeLabel: "Switch to dark mode",
+    menuLabel: "Open the menu",
+    get: "Get Zajil",
+    getFree: "Get Zajil for free",
     nav: [
-      ["home", "/en/", "Home"],
-      ["shots", "/en/#screenshots", "Screenshots"],
+      ["journey", "/en/#journey", "How it works"],
+      ["features", "/en/#features", "Features"],
+      ["screens", "/en/#screens", "Screenshots"],
+      ["extension", "/en/#extension", "Extension"],
       ["download", "/en/download/", "Download"],
-      ["install", "/en/download/#install", "Install"],
       ["faq", "/en/faq/", "FAQ"],
       ["privacy", "/en/privacy/", "Privacy"],
     ],
     other: "العربية",
-    footerLinks: [
-      [REPO, "Source code on GitHub"],
-      [`${REPO}/releases`, "All releases"],
-      [`${REPO}/issues`, "Report a problem"],
-      [`${REPO}/security/advisories/new`, "Report a security issue"],
+    otherLabel: "الموقع بالعربية",
+    footerNav: "Footer links",
+    footerAbout: "Free and open-source software under GPL-3.0, that gets your file to you whole, however far it comes from.",
+    footerSite: [
+      ["/en/download/", "Download"],
+      ["/en/download/#install", "Install steps"],
+      ["/en/faq/", "FAQ"],
       ["/en/privacy/", "Privacy policy"],
     ],
-    footer:
-      "Zajil is free and open-source software under GPL-3.0-or-later. Its only official sources are this site and its GitHub repository. This site has no cookies, no tracking and no analytics.",
+    footerRepo: [
+      [REPO, "GitHub"],
+      [`${REPO}/releases`, "Releases"],
+      [`${REPO}/blob/main/CONTRIBUTING.md`, "Contributing"],
+      [`${REPO}/issues`, "Report a problem"],
+      [`${REPO}/security/advisories/new`, "Report a security issue"],
+    ],
+    base: "Zajil is an independent, open-source project. Its only official sources are this site and its GitHub repository.",
+    toTop: "Back to top",
   },
 };
 
@@ -105,21 +137,26 @@ const urlOf = (file) => "/" + file.split(sep).join("/").replace(/index\.html$/, 
 /** The same page in the other language. */
 const twinOf = (url) => (url.startsWith("/en/") ? url.slice(3) : "/en" + url);
 
-function layout({ lang, url, meta, body }) {
+const links = (list) => list.map(([href, label]) => `<li><a href="${href}">${label}</a></li>`).join("\n            ");
+
+function layout({ lang, url, meta, body, icons }) {
   const t = TEXT[lang];
   const twin = twinOf(url);
   const arUrl = lang === "ar" ? url : twin;
   const enUrl = lang === "en" ? url : twin;
+  const homeUrl = lang === "ar" ? "/" : "/en/";
+  const downloadUrl = t.nav.find(([key]) => key === "download")[1];
   const nav = t.nav
     .map(([key, href, label]) => {
       const current = key === meta.nav ? ' aria-current="page"' : "";
       return `<li><a href="${href}"${current}>${label}</a></li>`;
     })
-    .join("\n          ");
+    .join("\n            ");
   const otherLang = lang === "ar" ? "en" : "ar";
-  const footerLinks = t.footerLinks.map(([href, label]) => `<li><a href="${href}">${label}</a></li>`).join("\n        ");
-  const script = meta.script ? `\n  <script src="/assets/${meta.script}.js" defer></script>` : "";
-  const notFound = url === "/404.html" || url === "/en/404.html";
+  const scripts = (meta.script ? meta.script.split(/\s+/) : [])
+    .map((s) => `\n  <script src="/assets/${s}.js" defer></script>`)
+    .join("");
+  const notFound = url.endsWith("/404.html");
   const robots = notFound ? '\n  <meta name="robots" content="noindex">' : "";
   const alternates = notFound
     ? ""
@@ -136,10 +173,10 @@ function layout({ lang, url, meta, body }) {
   <title>${escape(meta.title)}</title>
   <meta name="description" content="${escape(meta.description)}">${robots}
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#141d31" media="(prefers-color-scheme: dark)">${alternates}
+  <meta name="theme-color" content="#F4F8FF" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#060E2B" media="(prefers-color-scheme: dark)">${alternates}
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="${t.name}">
+  <meta property="og:site_name" content="${t.fullName}">
   <meta property="og:title" content="${escape(meta.title)}">
   <meta property="og:description" content="${escape(meta.description)}">
   <meta property="og:url" content="${ORIGIN}${url}">
@@ -148,28 +185,81 @@ function layout({ lang, url, meta, body }) {
   <link rel="icon" href="/assets/zajil-icon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/icon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/assets/icon-256.png">
-  <link rel="stylesheet" href="/assets/site.css">${script}
+  <link rel="preload" href="/assets/fonts/alexandria-500-900-arabic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/ibm-plex-sans-arabic-400-arabic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/fonts.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/theme.js"></script>
+  <script src="/assets/main.js" defer></script>${scripts}
 </head>
 <body>
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <defs>
+      ${icons.trim().split("\n").join("\n      ")}
+    </defs>
+  </svg>
+
   <a class="skip" href="#main">${t.skip}</a>
-  <header class="site-header">
-    <div class="wrap">
-      <a class="brand" href="${t.nav[0][1]}"><img src="/assets/zajil-icon.svg" alt="" width="40" height="40"><span>${t.name}</span></a>
-      <nav class="site-nav" aria-label="${t.menu}">
+
+  <!-- The pigeon dives down this rail as the page is read: download, top to bottom -->
+  <div class="flight-rail" aria-hidden="true">
+    <span class="flight-rail__track"></span>
+    <span class="flight-rail__trail"></span>
+    <span class="flight-rail__bird"><span class="mark"></span></span>
+  </div>
+
+  <header class="site-header" id="top">
+    <div class="wrap site-header__inner">
+      <a class="brand" href="${homeUrl}" aria-label="${t.home}">
+        <img class="brand__icon" src="/assets/zajil-icon.svg" alt="" width="40" height="40">
+        <span class="brand__name">${t.name}</span>
+      </a>
+
+      <nav class="nav" id="site-nav" aria-label="${t.menu}">
+        <ul class="nav__list">
+            ${nav}
+          <li class="nav__cta"><a class="btn btn--primary" href="${downloadUrl}">${t.getFree}</a></li>
+        </ul>
+      </nav>
+
+      <div class="site-header__actions">
+        <a class="lang-link" href="${twin}" hreflang="${otherLang}" lang="${otherLang}" aria-label="${t.otherLabel}">${t.other}</a>
+        <button class="icon-btn theme-toggle" type="button" aria-label="${t.themeLabel}" data-theme-toggle>
+          <svg class="icon icon--moon" aria-hidden="true"><use href="#i-moon"/></svg>
+          <svg class="icon icon--sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        </button>
+        <a class="btn btn--primary btn--sm header-cta" href="${downloadUrl}">${t.get}</a>
+        <button class="icon-btn nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="${t.menuLabel}" data-nav-toggle>
+          <svg class="icon icon--open" aria-hidden="true"><use href="#i-menu"/></svg>
+          <svg class="icon icon--close" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+${body.trimEnd()}
+
+  <footer class="site-footer">
+    <div class="wrap site-footer__inner">
+      <div class="site-footer__brand">
+        <a class="brand" href="${homeUrl}" aria-label="${t.home}">
+          <img class="brand__icon" src="/assets/zajil-icon.svg" alt="" width="40" height="40">
+          <span class="brand__name">${t.fullName}</span>
+        </a>
+        <p>${t.footerAbout}</p>
+      </div>
+      <nav class="site-footer__nav" aria-label="${t.footerNav}">
         <ul>
-          ${nav}
-          <li class="lang"><a href="${twin}" hreflang="${otherLang}" lang="${otherLang}">${t.other}</a></li>
+            ${links(t.footerSite)}
+        </ul>
+        <ul>
+            ${links(t.footerRepo)}
         </ul>
       </nav>
     </div>
-  </header>
-${body.trimEnd()}
-  <footer class="site-footer">
-    <div class="wrap">
-      <ul>
-        ${footerLinks}
-      </ul>
-      <p>${t.footer}</p>
+    <div class="wrap site-footer__base">
+      <p>${t.base}</p>
+      <a class="to-top" href="#top">${t.toTop}</a>
     </div>
   </footer>
 </body>
@@ -180,6 +270,7 @@ ${body.trimEnd()}
 export function build() {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
+  const icons = readFileSync(join(SRC, "icons.svg"), "utf8");
 
   for (const file of walk(PAGES)) {
     const source = readFileSync(join(PAGES, file), "utf8");
@@ -188,16 +279,18 @@ export function build() {
     const lang = url.startsWith("/en/") ? "en" : "ar";
     const out = join(OUT, file);
     mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, layout({ lang, url, meta, body }));
+    writeFileSync(out, layout({ lang, url, meta, body, icons }));
   }
 
   cpSync(join(SRC, "assets"), join(OUT, "assets"), { recursive: true });
   cpSync(join(SRC, "_headers"), join(OUT, "_headers"));
   cpSync(join(ROOT, "docs", "screenshots"), join(OUT, "screenshots"), { recursive: true });
-  cpSync(join(ROOT, "assets", "icon", "zajil-icon.svg"), join(OUT, "assets", "zajil-icon.svg"));
-  const icons = join(ROOT, "apps", "desktop", "src-tauri", "icons");
-  cpSync(join(icons, "32x32.png"), join(OUT, "assets", "icon-32.png"));
-  cpSync(join(icons, "128x128@2x.png"), join(OUT, "assets", "icon-256.png"));
+  for (const name of ["zajil-icon.svg", "zajil-mark.svg"]) {
+    cpSync(join(ROOT, "assets", "icon", name), join(OUT, "assets", name));
+  }
+  const appIcons = join(ROOT, "apps", "desktop", "src-tauri", "icons");
+  cpSync(join(appIcons, "32x32.png"), join(OUT, "assets", "icon-32.png"));
+  cpSync(join(appIcons, "128x128@2x.png"), join(OUT, "assets", "icon-256.png"));
 
   return walk(OUT).map((p) => relative(OUT, join(OUT, p)));
 }

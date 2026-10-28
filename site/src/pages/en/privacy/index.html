@@ -3,78 +3,88 @@ title: Zajil privacy policy
 description: What Zajil, its extension and this site do with data: no account, no tracking, no analytics, everything stays on your device, and exactly what Zajil connects to.
 nav: privacy
 -->
-  <main id="main">
-    <section class="page-head">
+
+  <main id="main" tabindex="-1">
+    <section class="privacy privacy--page" aria-labelledby="page-title">
+      <div class="privacy__sky" aria-hidden="true"><div class="lanes lanes--quiet" data-lanes></div></div>
       <div class="wrap">
-        <h1>Privacy policy</h1>
-        <p class="lead">Zajil collects nothing about you. No account, no tracking, no analytics, no ads, no crash reports sent. This page says exactly what the program, its extension and this site connect to, and what stays on your device.</p>
-        <p class="updated">Last changed: 28 October 2026. Every change to this page is kept in <a href="https://github.com/motalim-ai/zajil-download-manager/commits/main/site">the repository's history</a>. The Arabic version is the original.</p>
+        <div class="section-head">
+          <p class="hero__kicker">Privacy policy</p>
+          <h1 class="privacy__title" id="page-title">Privacy policy</h1>
+          <p class="lead">Zajil collects nothing about you. No account, no tracking, no analytics, no ads, no crash reports sent. This page says exactly what the program, its extension and this site connect to, and what stays on your device.</p>
+          <p class="privacy__updated">Last changed: 28 October 2026. Every change to this page is kept in <a href="https://github.com/motalim-ai/zajil-download-manager/commits/main/site">the repository's history</a>. The Arabic version is the original.</p>
+        </div>
+        <ul class="privacy__list">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg><strong>No tracking</strong><span>No one knows what you download.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-chart-off"/></svg><strong>No analytics</strong><span>No account, and no crash reports sent.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><strong>All on your device</strong><span>Settings and downloads never leave it.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><strong>The extension calls no server</strong><span>It talks only to the program on the same computer.</span></li>
+        </ul>
       </div>
     </section>
 
-    <section class="section">
-      <div class="wrap prose">
+    <section class="page-section">
+      <div class="wrap">
         <nav class="toc" aria-label="On this page">
-          <ul>
-            <li><a href="#app">The Zajil program</a></li>
-            <li><a href="#extension">The browser extension</a></li>
-            <li><a href="#site">This site</a></li>
-            <li><a href="#contact">Contact and changes</a></li>
-          </ul>
+          <a href="#app">The Zajil program</a>
+          <a href="#extension">The browser extension</a>
+          <a href="#site">This site</a>
+          <a href="#contact">Contact and changes</a>
         </nav>
-
-        <h2 id="app">The Zajil program</h2>
-        <p><strong>What it connects to:</strong></p>
-        <ul>
+        <div class="doc">
+          <h2 id="app">The Zajil program</h2>
+          <p><strong>What it connects to:</strong></p>
+          <ul>
           <li><strong>The sites of the files you download,</strong> as any browser does: the server sees your computer's IP address and the request for the file. With a download that comes from the extension, its site's cookies go to its site alone (see <a href="#extension">the extension</a>).</li>
           <li><strong>GitHub, to learn of a new version:</strong> one request at start to the list of Zajil's releases, and nothing is downloaded. You can turn it off in Settings → “Updates” → “Check for a new version at start”.</li>
           <li><strong>GitHub, to download the video tools</strong> (yt-dlp, FFmpeg and QuickJS-NG): once, when you ask for your first video, and only after you agree.</li>
           <li><strong>The sites you ask for a video from,</strong> through yt-dlp, to learn the qualities there are and then to download the one you choose.</li>
           <li><strong>“Site grabber”:</strong> reads the pages of the site you choose, and the pages of another site only if you add it. It always honours <code>robots.txt</code>, and never asks for a local or private address.</li>
-        </ul>
-        <p>Zajil connects to no other server. We run no server that the program reaches.</p>
+          </ul>
+          <p>Zajil connects to no other server. We run no server that the program reaches.</p>
 
-        <p><strong>What stays on your device only:</strong></p>
-        <ul>
+          <p><strong>What stays on your device only:</strong></p>
+          <ul>
           <li>The settings, the list of downloads, the queues, the categories and the program's logs.</li>
           <li>A state file next to each unfinished download, so Zajil can resume it. It holds the download link, and only your account on the computer can read it. A user name and password in the link are never saved in it.</li>
           <li>Cookies from the extension are not written to disk: they stay in memory until the download finishes or is removed. Except for a video: yt-dlp reads them from a temporary file in Zajil's data folder, deleted when it ends.</li>
           <li>Watching the clipboard is off from the start. If you turn it on, Zajil reads links from the clipboard on your computer only.</li>
-        </ul>
+          </ul>
 
-        <h2 id="extension">The browser extension</h2>
-        <p>The extension connects to no server. It talks only to the Zajil program on the same computer, through Native Messaging, and the program accepts only our extensions' IDs.</p>
+          <h2 id="extension">The browser extension</h2>
+          <p>The extension connects to no server. It talks only to the Zajil program on the same computer, through Native Messaging, and the program accepts only our extensions' IDs.</p>
 
-        <p><strong>Its basic permissions:</strong></p>
-        <ul>
-          <li><code>downloads</code> and <code>downloads.ui</code>: to see the downloads that start in the browser and hand Zajil those your settings choose, and so they do not show in the browser's downloads bar while they go to Zajil.</li>
-          <li><code>contextMenus</code>: for “Download with Zajil” and “Download video with Zajil” in the right-click menu.</li>
-          <li><code>nativeMessaging</code>: to talk to the Zajil program on your computer.</li>
-          <li><code>storage</code>: to keep the extension's settings in the browser.</li>
-          <li><code>notifications</code>: to tell you when a download stays in the browser, and why.</li>
-        </ul>
+          <p><strong>Its basic permissions:</strong></p>
+          <ul class="perm-list">
+          <li><span><code>downloads</code> and <code>downloads.ui</code></span><span>to see the downloads that start in the browser and hand Zajil those your settings choose, and so they do not show in the browser's downloads bar while they go to Zajil.</span></li>
+          <li><span><code>contextMenus</code></span><span>for “Download with Zajil” and “Download video with Zajil” in the right-click menu.</span></li>
+          <li><span><code>nativeMessaging</code></span><span>to talk to the Zajil program on your computer.</span></li>
+          <li><span><code>storage</code></span><span>to keep the extension's settings in the browser.</span></li>
+          <li><span><code>notifications</code></span><span>to tell you when a download stays in the browser, and why.</span></li>
+          </ul>
 
-        <p><strong>The optional permission “Allow Zajil on sites”</strong> (<code>cookies</code>, <code>scripting</code> and <code>webRequest</code>, on all sites): asked for only when you press, and you can take it back at any time in the extension's settings. Without it the extension works as it is. The browser will say the extension asks to “Read and change all your data on all websites”, as each site's cookies and videos need that site's permission. What the extension really reads is only this:</p>
-        <ul>
+          <p><strong>The optional permission “Allow Zajil on sites”</strong> (<code>cookies</code>, <code>scripting</code> and <code>webRequest</code>, on all sites): asked for only when you press, and you can take it back at any time in the extension's settings. Without it the extension works as it is. The browser will say the extension asks to “Read and change all your data on all websites”, as each site's cookies and videos need that site's permission. What the extension really reads is only this:</p>
+          <ul>
           <li><strong>A download link's cookies:</strong> for each download, only its link's site cookies, for its link only, and only when it goes to Zajil. For a video, its page's cookies, when you press or when the video button shows over it. They go to the Zajil program on the same computer, and from it to their own site only.</li>
           <li><strong>Videos:</strong> only where a page's videos are and their addresses, and on YouTube where a playlist's title is. The addresses of the video playlists (HLS and DASH) a page loads stay in memory, for each tab, and are forgotten when it closes or opens another page. The extension watches these requests and never stops or changes them.</li>
           <li><strong>Reading a video ahead:</strong> when the “Download video” button shows over a video, Zajil reads its page ahead, to have the qualities ready before you press: the page, the video's address (or the playlist the tab loaded for it) and the page's cookies go to Zajil, and Zajil asks the page's site for it. It reads a page at most once in ten minutes, and keeps what it read in memory only.</li>
           <li><strong>Keys with a click</strong> (off from the start): of a link clicked with Zajil's keys, the extension learns only its address.</li>
-        </ul>
-        <p>The extension never reads the pages' text or what you type in them. <strong>From private windows</strong> it notes nothing, takes no cookies, and sends nothing before you press.</p>
+          </ul>
+          <p>The extension never reads the pages' text or what you type in them. <strong>From private windows</strong> it notes nothing, takes no cookies, and sends nothing before you press.</p>
 
-        <p><strong>What the extension keeps in the browser:</strong> its settings (file types, excluded sites and so on), a random ID for the browser so Zajil knows which browser it asks, and a random “ticket” for each download sent with cookies that has not finished, with a hash of its site, never its cookies, so Zajil can ask for its cookies again if resuming needs them after a restart. A ticket is forgotten when its download finishes or is removed, or after 30 days at most.</p>
-        <p>User data is not used or passed on for anything but the extension's own work: handing downloads to the Zajil program. It is not sold, not given to anyone, and not used for ads.</p>
+          <p><strong>What the extension keeps in the browser:</strong> its settings (file types, excluded sites and so on), a random ID for the browser so Zajil knows which browser it asks, and a random “ticket” for each download sent with cookies that has not finished, with a hash of its site, never its cookies, so Zajil can ask for its cookies again if resuming needs them after a restart. A ticket is forgotten when its download finishes or is removed, or after 30 days at most.</p>
+          <p>User data is not used or passed on for anything but the extension's own work: handing downloads to the Zajil program. It is not sold, not given to anyone, and not used for ads.</p>
 
-        <h2 id="site">This site</h2>
-        <ul>
+          <h2 id="site">This site</h2>
+          <ul>
           <li>Static pages, with no cookies, no tracking, no analytics, no scripts from other sites and no outside fonts.</li>
           <li>It is hosted on Cloudflare Pages. As with any host, your request for each page passes through Cloudflare's servers to reach you, under <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</li>
           <li>The download page asks GitHub straight from your browser for the latest release, to put each file's link in its button, with no cookies. The files themselves download from GitHub, under <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</li>
-        </ul>
+          </ul>
 
-        <h2 id="contact">Contact and changes</h2>
-        <p>For any question about privacy, write in <a href="https://github.com/motalim-ai/zajil-download-manager/issues">Issues on GitHub</a>. For security issues, use <a href="https://github.com/motalim-ai/zajil-download-manager/security/advisories/new">private reporting</a>. If what Zajil does with data changes, this page changes in the same change, and the “Last changed” date at its top changes too.</p>
+          <h2 id="contact">Contact and changes</h2>
+          <p>For any question about privacy, write in <a href="https://github.com/motalim-ai/zajil-download-manager/issues">Issues on GitHub</a>. For security issues, use <a href="https://github.com/motalim-ai/zajil-download-manager/security/advisories/new">private reporting</a>. If what Zajil does with data changes, this page changes in the same change, and the “Last changed” date at its top changes too.</p>
+        </div>
       </div>
     </section>
   </main>

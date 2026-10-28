@@ -1,116 +1,481 @@
 <!--
-title: زاجِل لإدارة التحميل: مجاني ومفتوح المصدر وبالعربية أولًا
-description: زاجِل مدير تحميل مجاني ومفتوح المصدر لويندوز وماك ولينكس، بالعربية أولًا: تحميل بعدة اتصالات، واستكمال ما انقطع، وفيديو يوتيوب بالجودة التي تختارها وقوائم التشغيل كاملة، وإضافة للمتصفح، وطوابير بمواعيد.
+title: زاجِل لإدارة التحميل: مجاني ومفتوح المصدر
+description: زاجِل برنامج مجاني ومفتوح المصدر لإدارة التحميل، بواجهة عربية من اليمين إلى اليسار. تحميل متوازي حتى 32 اتصالاً، واستكمال بعد الانقطاع، وفيديو يوتيوب وقوائم التشغيل، وإضافة للمتصفح. يعمل على ويندوز وماك ولينكس.
 nav: home
+script: download
 -->
-  <main id="main">
-    <section class="hero">
-      <div class="wrap">
-        <img class="icon" src="/assets/zajil-icon.svg" alt="" width="96" height="96">
-        <h1>زاجِل لإدارة التحميل</h1>
-        <p class="lead">برنامج مجاني ومفتوح المصدر لتحميل الملفات، بالعربية أولًا. يقسّم الملف على عدة اتصالات، ويستكمل ما انقطع، وينزّل الفيديو بالجودة التي تختارها، ويرتّب تحميلاتك في طوابير بمواعيد.</p>
-        <div class="actions">
-          <a class="btn btn-primary" href="/download/">نزّل زاجِل</a>
-          <a class="btn" href="https://github.com/motalim-ai/zajil-download-manager">الكود على GitHub</a>
+  <main id="main" tabindex="-1">
+
+    <!-- ============ HERO ============ -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero__sky" aria-hidden="true">
+        <div class="lanes" data-lanes></div>
+      </div>
+
+      <div class="wrap hero__grid">
+        <div class="hero__copy">
+          <p class="hero__kicker">مدير تحميل مجاني ومفتوح المصدر</p>
+          <h1 class="hero__title" id="hero-title">
+            <span class="line"><span>ملفك يصل كاملاً،</span></span>
+            <span class="line"><span>مهما بعدت المسافة</span></span>
+          </h1>
+          <p class="hero__lead">
+            زاجِل يقسم الملف إلى أجزاء ويحملها معاً في وقت واحد، ويكمل من حيث توقف إذا انقطع الإنترنت.
+            واجهته عربية من اليمين إلى اليسار، ويعمل على ويندوز وماك ولينكس.
+          </p>
+          <div class="hero__actions">
+            <a class="btn btn--primary btn--lg" href="/download/">
+              <svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>
+              احصل على زاجِل مجاناً
+            </a>
+            <a class="btn btn--ghost btn--lg" href="https://github.com/motalim-ai/zajil-download-manager">
+              <svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>
+              الكود على GitHub
+            </a>
+          </div>
+          <ul class="hero__facts">
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>مجاني بالكامل</li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>ترخيص GPL-3.0</li>
+            <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>بلا إعلانات ولا تتبع</li>
+          </ul>
         </div>
-        <ul class="systems">
-          <li>ويندوز 10 و11</li>
-          <li>macOS 11 أو أحدث</li>
-          <li>لينكس: Ubuntu 22.04 وDebian 12 أو أحدث</li>
+
+        <div class="hero__emblem" aria-hidden="true">
+          <div class="emblem">
+            <span class="emblem__halo"></span>
+            <img class="emblem__icon" src="/assets/zajil-icon.svg" alt="" width="320" height="320">
+          </div>
+        </div>
+      </div>
+
+      <div class="wrap hero__shot">
+        <figure class="window window--hero">
+          <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <img class="shot-light" src="/screenshots/main-ar-light.png" width="1180" height="760"
+               alt="النافذة الرئيسية لزاجِل بالعربية في الوضع الفاتح: قائمة التحميلات مع الحجم والحالة والسرعة، وشجرة جانبية للفئات والطوابير">
+          <img class="shot-dark" src="/screenshots/main-ar-dark.png" width="1180" height="760"
+               alt="النافذة الرئيسية لزاجِل بالعربية في الوضع الداكن: قائمة التحميلات مع الحجم والحالة والسرعة، وشجرة جانبية للفئات والطوابير">
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============ STORY ============ -->
+    <section class="story" aria-labelledby="story-title">
+      <div class="wrap story__grid">
+        <div class="story__copy">
+          <h2 class="h2" id="story-title">اسم من الحمام الزاجل</h2>
+          <p class="lead">
+            كان الحمام الزاجل يوصل الرسائل مهما بعدت المسافة.
+            ومن هنا جاء الاسم: نريد من البرنامج أن يوصل ملفك كاملاً وسليماً، حتى لو انقطع الاتصال في الطريق.
+          </p>
+        </div>
+
+        <figure class="anatomy">
+          <div class="anatomy__art">
+            <img src="/assets/zajil-icon.svg" alt="شعار زاجِل: حمامة بيضاء تنزل إلى الأسفل على مربع أزرق" width="300" height="300">
+          </div>
+          <figcaption class="anatomy__notes">
+            <p class="anatomy__note anatomy__note--dive">
+              <strong>حمامة تنزل إلى الأسفل</strong>
+              <span>وهذا هو التحميل.</span>
+            </p>
+            <p class="anatomy__note anatomy__note--wing">
+              <strong>ريش الجناح خطوط متوازية</strong>
+              <span>وهذه هي الاتصالات المتوازية.</span>
+            </p>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============ JOURNEY / LIVE DEMO ============ -->
+    <section class="journey" id="journey" aria-labelledby="journey-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="journey-title">شاهد الملف وهو يصل</h2>
+          <p class="lead">
+            يقسم زاجِل الملف إلى أجزاء، ويفتح لكل جزء اتصالاً خاصاً به، حتى 32 اتصالاً.
+            وعندما ينهي اتصال جزأه، يأخذ نصف ما بقي من أبطأ جزء، فلا يبقى اتصال بلا عمل.
+          </p>
+        </div>
+
+        <div class="demo" data-demo>
+          <div class="demo__top">
+            <div class="demo__file">
+              <span class="demo__file-name" dir="auto">محاضرة-الخوارزميات.mp4</span>
+              <span class="demo__status" data-demo-status>جاهز للتحميل</span>
+            </div>
+            <span class="demo__pct" data-demo-pct aria-hidden="true">0%</span>
+          </div>
+
+          <div class="demo__bar" role="progressbar" aria-label="تقدم التحميل في المحاكاة" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-demo-bar>
+            <canvas data-demo-canvas></canvas>
+          </div>
+
+          <ul class="demo__legend" aria-hidden="true">
+            <li><i class="sw sw--done"></i>وصل</li>
+            <li><i class="sw sw--head"></i>يكتب الآن</li>
+            <li><i class="sw sw--left"></i>متبقي</li>
+            <li class="demo__conns" data-demo-conns>لا اتصالات تعمل</li>
+          </ul>
+
+          <div class="demo__controls">
+            <fieldset class="seg">
+              <legend class="seg__legend">عدد الاتصالات</legend>
+              <div class="seg__options">
+                <label><input type="radio" name="conns" value="1"><span>1</span></label>
+                <label><input type="radio" name="conns" value="8"><span>8</span></label>
+                <label><input type="radio" name="conns" value="16" checked><span>16</span></label>
+                <label><input type="radio" name="conns" value="32"><span>32</span></label>
+              </div>
+            </fieldset>
+            <div class="demo__buttons">
+              <button class="btn btn--outline" type="button" data-demo-cut>
+                <svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg>
+                <span data-demo-cut-label>اقطع الاتصال</span>
+              </button>
+              <button class="btn btn--quiet" type="button" data-demo-restart>ابدأ من جديد</button>
+            </div>
+          </div>
+
+          <p class="demo__live visually-hidden" aria-live="polite" data-demo-live></p>
+          <p class="demo__note">محاكاة للتوضيح فقط. السرعة الحقيقية تعتمد على الخادم وعلى سرعة الإنترنت لديك، والتقسيم يعمل عندما يسمح به الخادم.</p>
+        </div>
+
+        <div class="resume">
+          <div class="resume__item">
+            <h3 class="h3">انقطع الإنترنت؟ لا يضيع شيء</h3>
+            <p>يحفظ زاجِل ما وصل أولاً بأول. وإذا انقطع الاتصال، أو أغلقت البرنامج، يكمل التحميل من حيث توقف. وإذا انتهت صلاحية الرابط، تضع رابطاً جديداً للملف نفسه من «تحديث الرابط».</p>
+          </div>
+          <div class="resume__item">
+            <h3 class="h3">ملف سليم، لا خليط</h3>
+            <p>قبل أن يكمل، يتأكد زاجِل أن الملف على الخادم لم يتغير، حتى لا يختلط محتوى قديم بمحتوى جديد.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FEATURES ============ -->
+    <section class="features" id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="features-title">كل تحميلاتك مرتبة في مكانها</h2>
+          <p class="lead">من اختيار جودة الفيديو إلى جدولة التحميل في الليل، كل شيء في نافذة واحدة واضحة.</p>
+        </div>
+
+        <div class="features__layout">
+          <article class="feature-hero">
+            <div class="feature-hero__text">
+              <svg class="icon icon--lg" aria-hidden="true"><use href="#i-video"/></svg>
+              <h3 class="h3">الفيديو بالجودة التي تختارها، وقوائم التشغيل كاملة</h3>
+              <p>تعرض نافذة «جودة الفيديو» الجودات المتاحة مع حجم كل واحدة، ومعها «صوت فقط». ويدعم يوتيوب، ويحمل قائمة التشغيل كلها أو ما تختاره منها، ويدمج الصوت والصورة إذا كانا منفصلين.</p>
+              <p class="feature-hero__fine">أدوات الفيديو مفتوحة المصدر (yt-dlp وFFmpeg وQuickJS-NG)، وتنزل مرة واحدة بموافقتك. ولا يتجاوز زاجِل أي حماية للمحتوى: إذا كان الفيديو محمياً بـ DRM يخبرك بذلك بوضوح.</p>
+            </div>
+            <figure class="window window--small">
+              <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+              <img src="/screenshots/video-quality-ar.png" width="640" height="520" loading="lazy"
+                   alt="نافذة جودة الفيديو: الجودات المتاحة وحجم كل منها، وخيار صوت فقط، واسم الملف والمجلد وزر ابدأ التحميل">
+            </figure>
+          </article>
+
+          <ul class="feature-list">
+            <li class="feature">
+              <svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg>
+              <h3 class="h4">طوابير للانتظار</h3>
+              <p>رتب تحميلاتك في طوابير، وحدد كم تحميلاً يعمل في الوقت نفسه، وكم مرة يعيد المحاولة.</p>
+            </li>
+            <li class="feature">
+              <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>
+              <h3 class="h4">جدولة بالساعة واليوم</h3>
+              <p>اختر وقت البدء ووقت الإيقاف وأيام الأسبوع. ويمكنه أن يطفئ الجهاز أو يدخله في السبات بعد انتهاء الطابور.</p>
+            </li>
+            <li class="feature">
+              <svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg>
+              <h3 class="h4">حد للسرعة</h3>
+              <p>ضع حداً للبرنامج كله أو لكل تحميل وحده، حتى تبقى سرعة كافية لأعمالك الأخرى.</p>
+            </li>
+            <li class="feature">
+              <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>
+              <h3 class="h4">فئات تلقائية</h3>
+              <p>يضع زاجِل كل ملف في فئته: برامج، وفيديوهات، وصوتيات، ومستندات، ومضغوطات. ولكل فئة مجلدها وقواعد تعدلها بنفسك.</p>
+            </li>
+          </ul>
+
+          <article class="feature-lang">
+            <div class="feature-lang__text">
+              <svg class="icon icon--lg" aria-hidden="true"><use href="#i-lang"/></svg>
+              <h3 class="h3">عربي حقيقي، والإنجليزية بضغطة زر</h3>
+              <p>صممت واجهة زاجِل من اليمين إلى اليسار من البداية، وليست ترجمة أضيفت لاحقاً. وتنتقل إلى الإنجليزية بضغطة زر، دون إعادة تشغيل البرنامج.</p>
+              <button class="btn btn--outline" type="button" aria-pressed="false" data-lang-demo>جرب التبديل إلى الإنجليزية</button>
+            </div>
+            <div class="mini-ui" data-mini-ui dir="rtl" lang="ar">
+              <p class="mini-ui__title" data-ar="كل التحميلات" data-en="All downloads">كل التحميلات</p>
+              <ul class="mini-ui__list">
+                <li data-ar="برامج" data-en="Programs">برامج</li>
+                <li data-ar="فيديوهات" data-en="Video">فيديوهات</li>
+                <li data-ar="صوتيات" data-en="Music">صوتيات</li>
+                <li data-ar="مستندات" data-en="Documents">مستندات</li>
+                <li data-ar="مضغوطات" data-en="Archives">مضغوطات</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="feature-theme">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-theme"/></svg>
+            <h3 class="h3">فاتح أو داكن</h3>
+            <p>اختر المظهر الذي يريح عينك، أو اتركه يتبع إعداد جهازك. ولكل زر في البرنامج اختصار من لوحة المفاتيح.</p>
+            <div class="theme-pair">
+              <img src="/screenshots/main-ar-light.png" width="1180" height="760" loading="lazy" alt="زاجِل في الوضع الفاتح">
+              <img src="/screenshots/main-ar-dark.png" width="1180" height="760" loading="lazy" alt="زاجِل في الوضع الداكن">
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SCREENSHOTS ============ -->
+    <section class="screens" id="screens" aria-labelledby="screens-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="screens-title">صور حقيقية من البرنامج</h2>
+          <p class="lead">هذه صور من زاجِل نفسه، بأسماء ملفات تجريبية.</p>
+        </div>
+
+        <div class="tabs" data-tabs>
+          <div class="tabs__list" role="tablist" aria-label="صور البرنامج">
+            <button role="tab" id="tab-main" aria-controls="panel-main" aria-selected="true">النافذة الرئيسية</button>
+            <button role="tab" id="tab-progress" aria-controls="panel-progress" aria-selected="false" tabindex="-1">نافذة التقدم</button>
+            <button role="tab" id="tab-info" aria-controls="panel-info" aria-selected="false" tabindex="-1">معلومات الملف</button>
+            <button role="tab" id="tab-quality" aria-controls="panel-quality" aria-selected="false" tabindex="-1">جودة الفيديو</button>
+            <button role="tab" id="tab-grab" aria-controls="panel-grab" aria-selected="false" tabindex="-1">تحميل الموقع</button>
+            <button role="tab" id="tab-batch" aria-controls="panel-batch" aria-selected="false" tabindex="-1">تحميل بالجملة</button>
+          </div>
+
+          <div class="tabs__panels">
+            <div class="tabs__panel" role="tabpanel" id="panel-main" aria-labelledby="tab-main" tabindex="0">
+              <figure class="window window--wide">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img class="shot-light" src="/screenshots/main-ar-light.png" width="1180" height="760" loading="lazy"
+                     alt="النافذة الرئيسية في الوضع الفاتح: شريط أدوات بأزرار إضافة رابط واستكمال وإيقاف وحذف والجدولة، وجدول التحميلات، وشجرة الفئات والطوابير">
+                <img class="shot-dark" src="/screenshots/main-ar-dark.png" width="1180" height="760" loading="lazy"
+                     alt="النافذة الرئيسية في الوضع الداكن: شريط أدوات بأزرار إضافة رابط واستكمال وإيقاف وحذف والجدولة، وجدول التحميلات، وشجرة الفئات والطوابير">
+              </figure>
+              <p class="tabs__caption">كل التحميلات في جدول واحد، مع شجرة جانبية للفئات والطوابير. تظهر هنا بمظهر الموقع الحالي، فاتحاً أو داكناً.</p>
+            </div>
+            <div class="tabs__panel" role="tabpanel" id="panel-progress" aria-labelledby="tab-progress" tabindex="0" hidden>
+              <figure class="window window--tall">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img src="/screenshots/progress-ar.png" width="600" height="640" loading="lazy"
+                     alt="نافذة التقدم: حجم الملف وما وصل منه والسرعة والوقت المتبقي، وشريط الأجزاء مع الاتصالات التي تعمل، وجدول بما نزله كل اتصال">
+              </figure>
+              <p class="tabs__caption">نافذة التقدم تعرض كل جزء من الملف، وما نزله كل اتصال، وحد السرعة لهذا التحميل.</p>
+            </div>
+            <div class="tabs__panel" role="tabpanel" id="panel-info" aria-labelledby="tab-info" tabindex="0" hidden>
+              <figure class="window window--compact">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img src="/screenshots/file-info-ar.png" width="560" height="290" loading="lazy"
+                     alt="نافذة معلومات ملف التحميل: الرابط والفئة ومكان الحفظ والوصف، مع زري ابدأ التحميل ونزل لاحقاً">
+              </figure>
+              <p class="tabs__caption">قبل أن يبدأ التحميل، تختار الفئة ومكان الحفظ. ويمكنك أن تبدأ الآن، أو تضعه في الطابور لوقت لاحق.</p>
+            </div>
+            <div class="tabs__panel" role="tabpanel" id="panel-quality" aria-labelledby="tab-quality" tabindex="0" hidden>
+              <figure class="window window--compact">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img src="/screenshots/video-quality-ar.png" width="640" height="520" loading="lazy"
+                     alt="نافذة جودة الفيديو: قائمة بالجودات المتاحة وحجم كل منها، وخيار صوت فقط">
+              </figure>
+              <p class="tabs__caption">اختر جودة الفيديو وأنت ترى حجم كل خيار، أو احفظ الصوت فقط.</p>
+            </div>
+            <div class="tabs__panel" role="tabpanel" id="panel-grab" aria-labelledby="tab-grab" tabindex="0" hidden>
+              <figure class="window window--compact">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img src="/screenshots/grab-ar.png" width="720" height="680" loading="lazy"
+                     alt="نافذة تحميل الموقع: صفحة البداية والعمق وأنواع الملفات والحدود، وزر افحص">
+              </figure>
+              <p class="tabs__caption">«تحميل الموقع» يفحص موقعاً دون أن ينزل منه شيئاً، ويعرض ما وجده لتختار منه. ويحترم <code>robots.txt</code> دائماً.</p>
+            </div>
+            <div class="tabs__panel" role="tabpanel" id="panel-batch" aria-labelledby="tab-batch" tabindex="0" hidden>
+              <figure class="window window--compact">
+                <div class="window__bar" aria-hidden="true"><span></span><span></span><span></span></div>
+                <img src="/screenshots/batch-ar.png" width="680" height="600" loading="lazy"
+                     alt="نافذة التحميل بالجملة: رابط فيه نجمة مكان الجزء الذي يتغير، ومن وإلى، وقائمة الروابط قبل إضافتها">
+              </figure>
+              <p class="tabs__caption">«تحميل بالجملة»: رابط فيه نجمة مكان الجزء الذي يتغير، ومدى من الأرقام أو الحروف، وترى الروابط قبل إضافتها.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EXTENSION ============ -->
+    <section class="extension" id="extension" aria-labelledby="extension-title">
+      <div class="wrap extension__grid">
+        <div class="extension__copy">
+          <h2 class="h2" id="extension-title">من المتصفح إلى زاجِل مباشرة</h2>
+          <p class="lead">ثبت إضافة زاجِل في متصفحك، وستذهب التحميلات إلى زاجِل وحدها، دون نسخ أي رابط.</p>
+          <ul class="browsers" aria-label="المتصفحات المدعومة">
+            <li>Chrome</li>
+            <li>Edge</li>
+            <li>Firefox</li>
+          </ul>
+          <ul class="ext-points">
+            <li>
+              <svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg>
+              <div><strong>تلتقط ما تريده أنت</strong><p>حسب أنواع الملفات التي تختارها، وتترك المواقع التي تستثنيها في المتصفح.</p></div>
+            </li>
+            <li>
+              <svg class="icon" aria-hidden="true"><use href="#i-cursor"/></svg>
+              <div><strong>من قائمة الزر الأيمن</strong><p>«حمل بزاجِل» على أي رابط، و«حمل الفيديو بزاجِل» على أي فيديو.</p></div>
+            </li>
+            <li>
+              <svg class="icon" aria-hidden="true"><use href="#i-video"/></svg>
+              <div><strong>زر فوق الفيديو</strong><p>يظهر أعلى الفيديو ويفتح نافذة «جودة الفيديو». وفي صفحة قائمة تشغيل على يوتيوب، زر لتحميل القائمة كلها.</p></div>
+            </li>
+            <li>
+              <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+              <div><strong>تتصل ببرنامجك فقط</strong><p>لا تتصل الإضافة بأي خادم، وترسل مع كل تحميل ما يحتاجه هذا التحميل فقط. <a class="inline-link" href="/privacy/#extension">التفاصيل</a>.</p></div>
+            </li>
+          </ul>
+          <p><a class="btn btn--outline" href="/download/#install-extension">طريقة تركيب الإضافة</a></p>
+        </div>
+
+        <figure class="window window--browser">
+          <div class="window__bar window__bar--browser" aria-hidden="true">
+            <span></span><span></span><span></span>
+            <i class="window__url"></i>
+          </div>
+          <img class="crop-video" src="/screenshots/video-button-ar.png" width="1360" height="800" loading="lazy"
+               alt="صفحة فيديو تجريبية في المتصفح، وفي أعلى الفيديو زر صغير عليه علامة زاجِل لتحميل الفيديو">
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============ PRIVACY ============ -->
+    <section class="privacy" id="privacy" aria-labelledby="privacy-title">
+      <div class="privacy__sky" aria-hidden="true"><div class="lanes lanes--quiet" data-lanes></div></div>
+      <div class="wrap">
+        <div class="section-head section-head--center">
+          <h2 class="h2" id="privacy-title">زاجِل يوصل ملفاتك، ولا يراقبك</h2>
+          <p class="lead">لا يتصل زاجِل إلا بخوادم الملفات التي تحملها، وبـ GitHub ليعرف إن صدرت نسخة جديدة (ويمكنك إيقاف ذلك)، ولتنزيل أدوات الفيديو بموافقتك.</p>
+        </div>
+        <ul class="privacy__list">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg><strong>لا تتبع</strong><span>لا يعرف أحد ماذا تحمل.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-chart-off"/></svg><strong>لا إحصاءات</strong><span>لا يجمع أي بيانات عنك، ولا حساب.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-ad-off"/></svg><strong>لا إعلانات</strong><span>ولا ميزات مدفوعة أو مقفلة.</span></li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-box-off"/></svg><strong>لا برامج مرفقة</strong><span>تثبت زاجِل وحده، ولا شيء معه.</span></li>
         </ul>
-        <picture class="shot-hero">
-          <source srcset="/screenshots/main-ar-dark.png" media="(prefers-color-scheme: dark)">
-          <img src="/screenshots/main-ar-light.png" width="1180" height="760" alt="النافذة الرئيسية لزاجِل بالعربية: الشجرة الجانبية بالفئات والطوابير، وجدول التحميلات">
-        </picture>
+        <p class="privacy__site">وهذا الموقع أيضاً: بلا كوكيز، وبلا أدوات تتبع، وخطوطه محفوظة فيه. <a href="/privacy/">سياسة الخصوصية كاملة</a>.</p>
       </div>
     </section>
 
-    <section class="section" id="features" aria-labelledby="features-title">
+    <!-- ============ DOWNLOAD ============ -->
+    <section class="download" id="download" aria-labelledby="download-title">
       <div class="wrap">
-        <h2 id="features-title">ما يفعله زاجِل</h2>
-        <div class="cards">
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></span>بالعربية أولًا</h3>
-            <p>الواجهة كلها من اليمين إلى اليسار، بالعربية ومعها الإنجليزية، بالوضع الفاتح والداكن. ورسائل الخطأ بلغتك.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4v12M12 4v12M18 4v12M3 13l3 3 3-3M9 13l3 3 3-3M15 13l3 3 3-3M4 20h16"/></svg></span>تحميل بعدة اتصالات</h3>
-            <p>حتى 32 اتصالًا للملف الواحد، وحين يفرغ اتصال يقسم أبطأ جزء. ويستكمل التحميل بعد انقطاع الشبكة أو إغلاق البرنامج، ويتحقق من شهادات HTTPS دائمًا.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg></span>الفيديو وقوائم التشغيل</h3>
-            <p>نافذة «جودة الفيديو» تعرض الجودات بحجمها، ومعها «صوت فقط». ويدعم يوتيوب، ويحمّل قائمة التشغيل كلها أو ما تختاره منها. أما الفيديو المحمي بـ DRM فلا يُحمَّل.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/></svg></span>إضافة للمتصفح</h3>
-            <p>لـ Chrome وEdge وFirefox: تأخذ التحميلات من المتصفح إلى زاجِل، وتضيف «حمّل بزاجِل» إلى قائمة الزر الأيمن، وزر «نزّل الفيديو» فوق الفيديو.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>الطوابير والجدولة</h3>
-            <p>رتّب تحميلاتك في طوابير، وحدّد موعد البدء والإيقاف، وعدد التحميلات في الوقت نفسه، وما يحدث بعد انتهاء الطابور، مثل إطفاء الجهاز.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>خصوصيتك على جهازك</h3>
-            <p>لا حساب، ولا تتبع، ولا إحصاءات، ولا إعلانات. لا يتصل زاجِل إلا بمواقع الملفات التي تحمّلها، وبـ GitHub ليعرف إن صدرت نسخة جديدة (ويمكنك إيقاف ذلك)، ولتنزيل أدوات الفيديو بموافقتك. <a href="/privacy/">سياسة الخصوصية</a>.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/></svg></span>مجاني ومفتوح المصدر</h3>
-            <p>بترخيص GPL-3.0-or-later، بلا إعلانات ولا ميزات مدفوعة. الكود كله على GitHub، والمثبّتات تُبنى آليًا من الكود المنشور، ومعها بصمة كل ملف.</p>
-          </article>
-          <article class="card">
-            <h3><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><path d="M16.75 13.5v6.5M13.5 16.75H20"/></svg></span>وغير ذلك</h3>
-            <p>«تحميل الموقع»، و«تحميل بالجملة»، وسلة الإسقاط، وحد السرعة، والتصنيفات حسب نوع الملف ولكل منها مجلد، وسطر الأوامر <code>zajil</code>.</p>
-          </article>
+        <div class="section-head section-head--center">
+          <h2 class="h2" id="download-title">احصل على زاجِل مجاناً</h2>
+          <p class="lead">اختر نظامك. وإضافة المتصفح وخطوات التثبيت في <a class="inline-link" href="/download/">صفحة التحميل</a>.</p>
+        </div>
+
+        <ul class="os-list">
+          <li class="os" data-os="windows">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-win"/></svg>
+            <h3 class="h3">ويندوز</h3>
+            <p>ويندوز 10 و11 (x64)</p>
+            <span class="os__badge" hidden>جهازك</span>
+            <a class="btn btn--primary" data-asset="windows" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل لويندوز</span>
+              <small class="btn__file" data-name>.exe</small>
+            </a>
+          </li>
+          <li class="os" data-os="mac">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3 class="h3">ماك</h3>
+            <p>macOS 11 أو أحدث، لأجهزة Apple Silicon وIntel</p>
+            <span class="os__badge" hidden>جهازك</span>
+            <a class="btn btn--primary" data-asset="mac" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل لماك</span>
+              <small class="btn__file" data-name>.dmg</small>
+            </a>
+          </li>
+          <li class="os" data-os="linux">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-terminal"/></svg>
+            <h3 class="h3">لينكس</h3>
+            <p>Ubuntu 22.04 وDebian 12 أو أحدث (x64)</p>
+            <span class="os__badge" hidden>جهازك</span>
+            <div class="os__files">
+              <a class="btn btn--primary" data-asset="deb" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+                <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل ملف deb</span>
+                <small class="btn__file" data-name>.deb</small>
+              </a>
+              <a class="btn btn--outline" data-asset="appimage" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+                <span class="os__label">AppImage بلا تثبيت</span>
+                <small class="btn__file" data-name>.AppImage</small>
+              </a>
+            </div>
+          </li>
+        </ul>
+
+        <div class="notice">
+          <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+          <p>
+            يظهر تحذير من النظام عند أول تشغيل، لأن زاجِل غير موقع من Apple ولا Microsoft. وطريقة فتحه في <a href="/download/#install">خطوات التثبيت</a>.
+            وللتأكد من أن الملف هو ملفنا، قارنه ببصمات <span class="nowrap" dir="ltr">SHA-256</span> المنشورة مع كل إصدار.
+          </p>
+        </div>
+        <div class="notice notice--warn" role="note">
+          <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <p><strong>المصادر الرسمية الوحيدة لزاجِل: هذا الموقع <span class="nowrap" dir="ltr">zajil.by-wow.com</span>، ومستودعه على GitHub.</strong> وكل نسخة من مكان آخر، أو تطلب مالاً، أو تأتي مع برامج أخرى، ليست منا.</p>
         </div>
       </div>
     </section>
 
-    <section class="section" id="screenshots" aria-labelledby="screenshots-title">
-      <div class="wrap">
-        <h2 id="screenshots-title">صور من زاجِل</h2>
-        <p class="note">صور حقيقية من البرنامج نفسه بواجهته العربية، وفيها بيانات تجريبية فقط.</p>
-        <div class="gallery">
-          <figure>
-            <img src="/screenshots/main-ar-light.png" width="1180" height="760" loading="lazy" alt="النافذة الرئيسية بالوضع الفاتح">
-            <figcaption>النافذة الرئيسية، بالوضع الفاتح</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/main-ar-dark.png" width="1180" height="760" loading="lazy" alt="النافذة الرئيسية بالوضع الداكن">
-            <figcaption>النافذة الرئيسية، بالوضع الداكن</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/progress-ar.png" width="600" height="640" loading="lazy" alt="نافذة التقدم: أجزاء الملف واتصالاته وحد السرعة">
-            <figcaption>نافذة التقدم: الأجزاء والاتصالات</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/video-quality-ar.png" width="640" height="520" loading="lazy" alt="نافذة جودة الفيديو: الجودات وحجم كل منها واسم الملف">
-            <figcaption>نافذة «جودة الفيديو»</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/file-info-ar.png" width="560" height="290" loading="lazy" alt="نافذة معلومات ملف التحميل: الرابط والفئة والاسم والمجلد">
-            <figcaption>«معلومات ملف التحميل»</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/grab-ar.png" width="720" height="680" loading="lazy" alt="نافذة تحميل الموقع: صفحة البداية والعمق وأنواع الملفات">
-            <figcaption>«تحميل الموقع»</figcaption>
-          </figure>
-          <figure>
-            <img src="/screenshots/batch-ar.png" width="680" height="600" loading="lazy" alt="نافذة التحميل بالجملة: رابط بنجمة ومدى الأرقام">
-            <figcaption>«تحميل بالجملة»</figcaption>
-          </figure>
-          <figure class="wide">
-            <img src="/screenshots/video-button-ar.png" width="1360" height="800" loading="lazy" alt="زر نزّل الفيديو فوق فيديو تجريبي في المتصفح، ومعه علامة زاجِل">
-            <figcaption>زر «نزّل الفيديو» من إضافة المتصفح، فوق فيديو تجريبي</figcaption>
-          </figure>
+    <!-- ============ OPEN SOURCE ============ -->
+    <section class="oss" id="open-source" aria-labelledby="oss-title">
+      <div class="wrap oss__grid">
+        <div>
+          <h2 class="h2" id="oss-title">مفتوح المصدر، وملك للجميع</h2>
+          <p class="lead">
+            الكود كله منشور على GitHub بترخيص GPL-3.0. يمكنك قراءته وتعديله والمساهمة فيه.
+            والإصدارات تبنى تلقائياً من الكود المنشور، ومعها بصمة لكل ملف.
+          </p>
         </div>
+        <ul class="oss__links">
+          <li><a href="https://github.com/motalim-ai/zajil-download-manager"><svg class="icon" aria-hidden="true"><use href="#i-git"/></svg><span><strong>المستودع</strong><small>اقرأ الكود كاملاً</small></span></a></li>
+          <li><a href="https://github.com/motalim-ai/zajil-download-manager/blob/main/CONTRIBUTING.md"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span><strong>دليل المساهمة</strong><small>كيف تبدأ</small></span></a></li>
+          <li><a href="https://github.com/motalim-ai/zajil-download-manager/issues"><svg class="icon" aria-hidden="true"><use href="#i-bug"/></svg><span><strong>أبلغ عن مشكلة</strong><small>أو اقترح فكرة</small></span></a></li>
+          <li><a href="https://github.com/motalim-ai/zajil-download-manager/blob/main/LICENSE"><svg class="icon" aria-hidden="true"><use href="#i-scale"/></svg><span><strong>الترخيص</strong><small>GPL-3.0-or-later</small></span></a></li>
+        </ul>
       </div>
     </section>
 
-    <section class="section" aria-labelledby="official-title">
-      <div class="wrap">
-        <div class="notice" role="note">
-          <h2 id="official-title">المصادر الرسمية لزاجِل</h2>
-          <p>زاجِل مجاني دائمًا. <strong>مصادره الرسمية الوحيدة هذا الموقع، <code>zajil.by-wow.com</code>، ومستودعه على GitHub، <a href="https://github.com/motalim-ai/zajil-download-manager">motalim-ai/zajil-download-manager</a>.</strong> وكل نسخة من مكان آخر، أو تطلب مالًا، أو تأتي مع برامج أخرى، ليست منا. نزّل زاجِل من <a href="/download/">صفحة التحميل</a> فقط، وتأكد من بصمة الملف إن أردت (<a href="/download/#verify">كيف؟</a>).</p>
+    <!-- ============ FAQ ============ -->
+    <section class="faq" id="faq" aria-labelledby="faq-title">
+      <div class="wrap faq__grid">
+        <div>
+          <h2 class="h2" id="faq-title">أسئلة شائعة</h2>
+          <p class="faq__more"><a class="btn btn--outline" href="/faq/">كل الأسئلة</a></p>
+        </div>
+        <div class="faq__list">
+          <details>
+            <summary>هل زاجِل مجاني فعلاً؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <p>نعم، مجاني بالكامل. لا توجد نسخة مدفوعة، ولا ميزات مقفلة، ولا إعلانات.</p>
+          </details>
+          <details>
+            <summary>على أي أنظمة يعمل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <p>ويندوز 10 و11، وmacOS 11 أو أحدث، ولينكس (Ubuntu 22.04 وDebian 12 أو أحدث). ولا يوجد تطبيق للهاتف.</p>
+          </details>
+          <details>
+            <summary>لماذا يظهر تحذير عند أول تشغيل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <p>لأن زاجِل غير موقع من Apple ولا Microsoft. وخطوات فتحه في <a class="inline-link" href="/download/#install">صفحة التحميل</a>، ومعها طريقة التأكد من الملف ببصمته.</p>
+          </details>
+          <details>
+            <summary>كيف أربط زاجِل بالمتصفح؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <p>ثبت زاجِل وشغله مرة واحدة، ثم ركب إضافته في Chrome أو Edge أو Firefox. بعدها تذهب التحميلات إلى زاجِل مباشرة، حسب أنواع الملفات التي تختارها. <a class="inline-link" href="/download/#install-extension">الخطوات</a>.</p>
+          </details>
+          <details>
+            <summary>هل يجمع زاجِل أي بيانات عني؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <p>لا. لا تتبع، ولا إحصاءات، ولا إعلانات. والتفاصيل في <a class="inline-link" href="/privacy/">سياسة الخصوصية</a>.</p>
+          </details>
         </div>
       </div>
     </section>

@@ -1,134 +1,187 @@
 <!--
-title: نزّل زاجِل لويندوز وماك ولينكس
-description: نزّل زاجِل لإدارة التحميل مجانًا لويندوز وماك ولينكس، ومعه إضافة المتصفح لـ Chrome وEdge وFirefox، وخطوات فتحه أول مرة لأنه غير موقَّع من Apple ولا Microsoft.
+title: تحميل زاجِل لويندوز وماك ولينكس
+description: حمل زاجِل لإدارة التحميل مجاناً لويندوز وماك ولينكس، ومعه إضافة المتصفح لـ Chrome وEdge وFirefox، وخطوات فتحه أول مرة لأنه غير موقع من Apple ولا Microsoft.
 nav: download
 script: download
 -->
-  <main id="main">
-    <section class="page-head">
-      <div class="wrap">
-        <h1>نزّل زاجِل</h1>
-        <p class="lead">مجاني لكل الأنظمة، بلا حساب ولا إعلانات. <span class="release-line" data-release>الملفات على <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">صفحة آخر إصدار على GitHub</a>.</span></p>
+  <main id="main" tabindex="-1">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="hero__sky" aria-hidden="true"><div class="lanes" data-lanes></div></div>
+      <div class="wrap page-hero__inner">
+        <p class="hero__kicker">مجاني لكل الأنظمة، بلا حساب ولا إعلانات</p>
+        <h1 class="page-hero__title" id="page-title">احصل على زاجِل</h1>
+        <p class="lead"><span class="release-line" data-release>الملفات في <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">صفحة آخر إصدار على GitHub</a>.</span></p>
       </div>
     </section>
 
-    <section class="section" aria-labelledby="apps-title">
+    <section class="page-section" aria-labelledby="apps-title">
       <div class="wrap">
-        <h2 id="apps-title">البرنامج</h2>
-        <div class="downloads">
-          <article class="dl" data-os="windows">
-            <span class="yours">لنظامك</span>
-            <h3>ويندوز</h3>
-            <p>ويندوز 10 و11 (x64). يُثبَّت للمستخدم الحالي، بلا صلاحيات مدير.</p>
-            <div class="files">
-              <a class="btn btn-primary" data-asset="windows" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل لويندوز <small data-name>.exe</small></a>
-            </div>
-          </article>
-          <article class="dl" data-os="mac">
-            <span class="yours">لنظامك</span>
-            <h3>ماك</h3>
+        <div class="section-head">
+          <h2 class="h2" id="apps-title">البرنامج</h2>
+          <p class="lead">اختر نظامك. والبرنامج كامل في كل ملف، ولا يحتاج إلى أي تنزيل آخر إلا أدوات الفيديو، وهي تنزل بموافقتك عند أول فيديو.</p>
+        </div>
+        <ul class="os-list">
+          <li class="os" data-os="windows">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-win"/></svg>
+            <h3 class="h3">ويندوز</h3>
+            <p>ويندوز 10 و11 (x64). يثبت للمستخدم الحالي، بلا صلاحيات مدير.</p>
+            <span class="os__badge" hidden>جهازك</span>
+            <a class="btn btn--primary" data-asset="windows" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل لويندوز</span>
+              <small class="btn__file" data-name>.exe</small>
+            </a>
+          </li>
+          <li class="os" data-os="mac">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3 class="h3">ماك</h3>
             <p>macOS 11 أو أحدث. ملف واحد لأجهزة Apple Silicon وIntel.</p>
-            <div class="files">
-              <a class="btn btn-primary" data-asset="mac" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل لماك <small data-name>.dmg</small></a>
+            <span class="os__badge" hidden>جهازك</span>
+            <a class="btn btn--primary" data-asset="mac" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل لماك</span>
+              <small class="btn__file" data-name>.dmg</small>
+            </a>
+          </li>
+          <li class="os" data-os="linux">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-terminal"/></svg>
+            <h3 class="h3">لينكس</h3>
+            <p>x64. ملف deb لـ Ubuntu 22.04 وDebian 12 أو أحدث، أو AppImage يعمل بلا تثبيت.</p>
+            <span class="os__badge" hidden>جهازك</span>
+            <div class="os__files">
+              <a class="btn btn--primary" data-asset="deb" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+                <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>تحميل ملف deb</span>
+                <small class="btn__file" data-name>.deb</small>
+              </a>
+              <a class="btn btn--outline" data-asset="appimage" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+                <span class="os__label">AppImage بلا تثبيت</span>
+                <small class="btn__file" data-name>.AppImage</small>
+              </a>
             </div>
-          </article>
-          <article class="dl" data-os="linux">
-            <span class="yours">لنظامك</span>
-            <h3>لينكس</h3>
-            <p>x64. ملف <code>.deb</code> لـ Ubuntu 22.04 وDebian 12 أو أحدث، أو AppImage يعمل بلا تثبيت.</p>
-            <div class="files">
-              <a class="btn btn-primary" data-asset="deb" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل ‎.deb <small data-name>.deb</small></a>
-              <a class="btn" data-asset="appimage" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل AppImage <small data-name>.AppImage</small></a>
-            </div>
-          </article>
-        </div>
-        <div class="notice" role="note">
-          <p><strong>زاجِل غير موقَّع من Apple ولا Microsoft،</strong> فيظهر تحذير حين تفتحه أول مرة. هذا متوقع، وخطوات فتحه في <a href="#install">«التثبيت»</a> أسفل هذه الصفحة.</p>
+          </li>
+        </ul>
+        <div class="notice">
+          <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+          <p><strong>زاجِل غير موقع من Apple ولا Microsoft،</strong> فيظهر تحذير حين تفتحه أول مرة. هذا متوقع، وخطوات فتحه في <a href="#install">«التثبيت»</a> أسفل هذه الصفحة.</p>
         </div>
       </div>
     </section>
 
-    <section class="section" aria-labelledby="ext-title">
+    <section class="page-section page-section--alt" id="extension" aria-labelledby="ext-title">
       <div class="wrap">
-        <h2 id="ext-title">إضافة المتصفح</h2>
-        <p>ثبّت البرنامج أولًا وشغّله مرة واحدة، ثم ثبّت الإضافة. الإضافة لا تحمّل شيئًا وحدها: تعطي التحميلات للبرنامج على جهازك. وحتى تُنشر في متاجر المتصفحات، تُركَّب يدويًا (<a href="#install-extension">الخطوات</a>).</p>
-        <div class="downloads">
-          <article class="dl">
-            <h3>Chrome وEdge</h3>
-            <p>Chrome أو Edge، الإصدار 116 أو أحدث.</p>
-            <div class="files">
-              <a class="btn" data-asset="chrome" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل الإضافة <small data-name>.zip</small></a>
-            </div>
-          </article>
-          <article class="dl">
-            <h3>Firefox</h3>
-            <p>Firefox 142 أو أحدث. للتجربة حتى تجهز النسخة الموقَّعة من Mozilla.</p>
-            <div class="files">
-              <a class="btn" data-asset="firefox" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">نزّل الإضافة <small data-name>.zip</small></a>
-            </div>
-          </article>
+        <div class="section-head">
+          <h2 class="h2" id="ext-title">إضافة المتصفح</h2>
+          <p class="lead">ثبت البرنامج أولاً وشغله مرة واحدة، ثم ركب الإضافة. والإضافة لا تحمل شيئاً وحدها: تعطي التحميلات للبرنامج على جهازك. وحتى تنشر في متاجر المتصفحات، تركب يدوياً (<a href="#install-extension">الخطوات</a>).</p>
         </div>
-        <p class="note">كل ملفات الإصدار، ومعها ملف البصمات <code>SHA256SUMS</code>، في <a data-asset="page" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">صفحة الإصدار على GitHub</a>.</p>
+        <ul class="os-list os-list--two">
+          <li class="os">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-puzzle"/></svg>
+            <h3 class="h3">Chrome وEdge</h3>
+            <p>الإصدار 116 أو أحدث.</p>
+            <a class="btn btn--outline" data-asset="chrome" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label">تحميل الإضافة</span>
+              <small class="btn__file" data-name>.zip</small>
+            </a>
+          </li>
+          <li class="os">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-puzzle"/></svg>
+            <h3 class="h3">Firefox</h3>
+            <p>الإصدار 142 أو أحدث. للتجربة، حتى تجهز النسخة الموقعة من Mozilla.</p>
+            <a class="btn btn--outline" data-asset="firefox" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">
+              <span class="os__label">تحميل الإضافة</span>
+              <small class="btn__file" data-name>.zip</small>
+            </a>
+          </li>
+        </ul>
+        <p class="os-more">كل ملفات الإصدار، ومعها ملف البصمات <code>SHA256SUMS</code>، في <a data-asset="page" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">صفحة الإصدار على GitHub</a>.</p>
       </div>
     </section>
 
-    <section class="section" id="install" aria-labelledby="install-title">
-      <div class="wrap prose">
-        <h2 id="install-title">التثبيت</h2>
-        <p>زاجِل مشروع مجاني ومفتوح المصدر، <strong>ولن يُوقَّع من Apple ولا Microsoft</strong>. والذي يثبت أن الملف ملفنا: بصمات <code>SHA256SUMS</code> المنشورة مع كل إصدار، والكود كله على GitHub، والمثبّتات تُبنى آليًا على GitHub فقط. لذلك يظهر تحذير أول مرة تفتحه، وهذه طريقة تجاوزه.</p>
-
-        <h3 id="install-windows">ويندوز: SmartScreen</h3>
-        <ol>
-          <li>قد ينبّهك المتصفح أولًا بأن الملف لا يُنزَّل كثيرًا: اختر <strong>Keep</strong>. وفي Edge: <strong>…</strong> ← <strong>Keep</strong> ← <strong>Show more</strong> ← <strong>Keep anyway</strong>.</li>
-          <li>شغّل المثبّت. حين تظهر رسالة «Windows protected your PC»، اضغط <strong>More info</strong> (مزيد من المعلومات)، ثم <strong>Run anyway</strong> (تشغيل على أي حال).</li>
-        </ol>
-        <p><strong>ويندوز 11، Smart App Control:</strong> حين يكون مفعّلًا، يمنع ويندوز البرامج غير الموقَّعة بلا زر للتخطي ولا استثناء لبرنامج واحد. فلتشغيل زاجِل يجب إطفاؤه:</p>
-        <ol>
-          <li>افتح <strong>Windows Security</strong> (أمان Windows) ← <strong>App &amp; browser control</strong> (التحكم في التطبيقات والمستعرضات) ← <strong>Smart App Control settings</strong> (إعدادات التحكم الذكي في التطبيقات).</li>
-          <li>اختر <strong>Off</strong> (إيقاف).</li>
-          <li>انتبه: في بعض إصدارات ويندوز 11 لا يمكن تشغيله مرة أخرى بعد إطفائه إلا بإعادة تثبيت ويندوز. اقرأ رسالة ويندوز قبل أن تؤكد، والقرار لك.</li>
-        </ol>
-
-        <h3 id="install-mac">ماك: Gatekeeper</h3>
-        <ol>
-          <li>افتح ملف <code>.dmg</code> واسحب Zajil إلى مجلد Applications.</li>
-          <li>افتح Zajil. تظهر رسالة بأن ماك لا يستطيع التحقق منه: اضغط <strong>Done</strong> (أو <strong>OK</strong>).</li>
-          <li>افتح <strong>System Settings</strong> (إعدادات النظام) ← <strong>Privacy &amp; Security</strong> (الخصوصية والأمان)، وانزل إلى قسم Security، واضغط <strong>Open Anyway</strong> (فتح على أي حال) بجانب رسالة Zajil، ثم أكّد بكلمة مرور الجهاز. يبقى هذا الزر نحو ساعة بعد الخطوة السابقة.</li>
-          <li>إن سأل ماك مرة أخرى، اضغط <strong>Open Anyway</strong>. بعد ذلك يفتح زاجِل عاديًا.</li>
-        </ol>
-
-        <h3 id="install-linux">لينكس</h3>
-        <p>ملف <code>.deb</code>، من المجلد الذي نزّلته فيه:</p>
-        <pre><code>sudo apt install ./Zajil_*_amd64.deb</code></pre>
-        <p>أو ملف AppImage، بلا تثبيت:</p>
-        <pre><code>chmod +x Zajil_*_amd64.AppImage
+    <section class="page-section" id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="install-title">التثبيت</h2>
+          <p class="lead">زاجِل مشروع مجاني ومفتوح المصدر، ولن يوقع من Apple ولا Microsoft. والذي يثبت أن الملف ملفنا: بصمات <code>SHA256SUMS</code> المنشورة مع كل إصدار، والكود كله على GitHub، والمثبتات تبنى تلقائياً على GitHub فقط. لذلك يظهر تحذير أول مرة، وهذه طريقة تجاوزه.</p>
+        </div>
+        <div class="steps">
+          <article class="step-card" id="install-windows">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-win"/></svg>
+            <h3 class="h3">ويندوز: SmartScreen</h3>
+            <ol>
+              <li>قد ينبهك المتصفح أولاً بأن الملف لا ينزل كثيراً: اختر <strong>Keep</strong>. وفي Edge: <strong>…</strong> ← <strong>Keep</strong> ← <strong>Show more</strong> ← <strong>Keep anyway</strong>.</li>
+              <li>شغل المثبت. حين تظهر رسالة «<bdi>Windows protected your PC</bdi>»، اضغط <strong>More info</strong> (مزيد من المعلومات)، ثم <strong>Run anyway</strong> (تشغيل على أي حال).</li>
+            </ol>
+            <div class="step-card__sub">
+              <p><strong>ويندوز 11، Smart App Control:</strong> حين يكون مفعلاً، يمنع ويندوز البرامج غير الموقعة بلا زر للتخطي. فلتشغيل زاجِل يجب إطفاؤه:</p>
+            </div>
+            <ol>
+              <li>افتح <strong>Windows Security</strong> (أمان Windows) ← <strong>App &amp; browser control</strong> ← <strong>Smart App Control settings</strong>.</li>
+              <li>اختر <strong>Off</strong> (إيقاف).</li>
+              <li>انتبه: في بعض إصدارات ويندوز 11 لا يمكن تشغيله مرة أخرى إلا بإعادة تثبيت ويندوز. اقرأ رسالة ويندوز قبل أن تؤكد، والقرار لك.</li>
+            </ol>
+          </article>
+          <article class="step-card" id="install-mac">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3 class="h3">ماك: Gatekeeper</h3>
+            <ol>
+              <li>افتح ملف dmg واسحب Zajil إلى مجلد Applications.</li>
+              <li>افتح Zajil. تظهر رسالة بأن ماك لا يستطيع التحقق منه: اضغط <strong>Done</strong> (أو <strong>OK</strong>).</li>
+              <li>افتح <strong>System Settings</strong> (إعدادات النظام) ← <strong>Privacy &amp; Security</strong> (الخصوصية والأمان)، وانزل إلى قسم Security، واضغط <strong>Open Anyway</strong> (فتح على أي حال) بجانب رسالة Zajil، ثم أكد بكلمة مرور الجهاز. يبقى الزر نحو ساعة بعد الخطوة السابقة.</li>
+              <li>إن سأل ماك مرة أخرى، اضغط <strong>Open Anyway</strong>. بعد ذلك يفتح زاجِل عادياً.</li>
+            </ol>
+          </article>
+          <article class="step-card" id="install-linux">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-terminal"/></svg>
+            <h3 class="h3">لينكس</h3>
+            <p>ملف deb، من المجلد الذي نزلته فيه:</p>
+            <pre><code>sudo apt install ./Zajil_*_amd64.deb</code></pre>
+            <p>أو ملف AppImage، بلا تثبيت:</p>
+            <pre><code>chmod +x Zajil_*_amd64.AppImage
 ./Zajil_*_amd64.AppImage</code></pre>
+          </article>
+        </div>
+      </div>
+    </section>
 
-        <h3 id="install-extension">تركيب إضافة المتصفح</h3>
-        <p>ثبّت زاجِل وشغّله مرة واحدة أولًا: هو الذي يسجّل نفسه عند المتصفحات. وإن لم تصل الإضافة إليه، فافتح في زاجِل الإعدادات ← «المتصفح» ← «أصلح التكامل مع المتصفح».</p>
-        <p><strong>Chrome وEdge</strong> (حتى تُنشر في المتاجر):</p>
-        <ol>
-          <li>فك ضغط ملف الإضافة في مجلد دائم، ولا تحذفه بعد التركيب.</li>
-          <li>افتح <code>chrome://extensions</code> (أو <code>edge://extensions</code> في Edge)، وفعّل <strong>Developer mode</strong> (وضع المطوّر).</li>
-          <li>اضغط <strong>Load unpacked</strong> (تحميل غير مُحزَّم) واختر المجلد الذي فككته.</li>
-          <li>معرّف الإضافة يجب أن يكون <code>nbgfmhkjbkmldddelnepobieoehecmif</code>. زاجِل لا يقبل غيره.</li>
-        </ol>
-        <p><strong>Firefox:</strong> يحتاج Firefox إضافة موقَّعة من Mozilla، وسننشر رابطها هنا حين تجهز. وللتجربة قبل ذلك: افتح <code>about:debugging#/runtime/this-firefox</code>، واضغط <strong>Load Temporary Add-on</strong>، واختر ملف <code>manifest.json</code> من داخل ملف الإضافة بعد فك ضغطه. تبقى الإضافة حتى تغلق Firefox فقط.</p>
-        <p><strong>على لينكس:</strong> المتصفحات المثبّتة بـ Flatpak، وChromium من snap، لا تشغّل برنامجًا خارج عزلها، فلا تصل الإضافة منها إلى زاجِل.</p>
+    <section class="page-section page-section--alt" id="install-extension" aria-labelledby="install-ext-title">
+      <div class="wrap split">
+        <h2 class="h2" id="install-ext-title">تركيب إضافة المتصفح</h2>
+        <div class="doc">
+          <p>ثبت زاجِل وشغله مرة واحدة أولاً: هو الذي يسجل نفسه عند المتصفحات. وإن لم تصل الإضافة إليه، فافتح في زاجِل الإعدادات ← «المتصفح» ← «أصلح التكامل مع المتصفح».</p>
+          <h3>Chrome وEdge (حتى تنشر في المتاجر)</h3>
+          <ol>
+            <li>فك ضغط ملف الإضافة في مجلد دائم، ولا تحذفه بعد التركيب.</li>
+            <li>افتح <code>chrome://extensions</code> (أو <code>edge://extensions</code> في Edge)، وفعل <strong>Developer mode</strong> (وضع المطور).</li>
+            <li>اضغط <strong>Load unpacked</strong> (تحميل غير محزم) واختر المجلد الذي فككته.</li>
+            <li>معرف الإضافة يجب أن يكون <code>nbgfmhkjbkmldddelnepobieoehecmif</code>. زاجِل لا يقبل غيره.</li>
+          </ol>
+          <h3>Firefox</h3>
+          <p>يحتاج Firefox إضافة موقعة من Mozilla، وسننشر رابطها هنا حين تجهز. وللتجربة قبل ذلك: افتح <code>about:debugging#/runtime/this-firefox</code>، واضغط <strong>Load Temporary Add-on</strong>، واختر ملف <code>manifest.json</code> من داخل ملف الإضافة بعد فك ضغطه. وتبقى الإضافة حتى تغلق Firefox فقط.</p>
+          <h3>على لينكس</h3>
+          <p>المتصفحات المثبتة بـ Flatpak، وChromium من snap، لا تشغل برنامجاً خارج عزلها، فلا تصل الإضافة منها إلى زاجِل.</p>
+        </div>
+      </div>
+    </section>
 
-        <h3 id="verify">التأكد من الملفات</h3>
-        <p>نزّل <code>SHA256SUMS</code> من صفحة الإصدار في نفس مجلد الملفات، ثم شغّل في ذلك المجلد:</p>
-        <p>ماك:</p>
-        <pre><code>shasum -a 256 -c SHA256SUMS --ignore-missing</code></pre>
-        <p>لينكس:</p>
-        <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
-        <p>ويندوز (PowerShell):</p>
-        <pre><code>$f = Get-Item .\Zajil_*_x64-setup.exe
+    <section class="page-section" id="verify" aria-labelledby="verify-title">
+      <div class="wrap split">
+        <h2 class="h2" id="verify-title">التأكد من الملفات</h2>
+        <div class="doc">
+          <p>نزل <code>SHA256SUMS</code> من صفحة الإصدار في نفس مجلد الملفات، ثم شغل في ذلك المجلد:</p>
+          <div class="verify">
+            <p class="verify__os">ماك</p>
+            <pre><code>shasum -a 256 -c SHA256SUMS --ignore-missing</code></pre>
+            <p class="verify__os">لينكس</p>
+            <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+            <p class="verify__os">ويندوز (PowerShell)</p>
+            <pre><code>$f = Get-Item .\Zajil_*_x64-setup.exe
 (Get-FileHash $f).Hash -eq (Select-String -SimpleMatch $f.Name .\SHA256SUMS).Line.Split(' ')[0]</code></pre>
-        <p>في ماك ولينكس يجب أن ينتهي كل سطر بـ <code>OK</code>، وفي ويندوز يجب أن يطبع الأمر <code>True</code>. وإن لم يحدث ذلك، <strong>فلا تشغّل الملف</strong>، وأخبرنا في <a href="https://github.com/motalim-ai/zajil-download-manager/issues">GitHub</a>.</p>
-
-        <div class="notice" role="note">
-          <p><strong>نزّل زاجِل من هنا أو من <a href="https://github.com/motalim-ai/zajil-download-manager/releases">صفحة إصداراته على GitHub</a> فقط.</strong> هذان مصدراه الرسميان الوحيدان، وكل نسخة من مكان آخر ليست منا.</p>
+          </div>
+          <p>في ماك ولينكس يجب أن ينتهي كل سطر بـ <code>OK</code>، وفي ويندوز يجب أن يطبع الأمر <code>True</code>. وإن لم يحدث ذلك، <strong>فلا تشغل الملف</strong>، وأخبرنا في <a href="https://github.com/motalim-ai/zajil-download-manager/issues">GitHub</a>.</p>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="notice notice--warn" role="note">
+          <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <p><strong>حمل زاجِل من هنا أو من <a href="https://github.com/motalim-ai/zajil-download-manager/releases">صفحة إصداراته على GitHub</a> فقط.</strong> هذان مصدراه الرسميان الوحيدان، وكل نسخة من مكان آخر ليست منا.</p>
         </div>
       </div>
     </section>

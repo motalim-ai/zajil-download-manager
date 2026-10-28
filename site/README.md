@@ -2,7 +2,7 @@
 
 # موقع زاجِل
 
-الموقع العام لزاجِل، على `https://zajil.by-wow.com`. صفحات ثابتة فقط: HTML وCSS، وسكربت صغير واحد لأزرار التحميل. بلا مكتبات من npm، وبلا خطوط من الخارج، وبلا تتبع ولا إحصاءات.
+الموقع العام لزاجِل، على `https://zajil.by-wow.com`. صفحات ثابتة فقط: HTML وCSS، وسكربتات صغيرة بلا مكتبات. بلا مكتبات من npm، وخطوطه محفوظة فيه، وبلا تتبع ولا إحصاءات.
 
 - العربية هي الصفحة الأساسية (`/`)، والإنجليزية تحت `/en/`. ولكل صفحة عربية صفحة إنجليزية بنفس المسار.
 - الصفحات: الرئيسية (ومعها الصور)، والتحميل (ومعه خطوات التثبيت والتأكد من الملفات)، والأسئلة الشائعة، وسياسة الخصوصية.
@@ -12,7 +12,11 @@
 | الملف | ما هو |
 |---|---|
 | `src/pages/` | محتوى كل صفحة (`<main>` فقط)، وفوقه العنوان والوصف في تعليق |
+| `src/icons.svg` | الأيقونات، ويضعها البناء في كل صفحة |
 | `src/assets/site.css` | التنسيق كله، للاتجاهين وللوضع الفاتح والداكن |
+| `src/assets/fonts.css` و`src/assets/fonts/` | خطا Alexandria وIBM Plex Sans Arabic (OFL-1.1)، ونص ترخيصهما `OFL.txt` |
+| `src/assets/theme.js` | يضع الوضع الفاتح أو الداكن المحفوظ قبل أن تظهر الصفحة |
+| `src/assets/main.js` | زر الوضع، وقائمة الهاتف، وتبويبات الصور، ومحاكاة التحميل بالأجزاء |
 | `src/assets/download.js` | يضع رابط كل ملف في زره (انظر أدناه) |
 | `src/_headers` | ترويسات الأمان في Cloudflare Pages، ومنها Content-Security-Policy |
 | `build.mjs` | يلف كل صفحة بالقالب (الرأس والقائمة والتذييل) ويكتب الموقع في `dist/` |
@@ -65,7 +69,7 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory site/dist
 
 ## English summary
 
-Zajil's public site, for `https://zajil.by-wow.com`: static HTML and CSS, one small script for the download buttons, no npm packages, no outside fonts, no tracking. Arabic is at `/`, English under `/en/`.
+Zajil's public site, for `https://zajil.by-wow.com`: static HTML and CSS, a few small scripts, no npm packages, no tracking. Arabic is at `/`, English under `/en/`. Fonts (Alexandria, IBM Plex Sans Arabic, OFL-1.1) are kept in the site.
 
 - `node site/check.mjs` builds into `site/dist` and checks every internal link and anchor, twin pages, and that nothing loads from outside or inline.
 - The download buttons link to `releases/latest` and, if GitHub's API answers, straight to each file (the asset names carry the version, so `releases/latest/download/<name>` cannot be written ahead).

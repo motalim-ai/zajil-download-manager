@@ -1,122 +1,117 @@
 <!--
-title: الأسئلة الشائعة عن زاجِل
-description: أجوبة عن أكثر ما يُسأل عنه في زاجِل لإدارة التحميل: السعر، والتحذير عند فتحه أول مرة، والفيديو، وإضافة المتصفح، والتحديث، والإزالة.
+title: أسئلة شائعة عن زاجِل
+description: أجوبة عن أكثر ما يسأل عنه في زاجِل لإدارة التحميل: السعر، والتحذير عند فتحه أول مرة، والفيديو، وإضافة المتصفح، والتحديث، والإزالة.
 nav: faq
 -->
-  <main id="main">
-    <section class="page-head">
-      <div class="wrap">
-        <h1>الأسئلة الشائعة</h1>
+
+  <main id="main" tabindex="-1">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="hero__sky" aria-hidden="true"><div class="lanes" data-lanes></div></div>
+      <div class="wrap page-hero__inner">
+        <p class="hero__kicker">قبل أن تبدأ</p>
+        <h1 class="page-hero__title" id="page-title">أسئلة شائعة</h1>
+        <p class="lead">أجوبة قصيرة عن السعر، والأنظمة، والتحذير عند أول تشغيل، والفيديو، والإضافة، والتحديث. وإن لم تجد سؤالك، اكتبه في <a href="https://github.com/motalim-ai/zajil-download-manager/issues">GitHub</a>.</p>
       </div>
     </section>
 
-    <section class="section faq">
-      <div class="wrap prose">
-        <details id="free">
-          <summary>هل زاجِل مجاني؟</summary>
-          <div>
-            <p>نعم، مجاني بالكامل ومفتوح المصدر بترخيص GPL-3.0-or-later. لا إعلانات، ولا ميزات مدفوعة، ولا حساب. والكود كله على <a href="https://github.com/motalim-ai/zajil-download-manager">GitHub</a>. فإن طلب منك أحد مالًا مقابل زاجِل، فالنسخة ليست منا.</p>
-          </div>
-        </details>
-
-        <details id="systems">
-          <summary>على أي الأنظمة يعمل؟</summary>
-          <div>
-            <p>ويندوز 10 و11 (x64)، وmacOS 11 أو أحدث (ملف واحد لأجهزة Apple Silicon وIntel)، ولينكس x64 (ملف <code>.deb</code> لـ Ubuntu 22.04 وDebian 12 أو أحدث، أو AppImage). والإضافة لـ Chrome وEdge (116 أو أحدث) وFirefox (142 أو أحدث).</p>
-            <p>ولا يوجد تطبيق لأندرويد ولا لآيفون.</p>
-          </div>
-        </details>
-
-        <details id="warning">
-          <summary>لماذا يظهر تحذير حين أفتحه أول مرة؟</summary>
-          <div>
-            <p>لأن زاجِل غير موقَّع من Apple ولا Microsoft. وهذا قرار مقصود: زاجِل مشروع مجاني ومفتوح المصدر، ولن يُوقَّع من الشركتين. والذي يثبت أن الملف ملفنا: بصمات <code>SHA256SUMS</code> المنشورة مع كل إصدار، والكود المنشور، والمثبّتات التي تُبنى آليًا على GitHub فقط.</p>
-            <p>خطوات فتحه في <a href="/download/#install">«التثبيت»</a>، وطريقة التأكد من الملف في <a href="/download/#verify">«التأكد من الملفات»</a>.</p>
-          </div>
-        </details>
-
-        <details id="official">
-          <summary>من أين أنزّل زاجِل بأمان؟</summary>
-          <div>
-            <p>من هذا الموقع، <code>zajil.by-wow.com</code>، أو من <a href="https://github.com/motalim-ai/zajil-download-manager/releases">صفحة الإصدارات على GitHub</a> فقط. هذان المصدران الرسميان الوحيدان. وكل نسخة من مكان آخر، أو تأتي مع برامج أخرى، ليست منا.</p>
-          </div>
-        </details>
-
-        <details id="speed">
-          <summary>كيف يحمّل أسرع؟</summary>
-          <div>
-            <p>يقسّم زاجِل الملف على عدة اتصالات، حتى 32 اتصالًا للملف الواحد، وحين يفرغ اتصال يقسم أبطأ جزء. والفرق الذي تراه يعتمد على السيرفر وعلى شبكتك: بعض السيرفرات تحدّ سرعة كل اتصال، فيفيد التقسيم كثيرًا، وبعضها لا يقبل التقسيم أصلًا، فيحمّل زاجِل باتصال واحد.</p>
-          </div>
-        </details>
-
-        <details id="resume">
-          <summary>ماذا يحدث إن انقطعت الشبكة أو أغلقت البرنامج؟</summary>
-          <div>
-            <p>يستكمل زاجِل التحميل من حيث توقف، ما دام السيرفر يقبل الاستكمال ولم يتغير الملف عليه. وإن انتهت صلاحية رابط التحميل، فاستعمل «تحديث الرابط» وضع الرابط الجديد للملف نفسه.</p>
-          </div>
-        </details>
-
-        <details id="video">
-          <summary>هل يحمّل فيديو يوتيوب وقوائم التشغيل؟</summary>
-          <div>
-            <p>نعم. تعرض نافذة «جودة الفيديو» الجودات المتاحة بحجمها، ومعها «صوت فقط»، وتحمّل قائمة التشغيل كلها أو ما تختاره منها. ويستعمل زاجِل لذلك أدوات مفتوحة المصدر (yt-dlp وFFmpeg وQuickJS-NG)، تُنزَّل من GitHub مرة واحدة حين تطلب أول فيديو، وبعد موافقتك فقط، ويتحقق زاجِل من بصمة كل منها قبل كل تشغيل.</p>
-            <p>أما الفيديو المحمي بـ DRM فلا يحمّله زاجِل، ويقول ذلك صراحة.</p>
-          </div>
-        </details>
-
-        <details id="extension">
-          <summary>الإضافة لا تصل إلى البرنامج. ماذا أفعل؟</summary>
-          <div>
-            <ul>
-              <li>شغّل زاجِل مرة واحدة على الأقل بعد تثبيته: هو الذي يسجّل نفسه عند المتصفحات.</li>
+    <section class="faq" aria-labelledby="faq-title">
+      <div class="wrap faq__grid">
+        <h2 class="h2" id="faq-title">الأسئلة</h2>
+        <div class="faq__list">
+          <details id="free">
+            <summary>هل زاجِل مجاني؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>نعم، مجاني بالكامل ومفتوح المصدر بترخيص GPL-3.0-or-later. لا إعلانات، ولا ميزات مدفوعة، ولا حساب. والكود كله على <a href="https://github.com/motalim-ai/zajil-download-manager">GitHub</a>. فإن طلب منك أحد مالاً مقابل زاجِل، فالنسخة ليست منا.</p>
+            </div>
+          </details>
+          <details id="systems">
+            <summary>على أي الأنظمة يعمل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>ويندوز 10 و11 (x64)، وmacOS 11 أو أحدث (ملف واحد لأجهزة Apple Silicon وIntel)، ولينكس x64 (ملف <code>.deb</code> لـ Ubuntu 22.04 وDebian 12 أو أحدث، أو AppImage). والإضافة لـ Chrome وEdge (116 أو أحدث) وFirefox (142 أو أحدث).</p>
+              <p>ولا يوجد تطبيق لأندرويد ولا لآيفون.</p>
+            </div>
+          </details>
+          <details id="warning">
+            <summary>لماذا يظهر تحذير حين أفتحه أول مرة؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>لأن زاجِل غير موقع من Apple ولا Microsoft. وهذا قرار مقصود: زاجِل مشروع مجاني ومفتوح المصدر، ولن يوقع من الشركتين. والذي يثبت أن الملف ملفنا: بصمات <code>SHA256SUMS</code> المنشورة مع كل إصدار، والكود المنشور، والمثبتات التي تبنى آلياً على GitHub فقط.</p>
+              <p>خطوات فتحه في <a href="/download/#install">«التثبيت»</a>، وطريقة التأكد من الملف في <a href="/download/#verify">«التأكد من الملفات»</a>.</p>
+            </div>
+          </details>
+          <details id="official">
+            <summary>من أين أنزل زاجِل بأمان؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>من هذا الموقع، <code>zajil.by-wow.com</code>، أو من <a href="https://github.com/motalim-ai/zajil-download-manager/releases">صفحة الإصدارات على GitHub</a> فقط. هذان المصدران الرسميان الوحيدان. وكل نسخة من مكان آخر، أو تأتي مع برامج أخرى، ليست منا.</p>
+            </div>
+          </details>
+          <details id="speed">
+            <summary>كيف يحمل أسرع؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>يقسم زاجِل الملف على عدة اتصالات، حتى 32 اتصالاً للملف الواحد، وحين يفرغ اتصال يقسم أبطأ جزء. والفرق الذي تراه يعتمد على السيرفر وعلى شبكتك: بعض السيرفرات تحد سرعة كل اتصال، فيفيد التقسيم كثيراً، وبعضها لا يقبل التقسيم أصلاً، فيحمل زاجِل باتصال واحد.</p>
+            </div>
+          </details>
+          <details id="resume">
+            <summary>ماذا يحدث إن انقطعت الشبكة أو أغلقت البرنامج؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>يستكمل زاجِل التحميل من حيث توقف، ما دام السيرفر يقبل الاستكمال ولم يتغير الملف عليه. وإن انتهت صلاحية رابط التحميل، فاستعمل «تحديث الرابط» وضع الرابط الجديد للملف نفسه.</p>
+            </div>
+          </details>
+          <details id="video">
+            <summary>هل يحمل فيديو يوتيوب وقوائم التشغيل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>نعم. تعرض نافذة «جودة الفيديو» الجودات المتاحة بحجمها، ومعها «صوت فقط»، وتحمل قائمة التشغيل كلها أو ما تختاره منها. ويستعمل زاجِل لذلك أدوات مفتوحة المصدر (yt-dlp وFFmpeg وQuickJS-NG)، تنزل من GitHub مرة واحدة حين تطلب أول فيديو، وبعد موافقتك فقط، ويتحقق زاجِل من بصمة كل منها قبل كل تشغيل.</p>
+              <p>أما الفيديو المحمي بـ DRM فلا يحمله زاجِل، ويقول ذلك صراحة.</p>
+            </div>
+          </details>
+          <details id="extension">
+            <summary>الإضافة لا تصل إلى البرنامج. ماذا أفعل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <ul>
+              <li>شغل زاجِل مرة واحدة على الأقل بعد تثبيته: هو الذي يسجل نفسه عند المتصفحات.</li>
               <li>من إعدادات زاجِل ← «المتصفح» ← «أصلح التكامل مع المتصفح».</li>
-              <li>في Chrome وEdge، تأكد أن معرّف الإضافة <code>nbgfmhkjbkmldddelnepobieoehecmif</code>.</li>
-              <li>على لينكس، المتصفحات المثبّتة بـ Flatpak، وChromium من snap، لا تصل منها الإضافة إلى زاجِل.</li>
-            </ul>
-          </div>
-        </details>
-
-        <details id="stores">
-          <summary>لماذا لا توجد الإضافة في متاجر المتصفحات؟</summary>
-          <div>
-            <p>لم تُنشر فيها بعد. وحتى ذلك الحين تُركَّب يدويًا من ملفها في صفحة الإصدار (<a href="/download/#install-extension">الخطوات</a>). وسننشر رابط كل متجر هنا حين تجهز.</p>
-          </div>
-        </details>
-
-        <details id="privacy">
-          <summary>هل يجمع زاجِل بياناتي؟</summary>
-          <div>
-            <p>لا. لا حساب، ولا تتبع، ولا إحصاءات، ولا تقارير أعطال تُرسل. لا يتصل زاجِل إلا بمواقع الملفات التي تحمّلها، وبـ GitHub ليعرف إن صدرت نسخة جديدة (ويمكن إيقافه)، ولتنزيل أدوات الفيديو بموافقتك. والتفاصيل في <a href="/privacy/">سياسة الخصوصية</a>.</p>
-          </div>
-        </details>
-
-        <details id="updates">
-          <summary>كيف أحدّث زاجِل؟</summary>
-          <div>
-            <p>في الإصدار 1.0، يقول لك زاجِل «توجد نسخة جديدة من زاجِل» مع رابط صفحة الإصدار، ولا ينزّل ولا يثبّت شيئًا وحده. نزّل المثبّت الجديد من <a href="/download/">صفحة التحميل</a> وثبّته فوق النسخة القديمة. ويمكنك إيقاف هذا الفحص من الإعدادات ← «التحديثات».</p>
-            <p>والتحديث التلقائي الموقَّع مخطط له في الإصدار 1.1، ولن يُثبَّت شيء إلا بعد موافقتك.</p>
-          </div>
-        </details>
-
-        <details id="uninstall">
-          <summary>كيف أزيل زاجِل؟</summary>
-          <div>
-            <p>إن فعّلت «شغّل زاجِل مع بدء النظام»، فأطفئه من الإعدادات أولًا. ثم:</p>
-            <ul>
+              <li>في Chrome وEdge، تأكد أن معرف الإضافة <code>nbgfmhkjbkmldddelnepobieoehecmif</code>.</li>
+              <li>على لينكس، المتصفحات المثبتة بـ Flatpak، وChromium من snap، لا تصل منها الإضافة إلى زاجِل.</li>
+              </ul>
+            </div>
+          </details>
+          <details id="stores">
+            <summary>لماذا لا توجد الإضافة في متاجر المتصفحات؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>لم تنشر فيها بعد. وحتى ذلك الحين تركب يدوياً من ملفها في صفحة الإصدار (<a href="/download/#install-extension">الخطوات</a>). وسننشر رابط كل متجر هنا حين تجهز.</p>
+            </div>
+          </details>
+          <details id="privacy">
+            <summary>هل يجمع زاجِل بياناتي؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>لا. لا حساب، ولا تتبع، ولا إحصاءات، ولا تقارير أعطال ترسل. لا يتصل زاجِل إلا بمواقع الملفات التي تحملها، وبـ GitHub ليعرف إن صدرت نسخة جديدة (ويمكن إيقافه)، ولتنزيل أدوات الفيديو بموافقتك. والتفاصيل في <a href="/privacy/">سياسة الخصوصية</a>.</p>
+            </div>
+          </details>
+          <details id="updates">
+            <summary>كيف أحدث زاجِل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>في الإصدار 1.0، يقول لك زاجِل «توجد نسخة جديدة من زاجِل» مع رابط صفحة الإصدار، ولا ينزل ولا يثبت شيئاً وحده. نزل المثبت الجديد من <a href="/download/">صفحة التحميل</a> وثبته فوق النسخة القديمة. ويمكنك إيقاف هذا الفحص من الإعدادات ← «التحديثات».</p>
+              <p>والتحديث التلقائي الموقع مخطط له في الإصدار 1.1، ولن يثبت شيء إلا بعد موافقتك.</p>
+            </div>
+          </details>
+          <details id="uninstall">
+            <summary>كيف أزيل زاجِل؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>إن فعلت «شغل زاجِل مع بدء النظام»، فأطفئه من الإعدادات أولاً. ثم:</p>
+              <ul>
               <li><strong>ويندوز:</strong> من «الإعدادات» ← «التطبيقات».</li>
               <li><strong>ماك:</strong> اسحب Zajil من Applications إلى سلة المهملات.</li>
               <li><strong>لينكس:</strong> <code>sudo apt remove zajil</code>، أو احذف ملف AppImage.</li>
-            </ul>
-            <p>وتبقى بيانات زاجِل وإعداداته على جهازك بعد الإزالة. وأماكنها على كل نظام في <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">ملاحظات الإصدار</a>، في قسم «الإزالة».</p>
-          </div>
-        </details>
-
-        <details id="help">
-          <summary>وجدت مشكلة، أو عندي اقتراح. أين أكتب؟</summary>
-          <div>
-            <p>في <a href="https://github.com/motalim-ai/zajil-download-manager/issues">Issues على GitHub</a>، بالعربية أو بالإنجليزية. أما الثغرات الأمنية فلا تكتبها هناك علنًا: استعمل <a href="https://github.com/motalim-ai/zajil-download-manager/security/advisories/new">الإبلاغ الخاص عن الثغرات</a>.</p>
-          </div>
-        </details>
+              </ul>
+              <p>وتبقى بيانات زاجِل وإعداداته على جهازك بعد الإزالة. وأماكنها على كل نظام في <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">ملاحظات الإصدار</a>، في قسم «الإزالة».</p>
+            </div>
+          </details>
+          <details id="help">
+            <summary>وجدت مشكلة، أو عندي اقتراح. أين أكتب؟<svg class="icon" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="faq__a">
+              <p>في <a href="https://github.com/motalim-ai/zajil-download-manager/issues">Issues على GitHub</a>، بالعربية أو بالإنجليزية. أما الثغرات الأمنية فلا تكتبها هناك علناً: استعمل <a href="https://github.com/motalim-ai/zajil-download-manager/security/advisories/new">الإبلاغ الخاص عن الثغرات</a>.</p>
+            </div>
+          </details>
+        </div>
       </div>
     </section>
   </main>

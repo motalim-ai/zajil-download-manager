@@ -39,21 +39,6 @@ const TEXT = {
   },
 }[lang];
 
-/** Marks the visitor's own system, as the browser tells it. */
-function markOwnSystem() {
-  const ua = navigator.userAgent;
-  const os = /Android|iPhone|iPad/.test(ua)
-    ? null
-    : /Windows/.test(ua)
-      ? "windows"
-      : /Mac/.test(ua)
-        ? "mac"
-        : /Linux|X11/.test(ua)
-          ? "linux"
-          : null;
-  if (os) document.querySelector(`.dl[data-os="${os}"]`)?.classList.add("is-yours");
-}
-
 async function latest() {
   const stop = new AbortController();
   const timer = setTimeout(() => stop.abort(), 8000);
@@ -75,7 +60,6 @@ async function latest() {
 }
 
 async function main() {
-  markOwnSystem();
   const release = await latest();
   if (!release || typeof release.tag_name !== "string" || !TAG.test(release.tag_name)) return;
   if (release.draft || !Array.isArray(release.assets)) return;

@@ -2,14 +2,16 @@
 title: Page not found: Zajil
 description: This page does not exist on Zajil's site.
 -->
-  <main id="main">
-    <section class="hero">
-      <div class="wrap">
-        <h1>Page not found</h1>
+  <main id="main" tabindex="-1">
+    <section class="page-hero lost" aria-labelledby="page-title">
+      <div class="hero__sky" aria-hidden="true"><div class="lanes" data-lanes></div></div>
+      <div class="wrap page-hero__inner">
+        <p class="hero__kicker">404</p>
+        <h1 class="page-hero__title" id="page-title">Page not found</h1>
         <p class="lead">Its address may have changed, or have a typo.</p>
-        <div class="actions">
-          <a class="btn btn-primary" href="/en/">Home</a>
-          <a class="btn" href="/en/download/">Download Zajil</a>
+        <div class="hero__actions">
+          <a class="btn btn--primary btn--lg" href="/en/">Home</a>
+          <a class="btn btn--ghost btn--lg" href="/en/download/">Get Zajil</a>
         </div>
       </div>
     </section>
