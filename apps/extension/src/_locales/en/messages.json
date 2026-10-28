@@ -147,7 +147,7 @@
     "message": "Zajil cannot read this page: it is not an http or https page."
   },
   "sitesVideo": {
-    "message": "Video: of a page, the extension learns only where its videos are and their addresses, and on YouTube where a playlist's title is. Playlist addresses stay in memory, for each tab, are forgotten when it closes or opens another page, and go to Zajil only when you press. The extension watches requests and never stops or changes them, and notes nothing from a private window."
+    "message": "Video: of a page, the extension learns only where its videos are and their addresses, and on YouTube where a playlist's title is. When the video button shows over a video, Zajil reads its page ahead: the page, the video's address (or the playlist the tab loaded for it) and the page's cookies go to Zajil then, once a page in ten minutes, and Zajil keeps what it read in memory only. Playlist addresses stay in memory, for each tab, and are forgotten when it closes or opens another page. The extension watches requests and never stops or changes them, notes nothing from a private window, and sends nothing from one before you press."
   },
   "videoButton": {
     "message": "Download video"
