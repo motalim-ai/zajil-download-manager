@@ -13,6 +13,8 @@
 //! (under Xvfb on Linux).
 
 use std::io::Read;
+#[cfg(windows)]
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -115,8 +117,7 @@ fn start_with(data: &Path, close_quits: bool) -> App {
 /// exited cleanly, sooner than its own 5 s limit: a close that only waited
 /// the limit out would pass otherwise (review of #45).
 fn close_cleanly(app: &mut App, how: Close, store: &QueueStore) {
-    let asked = Instant::now();
-    ask_to_close(&app.child, how);
+    let asked = ask_to_close(&app.child, how);
     let status = wait_exit(&mut app.child, Duration::from_secs(30));
     #[cfg(windows)]
     let exited = Instant::now();
@@ -232,8 +233,13 @@ enum Close {
     SessionEnd,
 }
 
-fn ask_to_close(child: &Child, how: Close) {
+/// Asks the app to close, and gives back when the request went out: the
+/// close is timed from there. For a session end, that is once PowerShell
+/// has started and compiled its sender, which on a busy runner took up to
+/// 12.3 s of a 12.4 s close (#258, #284) before any message reached Zajil.
+fn ask_to_close(child: &Child, how: Close) -> Instant {
     let pid = child.id().to_string();
+    let asked = Instant::now();
     let status = match how {
         #[cfg(unix)]
         Close::Ask => Command::new("kill").args(["-TERM", &pid]).status(),
@@ -244,10 +250,7 @@ fn ask_to_close(child: &Child, how: Close) {
         // window...), not only to the one `MainWindowHandle` picks
         // (review of #59).
         #[cfg(windows)]
-        Close::SessionEnd => {
-            send_session_end(child.id());
-            return;
-        }
+        Close::SessionEnd => return send_session_end(child.id()).0,
         #[cfg(target_os = "macos")]
         Close::Quit => Command::new("osascript")
             .args([
@@ -261,17 +264,24 @@ fn ask_to_close(child: &Child, how: Close) {
             .status(),
     };
     assert!(status.expect("the close request is sent").success());
+    asked
 }
 
 /// Sends the session end to every top-level window of process `pid`, as
 /// Windows does at a shutdown (see [`Close::SessionEnd`]), and gives back
-/// what it said: a line per window and message, with how long the window
-/// took to answer (#244).
+/// when the first message went out and what the sender said: a line per
+/// window and message, with how long the window took to answer (#244).
+///
+/// PowerShell compiles the sender first, says `ready`, and sends only when
+/// the test answers: its own start is then outside the time the test
+/// measures (#258).
 #[cfg(windows)]
-fn send_session_end(pid: u32) -> String {
-    let output = Command::new("powershell")
+fn send_session_end(pid: u32) -> (Instant, String) {
+    let started = Instant::now();
+    let mut sender = Command::new("powershell")
             .args([
                 "-NoProfile",
+                "-NonInteractive",
                 "-Command",
                 &format!(
                     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
@@ -294,16 +304,36 @@ fn send_session_end(pid: u32) -> String {
                          foreach (var h in all) Timed(\"WM_QUERYENDSESSION\", h, 0x11, IntPtr.Zero, 5000); \
                          foreach (var h in all) Timed(\"WM_ENDSESSION\", h, 0x16, (IntPtr)1, 10000); \
                          Console.WriteLine(\"session end sent to \" + all.Count + \" top-level windows\"); if (all.Count == 0) Environment.Exit(1); }} }}'; \
+                     [Console]::WriteLine('ready'); [void][Console]::In.ReadLine(); \
                      [ZajilSession]::Send({pid})"
                 ),
             ])
-            .output()
-            .expect("the session end is sent");
-    let said = String::from_utf8_lossy(&output.stdout).into_owned();
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("PowerShell starts");
+    let mut out = BufReader::new(sender.stdout.take().unwrap());
+    let mut line = String::new();
+    while line.trim_end() != "ready" {
+        line.clear();
+        let read = out.read_line(&mut line).expect("PowerShell's output");
+        assert!(read > 0, "PowerShell ended before its sender was ready");
+    }
+    println!(
+        "PowerShell's sender was ready after {:?}",
+        started.elapsed()
+    );
+    let sent = Instant::now();
+    // The answer, and the end of its input once dropped.
+    writeln!(sender.stdin.take().unwrap(), "go").expect("the sender is told to send");
+    let mut said = String::new();
+    out.read_to_string(&mut said).expect("PowerShell's output");
+    let output = sender.wait_with_output().expect("PowerShell ends");
     print!("{said}");
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
     assert!(output.status.success(), "the session end was not sent");
-    said
+    (sent, said)
 }
 
 fn wait_exit(child: &mut Child, within: Duration) -> ExitStatus {
@@ -498,8 +528,7 @@ fn session_end_with_download_complete_open_is_answered_at_once() {
     // «Download complete» opens beside the main window once it is done.
     std::thread::sleep(Duration::from_secs(3));
 
-    let asked = Instant::now();
-    let said = send_session_end(app.child.id());
+    let (asked, said) = send_session_end(app.child.id());
     let status = wait_exit(&mut app.child, Duration::from_secs(30));
     let took = asked.elapsed();
     println!("closing took {took:?}");
