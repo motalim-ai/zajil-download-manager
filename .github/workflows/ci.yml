@@ -582,6 +582,12 @@ jobs:
 
   extension:
     name: Browser extension
+    # TEMPORARY (to be reverted before merge): 6 fresh runners at once,
+    # each running the tests 5 times (#206, #230, #296).
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -603,7 +609,14 @@ jobs:
       - name: Types (checkJs)
         run: npm run check
       - name: Tests
-        run: npm test
+        run: |
+          pass=0; fail=0
+          for i in 1 2 3 4 5; do
+            if npm test > "$RUNNER_TEMP/ext-$i.log" 2>&1; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "run $i FAILED"; grep -aE "FAIL|timed out|AssertionError" "$RUNNER_TEMP/ext-$i.log" | head -20; fi
+            grep -aE "\[warm-up\]|browser started in|Test Files" "$RUNNER_TEMP/ext-$i.log" | sed "s/^/run $i: /" || true
+          done
+          echo "extension tests on copy ${{ matrix.copy }}: $pass passed, $fail failed, of 5"
+          [ "$fail" = 0 ]
       - name: Build (Chrome and Edge, Firefox)
         run: npm run build
       # addons-linter is the linter `web-ext lint` runs, and AMO's.
@@ -612,7 +625,7 @@ jobs:
       - name: Upload the built extension
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: zajil-extension
+          name: zajil-extension-${{ matrix.copy }}
           path: apps/extension/dist
           if-no-files-found: error
 
