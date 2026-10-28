@@ -1,0 +1,122 @@
+<!--
+title: Zajil FAQ
+description: Answers to what people ask most about Zajil Download Manager: the price, the warning the first time it opens, videos, the browser extension, updates and uninstalling.
+nav: faq
+-->
+  <main id="main">
+    <section class="page-head">
+      <div class="wrap">
+        <h1>Frequently asked questions</h1>
+      </div>
+    </section>
+
+    <section class="section faq">
+      <div class="wrap prose">
+        <details id="free">
+          <summary>Is Zajil free?</summary>
+          <div>
+            <p>Yes, completely free and open source, under GPL-3.0-or-later. No ads, no paid features, no account. All the code is on <a href="https://github.com/motalim-ai/zajil-download-manager">GitHub</a>. If anyone asks you for money for Zajil, the copy is not ours.</p>
+          </div>
+        </details>
+
+        <details id="systems">
+          <summary>Which systems does it run on?</summary>
+          <div>
+            <p>Windows 10 and 11 (x64), macOS 11 or later (one file for Apple Silicon and Intel), and Linux x64 (a <code>.deb</code> for Ubuntu 22.04, Debian 12 or later, or an AppImage). The extension is for Chrome and Edge (116 or later) and Firefox (142 or later).</p>
+            <p>There is no app for Android or iPhone.</p>
+          </div>
+        </details>
+
+        <details id="warning">
+          <summary>Why does a warning show the first time I open it?</summary>
+          <div>
+            <p>Because Zajil is not signed by Apple or Microsoft. That is on purpose: Zajil is a free and open-source project, and will not be signed by either. What shows a file is ours: the <code>SHA256SUMS</code> checksums published with each release, the published code, and installers built automatically on GitHub only.</p>
+            <p>How to open it is under <a href="/en/download/#install">“Install”</a>, and how to check the file under <a href="/en/download/#verify">“Checking the files”</a>.</p>
+          </div>
+        </details>
+
+        <details id="official">
+          <summary>Where can I download Zajil safely?</summary>
+          <div>
+            <p>From this site, <code>zajil.by-wow.com</code>, or from <a href="https://github.com/motalim-ai/zajil-download-manager/releases">the releases page on GitHub</a>, only. These are the only official sources. Any copy from elsewhere, or bundled with other programs, is not ours.</p>
+          </div>
+        </details>
+
+        <details id="speed">
+          <summary>How does it download faster?</summary>
+          <div>
+            <p>Zajil splits a file over several connections, up to 32 for one file, and when a connection is free it splits the slowest part. How much faster depends on the server and your network: some servers limit the speed of each connection, where splitting helps a lot, and some do not accept splitting at all, where Zajil downloads over one connection.</p>
+          </div>
+        </details>
+
+        <details id="resume">
+          <summary>What happens if the network drops or I close the program?</summary>
+          <div>
+            <p>Zajil goes on from where it stopped, as long as the server accepts resuming and the file has not changed on it. If the download link has expired, use “Refresh link” and give it a new link to the same file.</p>
+          </div>
+        </details>
+
+        <details id="video">
+          <summary>Does it download YouTube videos and playlists?</summary>
+          <div>
+            <p>Yes. The “Video quality” window shows the qualities there are, each with its size, and “Sound only”, and downloads a whole playlist or the videos you pick from it. For this Zajil uses open-source tools (yt-dlp, FFmpeg and QuickJS-NG), downloaded from GitHub once, when you ask for your first video and only after you agree. Zajil checks each one's checksum before every run.</p>
+            <p>Videos protected by DRM are not downloaded, and Zajil says so plainly.</p>
+          </div>
+        </details>
+
+        <details id="extension">
+          <summary>The extension cannot reach the program. What do I do?</summary>
+          <div>
+            <ul>
+              <li>Start Zajil at least once after installing it: it is Zajil that registers itself with the browsers.</li>
+              <li>In Zajil's Settings → “Browser” → “Fix the browser integration”.</li>
+              <li>In Chrome and Edge, make sure the extension's ID is <code>nbgfmhkjbkmldddelnepobieoehecmif</code>.</li>
+              <li>On Linux, from browsers installed with Flatpak, or Chromium from snap, the extension cannot reach Zajil.</li>
+            </ul>
+          </div>
+        </details>
+
+        <details id="stores">
+          <summary>Why is the extension not in the browsers' stores?</summary>
+          <div>
+            <p>It has not been published there yet. Until then it is added by hand from its file on the release page (<a href="/en/download/#install-extension">the steps</a>). We will put each store's link here when it is ready.</p>
+          </div>
+        </details>
+
+        <details id="privacy">
+          <summary>Does Zajil collect my data?</summary>
+          <div>
+            <p>No. No account, no tracking, no analytics, no crash reports sent. Zajil connects only to the sites of the files you download, to GitHub to learn of a new version (it can be turned off), and to download the video tools once you agree. The details are in the <a href="/en/privacy/">privacy policy</a>.</p>
+          </div>
+        </details>
+
+        <details id="updates">
+          <summary>How do I update Zajil?</summary>
+          <div>
+            <p>In version 1.0, Zajil tells you “A new version of Zajil is available” with a link to the release page, and downloads and installs nothing by itself. Download the new installer from the <a href="/en/download/">download page</a> and install it over the old version. You can turn this check off in Settings → “Updates”.</p>
+            <p>Signed automatic updates are planned for version 1.1, and nothing will be installed without your OK.</p>
+          </div>
+        </details>
+
+        <details id="uninstall">
+          <summary>How do I uninstall Zajil?</summary>
+          <div>
+            <p>If you turned on “Start Zajil with the computer”, turn it off in Settings first. Then:</p>
+            <ul>
+              <li><strong>Windows:</strong> Settings → Apps.</li>
+              <li><strong>macOS:</strong> drag Zajil from Applications to the Trash.</li>
+              <li><strong>Linux:</strong> <code>sudo apt remove zajil</code>, or delete the AppImage.</li>
+            </ul>
+            <p>Zajil's data and settings stay on your computer after that. Where they are on each system is in <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">the release notes</a>, under “Uninstalling”.</p>
+          </div>
+        </details>
+
+        <details id="help">
+          <summary>I found a problem, or have an idea. Where do I write?</summary>
+          <div>
+            <p>In <a href="https://github.com/motalim-ai/zajil-download-manager/issues">Issues on GitHub</a>, in Arabic or English. Security issues, though, should not be posted there in public: use <a href="https://github.com/motalim-ai/zajil-download-manager/security/advisories/new">private vulnerability reporting</a>.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>

@@ -616,6 +616,20 @@ jobs:
           path: apps/extension/dist
           if-no-files-found: error
 
+  site:
+    name: Website
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      # Plain static files, no npm packages: the build wraps each page in its
+      # layout and copies the screenshots and icon in; the check fails on a
+      # broken link, a missing twin page, or anything loaded from outside.
+      - name: Build and check the site
+        run: node site/check.mjs
+
   desktop-licenses:
     name: Desktop licenses & advisories (cargo-deny)
     runs-on: ubuntu-latest

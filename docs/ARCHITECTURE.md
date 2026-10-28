@@ -52,6 +52,7 @@ zajil-download-manager/
 ├── locales/               # ملفات الترجمة ar وen (Fluent)، للواجهة ولجهة Rust (M4)
 ├── extension/             # إضافة المتصفح MV3 لـ Chrome/Edge/Firefox (M5)
 ├── docs/                  # الوثائق والـ ADR
+├── site/                  # الموقع العام zajil.by-wow.com: صفحات ثابتة بالعربية والإنجليزية (site/README.md)
 └── .github/               # الـ CI والقوالب
 ```
 

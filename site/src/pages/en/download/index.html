@@ -1,0 +1,135 @@
+<!--
+title: Download Zajil for Windows, macOS and Linux
+description: Download Zajil Download Manager for free for Windows, macOS and Linux, with its browser extension for Chrome, Edge and Firefox, and how to open it the first time, as it is not signed by Apple or Microsoft.
+nav: download
+script: download
+-->
+  <main id="main">
+    <section class="page-head">
+      <div class="wrap">
+        <h1>Download Zajil</h1>
+        <p class="lead">Free on every system, with no account and no ads. <span class="release-line" data-release>The files are on <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">the latest release's page on GitHub</a>.</span></p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="apps-title">
+      <div class="wrap">
+        <h2 id="apps-title">The program</h2>
+        <div class="downloads">
+          <article class="dl" data-os="windows">
+            <span class="yours">Your system</span>
+            <h3>Windows</h3>
+            <p>Windows 10 and 11 (x64). Installs for the current user, with no administrator rights.</p>
+            <div class="files">
+              <a class="btn btn-primary" data-asset="windows" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download for Windows <small data-name>.exe</small></a>
+            </div>
+          </article>
+          <article class="dl" data-os="mac">
+            <span class="yours">Your system</span>
+            <h3>macOS</h3>
+            <p>macOS 11 or later. One file for both Apple Silicon and Intel Macs.</p>
+            <div class="files">
+              <a class="btn btn-primary" data-asset="mac" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download for macOS <small data-name>.dmg</small></a>
+            </div>
+          </article>
+          <article class="dl" data-os="linux">
+            <span class="yours">Your system</span>
+            <h3>Linux</h3>
+            <p>x64. A <code>.deb</code> for Ubuntu 22.04, Debian 12 or later, or an AppImage that runs with no install.</p>
+            <div class="files">
+              <a class="btn btn-primary" data-asset="deb" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download .deb <small data-name>.deb</small></a>
+              <a class="btn" data-asset="appimage" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download AppImage <small data-name>.AppImage</small></a>
+            </div>
+          </article>
+        </div>
+        <div class="notice" role="note">
+          <p><strong>Zajil is not signed by Apple or Microsoft,</strong> so a warning shows the first time you open it. That is expected: how to open it is under <a href="#install">“Install”</a> below.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="ext-title">
+      <div class="wrap">
+        <h2 id="ext-title">Browser extension</h2>
+        <p>Install the program first and start it once, then add the extension. The extension downloads nothing itself: it hands downloads to the program on your computer. Until it is in the browsers' stores, it is added by hand (<a href="#install-extension">the steps</a>).</p>
+        <div class="downloads">
+          <article class="dl">
+            <h3>Chrome and Edge</h3>
+            <p>Chrome or Edge, version 116 or later.</p>
+            <div class="files">
+              <a class="btn" data-asset="chrome" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download the extension <small data-name>.zip</small></a>
+            </div>
+          </article>
+          <article class="dl">
+            <h3>Firefox</h3>
+            <p>Firefox 142 or later. For trying it out, until the version signed by Mozilla is ready.</p>
+            <div class="files">
+              <a class="btn" data-asset="firefox" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">Download the extension <small data-name>.zip</small></a>
+            </div>
+          </article>
+        </div>
+        <p class="note">All of the release's files, with the checksums file <code>SHA256SUMS</code>, are on <a data-asset="page" href="https://github.com/motalim-ai/zajil-download-manager/releases/latest">the release's page on GitHub</a>.</p>
+      </div>
+    </section>
+
+    <section class="section" id="install" aria-labelledby="install-title">
+      <div class="wrap prose">
+        <h2 id="install-title">Install</h2>
+        <p>Zajil is a free and open-source project, <strong>and will not be signed by Apple or Microsoft</strong>. What shows a file is ours: the <code>SHA256SUMS</code> checksums published with each release, the code on GitHub, and installers built automatically on GitHub only. So a warning shows the first time you open it; here is how to get past it.</p>
+
+        <h3 id="install-windows">Windows: SmartScreen</h3>
+        <ol>
+          <li>The browser may first warn that the file is not commonly downloaded: choose <strong>Keep</strong>. In Edge: <strong>…</strong> → <strong>Keep</strong> → <strong>Show more</strong> → <strong>Keep anyway</strong>.</li>
+          <li>Run the installer. When “Windows protected your PC” shows, press <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+        </ol>
+        <p><strong>Windows 11, Smart App Control:</strong> when it is on, Windows blocks unsigned programs, with no button to skip it and no exception for one program. To run Zajil it has to be turned off:</p>
+        <ol>
+          <li>Open <strong>Windows Security</strong> → <strong>App &amp; browser control</strong> → <strong>Smart App Control settings</strong>.</li>
+          <li>Choose <strong>Off</strong>.</li>
+          <li>Mind: on some versions of Windows 11 it cannot be turned on again without reinstalling Windows. Read Windows' message before you confirm; the choice is yours.</li>
+        </ol>
+
+        <h3 id="install-mac">macOS: Gatekeeper</h3>
+        <ol>
+          <li>Open the <code>.dmg</code> and drag Zajil to the Applications folder.</li>
+          <li>Open Zajil. A message says macOS cannot verify it: press <strong>Done</strong> (or <strong>OK</strong>).</li>
+          <li>Open <strong>System Settings</strong> → <strong>Privacy &amp; Security</strong>, scroll down to Security, press <strong>Open Anyway</strong> next to the message about Zajil, and confirm with your password. The button stays for about an hour after the step before.</li>
+          <li>If macOS asks again, press <strong>Open Anyway</strong>. After that Zajil opens as usual.</li>
+        </ol>
+
+        <h3 id="install-linux">Linux</h3>
+        <p>The <code>.deb</code>, from the folder you downloaded it to:</p>
+        <pre><code>sudo apt install ./Zajil_*_amd64.deb</code></pre>
+        <p>Or the AppImage, with no install:</p>
+        <pre><code>chmod +x Zajil_*_amd64.AppImage
+./Zajil_*_amd64.AppImage</code></pre>
+
+        <h3 id="install-extension">Adding the browser extension</h3>
+        <p>Install Zajil and start it once first: it is Zajil that registers itself with the browsers. If the extension cannot reach it, open Zajil's Settings → “Browser” → “Fix the browser integration”.</p>
+        <p><strong>Chrome and Edge</strong> (until it is in the stores):</p>
+        <ol>
+          <li>Unzip the extension's file into a folder you keep. Do not delete it after adding the extension.</li>
+          <li>Open <code>chrome://extensions</code> (or <code>edge://extensions</code> in Edge), and turn on <strong>Developer mode</strong>.</li>
+          <li>Press <strong>Load unpacked</strong> and choose the folder you unzipped.</li>
+          <li>The extension's ID must be <code>nbgfmhkjbkmldddelnepobieoehecmif</code>. Zajil accepts no other.</li>
+        </ol>
+        <p><strong>Firefox:</strong> Firefox needs an extension signed by Mozilla, and we will put its link here when it is ready. To try it before that: open <code>about:debugging#/runtime/this-firefox</code>, press <strong>Load Temporary Add-on</strong>, and choose <code>manifest.json</code> inside the unzipped extension. It stays until Firefox closes.</p>
+        <p><strong>On Linux:</strong> browsers installed with Flatpak, and Chromium from snap, cannot start a program outside their sandbox, so the extension cannot reach Zajil from them.</p>
+
+        <h3 id="verify">Checking the files</h3>
+        <p>Download <code>SHA256SUMS</code> from the release page into the same folder as the files, then run in that folder:</p>
+        <p>macOS:</p>
+        <pre><code>shasum -a 256 -c SHA256SUMS --ignore-missing</code></pre>
+        <p>Linux:</p>
+        <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+        <p>Windows (PowerShell):</p>
+        <pre><code>$f = Get-Item .\Zajil_*_x64-setup.exe
+(Get-FileHash $f).Hash -eq (Select-String -SimpleMatch $f.Name .\SHA256SUMS).Line.Split(' ')[0]</code></pre>
+        <p>On macOS and Linux every line must end in <code>OK</code>; on Windows the command must print <code>True</code>. If not, <strong>do not run the file</strong>, and tell us on <a href="https://github.com/motalim-ai/zajil-download-manager/issues">GitHub</a>.</p>
+
+        <div class="notice" role="note">
+          <p><strong>Download Zajil only from here or from <a href="https://github.com/motalim-ai/zajil-download-manager/releases">its releases page on GitHub</a>.</strong> These are its only official sources, and any copy from elsewhere is not ours.</p>
+        </div>
+      </div>
+    </section>
+  </main>

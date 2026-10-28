@@ -20,3 +20,6 @@ Thumbs.db
 
 # Written by the CI release-feature check when run locally
 release-features.txt
+
+# The website build (site/build.mjs)
+/site/dist/
