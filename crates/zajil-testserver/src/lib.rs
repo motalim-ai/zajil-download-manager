@@ -26,7 +26,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use bytes::Bytes;
-use http_body_util::channel::{Channel, Sender};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty};
 use hyper::body::{Frame, Incoming, SizeHint};
@@ -36,7 +35,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -1017,7 +1016,7 @@ fn respond(
         .cut_after
         .filter(|&(_, times)| get_index < times)
         .map(|(bytes, _)| bytes);
-    let (sender, channel) = Channel::<Bytes, BoxError>::new(1);
+    let (sender, channel) = FrameChannel::new();
     // A response that announced more than it has stalls at the end of what
     // it has, keeping the connection open. Closing it would make Windows
     // send a reset that can drop the headers before the client reads them.
@@ -1034,8 +1033,45 @@ fn respond(
     builder.body(channel.boxed()).unwrap()
 }
 
+/// What [`stream_body`] hands a response body: a chunk of data, or the
+/// error that cuts the response.
+type FrameSender = mpsc::Sender<Result<Frame<Bytes>, BoxError>>;
+
+/// A response body fed by [`stream_body`] through a single channel: every
+/// chunk sent arrives, in order, before the end or the cut.
+///
+/// Not `http_body_util::channel::Channel`: it keeps the chunks and the
+/// error in two channels, and looks at the second after finding the first
+/// empty. A last chunk sent from another thread between the two looks is
+/// lost when the sender is dropped (the body ends one chunk short of its
+/// `Content-Length`, and hyper cuts the connection with "early end,
+/// expected N more bytes"), or comes after the cut when it aborts. Seen on
+/// windows-latest in #50, #272 and #275.
+struct FrameChannel(mpsc::Receiver<Result<Frame<Bytes>, BoxError>>);
+
+impl FrameChannel {
+    /// One chunk in flight at a time, as before: a slow client holds the
+    /// rest back.
+    fn new() -> (FrameSender, Self) {
+        let (sender, receiver) = mpsc::channel(1);
+        (sender, Self(receiver))
+    }
+}
+
+impl hyper::body::Body for FrameChannel {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        self.0.poll_recv(cx)
+    }
+}
+
 async fn stream_body(
-    mut sender: Sender<Bytes, BoxError>,
+    sender: FrameSender,
     body: Bytes,
     cut: Option<u64>,
     stall: Option<u64>,
@@ -1060,7 +1096,8 @@ async fn stream_body(
         // Count before handing the chunk over, so the count is complete by
         // the time the client has read everything.
         bytes_sent.fetch_add(sent as u64, Ordering::SeqCst);
-        if sender.send_data(body.slice(offset..next)).await.is_err() {
+        let frame = Frame::data(body.slice(offset..next));
+        if sender.send(Ok(frame)).await.is_err() {
             bytes_sent.fetch_sub(sent as u64, Ordering::SeqCst);
             return; // client went away
         }
@@ -1074,7 +1111,10 @@ async fn stream_body(
         return; // complete
     }
     if cut.is_some_and(|c| c as usize == offset) {
-        sender.abort(Box::new(io::Error::other("cut by test server")));
+        // After every chunk before it. A client that went away does not
+        // need the cut.
+        let cut = Box::new(io::Error::other("cut by test server"));
+        let _ = sender.send(Err(cut)).await;
         return;
     }
     // Stalled: keep the connection open and send nothing.
@@ -1362,5 +1402,74 @@ mod tests {
         let a = FileSpec::new(&b"x"[..]);
         let b = FileSpec::new(&b"x"[..]);
         assert_ne!(a.current_etag(), b.current_etag());
+    }
+
+    /// Sends `chunks` one-byte chunks, then cuts the body if `cut`, then
+    /// drops the sender: what `stream_body` does.
+    async fn feed(sender: FrameSender, chunks: u8, cut: bool) {
+        for i in 0..chunks {
+            let chunk = Frame::data(Bytes::from(vec![i]));
+            if sender.send(Ok(chunk)).await.is_err() {
+                return;
+            }
+        }
+        if cut {
+            let _ = sender.send(Err(io::Error::other("cut").into())).await;
+        }
+    }
+
+    /// Every chunk the body gives, and whether it ended with the cut.
+    async fn drain(mut body: FrameChannel) -> (Vec<u8>, bool) {
+        let mut seen = Vec::new();
+        while let Some(frame) = body.frame().await {
+            match frame {
+                Ok(frame) => seen.extend_from_slice(&frame.into_data().unwrap()),
+                Err(_) => return (seen, true),
+            }
+        }
+        (seen, false)
+    }
+
+    #[test]
+    fn a_body_gives_every_chunk_before_its_end_or_its_cut() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for cut in [false, true] {
+            let (sender, body) = FrameChannel::new();
+            let (seen, was_cut) = runtime.block_on(async {
+                tokio::spawn(feed(sender, 4, cut));
+                drain(body).await
+            });
+            assert_eq!(seen, [0, 1, 2, 3], "cut: {cut}");
+            assert_eq!(was_cut, cut);
+        }
+    }
+
+    /// The race of #50, #272 and #275: the last chunk is sent, and the
+    /// sender dropped or the body cut, from another thread while the body
+    /// is being read. With `http_body_util::channel::Channel`, a loop like
+    /// this one lost that chunk once in each of two runs of 200,000 rounds
+    /// on macOS (once at the end, once before the cut); a single channel
+    /// cannot. A pass here does not prove the race is gone, since it is
+    /// rare: the single channel does.
+    #[test]
+    fn a_body_fed_from_another_thread_loses_no_chunk() {
+        let reader = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        let writer = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .unwrap();
+        for round in 0..10_000 {
+            let cut = round % 2 == 1;
+            let (sender, body) = FrameChannel::new();
+            writer.spawn(feed(sender, 4, cut));
+            let (seen, was_cut) = reader.block_on(reader.spawn(drain(body))).unwrap();
+            assert_eq!(seen, [0, 1, 2, 3], "round {round}, cut: {cut}");
+            assert_eq!(was_cut, cut, "round {round}");
+        }
     }
 }
