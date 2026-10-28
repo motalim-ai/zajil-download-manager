@@ -6,8 +6,8 @@
 
 <p><b>Zajil Download Manager</b></p>
 
-<p>ملفك يصل كاملًا، مهما بعدت المسافة.<br>
-Your file arrives whole, however far it comes from.</p>
+<p dir="rtl">ملفك يصل كاملًا، مهما بعدت المسافة.</p>
+<p dir="ltr">Your file arrives whole, however far it comes from.</p>
 
 <p>
 <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest"><img src="docs/media/btn-download-ar.png" height="46" alt="نزّل زاجِل"></a>&nbsp;
