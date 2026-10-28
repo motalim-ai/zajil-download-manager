@@ -326,30 +326,7 @@ pub fn run() {
                 if let Some(window) = tauri_app.get_webview_window("main") {
                     // The add windows' scenes draw that window in the main
                     // one, at its own size.
-                    let scenario = tauri_app.state::<ui_test::UiTest>().scenario.clone();
-                    let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
-                        Some("add") => Some(windows::INFO_SIZE),
-                        Some("link") => Some(windows::LINK_SIZE),
-                        Some("progress") => Some(windows::PROGRESS_SIZE),
-                        Some("tools" | "quality") => Some(video::SIZE),
-                        Some("complete") => Some(complete::SIZE),
-                        Some("schedule") => Some(schedule::SIZE),
-                        Some("batch") => Some(batch::SIZE),
-                        Some("grab") => Some(grab::SIZE),
-                        _ => None,
-                    };
-                    // macOS: the system's title bar is drawn by the page in
-                    // a scene (the main window's own is hidden, #118).
-                    let size = size.map(|(w, h)| {
-                        (
-                            w,
-                            if cfg!(target_os = "macos") {
-                                h + 28.0
-                            } else {
-                                h
-                            },
-                        )
-                    });
+                    let size = scene_size(tauri_app.handle());
                     ui_test::fit_to_screen(&window, size)?;
                 }
                 return Ok(());
@@ -4533,6 +4510,43 @@ async fn settings(app: State<'_, App>) -> Result<SettingsView, String> {
 /// download takes the new number of connections.
 /// A `ui-test` scene shows demo data: nothing done in it may change the
 /// user's files (review of #47).
+/// The size of the window a scene draws in the main one (logical pixels),
+/// or `None` outside a scene or for a scene of the main window itself.
+fn scene_size<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> Option<(f64, f64)> {
+    #[cfg(feature = "ui-test")]
+    {
+        let scenario = handle.state::<ui_test::UiTest>().scenario.clone();
+        let size = match scenario.as_deref().and_then(|s| s.split('-').next()) {
+            Some("add") => Some(windows::INFO_SIZE),
+            Some("link") => Some(windows::LINK_SIZE),
+            Some("progress") => Some(windows::PROGRESS_SIZE),
+            Some("tools" | "quality") => Some(video::SIZE),
+            Some("complete") => Some(complete::SIZE),
+            Some("schedule") => Some(schedule::SIZE),
+            Some("batch") => Some(batch::SIZE),
+            Some("grab") => Some(grab::SIZE),
+            _ => None,
+        };
+        // macOS: the system's title bar is drawn by the page in a scene
+        // (the main window's own is hidden, #118).
+        size.map(|(w, h)| {
+            (
+                w,
+                if cfg!(target_os = "macos") {
+                    h + 28.0
+                } else {
+                    h
+                },
+            )
+        })
+    }
+    #[cfg(not(feature = "ui-test"))]
+    {
+        let _ = handle;
+        None
+    }
+}
+
 fn in_scene<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> bool {
     #[cfg(feature = "ui-test")]
     {

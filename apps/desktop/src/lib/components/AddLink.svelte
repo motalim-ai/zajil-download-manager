@@ -28,9 +28,13 @@
   $effect(() => {
     url = given;
     // A new link (from the clipboard while open) is selected, ready to
-    // replace.
+    // replace; focused without scrolling the page (as «Download file
+    // info»'s button).
     void given;
-    queueMicrotask(() => box?.select());
+    queueMicrotask(() => {
+      box?.focus({ preventScroll: true });
+      box?.select();
+    });
   });
   function submit(event: SubmitEvent) {
     event.preventDefault();

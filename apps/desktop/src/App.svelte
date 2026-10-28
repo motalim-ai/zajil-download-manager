@@ -814,15 +814,23 @@
       await settle();
       languageSwitch = { before, after: seen() };
     }
-    // The add windows are as tall as what they show (the owner's notes
-    // on 1.0): once the window has taken the content's height (5 s at
-    // most; not at once on Linux and Windows), nothing is cut, at the
-    // top, the bottom or the sides, and nothing scrolls.
+    // The add windows hold all they show (the owner's notes on 1.0 and
+    // on its draft): once the window's height has not changed for 1 s
+    // (5 s at most; a resize is not done at once on Linux and Windows),
+    // nothing is cut, at the top, the bottom or the sides, nothing
+    // scrolls, and there is room under the buttons. Its exact height is
+    // checked on the real windows (`tests/end_to_end.rs`).
     let fit: unknown = undefined;
     const content = screen === "add" || screen === "link" ? document.querySelector<HTMLElement>("main.info, main.link") : null;
     if (content) {
-      const bottom = () => Math.ceil(content.getBoundingClientRect().bottom);
-      for (let i = 0; i < 50 && Math.abs(window.innerHeight - bottom()) > 1; i++) await new Promise((r) => setTimeout(r, 100));
+      const scrolled = () => document.scrollingElement?.scrollTop ?? 0;
+      const bottom = () => Math.ceil(content.getBoundingClientRect().bottom + scrolled());
+      let last = -1;
+      for (let i = 0, same = 0; i < 50 && same < 10; i++) {
+        same = window.innerHeight === last ? same + 1 : 0;
+        last = window.innerHeight;
+        await new Promise((r) => setTimeout(r, 100));
+      }
       await settle();
       const shown = (el: Element) => el.getClientRects().length > 0 && !el.closest(".visually-hidden");
       const name = (el: Element) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${el.classList.length ? `.${[...el.classList].join(".")}` : ""}`;
@@ -846,7 +854,8 @@
       const scrolls = [document.scrollingElement, content, ...all]
         .filter((el): el is Element => el !== null && el.scrollHeight > el.clientHeight + 1 && (el === document.scrollingElement || /auto|scroll/.test(getComputedStyle(el).overflowY)))
         .map(name);
-      fit = { content: bottom(), window: window.innerHeight, cut, scrolls };
+      const buttons = Math.ceil(Math.max(...[...content.querySelectorAll("button")].map((b) => b.getBoundingClientRect().bottom)));
+      fit = { content: bottom(), window: window.innerHeight, scroll: scrolled(), buttons, cut, scrolls };
     }
     if (screen !== "names") {
       // Automatic accessibility check of what is on screen (axe-core,

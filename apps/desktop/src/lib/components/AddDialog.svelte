@@ -77,9 +77,11 @@
   let main: HTMLElement | undefined = $state();
 
   // The focus goes to the main button once the server has answered:
-  // «Start download», or «Cancel» when the link is a web page.
+  // «Start download», or «Cancel» when the link is a web page. Without
+  // scrolling: the window is still growing to the answer's height (the
+  // owner's notes on the 1.0 draft, the rows went off the top).
   $effect(() => {
-    if (probe && !busy) main?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus();
+    if (probe && !busy) main?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus({ preventScroll: true });
   });
   const page = $derived(probe?.page === true);
 

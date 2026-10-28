@@ -26,12 +26,15 @@ pub const PROGRESS_CAPABILITY: &str = include_str!("../runtime-capabilities/prog
 pub const LINK: &str = "add-link";
 pub const INFO: &str = "add-info";
 
-/// The «Add a link» window's size, in logical pixels: its width is also
-/// its least; its height only until the page makes it as tall as what it
-/// shows ([`fit_window`]).
-pub const LINK_SIZE: (f64, f64) = (560.0, 230.0);
-/// The «Download file info» window's, the same way.
-pub const INFO_SIZE: (f64, f64) = (560.0, 260.0);
+/// The «Add a link» window's size, in logical pixels, and its least: the
+/// page makes it taller when what it shows needs more ([`fit_window`]).
+/// Its link, its note and its buttons, with room under them.
+pub const LINK_SIZE: (f64, f64) = (560.0, 190.0);
+/// The «Download file info» window's, the same way: the server's answer
+/// with every row (the line about the file, the link, the category, «Save
+/// as», the description and the buttons), with room under them, so it
+/// opens at the size it keeps (the owner's notes on the 1.0 draft).
+pub const INFO_SIZE: (f64, f64) = (560.0, 290.0);
 
 /// A progress window's size with its details shown (design window 4).
 pub const PROGRESS_SIZE: (f64, f64) = (600.0, 640.0);
@@ -220,12 +223,15 @@ pub async fn open_add_info<R: tauri::Runtime>(
     open(&handle, INFO, &title, INFO_SIZE).map_err(|e| e.to_string())
 }
 
-/// Makes the add window that asks exactly as tall as what its page shows
-/// (`height`, in logical pixels, measured by the page whenever it
-/// changes), and never shorter: the owner's notes on 1.0, the content was
-/// cut at the top and a scroll bar came at a fixed 260. Its width stays
-/// the user's. In a scene, the main window that draws it fits it the same
-/// way, without the least size.
+/// Makes the add window that asks as tall as what its page shows
+/// (`height`, in logical pixels from the top of the page, measured by the
+/// page whenever it changes), and never shorter: the owner's notes on 1.0,
+/// the content was cut at the top and a scroll bar came at a fixed 260.
+/// Never shorter than it opened either, whatever the page says (the 1.0
+/// draft: a page scrolled by the focus measured itself short, and the
+/// window shrank under its content). Its width stays the user's. In a
+/// scene, the main window that draws it fits it the same way, without the
+/// least size.
 #[tauri::command]
 pub async fn fit_window<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
@@ -235,31 +241,69 @@ pub async fn fit_window<R: tauri::Runtime>(
         return Err(format!("not a height: {height}"));
     }
     let label = window.label();
-    let least = if label == LINK {
-        Some(LINK_SIZE.0)
+    let (kind, least, opened) = if label == LINK {
+        (LINK, Some(LINK_SIZE.0), LINK_SIZE.1)
     } else if label.starts_with(INFO) {
-        Some(INFO_SIZE.0)
-    } else if label == "main" && crate::in_scene(window.app_handle()) {
-        None
+        (INFO, Some(INFO_SIZE.0), INFO_SIZE.1)
+    } else if let Some((_, opened)) = crate::scene_size(window.app_handle())
+        && label == "main"
+    {
+        ("main", None, opened)
     } else {
         return Err("not an add window".into());
     };
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let width = window
-        .inner_size()
-        .map_err(|e| e.to_string())?
-        .to_logical::<f64>(scale)
-        .width;
-    // The least first: a window going shorter is not held by the old one.
-    if let Some(least) = least {
+    let wanted = height.max(opened);
+    // One at a time, in the order asked: a resize must not take another
+    // one's height for its own.
+    let _one = FITTING.lock().await;
+    let page = || -> Result<(f64, f64), String> {
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let size = window
+            .inner_size()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(scale);
+        Ok((size.width, size.height))
+    };
+    let (width, _) = page()?;
+    let resize = |height: f64| -> Result<(), String> {
+        // The least first: a window going shorter is not held by the old one.
+        if let Some(least) = least {
+            window
+                .set_min_size(Some(tauri::LogicalSize::new(least, height)))
+                .map_err(|e| e.to_string())?;
+        }
         window
-            .set_min_size(Some(tauri::LogicalSize::new(least, height)))
-            .map_err(|e| e.to_string())?;
+            .set_size(tauri::LogicalSize::new(width, height))
+            .map_err(|e| e.to_string())
+    };
+    // The page may come out shorter or taller than the size asked for:
+    // on macOS the CI's windows gave the page 32 pixels less than their
+    // content's height (Tauri reads the page's own frame there). What a
+    // kind of window misses is learned once, from its first resize.
+    let missing = *MISSING.lock().unwrap().get(kind).unwrap_or(&0.0);
+    resize(wanted + missing)?;
+    // The resize is not done at once (Linux, Windows; macOS from another
+    // thread): 1 s at most.
+    let mut got = page()?.1;
+    for _ in 0..20 {
+        if (got - wanted).abs() <= 1.0 {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        got = page()?.1;
     }
-    window
-        .set_size(tauri::LogicalSize::new(width, height))
-        .map_err(|e| e.to_string())
+    let missing = missing + (wanted - got);
+    MISSING.lock().unwrap().insert(kind, missing);
+    resize(wanted + missing)
 }
+
+/// [`fit_window`] one at a time.
+static FITTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// What the page of each kind of add window misses of the height asked
+/// for ([`fit_window`]).
+static MISSING: std::sync::LazyLock<Mutex<std::collections::HashMap<&'static str, f64>>> =
+    std::sync::LazyLock::new(Default::default);
 
 /// What [`open_add_info`] answers while «Download file info» is open: the
 /// page says it in the user's language.

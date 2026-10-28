@@ -15,8 +15,8 @@
 // serious problem fails the run. And every file name a scene shows must
 // be drawn as the FileName component draws it (M5.5: mixed names right
 // in every window); the views below must show at least one. The add
-// windows («add», «link») must be as tall as their content, with nothing
-// cut and nothing scrolling.
+// windows («add», «link») must hold all their content, with nothing cut,
+// nothing scrolling, and room under their buttons.
 //
 // macOS: screencapture (needs the Screen Recording permission); Linux:
 // ImageMagick `import` on the X display (Xvfb in CI); Windows: .NET
@@ -126,16 +126,22 @@ for (const scenario of scenarios) {
       else if ((SHOW_NAMES.includes(view) || SHOW_NAMES.includes(`${view}-${theme}`)) && names.drawn === 0) fail("no mixed file name shown, so none was checked");
       else console.log(`${scenario}: ${names.drawn} mixed file names drawn as FileName draws them`);
     }
-    // The add windows: as tall as what they show, nothing cut, nothing
-    // scrolling (the owner's notes on 1.0).
+    // The add windows: all they show inside them, nothing cut, nothing
+    // scrolling, room under the buttons (the owner's notes on 1.0 and on
+    // its draft). Their exact height is checked on the real windows
+    // (tests/end_to_end.rs).
     if (/^(add|link)-/.test(scenario)) {
       if (!fit) fail("the page did not say whether its content fits");
       else {
-        if (Math.abs(fit.window - fit.content) > 1) fail(`the window is ${fit.window} tall, its content ${fit.content}`);
-        for (const el of fit.cut) fail(`cut by the window: ${el}`);
-        for (const el of fit.scrolls) fail(`scrolls: ${el}`);
-        if (Math.abs(fit.window - fit.content) <= 1 && fit.cut.length === 0 && fit.scrolls.length === 0)
-          console.log(`${scenario}: the window is as tall as its content (${fit.content}), nothing cut or scrolling`);
+        const problems = [
+          ...(fit.content > fit.window + 1 ? [`the window is ${fit.window} tall, its content ${fit.content}`] : []),
+          ...(fit.scroll !== 0 ? [`the page is scrolled by ${fit.scroll}`] : []),
+          ...(fit.window - fit.buttons < 8 ? [`no room under the buttons (they end at ${fit.buttons} of ${fit.window})`] : []),
+          ...fit.cut.map((el) => `cut by the window: ${el}`),
+          ...fit.scrolls.map((el) => `scrolls: ${el}`),
+        ];
+        for (const why of problems) fail(why);
+        if (problems.length === 0) console.log(`${scenario}: the window (${fit.window}) holds all its content (${fit.content}), nothing cut or scrolling`);
       }
     }
     if (scenario.startsWith("switch-")) {
