@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [1.0.0] - 2026-10-28
 
-The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). Two 1.0.0 drafts were tried by hand on macOS and Windows and never published; they and their tags were removed (owner's decisions of 2026-10-27 and 2026-10-28), and the fixes after them (#251 to #291) are here too. This list is the titles of the pull requests merged after 0.2.0.
+The first published release: 0.2.0 was a test draft that was never published. Signed automatic updates come in 1.1 (owner's decision of 2026-10-26). Two 1.0.0 drafts were tried by hand (the first on macOS and Windows) and never published; they and their tags were removed (owner's decisions of 2026-10-27 and 2026-10-28), and the fixes after them (#251 to #294) are here too. This list is the titles of the pull requests merged after 0.2.0.
 
 Mind: the extension's «Also take any file larger than 5 MB» (on from the start) works even for the types a user removed from the list (#263).
 
@@ -64,13 +64,13 @@ Mind: the extension's «Also take any file larger than 5 MB» (on from the start
 - fix(macos): zajil-host starts Zajil through LaunchServices, and the video tools carry no quarantine mark (#283)
 - fix(extension): stop the content scripts once the extension is gone from an open tab (#288)
 - fix(desktop): the add windows are as tall as what they show (#287)
+- fix(extension): the privacy text says what reading a video ahead sends (#294)
 
 ### Documentation
 
 - docs: a 0.2 test on macOS for the owner, under 20 minutes (#85) (#216)
 - docs: ADR-0011, signed self-updates with the project's own key (accepted, for 0.3) (#217)
 - docs: signed updates in 1.1, and SHA256SUMS signed by the update key, no GPG (#231)
-- docs(release): Zajil 1.0.0 again, after the first draft was tried (#282)
 
 ### Tests
 
