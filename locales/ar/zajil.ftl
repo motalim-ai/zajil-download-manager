@@ -753,10 +753,10 @@ settings-progress-shown = تظهر
 settings-progress-minimized = تظهر مصغّرة
 settings-progress-hidden = لا تظهر
 settings-start-while-open = ابدأ التحميل والنافذة مفتوحة
-settings-start-while-open-hint = يبدأ التحميل في الخلفية بمجرد أن يرد السيرفر، وأنت ما زلت في «معلومات ملف التحميل». و«إلغاء» يحذفه ويحذف ملفه الناقص.
+settings-start-while-open-hint = يبدأ التحميل في الخلفية بمجرد أن يرد السيرفر، وأنت ما زلت في «معلومات ملف التحميل». «ابدأ التحميل» ينقله إلى المجلد والاسم اللذين اخترتهما، و«إلغاء» يحذفه ويحذف ملفه الناقص.
 settings-browser-at-once = ابدأ تحميلات المتصفح على طول من غير سؤال
 settings-browser-at-once-hint = يبدأ التحميل القادم من المتصفح دون «معلومات ملف التحميل». أما البرامج (مثل exe) فتسأل أولًا دائمًا.
-add-started-note = بدأ التحميل في الخلفية، فاسمه ومجلده لم يعودا يتغيّران. الفئة والوصف يتغيّران.
+add-started-note = بدأ التحميل في الخلفية. غيّر الاسم أو المجلد كما تريد، وسينتقل الملف إليه حين تضغط «ابدأ التحميل».
 
 ## Batch download (M7)
 cmd-batch = تحميل بالجملة…
@@ -859,3 +859,28 @@ grab-error-max_files = عدد الملفات من { $min } إلى { $max }.
 grab-error-max_total = الحجم لا يكون صفرًا.
 grab-error-types = اختر نوعًا واحدًا على الأقل، أو اكتب امتدادًا.
 grab-error-site = «{ $site }» ليس اسم موقع: اكتب الاسم وحده، مثل { $example }.
+
+## The settings window's sections (a window of its own, its sections at its side).
+settings-section-general = عام
+settings-section-types = أنواع الملفات
+settings-section-saveto = الحفظ في
+settings-section-downloads = التحميلات
+settings-section-connection = الاتصال
+settings-section-proxy = البروكسي
+settings-section-logins = تسجيل الدخول للمواقع
+settings-section-sounds = الأصوات
+settings-section-speed = محدد السرعة
+settings-section-appearance = المظهر
+settings-double-click = النقر المزدوج على تحميل مكتمل
+settings-double-click-open = يفتح الملف
+settings-double-click-folder = يفتح المجلد الذي فيه الملف
+settings-double-click-details = يعرض تفاصيل التحميل
+settings-double-click-hint = التحميل الذي لم يكتمل يعرض نافذة تقدّمه دائمًا.
+settings-proxy = البروكسي
+settings-proxy-none = بدون بروكسي
+settings-proxy-use = استخدم هذا البروكسي
+settings-proxy-save = احفظ
+settings-proxy-saved = حُفظ. يُطبَّق عند تشغيل زاجِل في المرة القادمة.
+settings-proxy-hint = اكتبه هكذا: http://العنوان:المنفذ. تمر به كل التحميلات، ويبقى التحقق من شهادات المواقع كما هو. لا يُقبل اسم مستخدم أو كلمة مرور فيه.
+settings-logins-hint = يستخدم زاجِل تسجيل دخولك في المتصفح (الكوكيز) لكل تحميل يصله من الإضافة، ولا يحفظ كلمات مرور. إن لم يصل تحميل من موقع مسجّل فيه، فأصلح ربط المتصفح من هنا.
+settings-types-hint = الفئات تحدد نوع كل ملف من امتداده أو موقعه، ومجلدًا لكل نوع. عدّلها من محرر الفئات.

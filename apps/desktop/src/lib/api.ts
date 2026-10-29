@@ -3,6 +3,7 @@
 // tests are in ../uitest/api.ts, never in a release build.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { IntegrationView } from "./bindings/IntegrationView";
 import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
@@ -29,6 +30,7 @@ import type { SettingsView } from "./bindings/SettingsView";
 import type { SettingsChange } from "./bindings/SettingsChange";
 import type { CategoryView } from "./bindings/CategoryView";
 import type { ImportView } from "./bindings/ImportView";
+import type { Role } from "./bindings/Role";
 
 export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
@@ -123,6 +125,30 @@ export const api = {
   /** The add window that asks becomes `height` tall (logical pixels), and
    * no shorter; `page`: the page's own height now. */
   fitWindow: (height: number, page: number) => invoke<void>("fit_window", { height, page }),
+  /** The role of this window, made beforehand and hidden: `null` until it
+   * takes one. */
+  windowRole: () => invoke<Role | null>("window_role"),
+  /** Only this window's role: a plain `listen` hears every window's. */
+  onWindowRole: (handler: (role: Role) => void): Promise<UnlistenFn> =>
+    getCurrentWebviewWindow().listen<Role>("window-role", (event) => handler(event.payload)),
+  /** «Download file info» started download `id` in the background: closing
+   * the window without placing it removes it with its files. */
+  holdStarted: (id: number) => invoke<void>("hold_started", { id }),
+  /** The download this window started goes to `folder` under `name` (each
+   * `null`: as it is), then runs on (`start`) or waits paused. */
+  placeStarted: (folder: string | null, name: string | null, start: boolean, connections: number | null) =>
+    invoke<number>("place_started", { folder, name, start, connections }),
+  /** This window's page drew its first frame (timed with `ZAJIL_MEASURE=1`). */
+  windowPainted: () => invoke<void>("window_painted"),
+  /** The settings window (a window of its own), titled `title`. */
+  openSettings: (title: string) => invoke<void>("open_settings", { title }),
+  /** Saved in any window: every window follows. */
+  onSettingsChanged: (handler: (settings: SettingsView) => void): Promise<UnlistenFn> =>
+    listen<SettingsView>("settings-changed", (event) => handler(event.payload)),
+  /** The proxy every download goes through (`null`: none); a change
+   * applies when Zajil next starts. */
+  proxySetting: () => invoke<string | null>("proxy_setting"),
+  setProxy: (proxy: string | null) => invoke<void>("set_proxy", { proxy }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

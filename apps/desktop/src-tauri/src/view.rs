@@ -168,6 +168,10 @@ pub struct AddRequest {
     pub start: bool,
     #[ts(type = "number | null")]
     pub limit: Option<u64>,
+    /// Its own number of connections, 1 to 32 (the owner's request, as in
+    /// other download managers); `null`: the program's.
+    #[serde(default)]
+    pub connections: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

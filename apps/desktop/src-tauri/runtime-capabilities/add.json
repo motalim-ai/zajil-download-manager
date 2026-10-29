@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "add",
-  "description": "Added from Rust when the app starts (windows.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the add windows («Add a link» and «Download file info», M5.5, one of those for each download from the browser) may do: Zajil's own commands and events, and the system's folder picker (the user picks the download's folder). Nothing else: no file system, no shell, no network from the page.",
+  "description": "Added from Rust when the app starts (windows.rs), not listed in tauri.conf.json, whose release build enables only `default`. What the add windows («Add a link» and «Download file info», M5.5, one of those for each download from the browser; and the spare ones made beforehand, hidden, that take those roles) may do: Zajil's own commands and events, and the system's folder picker (the user picks the download's folder). Nothing else: no file system, no shell, no network from the page.",
   "windows": [
     "add-link",
+    "add-link-*",
     "add-info",
     "add-info-*"
   ],

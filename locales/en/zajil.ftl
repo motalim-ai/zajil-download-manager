@@ -683,10 +683,10 @@ settings-progress-shown = Shown
 settings-progress-minimized = Shown minimized
 settings-progress-hidden = Not shown
 settings-start-while-open = Start downloading while the window is open
-settings-start-while-open-hint = The download starts in the background as soon as the server answers, while you are still in “Download file info”. “Cancel” removes it and deletes its unfinished file.
+settings-start-while-open-hint = The download starts in the background as soon as the server answers, while you are still in “Download file info”. “Start download” moves it to the folder and name you chose; “Cancel” removes it and deletes its unfinished file.
 settings-browser-at-once = Start browser downloads at once, without asking
 settings-browser-at-once-hint = A download from the browser starts without “Download file info”. Programs (such as .exe) still ask first.
-add-started-note = The download has started in the background, so its name and folder can no longer change. The category and description can.
+add-started-note = The download has started in the background. Change its name or folder as you like: the file moves there when you press “Start download”.
 
 ## Batch download (M7)
 cmd-batch = Batch download…
@@ -785,3 +785,28 @@ grab-error-max_files = The files are from { $min } to { $max }.
 grab-error-max_total = The size cannot be zero.
 grab-error-types = Choose one type at least, or write an extension.
 grab-error-site = «{ $site }» is not a site's name: write the name alone, such as { $example }.
+
+## The settings window's sections (a window of its own, its sections at its side).
+settings-section-general = General
+settings-section-types = File types
+settings-section-saveto = Save to
+settings-section-downloads = Downloads
+settings-section-connection = Connection
+settings-section-proxy = Proxy
+settings-section-logins = Site logins
+settings-section-sounds = Sounds
+settings-section-speed = Speed limiter
+settings-section-appearance = Appearance
+settings-double-click = Double-clicking a finished download
+settings-double-click-open = Opens the file
+settings-double-click-folder = Opens the folder that has the file
+settings-double-click-details = Shows the download's details
+settings-double-click-hint = A download that has not finished always shows its progress window.
+settings-proxy = Proxy
+settings-proxy-none = No proxy
+settings-proxy-use = Use this proxy
+settings-proxy-save = Save
+settings-proxy-saved = Saved. It applies the next time Zajil starts.
+settings-proxy-hint = Write it as http://host:port. Every download goes through it, and sites' certificates are still checked. A user name or password in it is not accepted.
+settings-logins-hint = Zajil uses your browser's logins (cookies) for every download the extension sends, and saves no passwords. If a download from a site you are logged in to does not arrive, fix the browser link here.
+settings-types-hint = Categories tell each file's type from its extension or its site, with a folder for each type. Change them in the categories editor.

@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Added from Rust when the app starts (windows.rs), not listed in tauri.conf.json. What the settings window may do: Zajil's own commands and events, its own title, the system's open and save dialogs (the download folder, an import or export file) and its yes-or-no question (deleting the video tools), and turning launching at login on or off. Nothing else: no file system, no shell, no network from the page.",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-set-title",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}

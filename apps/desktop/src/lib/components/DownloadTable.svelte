@@ -113,6 +113,38 @@
   const fraction = (d: DownloadView) => (d.size ? d.done / d.size : d.status === "done" ? 1 : 0);
   const pct = (d: DownloadView) => percent(locale.lang, locale.digits, fraction(d));
 
+  // A long list draws only the rows in view, and some around them (the
+  // owner's request: a fast list): with thousands of downloads, drawing
+  // every row at each update, four times a second, took most of a second.
+  const VIRTUAL_FROM = 150;
+  const AROUND = 30;
+  let scrollTop = $state(0);
+  let viewHeight = $state(800);
+  let rowHeight = $state(37);
+  const virtual = $derived(downloads.length > VIRTUAL_FROM);
+  const first = $derived(virtual ? Math.max(0, Math.floor(scrollTop / rowHeight) - AROUND) : 0);
+  const last = $derived(virtual ? Math.min(downloads.length, Math.ceil((scrollTop + viewHeight) / rowHeight) + AROUND) : downloads.length);
+  const rows = $derived(virtual ? downloads.slice(first, last) : downloads);
+  const chosen = $derived(new Set(selected));
+  // The rows' height, as drawn.
+  $effect(() => {
+    void rows;
+    const row = scroller?.querySelector<HTMLElement>("tbody tr[id]");
+    const height = row?.getBoundingClientRect().height ?? 0;
+    if (height > 0 && Math.abs(height - rowHeight) > 0.5) rowHeight = height;
+  });
+  /** Focuses row `index`, drawn first if it was not. */
+  async function focusRow(index: number) {
+    const id = downloads[index]?.id;
+    if (id === undefined) return;
+    if (virtual && scroller && (index < first || index >= last)) {
+      scroller.scrollTop = Math.max(0, index * rowHeight - viewHeight / 2);
+      scrollTop = scroller.scrollTop;
+      await tick();
+    }
+    document.getElementById(`row-${id}`)?.focus();
+  }
+
   // The row the keyboard is on, and where a Shift range starts.
   let focus = $state<number | null>(null);
   let anchor = $state<number | null>(null);
@@ -177,7 +209,7 @@
         anchor = id;
       }
       focus = id;
-      document.getElementById(`row-${id}`)?.focus();
+      void focusRow(next);
     } else if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
       // Enter opens it here; the window does not see it again.
       event.preventDefault();
@@ -237,11 +269,12 @@
   {/if}
 {/snippet}
 
-<div class="scroll" bind:this={scroller}>
+<div class="scroll" bind:this={scroller} bind:clientHeight={viewHeight} onscroll={() => virtual && scroller && (scrollTop = scroller.scrollTop)}>
   <table
     class="grid"
     aria-label={label}
     aria-multiselectable="true"
+    aria-rowcount={downloads.length + 1}
     role="grid"
     style:min-width={`${minTableWidth(shownColumns)}px`}
   >
@@ -319,11 +352,16 @@
       </tr>
     </thead>
     <tbody>
-      {#each downloads as d, i (d.id)}
+      {#if first > 0}
+        <tr class="pad" aria-hidden="true"><td colspan={shownColumns.length + 1} style:height={`${first * rowHeight}px`}></td></tr>
+      {/if}
+      {#each rows as d, j (d.id)}
+        {@const i = first + j}
         <tr
           id="row-{d.id}"
+          aria-rowindex={i + 2}
           tabindex={i === focusIndex ? 0 : -1}
-          aria-selected={selected.includes(d.id)}
+          aria-selected={chosen.has(d.id)}
           onclick={(e) => pick(e, i)}
           ondblclick={() => onopen(d.id)}
           oncontextmenu={(e) => context(e, i)}
@@ -333,6 +371,9 @@
           <td class="cols"></td>
         </tr>
       {/each}
+      {#if last < downloads.length}
+        <tr class="pad" aria-hidden="true"><td colspan={shownColumns.length + 1} style:height={`${(downloads.length - last) * rowHeight}px`}></td></tr>
+      {/if}
     </tbody>
   </table>
 </div>
@@ -387,6 +428,10 @@
     border-radius: 3px;
   }
   th.cols,
+  tr.pad td {
+    padding: 0;
+    border: 0;
+  }
   td.cols {
     padding: 0;
     text-align: center;
