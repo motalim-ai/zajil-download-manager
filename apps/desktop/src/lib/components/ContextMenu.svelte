@@ -29,13 +29,13 @@
 
   // The icon of each command, as in the design.
   const ICONS: Partial<Record<Command, string>> = {
-    open: "file",
+    open: "t-file",
     "open-folder": "folder-open",
     resume: "play",
     pause: "pause",
-    progress: "external-link",
-    "copy-link": "copy",
-    "refresh-link": "rotate-ccw",
+    progress: "c-window",
+    "copy-link": "c-copy",
+    "refresh-link": "c-refresh",
     delete: "trash-2",
     properties: "info",
     "remove-from-queue": "list-x",

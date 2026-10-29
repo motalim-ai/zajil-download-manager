@@ -36,7 +36,7 @@
   // settings are read, takes no click (review of #169).
   let on = false;
   // And only once the user turned the keys on in the settings: off by
-  // default, as in IDM (owner's decision).
+  // default, as in other download managers (owner's decision).
   let used = false;
 
   /** @param {any} stored the `settings` in `storage.local` */

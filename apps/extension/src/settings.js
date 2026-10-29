@@ -11,7 +11,7 @@ export const DEFAULT_EXTENSIONS = [
   "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "aif", "aiff", "ra",
   "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "epub", "txt", "rtf", "csv",
   "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "arj", "lzh", "cab",
-  // The parts of a split RAR, as IDM's R0* and R1*.
+  // The parts of a split RAR, R0* and R1*.
   "r00", "r01", "r02", "r03", "r04", "r05", "r06", "r07", "r08", "r09", "r10", "r11", "r12", "r13", "r14", "r15", "r16", "r17", "r18", "r19",
 ];
 
@@ -32,7 +32,7 @@ export const MAX_BIG_FILE_MB = 100000;
  * @property {string[]} excludedSites Sites whose downloads stay in the
  *   browser: a host and its subdomains.
  * @property {boolean} useKeys The keys of a click are in use: off by
- *   default, as in IDM; the user turns them on (owner's decision).
+ *   default, as in other download managers; the user turns them on (owner's decision).
  * @property {string | null} sendKeys The keys that, held while clicking a
  *   link, send it to Zajil (one of `KEY_CHOICES`); null: this system's
  *   default (`defaultKeys`).

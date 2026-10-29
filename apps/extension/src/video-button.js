@@ -23,7 +23,7 @@
 // page only asked for EME (`requestMediaKeySystemAccess`) cannot be seen
 // from here: that would need a script in the page's own world.
 //
-// As IDM's (owner's decision, 2026-10-27): at the video's top right, with
+// As in other download managers (owner's decision, 2026-10-27): at the video's top right, with
 // Zajil's mark, in Zajil's own language (the background asks zajil-host,
 // which reads Zajil's settings). Pressed, it stays and says it is working
 // until Zajil answers, then says if it failed. On YouTube only on a video's
@@ -503,7 +503,7 @@
   /** The page whose video was last sent to be read ahead. */
   let peeked = "";
   /** Zajil reads the video ahead as soon as its button shows, once a page
-   * (owner's decision, 2026-10-28, as IDM): its qualities are there when
+   * (owner's decision, 2026-10-28, as in other download managers): its qualities are there when
    * the button is pressed. Only the video's address goes, as for a press.
    * @param {HTMLVideoElement} found */
   const peek = (found) => {

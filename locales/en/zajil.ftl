@@ -525,7 +525,7 @@ win-close = Close
 tray-still-running = Zajil is still running in the system tray, and the downloads go on. Choose “Quit Zajil” from its icon to quit.
 settings-closing = Closing the window
 settings-closing-label = Closing the window quits Zajil
-settings-closing-hint = Without this, the window hides and Zajil stays in the system tray while the downloads go on, as in IDM.
+settings-closing-hint = Without this, the window hides and Zajil stays in the system tray while the downloads go on.
 settings-closing-no-tray = This desktop shows no system tray, so closing the window always quits Zajil (asking first while downloads run).
 
 ## M5.5: the progress window (design window 4)
@@ -574,7 +574,7 @@ add-save-as = Save as
 add-choose-folder = Choose a folder
 last-try-yesterday = Yesterday { $time }
 
-## The toolbar as the user leaves it (M5.5, an IDM touch)
+## The toolbar as the user leaves it (M5.5)
 tb-big = Big buttons
 tb-small = Small buttons
 tb-customize = Customize the toolbar…
@@ -584,14 +584,14 @@ tb-later = Move “{ $name }” later
 tb-reset = Reset
 tb-done = Done
 
-## The drop box (M5.5, an IDM touch)
+## The drop box (M5.5)
 drop-box = Drop box
 drop-hint = Drag a link here to download it. Right-click it for a batch download, or to hide it.
 tray-drop-box = Show the drop box
 settings-drop-box-label = Show the drop box above all windows
 settings-drop-box-hint = A small box with Zajil's mark: drag a link from the browser onto it to open “Download file info”. Drag it to move it; right-click it for a batch download, or to hide it.
 
-## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
+## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5)
 col-queue = Queue
 cmd-remove-from-queue = Remove from queue
 delete-unfinished =
@@ -668,14 +668,14 @@ about-or-later = { $license } or later
 about-not-ours = Zajil does not own these tools; they belong to their projects:
 tool-license-yt-dlp = { $binary } for the file Zajil downloads (its source code: { $source })
 
-## Sounds (M5.5, an IDM touch)
+## Sounds (M5.5)
 settings-sounds = Sounds
 settings-sound-done = A sound when a download finishes
 settings-sound-failed = A sound when a download fails
 settings-sound-queue = A sound when a queue finishes
 settings-sound-try = Play the sound
 
-## How a new download shows (M5.5, IDM touches)
+## How a new download shows (M5.5)
 settings-new-download = New downloads
 settings-progress-window = The progress window when a download starts from “Download file info”:
 settings-progress-shown = Shown

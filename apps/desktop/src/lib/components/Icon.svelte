@@ -1,5 +1,6 @@
 <script lang="ts">
   import { lucide } from "../lucide";
+  import ColorIcon from "./ColorIcon.svelte";
 
   // Simple line icons drawn for Zajil (not taken from any other program),
   // and Lucide's (M5.5, `../lucide.ts`, ISC) by their Lucide names.
@@ -31,7 +32,50 @@
     sun: '<circle cx="12" cy="12" r="3.5"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M6 18l1.4-1.4M16.6 7.4L18 6"/>',
   };
   let { name, size = 18, stroke = 1.8 }: { name: string; size?: number; stroke?: number } = $props();
+
+  // The pictures are drawn in Zajil's coloured set (`ColorIcon`, the
+  // owner's request: no thin outline icons left); the controls (arrows,
+  // chevrons, close, search, the window's buttons) and the glyphs on a
+  // button's own colour stay lines.
+  const COLOURED: Record<string, string> = {
+    alert: "s-failed",
+    "circle-alert": "s-failed",
+    info: "c-info",
+    play: "resume",
+    pause: "pause",
+    "octagon-pause": "pause-all",
+    trash: "delete",
+    "trash-2": "delete",
+    "list-x": "c-remove-queue",
+    plus: "add",
+    "circle-plus": "add",
+    folder: "all",
+    "folder-open": "all",
+    tag: "c-tag",
+    link: "c-link",
+    "link-2": "c-link",
+    clock: "schedule",
+    "calendar-clock": "schedule",
+    queue: "queue",
+    "list-ordered": "queue",
+    "list-start": "run-queue",
+    "list-end": "halt-queue",
+    file: "t-file",
+    film: "c-film",
+    gauge: "c-gauge",
+    key: "c-key",
+    globe: "c-globe",
+    sound: "c-sound",
+    sun: "c-sun",
+    sliders: "settings",
+    settings: "settings",
+  };
+  const coloured = $derived(COLOURED[name] ?? (/^[cst]-/.test(name) ? name : null));
 </script>
+
+{#if coloured}
+  <ColorIcon name={coloured} {size} />
+{:else}
 
 <svg
   class="icon"
@@ -47,6 +91,7 @@
 >
   {@html paths[name] ?? lucide[name] ?? ""}
 </svg>
+{/if}
 
 <style>
   .icon {

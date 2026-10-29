@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import ColorIcon from "./ColorIcon.svelte";
   import { locale } from "../i18n.svelte";
   import { num } from "../format";
   import type { SettingsView } from "../bindings/SettingsView";
@@ -45,16 +46,16 @@
   // The sections at the window's side (the owner's request, as in other
   // download managers), each with its icon.
   const SECTIONS = [
-    ["general", "sliders"],
-    ["types", "tag"],
-    ["saveto", "folder"],
-    ["downloads", "down"],
-    ["connection", "link-2"],
-    ["proxy", "globe"],
-    ["logins", "key"],
-    ["sounds", "sound"],
-    ["speed", "gauge"],
-    ["appearance", "sun"],
+    ["general", "settings"],
+    ["types", "c-tag"],
+    ["saveto", "all"],
+    ["downloads", "unfinished"],
+    ["connection", "c-link"],
+    ["proxy", "c-globe"],
+    ["logins", "c-key"],
+    ["sounds", "c-sound"],
+    ["speed", "c-gauge"],
+    ["appearance", "c-sun"],
   ] as const;
   let section = $state<(typeof SECTIONS)[number][0]>("general");
 
@@ -285,7 +286,7 @@
   <nav class="sections" aria-label={locale.t("settings-title")}>
     {#each SECTIONS as [id, icon] (id)}
       <button class="section" class:on={section === id} aria-current={section === id ? "page" : undefined} onclick={() => (section = id)}>
-        <Icon name={icon} size={16} />{locale.t(`settings-section-${id}`)}
+        <ColorIcon name={icon} size={20} />{locale.t(`settings-section-${id}`)}
       </button>
     {/each}
   </nav>
@@ -620,10 +621,10 @@
   .section {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border: 0;
-    border-radius: 8px;
+    gap: 9px;
+    padding: 6px 10px;
+    border: 1px solid transparent;
+    border-radius: 4px;
     background: none;
     font: inherit;
     font-size: 13.5px;
@@ -631,12 +632,19 @@
     text-align: start;
     cursor: pointer;
   }
-  .section:hover {
-    background: var(--sel);
+  /* Only the open section is marked: a section under the mouse is only
+     tinted (the owner's screenshot: one hovered looked open too). */
+  .section:hover:not(.on) {
+    background: color-mix(in oklab, var(--sel) 45%, transparent);
+  }
+  .section:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .section.on {
     background: var(--sel);
-    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    color: var(--ink);
     font-weight: 600;
   }
   .content {

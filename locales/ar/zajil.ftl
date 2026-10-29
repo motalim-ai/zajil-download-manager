@@ -583,7 +583,7 @@ win-close = إغلاق
 tray-still-running = زاجِل ما زال يعمل في شريط النظام، والتحميلات تكمل. اختر «إنهاء زاجِل» من أيقونته لإنهائه.
 settings-closing = إغلاق النافذة
 settings-closing-label = إغلاق النافذة يُنهي زاجِل
-settings-closing-hint = دون هذا الخيار تختفي النافذة ويبقى زاجِل في شريط النظام والتحميلات تكمل، كما في IDM.
+settings-closing-hint = دون هذا الخيار تختفي النافذة ويبقى زاجِل في شريط النظام والتحميلات تكمل.
 settings-closing-no-tray = لا يظهر شريط النظام في سطح المكتب هذا، فإغلاق النافذة يُنهي زاجِل دائمًا (ويسأل أولًا إن كانت هناك تحميلات تعمل).
 
 ## M5.5: the progress window (design window 4)
@@ -632,7 +632,7 @@ add-save-as = احفظ باسم
 add-choose-folder = اختر مجلدًا
 last-try-yesterday = أمس { $time }
 
-## The toolbar as the user leaves it (M5.5, an IDM touch)
+## The toolbar as the user leaves it (M5.5)
 tb-big = أزرار كبيرة
 tb-small = أزرار صغيرة
 tb-customize = تخصيص شريط الأدوات…
@@ -642,14 +642,14 @@ tb-later = أخّر «{ $name }»
 tb-reset = كما كان
 tb-done = تم
 
-## The drop box (M5.5, an IDM touch)
+## The drop box (M5.5)
 drop-box = سلة الإسقاط
 drop-hint = اسحب رابطًا هنا لتحميله. وبكليك يمين: تحميل بالجملة، أو إخفاؤها.
 tray-drop-box = إظهار سلة الإسقاط
 settings-drop-box-label = إظهار سلة الإسقاط فوق كل النوافذ
 settings-drop-box-hint = مربع صغير بشعار زاجِل، تسحب عليه رابطًا من المتصفح فيفتح «معلومات ملف التحميل». تحرّكه بسحبه، وبكليك يمين عليه: تحميل بالجملة، أو إخفاؤه.
 
-## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5, IDM touches)
+## The table's queue column, «Remove from queue», and deleting what has not finished (M5.5)
 col-queue = الطابور
 cmd-remove-from-queue = إزالة من الطابور
 delete-unfinished =
@@ -738,14 +738,14 @@ about-or-later = { $license } أو أحدث
 about-not-ours = زاجِل لا يملك هذه الأدوات، وهي لأصحابها:
 tool-license-yt-dlp = { $binary } للملف الذي ينزّله زاجِل (والكود المصدري بترخيص { $source })
 
-## Sounds (M5.5, an IDM touch)
+## Sounds (M5.5)
 settings-sounds = الأصوات
 settings-sound-done = صوت عند اكتمال تحميل
 settings-sound-failed = صوت عند فشل تحميل
 settings-sound-queue = صوت عند انتهاء طابور
 settings-sound-try = جرّب الصوت
 
-## How a new download shows (M5.5, IDM touches)
+## How a new download shows (M5.5)
 settings-new-download = التحميل الجديد
 settings-progress-window = نافذة التقدم حين يبدأ تحميل من «معلومات ملف التحميل»:
 settings-progress-shown = تظهر

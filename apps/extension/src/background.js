@@ -373,7 +373,7 @@ const PEEK_MS = 10 * 60_000;
 const peeked = new Map();
 
 /**
- * The button showed over a video (owner's decision, 2026-10-28, as IDM):
+ * The button showed over a video (owner's decision, 2026-10-28, as in other download managers):
  * Zajil reads its page now, in the background, so its qualities are there
  * when the button is pressed. What `sendVideo` would send, as
  * `peek_video`, with no word to the user; once a page in ten minutes.

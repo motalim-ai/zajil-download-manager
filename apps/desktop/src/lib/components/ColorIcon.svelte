@@ -102,6 +102,69 @@
       <circle cx="24" cy="23" r="7" fill={g("blue")} stroke="var(--side)" stroke-width="1.5" />
       <path d="M24 19.6v3.6l2.3 1.4" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
     {/if}
+  {:else if name === "c-tag"}
+    <path d="M4 6.2C4 5 5 4 6.2 4h8.9c.6 0 1.1.2 1.5.6l10.8 10.8c.9.9.9 2.3 0 3.1l-8.6 8.6c-.9.9-2.3.9-3.1 0L4.6 16.6c-.4-.4-.6-1-.6-1.5z" fill={g("amber")} />
+    <circle cx="10.2" cy="10.2" r="2.5" fill="#fff" />
+  {:else if name === "c-link"}
+    <g fill="none" stroke={g("blue")} stroke-width="3.4">
+      <rect x="2.6" y="11.6" width="16" height="8.8" rx="4.4" transform="rotate(-45 10.6 16)" />
+      <rect x="13.4" y="11.6" width="16" height="8.8" rx="4.4" transform="rotate(-45 21.4 16)" />
+    </g>
+  {:else if name === "c-globe"}
+    <circle cx="16" cy="16" r="13" fill={g("blue")} />
+    <g fill="none" stroke="#fff" stroke-width="1.7" opacity="0.9">
+      <ellipse cx="16" cy="16" rx="5.6" ry="13" />
+      <path d="M3 16h26M5.2 9.5h21.6M5.2 22.5h21.6" />
+    </g>
+  {:else if name === "c-key"}
+    <circle cx="10" cy="16" r="7" fill={g("amber")} />
+    <circle cx="8.6" cy="16" r="2.3" fill="var(--surface)" />
+    <rect x="15" y="14" width="14" height="4.2" rx="1.6" fill={g("amber")} />
+    <rect x="23" y="17" width="3.2" height="5" rx="1" fill={TONES.amber[1]} />
+    <rect x="18.8" y="17" width="2.8" height="3.6" rx="1" fill={TONES.amber[1]} />
+  {:else if name === "c-sound"}
+    <path d="M4 12.2c0-.7.5-1.2 1.2-1.2H9l6.4-5.3c.8-.7 2.1-.1 2.1 1v18.6c0 1.1-1.3 1.7-2.1 1L9 21H5.2c-.7 0-1.2-.5-1.2-1.2z" fill={g("purple")} />
+    <path d="M21 11.5a6.5 6.5 0 0 1 0 9M24.6 7.8a11.5 11.5 0 0 1 0 16.4" fill="none" stroke={TONES.purple[1]} stroke-width="2.4" stroke-linecap="round" />
+  {:else if name === "c-gauge"}
+    <g fill="none" stroke-width="4.2" stroke-linecap="round">
+      <path d="M5 23A11 11 0 0 1 10.5 13.5" stroke={g("green")} />
+      <path d="M10.5 13.5A11 11 0 0 1 21.5 13.5" stroke={g("amber")} />
+      <path d="M21.5 13.5A11 11 0 0 1 27 23" stroke={g("red")} />
+    </g>
+    <path d="M16 23l5.6-6.8" stroke={TONES.dark[1]} stroke-width="2.6" stroke-linecap="round" />
+    <circle cx="16" cy="23" r="2.6" fill={TONES.dark[1]} />
+  {:else if name === "c-sun"}
+    <g stroke={TONES.amber[1]} stroke-width="2.6" stroke-linecap="round">
+      <path d="M16 2.8v3.4M16 25.8v3.4M2.8 16h3.4M25.8 16h3.4M6.7 6.7l2.4 2.4M22.9 22.9l2.4 2.4M6.7 25.3l2.4-2.4M22.9 9.1l2.4-2.4" />
+    </g>
+    <circle cx="16" cy="16" r="7" fill={g("amber")} />
+  {:else if name === "c-info"}
+    <circle cx="16" cy="16" r="13" fill={g("blue")} />
+    <circle cx="16" cy="9.8" r="2" fill="#fff" />
+    <path d="M16 14.5v9" stroke="#fff" stroke-width="3.4" stroke-linecap="round" />
+  {:else if name === "c-copy"}
+    <rect x="10" y="3.5" width="17" height="20" rx="2.5" fill={TONES.slate[0]} />
+    <rect x="5" y="8.5" width="17" height="20" rx="2.5" fill={g("blue")} stroke="var(--surface)" stroke-width="1.4" />
+    <path d="M9.5 15h8M9.5 19h8M9.5 23h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+  {:else if name === "c-refresh"}
+    <path d="M25 12.5A9.5 9.5 0 1 0 25.6 20" fill="none" stroke={g("green")} stroke-width="3.6" stroke-linecap="round" />
+    <path d="M27.5 5.5v8.2h-8.2z" fill={TONES.green[1]} stroke={TONES.green[1]} stroke-width="1.6" stroke-linejoin="round" />
+  {:else if name === "c-window"}
+    <rect x="3" y="5" width="26" height="22" rx="3" fill={g("blue")} />
+    <rect x="5.4" y="11" width="21.2" height="13.6" rx="1.3" fill="#fff" />
+    <path d="M14 20.5l7-7M16 13.5h5v5" fill="none" stroke={TONES.blue[1]} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "c-remove-queue"}
+    <rect x="3" y="5" width="18" height="3.6" rx="1.8" fill={g("slate")} />
+    <rect x="3" y="12" width="18" height="3.6" rx="1.8" fill={g("slate")} />
+    <rect x="3" y="19" width="11" height="3.6" rx="1.8" fill={g("slate")} />
+    <circle cx="23.5" cy="23.5" r="7.5" fill={g("red")} stroke="var(--surface)" stroke-width="1.5" />
+    <path d="M21 21l5 5M26 21l-5 5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" />
+  {:else if name === "c-film"}
+    <rect x="3" y="6" width="26" height="20" rx="3.5" fill={g("blue")} />
+    {#each [8.5, 13.2, 17.9, 22.6] as y (y)}
+      <rect x="5" y={y - 1.2} width="2.4" height="2.4" rx="0.6" fill="#fff" opacity="0.8" />
+      <rect x="24.6" y={y - 1.2} width="2.4" height="2.4" rx="0.6" fill="#fff" opacity="0.8" />
+    {/each}
   {:else if name === "unfinished"}
     <path d="M12 4.5h8v10.5h5.2L16 26.5 6.8 15H12z" fill={g("blue")} stroke={TONES.blue[1]} stroke-width="1.6" stroke-linejoin="round" />
   {:else if name === "finished"}
