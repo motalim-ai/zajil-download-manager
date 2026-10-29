@@ -5,7 +5,7 @@
 // stops when idle and is woken by these events.
 
 import { api, onNewDownload, pausesSafely, withDownloadUiHidden } from "./compat.js";
-import { HOST, HOST_PROBLEMS, PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, playlistPage, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
+import { HOST, HOST_PROBLEMS, PROTOCOL_VERSION, isPageRefusal, isWeb, menuMessage, needsSignIn, playlistPage, samePost, send, shouldCapture, takeOver, videoMessage } from "./capture.js";
 import { cookieHeader, cookiesAllowed, otherSite, videoAllowed } from "./cookies.js";
 import { load } from "./settings.js";
 import { forgetTicket, instanceId, newTicket, plainStore, rememberTicket, startLink } from "./link.js";
@@ -546,6 +546,7 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     pageUrl: sender.tab.url,
     frameUrl: frameId === 0 ? undefined : sender.url,
     srcUrl: typeof message.src === "string" ? message.src : undefined,
+    postUrl: samePost(message.post, frameId === 0 ? sender.tab.url : sender.url),
     frameId,
   };
   const doc = typeof sender.documentId === "string" ? sender.documentId : undefined;

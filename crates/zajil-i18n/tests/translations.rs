@@ -875,6 +875,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("seconds-left", &["count"]),
     ("settings-browser-failed", &["browser", "error"]),
     ("settings-browser-ok", &["browser"]),
+    ("settings-video-tools-installing", &["percent", "tool"]),
     ("settings-connections-hint", &["default", "max"]),
     ("size-bytes", &["value"]),
     ("size-gib", &["value"]),
@@ -1425,6 +1426,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "settings-browser-ok",
         ar: (&[("browser", "Chrome")], "Chrome: مسجَّل"),
         en: (&[("browser", "Chrome")], "Chrome: registered"),
+    },
+    Whole {
+        key: "settings-video-tools-installing",
+        ar: (
+            &[("tool", "yt-dlp"), ("percent", "40%")],
+            "تنزيل yt-dlp… 40%",
+        ),
+        en: (
+            &[("tool", "yt-dlp"), ("percent", "40%")],
+            "Downloading yt-dlp… 40%",
+        ),
     },
     Whole {
         key: "queue-window",

@@ -92,6 +92,16 @@
     host.remove();
     listHost.remove();
   };
+  /** The page of the post `found` is in, when the page is a feed of posts
+   * (X's timeline, a profile): the link on the post's time, as X and
+   * Mastodon draw it. Empty when there is none, or it is this page.
+   * @param {HTMLVideoElement} found @returns {string} */
+  const postOf = (found) => {
+    const link = found.closest("article")?.querySelector("a[href] time")?.closest("a");
+    const href = link instanceof HTMLAnchorElement ? link.href : "";
+    return href && href !== location.href && href.length <= 8192 ? href : "";
+  };
+
   /** Asks the background; null when it gives no answer. Once the extension
    * went, null at once, and the script stops.
    * @param {object} message @returns {Promise<any>} */
@@ -507,11 +517,12 @@
    * the button is pressed. Only the video's address goes, as for a press.
    * @param {HTMLVideoElement} found */
   const peek = (found) => {
-    if (location.href === peeked) return;
-    peeked = location.href;
+    const post = postOf(found);
+    if ((post || location.href) === peeked) return;
+    peeked = post || location.href;
     readPage();
     const src = found.currentSrc || found.src || "";
-    void ask({ type: "video-peek", src: src.length <= 8192 ? src : "" });
+    void ask({ type: "video-peek", src: src.length <= 8192 ? src : "", ...(post ? { post } : {}) });
   };
 
   /** The last pointer position not yet looked at, once per frame (review:
@@ -606,9 +617,10 @@
     if (!video) return;
     const src = video.currentSrc || video.src || "";
     setState("working");
+    const post = whole ? "" : postOf(video);
     // A longer address is left out, never cut into another one (review).
     /** @type {Record<string, unknown>} */
-    const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "" };
+    const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "", ...(post ? { post } : {}) };
     if (format) message.format = format;
     const answer = await answerTo(message);
     if (stopped) return;

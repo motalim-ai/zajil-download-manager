@@ -106,6 +106,16 @@ describe("the Download video button", () => {
     await page.close();
   });
 
+  // Owner's report, 2026-10-29: on X's timeline the tab's page is a feed,
+  // which yt-dlp does not read; the post's own link (on its time) goes.
+  it("in a post of a feed, a click sends the post's own link too", async () => {
+    const page = await pageWith(`<article><a href="/someone/status/1"><time>2h</time></a>${VIDEO}</article>`, { url: "https://page.invalid/home" });
+    await page.mouse.move(400, 200);
+    await page.mouse.click(AT.x, AT.y);
+    expect(await sent(page)).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4", post: "https://page.invalid/someone/status/1" }]);
+    await page.close();
+  });
+
   // Owner's decision, 2026-10-28 (as IDM): read ahead, so the qualities
   // are there at the press.
   it("showing over a video, it has Zajil read it ahead: once a page, with only its address", async () => {

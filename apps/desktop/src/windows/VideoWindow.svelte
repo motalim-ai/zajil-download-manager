@@ -53,6 +53,9 @@
   // browser started, or a page to ask about (the owner's notes: no view
   // that is replaced by another as soon as it shows).
   let decided = $state(false);
+  // The browser's download that waits for the tools: it starts again
+  // once they are in, and goes if the user cancels instead.
+  let afterTools: number | null = null;
 
   onMount(() => {
     if (scene) {
@@ -70,7 +73,8 @@
         }),
       );
       unlisten.push(await api.onChange(() => step.kind === "started" && void showStarted()));
-      unlisten.push(await api.onVideoStarted(() => void showStarted(true)));
+      // Not while the tools come: what is asked about then waits its turn.
+      unlisten.push(await api.onVideoStarted(() => step.kind !== "installing" && void showStarted(true)));
       if (await showStarted(true)) return;
       decided = true;
       const pending = await api.videoPending().catch(() => null);
@@ -87,6 +91,18 @@
   async function showStarted(fresh = false): Promise<boolean> {
     const s = await api.videoStarted().catch(() => null);
     if (!s) return false;
+    // Without the tools it cannot go on (it failed, or it will): they are
+    // asked for here, as for a page, not left to a message (owner,
+    // 2026-10-29: 1.1.0 said only «open the window again»).
+    if (fresh || s.status === "failed") {
+      const tools = await api.videoToolsStatus().catch(() => []);
+      if (tools.some((t) => !t.installed)) {
+        afterTools = s.id;
+        step = { kind: "consent", tools };
+        decided = true;
+        return true;
+      }
+    }
     if (fresh || step.kind !== "started" || step.id !== s.id) {
       nameTouched = false;
       folderTouched = false;
@@ -163,7 +179,12 @@
     step = { kind: "installing", tool: "", done: 0, total: null };
     try {
       await api.videoToolsInstall();
-      await probe();
+      if (afterTools !== null) {
+        const id = afterTools;
+        afterTools = null;
+        await api.resume([id]);
+        await showStarted(true);
+      } else await probe();
     } catch (e) {
       // Why, in the user's words (`not_ready`: yt-dlp did not start after
       // its download), and its own text under «Details».
@@ -234,6 +255,7 @@
     if (step.kind === "probing") await api.videoProbeCancel().catch(() => {});
     if (step.kind === "downloading" && step.id !== null) await api.videoCancel(step.id).catch(() => {});
     if (step.kind === "started") await api.videoDiscard(step.id).catch(() => {});
+    else if (afterTools !== null) await api.videoDiscard(afterTools).catch(() => {});
     await api.closeWindow();
   }
 

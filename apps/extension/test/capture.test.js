@@ -12,6 +12,7 @@ import {
   send,
   shouldCapture,
   takeOver,
+  samePost,
   videoMessage,
 } from "../src/capture.js";
 import { DECIDE_MS, onNewDownload, pausesSafely, withDownloadUiHidden } from "../src/compat.js";
@@ -287,6 +288,19 @@ describe("videoMessage (M6)", () => {
       media: "https://cdn.example/v.mp4",
     });
     expect(videoMessage({ pageUrl: "https://example.com/v", frameUrl: "about:blank" })).toEqual({ type: "video", protocol_version: 1, page: "https://example.com/v" });
+  });
+
+  it("sends a feed's video as its post's page, only of the same site (X's timeline)", () => {
+    const post = samePost("https://x.com/someone/status/1", "https://x.com/motalim_ai");
+    expect(post).toBe("https://x.com/someone/status/1");
+    expect(videoMessage({ pageUrl: "https://x.com/motalim_ai", postUrl: post, srcUrl: "blob:https://x.com/1" })).toEqual({
+      type: "video",
+      protocol_version: 1,
+      page: "https://x.com/someone/status/1",
+    });
+    expect(samePost("https://elsewhere.example/status/1", "https://x.com/home")).toBeUndefined();
+    expect(samePost("javascript:alert(1)", "https://x.com/home")).toBeUndefined();
+    expect(samePost(42, "https://x.com/home")).toBeUndefined();
   });
 
   it("leaves out an address only the page can read, and refuses a page Zajil cannot", () => {

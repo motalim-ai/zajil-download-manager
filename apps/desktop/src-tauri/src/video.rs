@@ -963,9 +963,13 @@ fn tools_status(toolbox: &Toolbox) -> Vec<ToolView> {
         .iter()
         .map(|&tool| {
             let pin = target.and_then(|t| zajil_core::tools::pinned(tool, t));
+            let why = toolbox.why_not_installed(tool);
+            if let Some(why) = &why {
+                eprintln!("zajil: {} is not ready: {why}", name(tool));
+            }
             ToolView {
                 tool: name(tool).into(),
-                installed: toolbox.is_installed(tool),
+                installed: why.is_none(),
                 version: pin.as_ref().map(|p| p.version.clone()),
                 host: pin
                     .as_ref()
@@ -1277,9 +1281,21 @@ impl VideoErrorView {
 }
 
 pub fn format_view(f: &Format) -> FormatView {
+    // Codecs the site does not say (X's direct MP4s, a plain file): a
+    // picture with its sound when it has a picture's size or a video's
+    // extension, as yt-dlp's own «best» takes it (owner's report,
+    // 2026-10-29: X offered sound only).
+    let unknown = f.vcodec.is_none() && f.acodec.is_none();
+    let a_picture = f.height.is_some()
+        || f.width.is_some()
+        || matches!(
+            f.ext.as_str(),
+            "mp4" | "webm" | "mov" | "mkv" | "flv" | "3gp"
+        );
     let kind = match (f.has_video(), f.has_audio()) {
         (true, true) => "both",
         (true, false) => "video",
+        _ if unknown && a_picture => "both",
         _ => "audio",
     };
     FormatView {
@@ -1342,6 +1358,23 @@ pub async fn video_probe(
             .lock()
             .unwrap()
             .insert(url.clone(), sent.url.clone());
+    }
+    // Never the links (they may carry a token): which was read, and what.
+    if let Probed::Video(video) = &sent.probed {
+        let pictures = video
+            .formats
+            .iter()
+            .filter(|f| format_view(f).kind != "audio")
+            .count();
+        eprintln!(
+            "zajil: read from {}: {} formats, {pictures} with a picture",
+            if sent.url == url {
+                "the page"
+            } else {
+                "the page's playlist"
+            },
+            video.formats.len(),
+        );
     }
     let read = sent.url;
     Ok(match sent.probed {
@@ -1790,6 +1823,8 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 row.status = StatusView::Paused;
             }
             Err(e) => {
+                // Its kind only: yt-dlp's words may hold the page's link.
+                eprintln!("zajil: video {id} failed ({})", e.kind);
                 row.status = StatusView::Failed;
                 row.error = Some(e.text(lang));
             }
@@ -2168,6 +2203,14 @@ mod tests {
             r#"{"format_id":"hls-720","ext":"mp4","vcodec":"avc1","acodec":"mp4a","protocol":"m3u8_native"}"#,
         );
         assert!(hls.hls);
+        // X's direct MP4: no codecs said, a picture's size.
+        let x = f(r#"{"format_id":"http-2176","ext":"mp4","width":1280,"height":720}"#);
+        assert_eq!((x.kind.as_str(), x.height), ("both", Some(720)));
+        let plain = f(r#"{"format_id":"0","ext":"mp4"}"#);
+        assert_eq!(plain.kind, "both");
+        // Nothing said, and no picture's sign: sound.
+        let mp3 = f(r#"{"format_id":"0","ext":"mp3"}"#);
+        assert_eq!(mp3.kind, "audio");
     }
 
     /// What the page sends comes back as the engine's choice, and back.

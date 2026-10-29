@@ -635,7 +635,7 @@ video-playlists-only = These are playlists: open each one to choose its videos.
 video-error-playlist = This link is a playlist, not a video. Open it in «Video quality» to choose from it.
 video-done = The video has downloaded.
 video-drm = This video is protected, and Zajil does not download protected content.
-video-tools-missing = The video tools are not installed or have changed. Open the window again to download them.
+video-tools-missing = The video tools are not downloaded or have changed. Download them in Settings › Video tools, or download the video again.
 video-tools-not-ready = yt-dlp was downloaded but did not start, so the video tools are not ready. Try again, and if it happens again, tell us what «Details» says.
 video-error-no_formats = Zajil found no quality it can download for this video. Try again in a little while.
 video-error-sign_in = This video opens only when signed in to its site. Sign in in the browser and let the extension send cookies, then try again.
@@ -653,12 +653,15 @@ queue-video = Video
 
 ## Video tools in the settings and «About» (M6, #149)
 settings-video-tools = Video tools
-settings-video-tools-hint = They are downloaded with your agreement the first time you download a video, and kept in Zajil's data folder.
+settings-video-tools-hint = They are downloaded with your agreement the first time you download a video, or from here, and kept in Zajil's data folder.
 settings-video-tools-ready = Ready
 settings-video-tools-missing = Not downloaded
 settings-video-tools-remove = Delete the video tools
 settings-video-tools-remove-question = The video tools are deleted, and downloaded again with your agreement when you download a video. Delete them?
 settings-video-tools-removed = The video tools were deleted.
+settings-video-tools-install = Download the video tools
+settings-video-tools-installing = Downloading { $tool }… { $percent }
+settings-video-tools-installed = The video tools are ready.
 about-video-tools = Zajil downloads videos with free tools, downloaded from their sources:
 about-ffmpeg = This software uses libraries from the FFmpeg project under the { $license }.
 about-tool = { $tool } { $version }, under the { $license }. Its source: { $source }

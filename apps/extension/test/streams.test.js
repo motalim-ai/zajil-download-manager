@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_STREAMS, forget, forgetAll, kindOf, note, streamFor, streamsOf } from "../src/streams.js";
+import { MAX_STREAMS, forget, forgetAll, isRendition, kindOf, note, streamFor, streamsOf } from "../src/streams.js";
 
 /** A fake browser: `storage.session` only (memory), and its tabs. Anything
  * written elsewhere would throw. */
@@ -124,6 +124,22 @@ describe("the playlists a tab loads", () => {
     expect(await streamFor(api, 1, { frame: 3, origin: "https://site.example" })).toBeUndefined();
     // Nothing known of either side: nothing goes.
     expect(await streamFor(api, 1, { frame: 0 })).toBeUndefined();
+  });
+
+  it("a main playlist goes before the renditions loaded after it (X: sound and picture apart)", async () => {
+    const api = browserWith();
+    const at = { initiator: "https://x.com" };
+    const base = "https://video.twimg.com/amplify_video/1/pl";
+    await note(api, hls(`${base}/Ab1.m3u8?variant_version=1`, at));
+    await note(api, hls(`${base}/avc1/1280x720/Cd2.m3u8`, at));
+    await note(api, hls(`${base}/mp4a/128000/Ef3.m3u8`, at));
+    expect(await streamFor(api, 1, { frame: 0, origin: "https://x.com" })).toBe(`${base}/Ab1.m3u8?variant_version=1`);
+    // Renditions only: the newest still goes.
+    const only = browserWith();
+    await note(only, hls(`${base}/mp4a/128000/Ef3.m3u8`, at));
+    expect(await streamFor(only, 1, { frame: 0, origin: "https://x.com" })).toBe(`${base}/mp4a/128000/Ef3.m3u8`);
+    expect(isRendition("https://cdn.example/hls/master.m3u8")).toBe(false);
+    expect(isRendition("https://cdn.example/hls/audio/eng.m3u8")).toBe(true);
   });
 
   it("a page restored by Back gets none of the next page's playlists (Chrome's documentId)", async () => {

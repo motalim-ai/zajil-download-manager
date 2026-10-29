@@ -466,7 +466,13 @@ impl Toolbox {
     /// Whether `tool` is there and is the pinned file. Reads and hashes it,
     /// so call it from a blocking task.
     pub fn is_installed(&self, tool: Tool) -> bool {
-        self.verified_blocking(tool).is_ok()
+        self.why_not_installed(tool).is_none()
+    }
+
+    /// Why `tool` is not [installed](Self::is_installed), if it is not: for
+    /// the log. Reads and hashes it, so call it from a blocking task.
+    pub fn why_not_installed(&self, tool: Tool) -> Option<ToolError> {
+        self.verified_blocking(tool).err()
     }
 
     /// `tool`, checked right before it runs: the pinned file, which no
