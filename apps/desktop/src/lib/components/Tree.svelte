@@ -20,7 +20,7 @@
 </script>
 
 <script lang="ts">
-  import Icon from "./Icon.svelte";
+  import ColorIcon, { typeIcon } from "./ColorIcon.svelte";
   import { inSection } from "../sections";
   import { locale } from "../i18n.svelte";
   import { categoryName as nameOf } from "../categoryName";
@@ -53,15 +53,15 @@
   const categoryName = (c: Snapshot["categories"][number]) => nameOf(c.id, c.name, (k) => locale.t(k));
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
   const SECTIONS = [
-    { section: "unfinished", icon: "circle-dashed", key: "tree-unfinished" },
-    { section: "finished", icon: "circle-check", key: "tree-finished" },
-    { section: "waiting", icon: "clock", key: "tree-waiting" },
+    { section: "unfinished", icon: "unfinished", key: "tree-unfinished" },
+    { section: "finished", icon: "finished", key: "tree-finished" },
+    { section: "waiting", icon: "waiting", key: "tree-waiting" },
   ] as const;
 </script>
 
 <nav class="tree" aria-label={locale.t("tree-label")}>
   <button class="node top" aria-current={current({ kind: "all" })} onclick={() => show({ kind: "all" })}>
-    <Icon name="layers" size={16} /><span class="label">{locale.t("nav-all")}</span><span class="n num">{count(() => true)}</span>
+    <ColorIcon name="all" size={18} /><span class="label">{locale.t("nav-all")}</span><span class="n num">{count(() => true)}</span>
   </button>
 
   <!-- Under «All downloads»: the unfinished, finished and waiting ones,
@@ -76,20 +76,20 @@
         aria-expanded={expanded}
         aria-label={`${locale.t("tree-expand")}: ${locale.t(sec.key)}`}
         onclick={() => toggle(key)}
-      ><span class="flip"><Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} /></span></button>
+      ><span class="box" aria-hidden="true">{expanded ? "−" : "+"}</span></button>
       <button class="node" aria-current={current({ kind: "status", status: sec.section })} onclick={() => show({ kind: "status", status: sec.section })}>
-        <Icon name={sec.icon} size={16} /><span class="label">{locale.t(sec.key)}</span><span class="n num">{count(of)}</span>
+        <ColorIcon name={sec.icon} size={17} /><span class="label">{locale.t(sec.key)}</span><span class="n num">{count(of)}</span>
       </button>
     </div>
     {#if expanded}
       {#each snapshot.categories as c (c.id)}
         <button class="node l1" aria-current={current({ kind: "status", status: sec.section, category: c.id })} onclick={() => show({ kind: "status", status: sec.section, category: c.id })}>
-          <Icon name={categoryIcon(c.id)} size={15} /><span class="label">{categoryName(c)}</span><span class="n num">{count((d) => of(d) && d.category === c.id)}</span>
+          <ColorIcon name={typeIcon(c.id)} size={16} /><span class="label">{categoryName(c)}</span><span class="n num">{count((d) => of(d) && d.category === c.id)}</span>
         </button>
       {/each}
       {#if snapshot.downloads.some((d) => d.category === null)}
         <button class="node l1" aria-current={current({ kind: "status", status: sec.section, category: null })} onclick={() => show({ kind: "status", status: sec.section, category: null })}>
-          <Icon name="file" size={15} /><span class="label">{locale.t("category-none")}</span><span class="n num">{count((d) => of(d) && d.category === null)}</span>
+          <ColorIcon name="t-file" size={16} /><span class="label">{locale.t("category-none")}</span><span class="n num">{count((d) => of(d) && d.category === null)}</span>
         </button>
       {/if}
     {/if}
@@ -105,29 +105,29 @@
         aria-expanded={expanded}
         aria-label={`${locale.t("tree-expand")}: ${categoryName(c)}`}
         onclick={() => toggle(c.id)}
-      ><span class="flip"><Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} /></span></button>
+      ><span class="box" aria-hidden="true">{expanded ? "−" : "+"}</span></button>
       <button class="node" aria-current={current({ kind: "category", id: c.id })} onclick={() => show({ kind: "category", id: c.id })}>
-        <Icon name={categoryIcon(c.id)} size={16} /><span class="label">{categoryName(c)}</span><span class="n num">{count(mine)}</span>
+        <ColorIcon name={typeIcon(c.id)} size={17} /><span class="label">{categoryName(c)}</span><span class="n num">{count(mine)}</span>
       </button>
     </div>
     {#if expanded}
-      {#each [{ part: "unfinished", icon: "circle-dashed", key: "tree-unfinished", pick: (d: Download) => mine(d) && d.status !== "done" }, { part: "finished", icon: "circle-check", key: "tree-finished", pick: (d: Download) => mine(d) && d.status === "done" }] as const as sub (sub.part)}
+      {#each [{ part: "unfinished", icon: "unfinished", key: "tree-unfinished", pick: (d: Download) => mine(d) && d.status !== "done" }, { part: "finished", icon: "finished", key: "tree-finished", pick: (d: Download) => mine(d) && d.status === "done" }] as const as sub (sub.part)}
         <button class="node l1" aria-current={current({ kind: "category", id: c.id, part: sub.part })} onclick={() => show({ kind: "category", id: c.id, part: sub.part })}>
-          <Icon name={sub.icon} size={15} /><span class="label">{locale.t(sub.key)}</span><span class="n num">{count(sub.pick)}</span>
+          <ColorIcon name={sub.icon} size={16} /><span class="label">{locale.t(sub.key)}</span><span class="n num">{count(sub.pick)}</span>
         </button>
       {/each}
     {/if}
   {/each}
   {#if snapshot.downloads.some((d) => d.category === null)}
     <button class="node l0" aria-current={current({ kind: "uncategorized" })} onclick={() => show({ kind: "uncategorized" })}>
-      <Icon name="file" size={16} /><span class="label">{locale.t("category-none")}</span><span class="n num">{count((d) => d.category === null)}</span>
+      <ColorIcon name="t-file" size={17} /><span class="label">{locale.t("category-none")}</span><span class="n num">{count((d) => d.category === null)}</span>
     </button>
   {/if}
 
   <h2>{locale.t("nav-queues")}</h2>
   {#each snapshot.queues as q (q.name)}
     <button class="node l0" aria-current={current({ kind: "queue", name: q.name })} onclick={() => show({ kind: "queue", name: q.name })}>
-      <Icon name={q.window ? "calendar-clock" : "list-ordered"} size={16} />
+      <ColorIcon name={q.window ? "queue-timed" : "queue"} size={18} />
       <span class="label">
         <bdi>{queueName(q.name)}</bdi>
         {#if q.window}<small><bdi>{locale.t("queue-starts", { time: q.window[0] })}</bdi></small>{/if}
@@ -141,45 +141,58 @@
   .tree {
     background: var(--side);
     border-inline-end: 1px solid var(--line);
-    padding: 10px 8px;
+    padding: 6px 6px;
     overflow: auto;
-    font-size: 13px;
+    font-size: 12.5px;
     display: flex;
     flex-direction: column;
     gap: 1px;
   }
   h2 {
     font-size: 11.5px;
-    font-weight: 600;
-    color: var(--faint);
-    margin: 12px 8px 2px;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 8px 4px 2px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid var(--line);
   }
   .row {
     display: flex;
     align-items: center;
   }
   .twist {
-    width: 22px;
-    height: 26px;
+    width: 20px;
+    height: 22px;
     display: grid;
     place-items: center;
     border: 0;
     background: none;
-    color: var(--faint);
     cursor: pointer;
-    border-radius: 6px;
+    padding: 0;
     flex: none;
   }
-  :global([dir="rtl"]) .flip {
-    display: inline-flex;
-    transform: scaleX(-1);
+  /* A desktop tree's box: + to open, − to close. */
+  .box {
+    width: 11px;
+    height: 11px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--faint);
+    border-radius: 2px;
+    background: var(--surface);
+    color: var(--muted);
+    font: 600 11px/1 system-ui, sans-serif;
+  }
+  .twist:hover .box {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .node {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 4px 6px;
-    border-radius: 7px;
+    gap: 6px;
+    padding: 2px 5px;
+    border-radius: 3px;
     border: 0;
     background: none;
     color: var(--ink);
@@ -198,19 +211,17 @@
   }
   .node[aria-current="page"] {
     background: var(--sel);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent);
     font-weight: 600;
-  }
-  .node :global(.icon) {
-    color: var(--muted);
   }
   .top {
     font-size: 14px;
   }
   .l0 {
-    margin-inline-start: 22px;
+    margin-inline-start: 20px;
   }
   .l1 {
-    margin-inline-start: 40px;
+    margin-inline-start: 38px;
   }
   .label {
     display: flex;

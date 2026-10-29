@@ -29,6 +29,7 @@
   import RefreshDialog from "./lib/components/RefreshDialog.svelte";
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
+  import ColorIcon from "./lib/components/ColorIcon.svelte";
   import { toolLines } from "./lib/about";
   import { api } from "./lib/api";
   import { finishedQueues, play, type Sound } from "./lib/sounds";
@@ -1052,10 +1053,10 @@
     </div>
     <footer class="status">
       <span>{locale.t("downloads-count", { count: snapshot.downloads.length })}</span>
-      <span>{locale.t("footer-active", { count: active.length })}</span>
+      <span><ColorIcon name="s-active" size={13} />{locale.t("footer-active", { count: active.length })}</span>
       <span>{locale.t("footer-total-speed", { speed: speed(locale.lang, locale.digits, totalSpeed) || size(locale.lang, locale.digits, 0) })}</span>
-      <span>{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
-      <span>{locale.t("footer-waiting", { count: waiting })}</span>
+      <span><Icon name="gauge" size={14} />{snapshot.speed_limit ? locale.t("footer-limit", { speed: speed(locale.lang, locale.digits, snapshot.speed_limit) }) : locale.t("footer-limit-none")}</span>
+      <span><ColorIcon name="s-waiting" size={13} />{locale.t("footer-waiting", { count: waiting })}</span>
       {#if selected.length > 0}<span class="end">{locale.t("footer-selected", { number: num(locale.lang, locale.digits, selected.length, 0) })}</span>{/if}
     </footer>
     <div class="visually-hidden" aria-live="polite" role="status">{announcement}</div>
@@ -1101,15 +1102,24 @@
     background: var(--red-bg);
     color: var(--red);
   }
+  /* A desktop status bar: its parts in panels with lines between. */
   .status {
     display: flex;
-    gap: 18px;
     align-items: center;
-    padding: 5px 14px;
+    padding: 3px 6px;
     border-top: 1px solid var(--line);
     font-size: 12px;
     color: var(--muted);
-    background: var(--surface);
+    background: linear-gradient(var(--sunken), var(--surface));
+  }
+  .status > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 10px;
+  }
+  .status > span + span {
+    border-inline-start: 1px solid var(--line);
   }
   .end {
     margin-inline-start: auto;

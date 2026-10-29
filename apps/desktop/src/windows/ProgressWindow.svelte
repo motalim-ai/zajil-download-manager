@@ -3,6 +3,7 @@
   import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { ask } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import ColorIcon from "../lib/components/ColorIcon.svelte";
   import { isolatedName } from "../lib/fname";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
@@ -48,6 +49,18 @@
     d?.status === "done" || (s.end !== null && s.start + s.done > s.end);
   const working = $derived(running && details ? details.segments.filter((s) => !whole(s)).length : 0);
 
+  // The speed of the last reads, drawn as a line under the bar (the
+  // owner's request: a window that shows it at work).
+  const SPEEDS = 60;
+  let speeds = $state<number[]>([]);
+  const speedLine = $derived.by(() => {
+    if (speeds.length < 2) return "";
+    const top = Math.max(...speeds) || 1;
+    const step = 100 / (SPEEDS - 1);
+    const at = (v: number, i: number) => `${((SPEEDS - speeds.length + i) * step).toFixed(2)},${(30 - (v / top) * 27).toFixed(2)}`;
+    return speeds.map(at).join(" ");
+  });
+
   // One read at a time, and one more after it if changes came meanwhile
   // (review of #111: every change of any download read three files).
   let loading = false;
@@ -63,6 +76,7 @@
     try {
       const next = await api.details(id);
       const was = details?.download.status;
+      if (next.download.status === "active") speeds = [...speeds.slice(1 - SPEEDS), next.download.speed];
       details = next;
       problem = null;
       if (was && was !== "done" && next.download.status === "done") void finished();
@@ -274,9 +288,15 @@
             {:else}{locale.t("details-unknown")}{/if}
           </dd>
         </dl>
-        <div class="bar" role="progressbar" aria-label={locale.t("progress-done")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)}>
+        <div class="bar" class:going={running} role="progressbar" aria-label={locale.t("progress-done")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)}>
           <b style:inline-size="{fraction * 100}%"></b>
         </div>
+        {#if speedLine}
+          <svg class="speeds" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+            <polygon points="{speedLine.split(" ")[0]!.split(",")[0]},30 {speedLine} 100,30" />
+            <polyline points={speedLine} />
+          </svg>
+        {/if}
       </div>
     {:else if tab === "limit"}
       <div id="panel-limit" role="tabpanel" aria-labelledby="tab-limit" class="panel">
@@ -331,6 +351,8 @@
             {@const from = (s.start / total) * 100}
             {@const width = (Math.min(s.done, (s.end ?? total - 1) - s.start + 1) / total) * 100}
             <span class="got" style:inset-inline-start="{from}%" style:inline-size="{width}%" class:writing={running && !whole(s)}></span>
+            <!-- Where each connection started. -->
+            <span class="start" style:inset-inline-start="{from}%"></span>
           {/each}
         </div>
         <div class="legend">
@@ -344,11 +366,16 @@
           </thead>
           <tbody>
             {#each details.segments as s, i (s.start)}
+              {@const length = s.end === null ? 0 : s.end - s.start + 1}
               <tr>
                 <td class="num">{num(locale.lang, locale.digits, i + 1, 0)}</td>
                 <td class="num">{size(locale.lang, locale.digits, s.done)}</td>
-                <td class:yes={whole(s)}>
-                  {whole(s) ? locale.t("details-part-done") : running ? locale.t("progress-receiving") : locale.t(`status-${d?.status ?? "paused"}`)}
+                <td>
+                  <span class="state" class:yes={whole(s)} class:live={running && !whole(s)}>
+                    <ColorIcon name={whole(s) ? "s-done" : running ? "s-active" : "s-paused"} size={13} />
+                    {#if length > 0}<span class="mini" aria-hidden="true"><b style:inline-size="{Math.min(100, (s.done / length) * 100)}%"></b></span>{/if}
+                    {whole(s) ? locale.t("details-part-done") : running ? locale.t("progress-receiving") : locale.t(`status-${d?.status ?? "paused"}`)}
+                  </span>
                 </td>
               </tr>
             {/each}
@@ -386,7 +413,7 @@
   }
   .tab {
     padding: 6px 12px;
-    border-radius: 8px 8px 0 0;
+    border-radius: 4px 4px 0 0;
     color: var(--muted);
     border: 1px solid transparent;
     border-bottom: 0;
@@ -437,18 +464,52 @@
   .bad {
     color: var(--amber);
   }
+  /* A desktop progress bar: green, with moving stripes while it runs. */
   .bar {
-    height: 10px;
-    border-radius: 6px;
+    height: 16px;
+    border-radius: 3px;
     background: var(--sunken);
+    box-shadow: inset 0 0 0 1px var(--line);
     overflow: hidden;
     margin-top: 6px;
   }
   .bar b {
     display: block;
     height: 100%;
-    border-radius: 6px;
-    background: var(--accent);
+    border-radius: 3px;
+    background: linear-gradient(#4fd977, #1f9e44);
+  }
+  .bar.going b {
+    background:
+      repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.18) 0 8px, transparent 8px 16px),
+      linear-gradient(#4fd977, #1f9e44);
+    background-size: 22.6px 100%, auto;
+    animation: stripes 1s linear infinite;
+  }
+  @keyframes stripes {
+    to {
+      background-position: 22.6px 0, 0 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bar.going b {
+      animation: none;
+    }
+  }
+  .speeds {
+    display: block;
+    width: 100%;
+    height: 30px;
+    margin-top: 4px;
+  }
+  .speeds polygon {
+    fill: color-mix(in oklab, #1f9e44 18%, transparent);
+  }
+  .speeds polyline {
+    fill: none;
+    stroke: #1f9e44;
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
   }
   .check,
   .row {
@@ -509,24 +570,34 @@
     margin: 0;
     font-size: 13.5px;
   }
+  /* Each connection's start (a red mark) and how far it came (green),
+     on one line, as desktop download managers show it. */
   .parts {
     position: relative;
-    height: 16px;
-    border-radius: 6px;
-    background: var(--line);
+    height: 18px;
+    border-radius: 2px;
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--line);
     overflow: hidden;
   }
   .parts .got {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    background: var(--accent);
+    top: 1px;
+    bottom: 1px;
+    background: linear-gradient(#4fd977, #1f9e44);
   }
   .parts .got.writing {
-    box-shadow: inset -4px 0 0 color-mix(in oklab, var(--accent) 45%, white);
+    box-shadow: inset -3px 0 0 #a8f0bd;
   }
   :global([dir="rtl"]) .parts .got.writing {
-    box-shadow: inset 4px 0 0 color-mix(in oklab, var(--accent) 45%, white);
+    box-shadow: inset 3px 0 0 #a8f0bd;
+  }
+  .parts .start {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #d42f2c;
   }
   .legend {
     display: flex;
@@ -546,28 +617,53 @@
     background: var(--line);
   }
   .legend i.got {
-    background: var(--accent);
+    background: #1f9e44;
   }
   .legend i.writing {
-    background: color-mix(in oklab, var(--accent) 45%, white);
+    background: #a8f0bd;
   }
   .conns {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 12.5px;
     background: var(--surface);
-    border-radius: 8px;
-    overflow: hidden;
+    border: 1px solid var(--line);
   }
   .conns th {
     text-align: start;
     font-weight: 600;
     color: var(--muted);
-    padding: 6px 12px;
+    padding: 3px 8px;
     border-bottom: 1px solid var(--line);
+    background: linear-gradient(var(--surface), var(--sunken));
   }
   .conns td {
-    padding: 5px 12px;
-    border-bottom: 1px solid var(--line);
+    padding: 2px 8px;
+    border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+  }
+  .conns th + th,
+  .conns td + td {
+    border-inline-start: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+  }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .state.live {
+    color: var(--accent);
+  }
+  .state .mini {
+    width: 60px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--sunken);
+    box-shadow: inset 0 0 0 1px var(--line);
+    overflow: hidden;
+  }
+  .state .mini b {
+    display: block;
+    height: 100%;
+    background: linear-gradient(#4fd977, #1f9e44);
   }
 </style>

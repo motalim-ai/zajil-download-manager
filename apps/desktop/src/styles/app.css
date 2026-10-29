@@ -10,6 +10,7 @@
   --bg: #eef3f8;
   --surface: #ffffff;
   --sunken: #f5f8fb;
+  --toolbar-end: #eaf0f6;
   --side: #e4ecf4;
   --ink: #10263d;
   /* At least 4.5:1 on every light background (axe, review of #57). */
@@ -39,6 +40,7 @@
     --bg: #07111d;
     --surface: #0e2034;
     --sunken: #0b1a2b;
+    --toolbar-end: #0b1a2b;
     --side: #0a1828;
     --ink: #e3eef9;
     --muted: #a3b8cf;
@@ -67,6 +69,7 @@
   --bg: #07111d;
   --surface: #0e2034;
   --sunken: #0b1a2b;
+  --toolbar-end: #0b1a2b;
   --side: #0a1828;
   --ink: #e3eef9;
   --muted: #a3b8cf;
@@ -132,15 +135,19 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  padding: 6px 12px;
-  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--line) 70%, var(--faint));
+  background: linear-gradient(var(--surface), var(--sunken));
+  padding: 5px 12px;
+  /* Desktop buttons: a little rounding, a firm edge (the owner's request). */
+  border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
 .btn.primary {
-  background: var(--accent);
+  background: linear-gradient(color-mix(in oklab, var(--accent) 82%, white), var(--accent));
   color: var(--accent-ink);
   border-color: transparent;
   font-weight: 600;
@@ -152,6 +159,9 @@ select {
 .btn.quiet {
   border-color: transparent;
   background: none;
+}
+.btn.quiet:hover:not(:disabled) {
+  border-color: var(--line);
 }
 .btn:disabled {
   opacity: 0.5;

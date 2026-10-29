@@ -15,6 +15,7 @@
 
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import ColorIcon from "./ColorIcon.svelte";
   import { locale } from "../i18n.svelte";
   import { tick } from "svelte";
   import { shortcut } from "../keys";
@@ -34,20 +35,21 @@
     onaction: (action: ToolAction) => void;
   } = $props();
 
-  // A colour for each kind of action (owner's decision on #83): green to
-  // run, amber to stop, red to delete, grey for settings and the schedule,
-  // blue to add a link. A line between the groups (`toolbar.ts`).
-  const LOOK: Record<ToolAction, { icon: string; key: string; kind: string }> = {
-    add: { icon: "link-2", key: "tb-add", kind: "add" },
-    resume: { icon: "play", key: "tb-resume", kind: "go" },
-    pause: { icon: "pause", key: "tb-pause", kind: "stop" },
-    "pause-all": { icon: "octagon-pause", key: "tb-pause-all", kind: "stop" },
-    delete: { icon: "trash-2", key: "tb-delete", kind: "del" },
-    "delete-done": { icon: "list-x", key: "tb-delete-done", kind: "del" },
-    settings: { icon: "settings", key: "tb-settings", kind: "calm" },
-    schedule: { icon: "calendar-clock", key: "tb-schedule", kind: "calm" },
-    "run-queue": { icon: "list-start", key: "tb-run-queue", kind: "go" },
-    "halt-queue": { icon: "list-end", key: "tb-halt-queue", kind: "stop" },
+  // Each button its own coloured icon (`ColorIcon`, the owner's request:
+  // more life, as desktop download managers): green to add and run, amber
+  // and red to stop, red to delete, blue for the schedule. A line between
+  // the groups (`toolbar.ts`).
+  const LOOK: Record<ToolAction, { key: string }> = {
+    add: { key: "tb-add" },
+    resume: { key: "tb-resume" },
+    pause: { key: "tb-pause" },
+    "pause-all": { key: "tb-pause-all" },
+    delete: { key: "tb-delete" },
+    "delete-done": { key: "tb-delete-done" },
+    settings: { key: "tb-settings" },
+    schedule: { key: "tb-schedule" },
+    "run-queue": { key: "tb-run-queue" },
+    "halt-queue": { key: "tb-halt-queue" },
   };
 
   // As the user leaves it (an IDM touch): big or small buttons, which,
@@ -102,13 +104,13 @@
     {#if b.line}<span class="sep" aria-hidden="true"></span>{/if}
     <button
       id="tb-{b.action}"
-      class="tb {look.kind}"
+      class="tb"
       title={hint(b.action) ?? (prefs.small ? locale.t(look.key) : undefined)}
       aria-label={prefs.small ? locale.t(look.key) : undefined}
       disabled={!can(b.action)}
       onclick={() => onaction(b.action)}
     >
-      <span class="tile"><Icon name={look.icon} size={prefs.small ? 17 : 22} stroke={1.7} /></span>
+      <span class="tile"><ColorIcon name={b.action} size={prefs.small ? 20 : 30} /></span>
       {#if !prefs.small}<span class="label">{locale.t(look.key)}</span>{/if}
     </button>
   {/each}
@@ -140,7 +142,7 @@
         {@const look = LOOK[action]}
         <li>
           <label><input type="checkbox" checked={!prefs.hidden.includes(action)} onchange={() => keep(toggle(prefs, action))} />
-            <Icon name={look.icon} size={16} />{locale.t(look.key)}</label>
+            <ColorIcon name={action} size={18} />{locale.t(look.key)}</label>
           <span class="moves">
             <button class="btn quiet" aria-label={locale.t("tb-earlier", { name: locale.t(look.key) })} disabled={i === 0} onclick={() => keep(shift(prefs, action, -1))}><Icon name="arrow-up" size={14} /></button>
             <button class="btn quiet" aria-label={locale.t("tb-later", { name: locale.t(look.key) })} disabled={i === prefs.order.length - 1} onclick={() => keep(shift(prefs, action, 1))}><Icon name="arrow-down" size={14} /></button>
@@ -158,12 +160,11 @@
 <style>
   .small .tb {
     min-width: 34px;
-    padding: 4px;
+    padding: 3px;
   }
   .small .tile {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
   }
   .tbmenu {
     position: fixed;
@@ -255,70 +256,58 @@
   .toolbar {
     display: flex;
     align-items: stretch;
-    gap: 2px;
-    padding: 6px 10px;
+    gap: 1px;
+    padding: 4px 8px;
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    background: linear-gradient(var(--surface), var(--toolbar-end, var(--surface)));
     overflow: hidden;
   }
   .tb {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    min-width: 62px;
+    gap: 2px;
+    min-width: 58px;
     flex: none;
-    padding: 6px 4px 4px;
-    border-radius: 8px;
+    padding: 4px 3px 3px;
+    border-radius: 4px;
     border: 1px solid transparent;
     background: none;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11.5px;
+    font-weight: 500;
     color: var(--ink);
-    line-height: 1.3;
+    line-height: 1.25;
   }
   .tb:hover:not(:disabled) {
-    background: var(--sunken);
-    border-color: var(--line);
+    background: var(--sel);
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--line));
   }
+  .tb:active:not(:disabled) .tile {
+    transform: translateY(1px);
+  }
+  /* Off: grey, as on the desktop. */
   .tb:disabled {
     cursor: default;
-    opacity: 0.45;
+    color: var(--faint);
+  }
+  .tb:disabled .tile {
+    filter: grayscale(1);
+    opacity: 0.4;
   }
   .tile {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 30px;
+    height: 30px;
     display: grid;
     place-items: center;
-    background: var(--feather-bg);
-    color: var(--accent);
-  }
-  .go .tile {
-    background: var(--green-bg);
-    color: var(--green);
-  }
-  .stop .tile {
-    background: var(--amber-bg);
-    color: var(--amber);
-  }
-  .del .tile {
-    background: var(--red-bg);
-    color: var(--red);
-  }
-  .calm .tile {
-    background: var(--sunken);
-    color: var(--muted);
-    border: 1px solid var(--line);
-  }
-  .label {
-    white-space: nowrap;
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.18));
   }
   .sep {
     width: 1px;
     flex: none;
     background: var(--line);
-    margin: 6px 4px;
+    box-shadow: 1px 0 0 var(--surface);
+    margin: 4px 5px;
   }
   .search {
     margin-inline-start: auto;

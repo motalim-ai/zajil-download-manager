@@ -9,13 +9,13 @@ export type ColumnId = "name" | "size" | "status" | "left" | "speed" | "last" | 
 export const COLUMNS: { id: ColumnId; key: string; width: number | null }[] = [
   { id: "name", key: "col-name", width: null },
   { id: "size", key: "col-size", width: 100 },
-  { id: "status", key: "col-status", width: 128 },
+  { id: "status", key: "col-status", width: 168 },
   { id: "left", key: "col-left", width: 84 },
   { id: "speed", key: "col-speed", width: 112 },
   { id: "last", key: "col-last-try", width: 88 },
   { id: "desc", key: "col-description", width: 88 },
   // An IDM touch: the queue each download is in.
-  { id: "queue", key: "col-queue", width: 120 },
+  { id: "queue", key: "col-queue", width: 108 },
 ];
 
 export const MIN_WIDTH = 56;

@@ -10,7 +10,7 @@
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
-  import { categoryIcon } from "./Tree.svelte";
+  import ColorIcon, { typeIcon } from "./ColorIcon.svelte";
   import { locale } from "../i18n.svelte";
   import { lastTry, left, percent, size, speed } from "../format";
   import { COLUMNS, MENU_COLUMN_WIDTH, clampWidth, load, minTableWidth, move, save, toggle, visible, type ColumnId, type Columns } from "../columns";
@@ -120,7 +120,7 @@
   const AROUND = 30;
   let scrollTop = $state(0);
   let viewHeight = $state(800);
-  let rowHeight = $state(37);
+  let rowHeight = $state(27);
   const virtual = $derived(downloads.length > VIRTUAL_FROM);
   const first = $derived(virtual ? Math.max(0, Math.floor(scrollTop / rowHeight) - AROUND) : 0);
   const last = $derived(virtual ? Math.min(downloads.length, Math.ceil((scrollTop + viewHeight) / rowHeight) + AROUND) : downloads.length);
@@ -226,7 +226,7 @@
   {#if id === "name"}
     <td>
       <span class="nm">
-        <span class="ft" aria-hidden="true"><Icon name={categoryIcon(d.category)} size={14} /></span>
+        <span class="ft" aria-hidden="true"><ColorIcon name={typeIcon(d.category)} size={18} /></span>
         <FileName name={d.name} />
       </span>
     </td>
@@ -242,18 +242,27 @@
         <span class="st"><Icon name="clock" size={14} />{locale.t("status-waiting-site")}</span>
       {:else if d.status === "active"}
         <span class="st">
-          <span class="mini" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
+          <ColorIcon name="s-active" size={15} />
+          <span class="mini go" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
           <span class="pct num">{pct(d)}</span>
         </span>
       {:else if d.status === "paused"}
-        <span class="st paused"><Icon name="pause" size={14} />{locale.t("st-paused")} <span class="num">{pct(d)}</span></span>
+        <span class="st paused">
+          <ColorIcon name="s-paused" size={15} />
+          <span class="mini held" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
+          {locale.t("st-paused")} <span class="num">{pct(d)}</span>
+        </span>
       {:else if d.status === "done"}
-        <span class="st done"><Icon name="circle-check" size={14} />{locale.t("status-done")}</span>
+        <span class="st done"><ColorIcon name="s-done" size={15} />{locale.t("status-done")}</span>
       {:else if d.status === "failed"}
         {@const code = errorCode(d.error)}
-        <span class="st failed" title={d.error ?? undefined}><Icon name="circle-alert" size={14} />{code ? locale.t("st-error", { code }) : locale.t("st-failed")}</span>
+        <span class="st failed" title={d.error ?? undefined}>
+          <ColorIcon name="s-failed" size={15} />
+          <span class="mini bad" aria-hidden="true"><b style:inline-size="{Math.round(fraction(d) * 100)}%"></b></span>
+          {code ? locale.t("st-error", { code }) : locale.t("st-failed")}
+        </span>
       {:else}
-        <span class="st waiting"><Icon name="list-end" size={14} />{locale.t("st-in-queue")}</span>
+        <span class="st waiting"><ColorIcon name="s-waiting" size={15} />{locale.t("st-in-queue")}</span>
       {/if}
     </td>
   {:else if id === "left"}
@@ -400,10 +409,10 @@
     text-align: start;
     font-size: 12px;
     font-weight: 600;
-    color: var(--faint);
-    padding: 7px 10px;
+    color: var(--muted);
+    padding: 4px 8px;
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    background: linear-gradient(var(--surface), var(--sunken));
     position: sticky;
     top: 0;
     white-space: nowrap;
@@ -485,14 +494,16 @@
   th + th::before {
     content: "";
     position: absolute;
-    inset-block: 7px;
+    inset-block: 3px;
     inset-inline-start: 0;
     width: 1px;
     background: var(--line);
   }
+  /* Desktop density: tight rows with their grid lines. */
   td {
-    padding: 6px 10px;
-    border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+    padding: 3px 8px;
+    border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    border-inline-start: 1px solid color-mix(in oklab, var(--line) 45%, transparent);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -515,15 +526,10 @@
     min-width: 0;
   }
   .ft {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
     display: grid;
     place-items: center;
     flex: none;
-    background: var(--sunken);
-    color: var(--muted);
-    border: 1px solid var(--line);
+    filter: drop-shadow(0 1px 0.5px rgb(0 0 0 / 0.15));
   }
   .muted {
     color: var(--muted);
@@ -543,12 +549,16 @@
     min-width: 34px;
     font-size: 12px;
   }
+  /* A slim bar in the row: green while it downloads, amber paused, red
+     on an error. */
   .mini {
     display: inline-block;
-    width: 64px;
-    height: 6px;
-    border-radius: 99px;
-    background: var(--feather-bg);
+    flex: none;
+    width: 48px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--sunken);
+    box-shadow: inset 0 0 0 1px var(--line);
     overflow: hidden;
     position: relative;
   }
@@ -557,7 +567,15 @@
     inset-block: 0;
     inset-inline-start: 0;
     border-radius: inherit;
-    background: var(--feather);
+  }
+  .go b {
+    background: linear-gradient(#4fd977, #1f9e44);
+  }
+  .held b {
+    background: linear-gradient(#ffc54d, #e08a06);
+  }
+  .bad b {
+    background: linear-gradient(#ff6b61, #d42f2c);
   }
   .done {
     color: var(--green);
