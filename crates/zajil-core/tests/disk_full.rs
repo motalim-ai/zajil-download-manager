@@ -54,15 +54,22 @@ fn volume() -> Option<(&'static str, PathBuf)> {
 /// file system may give a growing file more blocks than it wrote and free
 /// the rest when it is closed, so the filler stays open until dropped, and
 /// filling goes on until a new file cannot take a block either.
+///
+/// APFS frees a removed file's blocks in the background: on CI a download
+/// resumed right after the filler went still found the disk full. So the
+/// drop waits, up to 30 s, until the room is back.
 struct Filler {
     path: PathBuf,
     file: Option<fs::File>,
+    volume: PathBuf,
+    free_before: u64,
 }
 
 impl Filler {
     fn fill(volume: &Path) -> Self {
         let path = volume.join(format!("filler-{}", std::process::id()));
         let probe = volume.join(format!("probe-{}", std::process::id()));
+        let free_before = available_space(volume).unwrap();
         let mut file = fs::File::create(&path).unwrap();
         for _ in 0..64 {
             for chunk in [MIB, 4096] {
@@ -77,6 +84,8 @@ impl Filler {
                 return Filler {
                     path,
                     file: Some(file),
+                    volume: volume.to_path_buf(),
+                    free_before,
                 };
             }
         }
@@ -88,6 +97,14 @@ impl Drop for Filler {
     fn drop(&mut self) {
         drop(self.file.take());
         let _ = fs::remove_file(&self.path);
+        // Enough to finish a download, or all there was before.
+        let wanted = self.free_before.min(2 * SIZE as u64);
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while available_space(&self.volume).is_ok_and(|free| free < wanted)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 }
 
@@ -225,6 +242,10 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
 
         // Room again: the download resumes from what it kept.
         drop(filler);
+        eprintln!(
+            "{case}: free once the filler went: {}",
+            available_space(&volume).unwrap()
+        );
         let done = engine
             .resume(&state_file, &mut |_| {})
             .await
