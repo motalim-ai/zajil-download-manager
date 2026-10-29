@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Features
+
+- feat(video): on YouTube the extension's button is a pill, «Download video (N) ▾» with «?» and «✕», and a press lists every format at once (MP4/WebM, H.264/VP9/AV1, sound only) with its size and rate, read from YouTube's own player answer in the page. A choice starts the download at once, without «Video quality»: the picture and the sound come through Zajil's own engine (8 and 4 connections, resumable after a cut or a pause) from the links of the read-ahead probe, and FFmpeg puts them together without re-encoding. yt-dlp stays for other sites, HLS formats, and a YouTube download whose first byte never came. Tried by hand on macOS (a 10-minute 1080p60 video, cut after 20 s and resumed); not tried on Windows or Linux yet.
+
 ### Fixes
 
 - fix: a download no longer reserves its whole size on disk when it starts, on any system: a second download of the same 6.2 GB file failed at once on a disk with 7 GB free. The part file is sparse; the free-space check before the start stays on all three systems, and a disk that fills up mid-download stops it at once, resumable from its last saved state.
