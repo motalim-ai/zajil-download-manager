@@ -14,7 +14,10 @@ import { scheduleApi } from "../lib/scheduleApi";
 export async function run(win: string | null): Promise<void> {
   if (!(await invoke<boolean>("ui_test_windows").catch(() => false))) return;
   if (win !== null) {
-    await invoke("ui_test_loaded", { label: getCurrentWindow().label });
+    // By the role it took: a window made beforehand has a label of its
+    // own (`add-info-spare-0`), not the one the button asked for.
+    const role = await api.windowRole().catch(() => null);
+    await invoke("ui_test_loaded", { label: role?.label ?? getCurrentWindow().label });
     return;
   }
   // Each as its button opens it, by its label; the next once its page
