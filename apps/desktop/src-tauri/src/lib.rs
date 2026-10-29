@@ -1037,15 +1037,24 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                     media,
                     cookies,
                     private,
+                    format,
+                    audio,
                     ..
                 } = &request
                 {
+                    // A format chosen in the button's list: downloaded at
+                    // once, without «Video quality» (owner, 2026-10-29).
+                    let chosen = format.clone().map(|id| match audio.clone() {
+                        Some(audio) => video::ChoiceView::Merge { video: id, audio },
+                        None => video::ChoiceView::Format { id },
+                    });
                     video::receive(
                         &handle,
                         page.clone(),
                         media.clone(),
                         cookies.clone(),
                         *private,
+                        chosen,
                     );
                     return zajil_host::Response::ok();
                 }

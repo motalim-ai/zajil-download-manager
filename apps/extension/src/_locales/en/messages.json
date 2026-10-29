@@ -170,6 +170,21 @@
   "videoButtonWholeList": {
     "message": "The whole playlist"
   },
+  "videoListVideo": {
+    "message": "Video"
+  },
+  "videoListAudio": {
+    "message": "Audio only"
+  },
+  "videoListMore": {
+    "message": "More qualities in Zajil…"
+  },
+  "videoButtonHelp": {
+    "message": "Zajil: pick a quality and the download starts at once"
+  },
+  "videoButtonHide": {
+    "message": "Hide the button for this video"
+  },
   "playlistNotHere": {
     "message": "Zajil found no playlist on this page."
   },

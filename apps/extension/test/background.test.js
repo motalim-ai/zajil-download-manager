@@ -416,9 +416,19 @@ describe("the background", () => {
     await load(fake);
     await flush();
     expect(fake.done.scripts).toEqual([
-      { id: "zajil-video-button", js: ["video-button.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_idle", persistAcrossSessions: true },
+      { id: "zajil-video-button", js: ["yt-formats.js", "video-button.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_idle", persistAcrossSessions: true },
       // The keys of a click (owner's decision, 2026-10-26), from a page's start.
       { id: "zajil-click-keys", js: ["click-keys.js"], matches: ["<all_urls>"], allFrames: true, runAt: "document_start", persistAcrossSessions: true },
+      // YouTube's word on its formats, for the button's list (owner, 2026-10-29).
+      {
+        id: "zajil-yt-page",
+        js: ["yt-page.js"],
+        matches: ["https://www.youtube.com/*", "https://m.youtube.com/*", "https://www.youtube-nocookie.com/*"],
+        allFrames: true,
+        runAt: "document_start",
+        world: "MAIN",
+        persistAcrossSessions: true,
+      },
     ]);
     expect(fake.done.watched).toHaveLength(1);
     expect(fake.done.watched[0].extra).toEqual(["responseHeaders"]);
@@ -641,6 +651,11 @@ describe("the background", () => {
             playlist: locales.en.playlistButton.message,
             thisVideo: locales.en.videoButtonThis.message,
             wholeList: locales.en.videoButtonWholeList.message,
+            listVideo: locales.en.videoListVideo.message,
+            listAudio: locales.en.videoListAudio.message,
+            more: locales.en.videoListMore.message,
+            help: locales.en.videoButtonHelp.message,
+            hide: locales.en.videoButtonHide.message,
           },
         });
       }

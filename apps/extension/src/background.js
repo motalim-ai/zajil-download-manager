@@ -338,9 +338,11 @@ async function openBehind(url, tab) {
  * @param {boolean} [quiet]
  * @param {boolean} [list] a YouTube playlist's page (`playlistPage`): no
  *   stream of the tab goes with it, that is the video playing now
+ * @param {{ format?: string, audio?: string }} [format] the format chosen in
+ *   the button's list: Zajil downloads it at once
  * @returns {Promise<import("./capture.js").Result | "not-web">}
  */
-async function sendVideo(info, tab, doc, quiet = false, list = false) {
+async function sendVideo(info, tab, doc, quiet = false, list = false, format = undefined) {
   const isPrivate = Boolean(tab?.incognito);
   const page = videoMessage(info);
   if (!page) {
@@ -354,7 +356,7 @@ async function sendVideo(info, tab, doc, quiet = false, list = false) {
   const want = { frame: Number.isSafeInteger(info.frameId) ? info.frameId : 0, doc, origin: originOf(info.frameUrl ?? info.pageUrl) };
   const stream = noted ? await streamFor(api, tab.id, want) : undefined;
   const message = /** @type {Record<string, unknown>} */ (videoMessage(info, { cookies, private: isPrivate, stream }));
-  const result = await send(api, message);
+  const result = await send(api, { ...message, ...format });
   if (isPrivate && result.outcome === "taken") await api.storage.session.set({ privateSent: true }).catch(() => {});
   if (!quiet) await report(result, "video");
   // From the button: a "!" left by an earlier failure goes once it worked.
@@ -464,12 +466,23 @@ async function hostText(code) {
 /** The button's texts, in Zajil's language. */
 async function buttonTexts() {
   const lang = await zajilLanguage();
-  const [button, working, done, failed, playlist, thisVideo, wholeList] = await Promise.all(
-    ["videoButton", "videoButtonWorking", "videoButtonDone", "videoButtonFailed", "playlistButton", "videoButtonThis", "videoButtonWholeList"].map((key) =>
-      textIn(lang, key),
-    ),
+  const [button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, more, help, hide] = await Promise.all(
+    [
+      "videoButton",
+      "videoButtonWorking",
+      "videoButtonDone",
+      "videoButtonFailed",
+      "playlistButton",
+      "videoButtonThis",
+      "videoButtonWholeList",
+      "videoListVideo",
+      "videoListAudio",
+      "videoListMore",
+      "videoButtonHelp",
+      "videoButtonHide",
+    ].map((key) => textIn(lang, key)),
   );
-  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList } };
+  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, more, help, hide } };
 }
 
 /**
@@ -508,6 +521,10 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     void clicked(message.href, sender);
     return;
   }
+  if (message?.type === "video-help") {
+    void api.runtime.openOptionsPage();
+    return;
+  }
   if (message?.type === "video-button-texts") {
     void buttonTexts().then(sendResponse, () => sendResponse(null));
     return true;
@@ -537,11 +554,28 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
     void peekVideo(info, sender.tab, doc).catch(() => {});
     return;
   }
-  void sendVideo(info, sender.tab, doc, true)
+  void sendVideo(info, sender.tab, doc, true, false, chosenFormat(message.format))
     .then(buttonAnswer)
     .then(sendResponse, () => sendResponse(null));
   return true;
 });
+
+/** An itag as YouTube numbers its formats. */
+const ITAG = /^\d{1,4}$/;
+
+/**
+ * The format chosen in the button's list, as zajil-host takes it: a format
+ * with sound, or a picture and its sound. Anything else is no choice (the
+ * press then opens Zajil's «Video quality»).
+ * @param {any} format
+ * @returns {{ format: string, audio?: string } | undefined}
+ */
+export function chosenFormat(format) {
+  if (!format || typeof format !== "object") return undefined;
+  if (ITAG.test(format.video) && ITAG.test(format.audio)) return { format: format.video, audio: format.audio };
+  if (ITAG.test(format.id)) return { format: format.id };
+  return undefined;
+}
 
 /**
  * A link clicked with Zajil's keys goes to Zajil as from its menu, its page
@@ -558,10 +592,22 @@ async function clicked(href, sender) {
 /** The button's script, on every site while the video permissions last. */
 const BUTTON = {
   id: "zajil-video-button",
-  js: ["video-button.js"],
+  js: ["yt-formats.js", "video-button.js"],
   matches: ["<all_urls>"],
   allFrames: true,
   runAt: "document_idle",
+  persistAcrossSessions: true,
+};
+
+/** YouTube's word on its formats, read in the page's own world
+ * (`yt-page.js`), for the button's list. */
+const YT_PAGE = {
+  id: "zajil-yt-page",
+  js: ["yt-page.js"],
+  matches: ["https://www.youtube.com/*", "https://m.youtube.com/*", "https://www.youtube-nocookie.com/*"],
+  allFrames: true,
+  runAt: "document_start",
+  world: "MAIN",
   persistAcrossSessions: true,
 };
 
@@ -600,8 +646,13 @@ async function syncVideo() {
   if (!allowed && requests?.hasListener(onHeaders)) requests.removeListener(onHeaders);
   if (!allowed) await forgetAll(api);
   if (!api.scripting) return;
-  for (const script of [BUTTON, CLICKS]) {
+  for (const script of [BUTTON, CLICKS, YT_PAGE]) {
     const registered = await api.scripting.getRegisteredContentScripts({ ids: [script.id] }).catch(() => []);
+    // A Zajil updated from before the list: its button's script again,
+    // now with the list's.
+    if (allowed && registered.length && registered[0].js?.length !== script.js.length) {
+      await api.scripting.updateContentScripts([script]).catch(() => {});
+    }
     if (allowed && !registered.length) await api.scripting.registerContentScripts([script]).catch(() => {});
     if (!allowed && registered.length) await api.scripting.unregisterContentScripts({ ids: [script.id] }).catch(() => {});
   }

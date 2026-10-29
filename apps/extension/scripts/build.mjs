@@ -17,6 +17,8 @@ const files = [
   "settings.js",
   "streams.js",
   "video-button.js",
+  "yt-formats.js",
+  "yt-page.js",
   "click-keys.js",
   "options.html",
   "options.js",

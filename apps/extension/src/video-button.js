@@ -40,6 +40,16 @@
 // same "Sending…", same protections (a closed shadow root, `isTrusted`). A
 // Mix (`list=RD…`) is no playlist: YouTube makes it as you watch.
 //
+// The pill and its list (owner's decision, 2026-10-29): on YouTube the
+// button says how many formats the video has, «Download video (N) ▾», and
+// a press opens their list at once, each with its size and rate: read from
+// the player's own answer in the page (`yt-page.js`, in the page's world,
+// asked by an event on the document), never waiting for Zajil. A choice
+// sends the background only that format's itag (and its sound's); Zajil
+// finds it in what it read itself. «?» opens Zajil's page in the browser,
+// «✕» hides the button for this video. Elsewhere, or before the page says
+// anything, a press sends the video as before.
+//
 // Updated, reloaded or turned off, the extension leaves this script in the
 // open tabs, cut off from it: `runtime.id` is gone, and `sendMessage`
 // throws at once ("Extension context invalidated"), not a refused promise.
@@ -144,51 +154,94 @@
       all: initial !important; display: block !important; opacity: 1 !important;
       visibility: visible !important; filter: none !important;
     }
-    .main, .menu { position: fixed; z-index: 2147483647; }
+    .bar, .menu { position: fixed; z-index: 2147483647; }
+    .bar { display: flex; flex-direction: row-reverse; align-items: center; gap: 4px; direction: ltr; }
+    .bar:has(.main[hidden]) { display: none; }
     button {
       margin: 0; max-width: 360px;
       display: flex; align-items: center; gap: 6px;
-      font: 600 13px/1.3 system-ui, "Segoe UI", "IBM Plex Sans Arabic", sans-serif; color: #fff;
-      background: rgba(16, 38, 61, 0.9); border: 1px solid rgba(255, 255, 255, 0.35);
-      border-radius: 6px; padding: 5px 10px; cursor: pointer; text-align: start;
+      font: 600 13px/1.3 system-ui, "Segoe UI", "IBM Plex Sans Arabic", "Noto Sans Arabic", sans-serif; color: #fff;
+      background: rgba(15, 15, 18, 0.82); border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 999px; padding: 6px 12px; cursor: pointer; text-align: start;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); backdrop-filter: blur(6px);
+      transition: background 0.12s;
     }
     button[hidden] { display: none; }
-    button:hover, button:focus-visible { background: rgba(16, 38, 61, 0.98); outline: 2px solid #8adcff; }
+    button:hover, button:focus-visible { background: rgba(10, 10, 12, 0.95); outline: none; border-color: rgba(255, 255, 255, 0.55); }
+    button:focus-visible { outline: 2px solid #8adcff; }
     button[data-state="working"] { cursor: progress; }
+    button[data-state="done"] { background: rgba(20, 110, 60, 0.92); }
     button[data-state="error"] { background: rgba(150, 30, 30, 0.95); cursor: default; }
-    svg { width: 18px; height: 18px; flex: none; }
+    .main svg { width: 16px; height: 16px; flex: none; }
+    .main .arrow { width: 10px; height: 10px; opacity: 0.85; }
+    .main .arrow[hidden] { display: none; }
+    .small { width: 26px; height: 26px; padding: 0; justify-content: center; font-size: 13px; }
+    .small[hidden] { display: none; }
     .spin {
       display: none; width: 14px; height: 14px; flex: none; box-sizing: border-box;
       border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; border-radius: 50%;
       animation: zajil-spin 0.8s linear infinite;
     }
     button[data-state="working"] .spin { display: block; }
+    button[data-state="working"] .mark { display: none; }
     @keyframes zajil-spin { to { transform: rotate(1turn); } }
     @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
     .menu {
-      display: flex; flex-direction: column; gap: 2px; padding: 3px;
-      background: rgba(16, 38, 61, 0.95); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px;
+      display: flex; flex-direction: column; gap: 1px; padding: 4px; min-width: 230px; max-width: 380px;
+      max-height: min(70vh, 460px); overflow-y: auto; box-sizing: border-box;
+      background: rgba(22, 22, 26, 0.97); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); color: #fff;
+      font: 500 12.5px/1.35 system-ui, "Segoe UI", "IBM Plex Sans Arabic", "Noto Sans Arabic", sans-serif;
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.3) transparent;
     }
     .menu[hidden] { display: none; }
-    .menu button { width: 100%; background: transparent; border-color: transparent; }
+    .menu button {
+      width: 100%; max-width: none; background: transparent; border-color: transparent; border-radius: 6px;
+      box-shadow: none; backdrop-filter: none; padding: 6px 8px; justify-content: space-between; gap: 12px;
+      font-weight: 500;
+    }
+    .menu button:hover, .menu button:focus-visible { background: rgba(255, 255, 255, 0.1); border-color: transparent; }
+    .menu button.item { padding: 4px 8px; }
+    .menu .what { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+    .menu .name { font-weight: 650; }
+    .menu .detail { opacity: 0.6; font-size: 11.5px; }
+    .menu .size { opacity: 0.9; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+    .menu .name, .menu .detail, .menu .size { direction: ltr; unicode-bidi: isolate; }
+    .menu .head { padding: 6px 8px 4px; opacity: 0.6; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+    .menu .title { display: flex; gap: 8px; padding: 6px 8px; font-weight: 650; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 2px; }
+    .menu .title .words { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; }
+    .menu .title .length { flex: none; opacity: 0.6; font-weight: 500; direction: ltr; unicode-bidi: isolate; }
+    .menu hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 3px 4px; width: auto; }
   `;
-  /** A button with Zajil's mark, its spinner and its text.
-   * @param {string} name its class */
-  const makeButton = (name) => {
+  const SVG = "http://www.w3.org/2000/svg";
+  /** An icon. @param {string} viewBox @param {string[]} paths @param {string} name its class
+   * @param {boolean} [stroke] drawn by lines, not filled */
+  const icon = (viewBox, paths, name, stroke = false) => {
+    const made = document.createElementNS(SVG, "svg");
+    made.setAttribute("viewBox", viewBox);
+    made.setAttribute("class", name);
+    made.setAttribute("aria-hidden", "true");
+    if (stroke) {
+      for (const [key, value] of [["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "2.2"], ["stroke-linecap", "round"], ["stroke-linejoin", "round"]]) made.setAttribute(key, value);
+    } else made.setAttribute("fill", "currentColor");
+    for (const d of paths) {
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", d);
+      made.append(path);
+    }
+    return made;
+  };
+  /** A download arrow over a tray. */
+  const DOWNLOAD = ["M12 4v11", "M7 10.5l5 5 5-5", "M5 19.5h14"];
+  /** A button with its icon (Zajil's mark, or a download arrow), its
+   * spinner and its text; the video's has an arrow for its list.
+   * @param {string} name its class @param {"mark" | "download"} [kind] */
+  const makeButton = (name, kind = "mark") => {
     const made = document.createElement("button");
     made.type = "button";
     made.className = name;
     made.dataset.state = "idle";
-    const SVG = "http://www.w3.org/2000/svg";
-    const mark = document.createElementNS(SVG, "svg");
-    mark.setAttribute("viewBox", MARK_VIEWBOX);
-    mark.setAttribute("fill", "currentColor");
-    mark.setAttribute("aria-hidden", "true");
-    for (const d of MARK_PATHS) {
-      const path = document.createElementNS(SVG, "path");
-      path.setAttribute("d", d);
-      mark.append(path);
-    }
+    const mark = kind === "mark" ? icon(MARK_VIEWBOX, MARK_PATHS, "mark") : icon("0 0 24 24", DOWNLOAD, "mark", true);
     const spin = document.createElement("span");
     spin.className = "spin";
     const text = document.createElement("span");
@@ -196,9 +249,25 @@
     made.append(mark, spin, text);
     return { button: made, label: text };
   };
-  const main = { ...makeButton("main"), rest: (/** @type {Texts} */ t) => t.button };
+  const main = { ...makeButton("main", "download"), rest: (/** @type {Texts} */ t) => (choices.length ? `${t.button} (${choices.length})` : t.button) };
   const button = main.button;
   button.hidden = true;
+  const arrow = icon("0 0 24 24", ["M6 9l6 6 6-6"], "arrow", true);
+  arrow.setAttribute("hidden", "");
+  button.append(arrow);
+  /** «?» and «✕», beside the button. @param {string} text */
+  const small = (text) => {
+    const made = document.createElement("button");
+    made.type = "button";
+    made.className = "small";
+    made.textContent = text;
+    return made;
+  };
+  const help = small("?");
+  const close = small("✕");
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  bar.append(button, help, close);
   // On a video played from a playlist: its two choices, under the button.
   const menu = document.createElement("div");
   menu.className = "menu";
@@ -211,9 +280,85 @@
     return made;
   };
   const thisVideo = choice();
+  thisVideo.dataset.act = "this";
   const wholeList = choice();
+  wholeList.dataset.act = "whole";
   menu.append(thisVideo, wholeList);
-  root.append(style, button, menu);
+  root.append(style, bar, menu);
+
+  /** The video's formats, as the page's player says them (`yt-page.js`,
+   * made into choices by `yt-formats.js`); none elsewhere.
+   * @type {{ title: string, duration: string, video: any[], audio: any[] } | null} */
+  let listing = null;
+  /** Every choice of `listing`, in the list's order. @type {any[]} */
+  let choices = [];
+  /** What the page's world answered last (a text, checked when read). */
+  let pageSaid = "";
+  listen(document, "zajil-yt-formats", (event) => {
+    if (typeof event.detail === "string" && event.detail.length <= 512 * 1024) pageSaid = event.detail;
+  });
+  /** Asks the page's world now (it answers at once, during the ask). */
+  const readPage = () => {
+    const make = /** @type {any} */ (globalThis).__zajilFormats?.choicesOf;
+    if (typeof make !== "function" || !YOUTUBE.test(location.hostname)) return;
+    pageSaid = "";
+    document.dispatchEvent(new CustomEvent("zajil-yt-ask"));
+    let data = null;
+    try {
+      data = JSON.parse(pageSaid || "null");
+    } catch {
+      data = null;
+    }
+    listing = make(data);
+    choices = listing ? [...listing.video, ...listing.audio] : [];
+    arrow.toggleAttribute("hidden", !choices.length && !listHere("/watch"));
+    if (!busy()) setState("idle");
+  };
+
+  /** One line of the list. @param {string} cls @param {string} words */
+  const line = (cls, words) => {
+    const made = document.createElement("div");
+    made.className = cls;
+    made.textContent = words;
+    return made;
+  };
+  /** The list, made again for what is known now. */
+  const fillMenu = () => {
+    menu.replaceChildren();
+    if (texts) menu.dir = texts.dir;
+    if (!listing || !texts) {
+      menu.append(thisVideo, wholeList);
+      return;
+    }
+    const title = line("title", "");
+    title.append(line("words", listing.title));
+    if (listing.duration) title.append(line("length", listing.duration));
+    menu.append(title);
+    const group = (/** @type {string} */ head, /** @type {any[]} */ items, /** @type {number} */ from) => {
+      if (!items.length) return;
+      menu.append(line("head", head));
+      items.forEach((item, i) => {
+        const made = choice();
+        made.dataset.act = "format";
+        made.className = "item";
+        made.dataset.index = String(from + i);
+        const what = document.createElement("span");
+        what.className = "what";
+        what.append(line("name", item.name), line("detail", item.detail));
+        const size = document.createElement("span");
+        size.className = "size";
+        size.textContent = item.size;
+        made.append(what, size);
+        menu.append(made);
+      });
+    };
+    group(texts.listVideo ?? "Video", listing.video, 0);
+    group(texts.listAudio ?? "Audio", listing.audio, listing.video.length);
+    menu.append(document.createElement("hr"));
+    if (listHere("/watch")) menu.append(wholeList);
+    thisVideo.textContent = texts.more ?? texts.thisVideo;
+    menu.append(thisVideo);
+  };
 
   // A playlist's page: its own button, in a host of its own beside the
   // title, in the page's flow (not over it).
@@ -232,7 +377,7 @@
    * move of the pointer or key press, never by the page alone). Until they come the button is not shown at
    * all, so it never shows in another language first (owner's decision on
    * #264); if they never come, it never shows.
-   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string }} Texts
+   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string, listVideo?: string, listAudio?: string, more?: string, help?: string, hide?: string }} Texts
    * @type {Texts | null} */
   let texts = null;
   /** The video the pointer was on while the texts were on their way. */
@@ -251,10 +396,17 @@
       }
       const dir = answer.lang === "en" ? "ltr" : "rtl";
       texts = /** @type {Texts} */ ({ dir, ...Object.fromEntries(keys.map((key) => [key, given[key]])) });
+      // The list's words, when this Zajil has them.
+      for (const key of /** @type {const} */ (["listVideo", "listAudio", "more", "help", "hide"])) {
+        if (typeof given[key] === "string" && given[key]) texts[key] = given[key];
+      }
+      help.title = texts.help ?? "Zajil";
+      close.title = texts.hide ?? "✕";
+      close.setAttribute("aria-label", close.title);
       setState("idle");
       setState("idle", undefined, page);
       menu.dir = dir;
-      thisVideo.textContent = texts.thisVideo;
+      thisVideo.textContent = texts.more ?? texts.thisVideo;
       wholeList.textContent = texts.wholeList;
       const found = waiting;
       waiting = null;
@@ -299,10 +451,12 @@
     menu.hidden = true;
     button.removeAttribute("aria-expanded");
   };
-  /** Under the button, at the same right edge. */
+  /** Under the button, at the same right edge, inside the window. */
   const placeMenu = () => {
-    menu.style.top = `${button.getBoundingClientRect().bottom + 4}px`;
-    menu.style.right = button.style.right;
+    const below = button.getBoundingClientRect().bottom + 4;
+    menu.style.top = `${below}px`;
+    menu.style.maxHeight = `${Math.max(window.innerHeight - below - 12, 120)}px`;
+    menu.style.right = bar.style.right;
     menu.style.left = "auto";
   };
 
@@ -318,9 +472,9 @@
     const box = found.getBoundingClientRect();
     // The viewport's width without its scrollbar, also in quirks mode.
     const width = (document.scrollingElement ?? document.documentElement).clientWidth;
-    button.style.top = `${Math.max(box.top, 0) + 8}px`;
-    button.style.right = `${Math.max(width - Math.min(box.right, width), 0) + 8}px`;
-    button.style.left = "auto";
+    bar.style.top = `${Math.max(box.top, 0) + 8}px`;
+    bar.style.right = `${Math.max(width - Math.min(box.right, width), 0) + 8}px`;
+    bar.style.left = "auto";
     if (!menu.hidden) placeMenu();
   };
 
@@ -328,7 +482,7 @@
   const show = (found) => {
     if (stopped || busy()) return;
     const box = found.getBoundingClientRect();
-    if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT || isProtected(found) || !wantedHere()) return;
+    if (box.width < MIN_WIDTH || box.height < MIN_HEIGHT || isProtected(found) || !wantedHere() || location.href === dismissed) return;
     if (!texts) {
       waiting = found;
       askTexts();
@@ -344,6 +498,8 @@
     peek(found);
   };
 
+  /** The page whose button «✕» hid. */
+  let dismissed = "";
   /** The page whose video was last sent to be read ahead. */
   let peeked = "";
   /** Zajil reads the video ahead as soon as its button shows, once a page
@@ -353,6 +509,7 @@
   const peek = (found) => {
     if (location.href === peeked) return;
     peeked = location.href;
+    readPage();
     const src = found.currentSrc || found.src || "";
     void ask({ type: "video-peek", src: src.length <= 8192 ? src : "" });
   };
@@ -442,14 +599,18 @@
     return !busy() && event.isTrusted && video != null && !isProtected(video) && seen(host);
   };
 
-  /** Sends the video, or the whole playlist it is played from.
-   * @param {boolean} whole */
-  const press = async (whole) => {
+  /** Sends the video, or the whole playlist it is played from, or one of
+   * its formats (its itag, and its sound's).
+   * @param {boolean} whole @param {{ id?: string, video?: string, audio?: string }} [format] */
+  const press = async (whole, format) => {
     if (!video) return;
     const src = video.currentSrc || video.src || "";
     setState("working");
     // A longer address is left out, never cut into another one (review).
-    const answer = await answerTo(whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "" });
+    /** @type {Record<string, unknown>} */
+    const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "" };
+    if (format) message.format = format;
+    const answer = await answerTo(message);
     if (stopped) return;
     if (answer?.taken === true) {
       setState("done");
@@ -462,25 +623,42 @@
 
   listen(button, "click", (event) => {
     if (!pressable(event)) return;
-    // Played from a playlist: the two choices first.
-    if (!listHere("/watch")) void press(false);
+    // The page may have said more since.
+    if (menu.hidden) readPage();
+    // Its formats, or (played from a playlist) the two choices, first.
+    if (!choices.length && !listHere("/watch")) void press(false);
     else if (!menu.hidden) closeMenu();
     else {
+      fillMenu();
       menu.hidden = false;
       button.setAttribute("aria-expanded", "true");
       placeMenu();
     }
   });
-  for (const [item, whole] of /** @type {[HTMLButtonElement, boolean][]} */ ([
-    [thisVideo, false],
-    [wholeList, true],
-  ])) {
-    listen(item, "click", (event) => {
-      if (menu.hidden || !pressable(event)) return;
-      closeMenu();
-      void press(whole);
-    });
-  }
+  listen(menu, "click", (event) => {
+    const item = /** @type {HTMLElement | null} */ (event.target instanceof Element ? event.target.closest("button") : null);
+    if (!item || menu.hidden || !pressable(event)) return;
+    closeMenu();
+    const act = item.dataset.act;
+    if (act === "whole") void press(true);
+    else if (act === "this") void press(false);
+    else if (act === "format") {
+      const picked = choices[Number(item.dataset.index)];
+      if (picked) void press(false, picked.send);
+    }
+  });
+  listen(help, "click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.isTrusted) void ask({ type: "video-help" });
+  });
+  listen(close, "click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.isTrusted || busy()) return;
+    dismissed = location.href;
+    hide();
+  });
   listen(document, "keydown", (event) => {
     if (event.key === "Escape") closeMenu();
     if (event.isTrusted && !asked && listHere("/playlist")) askTexts();

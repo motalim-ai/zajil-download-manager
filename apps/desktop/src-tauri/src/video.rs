@@ -470,13 +470,16 @@ pub const SIZE: (f64, f64) = (640.0, 520.0);
 pub const CAPABILITY: &str = include_str!("../runtime-capabilities/video.json");
 
 /// A video from the extension: its cookies and its own link kept here,
-/// and «Video quality» opened for its page.
+/// and «Video quality» opened for its page; or, with a format chosen in
+/// the button's list, its download started at once in the videos' folder,
+/// named after the page's title once it is read, with its progress window.
 pub fn receive<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     url: String,
     media: Option<String>,
     cookies: Option<String>,
     private: bool,
+    chosen: Option<ChoiceView>,
 ) {
     let state = handle.state::<VideoState>();
     if let Some(cookies) = cookies {
@@ -488,8 +491,70 @@ pub fn receive<R: tauri::Runtime>(
     if private {
         state.private.lock().unwrap().insert(url.clone());
     }
+    if let Some(choice) = chosen {
+        let app = handle.state::<crate::App>();
+        let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
+        state.rows.lock().unwrap().push(Row {
+            id,
+            url,
+            // The page's title, once read (`start`).
+            name: String::new(),
+            folder: crate::download_dir(&app.settings, &app.system_download_dir)
+                .display()
+                .to_string(),
+            choice,
+            status: StatusView::Waiting,
+            size: None,
+            done: 0,
+            speed: 0,
+            error: None,
+            file: None,
+            private,
+        });
+        save_rows(&app, &state);
+        let _ = handle.emit("downloads-changed", ());
+        pump(handle);
+        let show = handle
+            .state::<crate::closing::Closing>()
+            .prefs()
+            .add
+            .progress_window;
+        if let Err(err) = crate::addprefs::show_started(handle, show, id, "Zajil") {
+            eprintln!("zajil: the progress window of video {id}: {err}");
+        }
+        return;
+    }
     *state.pending.lock().unwrap() = Some(url);
     let _ = open_window(handle);
+}
+
+/// The format of `formats` that YouTube's itag `wanted` names: yt-dlp
+/// names a format by its itag, with a suffix for another language's sound
+/// or a "stable volume" one (`140-drc`), the plain one first.
+fn by_itag(formats: &[Format], wanted: &str) -> Option<String> {
+    formats
+        .iter()
+        .find(|f| f.id == wanted)
+        .or_else(|| {
+            formats.iter().find(|f| {
+                f.id.split_once('-')
+                    .is_some_and(|(itag, rest)| itag == wanted && !rest.contains("drc"))
+            })
+        })
+        .map(|f| f.id.clone())
+}
+
+/// A choice made in the browser's list, in the names of yt-dlp's formats;
+/// the engine's best when the probe did not find what was chosen.
+fn from_list(choice: &ChoiceView, formats: &[Format]) -> ChoiceView {
+    let found = match choice {
+        ChoiceView::Format { id } => by_itag(formats, id).map(|id| ChoiceView::Format { id }),
+        ChoiceView::Merge { video, audio } => by_itag(formats, video)
+            .zip(by_itag(formats, audio))
+            .map(|(video, audio)| ChoiceView::Merge { video, audio }),
+        other => Some(other.clone()),
+    };
+    found.unwrap_or(ChoiceView::Best)
 }
 
 /// Opens «Video quality» (or brings it to the front), titled in the
@@ -1232,7 +1297,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
 /// resumed one: the formats of the last probe may be gone, or stale).
 fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
     let state = handle.state::<VideoState>();
-    let Some(row) = with_row(&state, id, |row| {
+    let Some(mut row) = with_row(&state, id, |row| {
         row.status = StatusView::Active;
         row.clone()
     }) else {
@@ -1241,25 +1306,67 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
     let stop = Stop::new();
     state.downloads.lock().unwrap().insert(id, stop.clone());
     let known = state.formats.lock().unwrap().get(&row.url).cloned();
+    // From the browser's list: what was read ahead, if it fits.
+    let ahead = (row.name.is_empty())
+        .then(|| {
+            let cookies = state.cookies.lock().unwrap().contains_key(&row.url);
+            let media = state.media.lock().unwrap().get(&row.url).cloned();
+            state
+                .ahead
+                .lock()
+                .unwrap()
+                .find(&row.url, cookies, Instant::now())
+                .map(|read| (read, media))
+        })
+        .flatten();
     tauri::async_runtime::spawn(async move {
         let runner = runner(&handle.state::<crate::App>()).await;
-        let formats = match known.filter(|_| !ask) {
-            Some(formats) => Ok(formats),
-            None => match probe(
+        let read = match ahead {
+            Some((mut read, media)) => tokio::select! {
+                read = read.wait_for(Option::is_some) => read
+                    .ok()
+                    .and_then(|r| r.clone().flatten())
+                    .filter(|sent| ahead_fits(sent, &row.url, media.as_deref())),
+                () = stop.requested() => None,
+            },
+            None => None,
+        };
+        let probed = match read {
+            Some(sent) => Ok(sent.probed),
+            None if known.is_some() && !ask => Err(None),
+            None => probe(
                 handle.state::<VideoState>().inner(),
                 &runner,
                 &row.url,
                 &stop,
             )
             .await
-            {
-                Ok(Probed::Video(video)) => Ok(video.formats),
-                Ok(Probed::Playlist { .. }) => Err(VideoErrorView {
-                    kind: "playlist".into(),
-                    message: "the page is a playlist".into(),
-                }),
-                Err(e) => Err(e.into()),
-            },
+            .map_err(Some),
+        };
+        let formats = match probed {
+            Err(None) => Ok(known.unwrap_or_default()),
+            Err(Some(e)) => Err(e.into()),
+            Ok(Probed::Video(video)) => {
+                // From the browser's list: named after its title, and
+                // its choice in yt-dlp's names.
+                if row.name.is_empty() {
+                    let name = Some(video.title.trim())
+                        .filter(|t| !t.is_empty())
+                        .map_or_else(|| "video".into(), zajil_core::sanitize::sanitize_file_name);
+                    let choice = from_list(&row.choice, &video.formats);
+                    with_row(&handle.state::<VideoState>(), id, |r| {
+                        r.name = name.clone();
+                        r.choice = choice.clone();
+                    });
+                    row.name = name;
+                    row.choice = choice;
+                }
+                Ok(video.formats)
+            }
+            Ok(Probed::Playlist { .. }) => Err(VideoErrorView {
+                kind: "playlist".into(),
+                message: "the page is a playlist".into(),
+            }),
         };
         // The engine's best, once chosen, is the row's choice from now on.
         let chosen = formats.and_then(|formats| {
@@ -1395,6 +1502,42 @@ pub fn video_cancel(state: State<'_, VideoState>, id: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A choice from the browser's list names YouTube's itags; yt-dlp's
+    /// formats may add a suffix, and a "stable volume" sound is not taken.
+    #[test]
+    fn a_choice_from_the_list_finds_yt_dlps_format() {
+        let format = |id: &str| -> Format {
+            serde_json::from_value(serde_json::json!({ "format_id": id })).unwrap()
+        };
+        let formats = [
+            format("299"),
+            format("140-drc"),
+            format("140-1"),
+            format("251"),
+        ];
+        assert_eq!(
+            from_list(
+                &ChoiceView::Merge {
+                    video: "299".into(),
+                    audio: "140".into()
+                },
+                &formats
+            ),
+            ChoiceView::Merge {
+                video: "299".into(),
+                audio: "140-1".into()
+            }
+        );
+        assert_eq!(
+            from_list(&ChoiceView::Format { id: "251".into() }, &formats),
+            ChoiceView::Format { id: "251".into() }
+        );
+        assert_eq!(
+            from_list(&ChoiceView::Format { id: "18".into() }, &formats),
+            ChoiceView::Best
+        );
+    }
 
     /// Closing «Video quality» stops its check of the page and its tools'
     /// download (the owner's notes on 1.0: they ran on behind it).

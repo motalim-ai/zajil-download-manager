@@ -271,7 +271,7 @@ describe("the Download video button", () => {
     await page.close();
   });
 
-  it("sits at the video's top right, with Zajil's mark, in either language", async () => {
+  it("sits at the video's top right, with a download arrow and its list's, in either language", async () => {
     for (const lang of ["ar", "en"]) {
       const page = await pageWith(VIDEO, { open: true });
       if (lang === "en") await page.evaluate(() => void (/** @type {any} */ (window).texts = { lang: "en", texts: { button: "Download video", working: "Sending to Zajil…", done: "Sent to Zajil", failed: "The video did not reach Zajil.", playlist: "Download the playlist with Zajil", thisVideo: "This video", wholeList: "The whole playlist" } }));
@@ -279,9 +279,46 @@ describe("the Download video button", () => {
       const word = lang === "en" ? "Download video" : "نزّل الفيديو";
       await page.waitForFunction((w) => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.textContent === w, word);
       const button = await buttonOf(page);
-      expect(button).toMatchObject({ hidden: false, right: 732, top: 58, mark: 3, dir: lang === "en" ? "ltr" : "rtl" });
+      expect(button).toMatchObject({ hidden: false, right: 732, top: 58, mark: 4, dir: lang === "en" ? "ltr" : "rtl" });
       await page.close();
     }
+  });
+
+  // Owner's decision, 2026-10-29: on YouTube the formats show at once,
+  // from the player's own answer in the page, and a choice sends its itags.
+  it("on YouTube, says how many formats the video has, lists them at once, and a choice sends only its itags", async () => {
+    const page = await pageWith(VIDEO, { open: true, url: "https://www.youtube.com/watch?v=abc" });
+    // The page's world, as `yt-page.js` answers there.
+    await page.evaluate(() => {
+      const data = {
+        video: "abc",
+        title: "A video",
+        seconds: "65",
+        formats: [
+          { itag: 18, mime: 'video/mp4; codecs="avc1.42001E, mp4a.40.2"', size: "1000000", height: 360, quality: "360p" },
+          { itag: 299, mime: 'video/mp4; codecs="avc1.64002a"', size: "9000000", height: 1080, quality: "1080p" },
+          { itag: 140, mime: 'audio/mp4; codecs="mp4a.40.2"', size: "500000" },
+        ],
+      };
+      document.addEventListener("zajil-yt-ask", () => document.dispatchEvent(new CustomEvent("zajil-yt-formats", { detail: JSON.stringify(data) })));
+    });
+    await page.addScriptTag({ content: readFileSync(new URL("../src/yt-formats.js", import.meta.url), "utf8") });
+    await page.mouse.move(400, 200);
+    await page.waitForFunction(() => [...document.documentElement.children].at(-1)?.shadowRoot?.querySelector("button")?.textContent === "نزّل الفيديو (3)");
+    await page.mouse.click(AT.x, AT.y);
+    const items = await page.evaluate(() =>
+      [...([...document.documentElement.children].at(-1)?.shadowRoot?.querySelectorAll(".menu button") ?? [])].map((b) => b.textContent),
+    );
+    // Each with its name, its codec and its size (with its sound's).
+    expect(items.slice(0, 3)).toEqual(["MP4 1080pH.2649.1 MB", "MP4 360pH.264977 KB", "M4AAAC488 KB"]);
+    const first = await page.evaluate(() => {
+      const b = /** @type {HTMLElement} */ ([...document.documentElement.children].at(-1)?.shadowRoot?.querySelector(".menu button"));
+      const box = b.getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+    await page.mouse.click(first.x, first.y);
+    expect(await sent(page)).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4", format: { video: "299", audio: "140" } }]);
+    await page.close();
   });
 
   it("speaks Zajil's language, not the browser's", async () => {

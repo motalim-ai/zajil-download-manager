@@ -170,6 +170,21 @@
   "videoButtonWholeList": {
     "message": "قائمة التشغيل كلها"
   },
+  "videoListVideo": {
+    "message": "فيديو"
+  },
+  "videoListAudio": {
+    "message": "صوت فقط"
+  },
+  "videoListMore": {
+    "message": "جودات أخرى في زاجِل…"
+  },
+  "videoButtonHelp": {
+    "message": "زاجِل: اختر الجودة وسيبدأ التنزيل فورًا"
+  },
+  "videoButtonHide": {
+    "message": "إخفاء الزر لهذا الفيديو"
+  },
   "playlistNotHere": {
     "message": "لم يجد زاجِل قائمة تشغيل في هذه الصفحة."
   },

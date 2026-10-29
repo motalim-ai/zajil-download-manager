@@ -30,6 +30,9 @@ use serde::Deserialize;
 use crate::engine::{Engine, Stop};
 use crate::tools::{Tool, Toolbox, VerifiedTool};
 
+#[path = "video_fast.rs"]
+mod fast;
+
 /// The tools of one run, checked right before it ([`Toolbox::verified`]),
 /// and kept until its whole tree has ended: on Windows they stay locked
 /// while yt-dlp may start ffmpeg or ffprobe (review of the video runner:
@@ -1598,6 +1601,15 @@ impl VideoRunner {
         // Checked before any check of the HLS playlists asks for them.
         let choice_args = choice.args()?;
         self.check_hls(request, stop).await?;
+        // YouTube: Zajil's own engine, when the probe's links allow it.
+        if let Some(parts) = fast::parts(choice, request.formats) {
+            match self.fast_download(request, &parts, stop, on_event).await {
+                Ok(file) => return Ok(file),
+                Err(fast::Failed::Partway(e)) => return Err(e),
+                // Nothing came: yt-dlp tries.
+                Err(fast::Failed::Untouched) => {}
+            }
+        }
         let mut args = base_args();
         args.extend([
             Arg::NoPlaylist,
