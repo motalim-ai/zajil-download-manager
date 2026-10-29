@@ -96,7 +96,14 @@
       .filter((/** @type {any} */ f) => !seen.has(f.itag) && seen.add(f.itag));
     // The sound that goes with a picture: the video's own track (not
     // another language's, not a "stable volume" one), the best of its kind.
-    const sounds = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.plain && (!f.track || f.track.main));
+    // A video whose sound has a language but no track marked the default
+    // (one language only, often): every track counts as the video's own.
+    const tracked = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.track);
+    const anyMain = tracked.some((/** @type {any} */ f) => f.track.main);
+    const isMain = (/** @type {any} */ f) => !f.track || f.track.main || !anyMain;
+    // A language is named only when there are several.
+    const languages = new Set(tracked.map((/** @type {any} */ f) => f.track.name)).size;
+    const sounds = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.plain && isMain(f));
     /** YouTube's usual one first (140, 251), else the best of its kind.
      * @param {string} ext @param {string} usual */
     const bestSound = (ext, usual) =>
@@ -132,9 +139,9 @@
     /** @type {Choice[]} */
     const audio = all
       .filter((/** @type {any} */ f) => f.kind === "audio")
-      .sort((/** @type {any} */ a, /** @type {any} */ b) => Number(b.track?.main ?? true) - Number(a.track?.main ?? true) || (b.bitrate ?? 0) - (a.bitrate ?? 0))
+      .sort((/** @type {any} */ a, /** @type {any} */ b) => Number(isMain(b)) - Number(isMain(a)) || (b.bitrate ?? 0) - (a.bitrate ?? 0))
       .map((/** @type {any} */ f) => ({
-        name: `${f.ext.toUpperCase()} ${rateText(f.bitrate)}`.trim() + (f.track?.name && !f.track.main ? ` · ${f.track.name}` : ""),
+        name: `${f.ext.toUpperCase()} ${rateText(f.bitrate)}`.trim() + (f.track?.name && languages > 1 ? ` · ${f.track.name}` : ""),
         detail: f.codec,
         size: sizeText(f.size),
         send: { id: f.itag },

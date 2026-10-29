@@ -280,6 +280,37 @@ async fn part(
         .map(|f| f.file)
 }
 
+/// The `.zajil-part` and `.zajil-state` files of the parts of `name` in
+/// `dest`: `<base>.f<id>.<ext>.zajil-part`, with an id and an extension of
+/// letters, digits and `-` only.
+pub(super) fn part_files(dest: &Path, name: &str) -> Vec<PathBuf> {
+    let start = format!("{}.f", base_of(name));
+    let Ok(entries) = std::fs::read_dir(dest) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|file| {
+            let Some(rest) = file.strip_prefix(&start) else {
+                return false;
+            };
+            let Some(rest) = rest
+                .strip_suffix(".zajil-part")
+                .or_else(|| rest.strip_suffix(".zajil-state"))
+            else {
+                return false;
+            };
+            rest.split_once('.').is_some_and(|(id, ext)| {
+                !id.is_empty()
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    && is_plain(ext)
+            })
+        })
+        .map(|file| dest.join(file))
+        .collect()
+}
+
 /// The speed over the last few seconds, from the bytes so far.
 #[derive(Default)]
 struct Speed {
@@ -420,6 +451,35 @@ mod tests {
         let o = format("251", "webm", "none", "opus", YT);
         assert_eq!(container(&[&v, &a]), "mkv");
         assert_eq!(container(&[&v, &o]), "webm");
+    }
+
+    #[test]
+    fn only_this_videos_parts_are_found() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in [
+            "A b.f299.mp4.zajil-part",
+            "A b.f299.mp4.zajil-state",
+            "A b.f140-1.m4a.zajil-part",
+            "A b.mp4",
+            "A b.f299.mp4",
+            "A bc.f299.mp4.zajil-part",
+            "Other.f140.m4a.zajil-part",
+        ] {
+            std::fs::write(dir.path().join(file), b"").unwrap();
+        }
+        let mut found: Vec<String> = part_files(dir.path(), "A b")
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "A b.f140-1.m4a.zajil-part",
+                "A b.f299.mp4.zajil-part",
+                "A b.f299.mp4.zajil-state"
+            ]
+        );
     }
 
     #[test]

@@ -65,6 +65,13 @@ pub struct VideoState {
     told: Mutex<HashMap<u64, Instant>>,
     /// The videos read ahead, while the pointer was on them.
     ahead: Mutex<Aheads>,
+    /// The download a format chosen in the browser started, while «Video
+    /// quality» asks where it goes (as IDM's «Download file info», owner,
+    /// 2026-10-29): it runs meanwhile.
+    started: Mutex<Option<u64>>,
+    /// Downloads cancelled while they ran: once stopped, they leave the
+    /// list with what they wrote.
+    discard: Mutex<HashSet<u64>>,
 }
 
 /// How long a video read ahead is kept (owner, 2026-10-28): in memory
@@ -186,6 +193,25 @@ struct Row {
     /// From a private window: never written to `videos.json`.
     #[serde(skip)]
     private: bool,
+    /// Where the user wants it once finished, if not where it downloads:
+    /// changed in «Video quality» while it was already downloading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    move_to: Option<MoveTo>,
+}
+
+impl Row {
+    /// Whether it lands where `to` says anyway: the same folder, and the
+    /// same name (or none given).
+    fn lands_at(&self, to: &MoveTo) -> bool {
+        self.folder == to.folder && (to.name.is_empty() || to.name == self.name)
+    }
+}
+
+/// A finished video's folder and name, as the user changed them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct MoveTo {
+    folder: String,
+    name: String,
 }
 
 fn rows_file(app: &crate::App) -> PathBuf {
@@ -510,22 +536,140 @@ pub fn receive<R: tauri::Runtime>(
             error: None,
             file: None,
             private,
+            move_to: None,
         });
         save_rows(&app, &state);
         let _ = handle.emit("downloads-changed", ());
         pump(handle);
-        let show = handle
-            .state::<crate::closing::Closing>()
-            .prefs()
-            .add
-            .progress_window;
-        if let Err(err) = crate::addprefs::show_started(handle, show, id, "Zajil") {
-            eprintln!("zajil: the progress window of video {id}: {err}");
-        }
+        // An earlier one still asked about goes on where it is.
+        *state.started.lock().unwrap() = Some(id);
+        let _ = handle.emit_to(LABEL, "video-started", id);
+        let _ = open_window(handle);
         return;
     }
     *state.pending.lock().unwrap() = Some(url);
     let _ = open_window(handle);
+}
+
+/// A download from the browser's list, for «Video quality» while it asks
+/// where it goes.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct StartedView {
+    #[ts(type = "number")]
+    pub id: u64,
+    /// The page's title once read, else empty.
+    pub name: String,
+    pub folder: String,
+    pub status: StatusView,
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    #[ts(type = "number")]
+    pub done: u64,
+    pub error: Option<String>,
+}
+
+/// The download «Video quality» asks about, if any.
+#[tauri::command]
+pub fn video_started(state: State<'_, VideoState>) -> Option<StartedView> {
+    let id = (*state.started.lock().unwrap())?;
+    with_row(&state, id, |row| StartedView {
+        id,
+        name: row.name.clone(),
+        folder: row.folder.clone(),
+        status: row.status,
+        size: row.size,
+        done: row.done,
+        error: row.error.clone(),
+    })
+}
+
+/// «Start download»: it goes on, to `folder` as `name` once finished (at
+/// once if it already is). Its progress window takes over.
+#[tauri::command]
+pub async fn video_keep<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    id: u64,
+    folder: String,
+    name: String,
+) -> Result<(), String> {
+    let state = handle.state::<VideoState>();
+    state.started.lock().unwrap().take_if(|s| *s == id);
+    let name = zajil_core::sanitize::sanitize_file_name(name.trim());
+    let wanted = MoveTo { folder, name };
+    let done_file = with_row(&state, id, |row| match (&row.file, row.status) {
+        (Some(file), StatusView::Done) => {
+            (!row.lands_at(&wanted)).then(|| (PathBuf::from(file), row.name.clone()))
+        }
+        // Moved there once finished, if it is not where it lands then.
+        _ => {
+            row.move_to = Some(wanted.clone());
+            None
+        }
+    })
+    .flatten();
+    if let Some((file, title)) = done_file {
+        let to = wanted.clone();
+        let moved = tauri::async_runtime::spawn_blocking(move || {
+            let name = if to.name.is_empty() { title } else { to.name };
+            zajil_core::video::move_video(&file, std::path::Path::new(&to.folder), &name)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        with_row(&state, id, |row| {
+            row.file = Some(moved.display().to_string());
+            row.folder = wanted.folder.clone();
+        });
+    }
+    save_rows(&handle.state::<crate::App>(), &state);
+    let _ = handle.emit("downloads-changed", ());
+    Ok(())
+}
+
+/// «Cancel» while it asks where the download goes: it stops, and leaves
+/// the list with what it wrote.
+#[tauri::command]
+pub fn video_discard<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64) {
+    handle
+        .state::<VideoState>()
+        .started
+        .lock()
+        .unwrap()
+        .take_if(|s| *s == id);
+    discard(&handle, id);
+}
+
+/// Download `id` stops if it runs and leaves the list; its parts, and its
+/// file if it finished, are removed (it was never kept).
+fn discard<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, id: u64) {
+    let state = handle.state::<VideoState>();
+    let running = state.downloads.lock().unwrap().get(&id).cloned();
+    if let Some(stop) = running {
+        // `start` removes it once stopped.
+        state.discard.lock().unwrap().insert(id);
+        stop.request();
+        return;
+    }
+    let Some(row) = with_row(&state, id, |row| row.clone()) else {
+        return;
+    };
+    state.rows.lock().unwrap().retain(|r| r.id != id);
+    save_rows(&handle.state::<crate::App>(), &state);
+    let _ = handle.emit("downloads-changed", ());
+    pump(handle);
+    tauri::async_runtime::spawn_blocking(move || remove_leftovers(&row));
+}
+
+/// What a cancelled download wrote: its parts, and its file if finished.
+fn remove_leftovers(row: &Row) {
+    let folder = std::path::Path::new(&row.folder);
+    for part in zajil_core::video::part_files(folder, &row.name) {
+        let _ = zajil_platform::fs::remove_file_retrying(&part);
+    }
+    if let Some(file) = &row.file {
+        let _ = zajil_platform::fs::remove_file_retrying(std::path::Path::new(file));
+    }
 }
 
 /// The format of `formats` that YouTube's itag `wanted` names: yt-dlp
@@ -576,6 +720,11 @@ pub fn open_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Re
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::Destroyed = event {
                 give_up(&app.state::<VideoState>());
+                // Closed while it asked where the download goes: cancelled.
+                let started = app.state::<VideoState>().started.lock().unwrap().take();
+                if let Some(id) = started {
+                    discard(&app, id);
+                }
                 let _ = app.emit_to("main", "video-window", false);
             }
         });
@@ -1208,6 +1357,7 @@ pub fn video_download<R: tauri::Runtime>(
         error: None,
         file: None,
         private,
+        move_to: None,
     });
     state.fresh.lock().unwrap().insert(id);
     save_rows(&app, &state);
@@ -1290,6 +1440,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
         error: None,
         file: None,
         private: false,
+        move_to: None,
     }
 }
 
@@ -1413,6 +1564,60 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         let state = handle.state::<VideoState>();
         state.downloads.lock().unwrap().remove(&id);
         state.told.lock().unwrap().remove(&id);
+        // Cancelled while it ran: gone, with what it wrote.
+        if state.discard.lock().unwrap().remove(&id) {
+            let mut gone = row.clone();
+            gone.file = result.as_ref().ok().map(|f| f.display().to_string());
+            state.rows.lock().unwrap().retain(|r| r.id != id);
+            save_rows(&handle.state::<crate::App>(), &state);
+            let _ = handle.emit("downloads-changed", ());
+            pump(&handle);
+            let _ = tauri::async_runtime::spawn_blocking(move || remove_leftovers(&gone)).await;
+            return;
+        }
+        // Finished where it downloaded: moved where the user said meanwhile.
+        let move_to = with_row(&state, id, |row| {
+            row.move_to
+                .take()
+                .filter(|to| !row.lands_at(to))
+                .map(|mut to| {
+                    if to.name.is_empty() {
+                        to.name = row.name.clone();
+                    }
+                    to
+                })
+        })
+        .flatten();
+        let result = match (result, move_to) {
+            (Ok(file), Some(to)) => {
+                let target = to.clone();
+                let moved = tauri::async_runtime::spawn_blocking(move || {
+                    zajil_core::video::move_video(
+                        &file,
+                        std::path::Path::new(&target.folder),
+                        &target.name,
+                    )
+                    .map_err(|e| (e, file))
+                })
+                .await;
+                match moved {
+                    Ok(Ok(file)) => {
+                        with_row(&state, id, |row| row.folder = to.folder.clone());
+                        Ok(file)
+                    }
+                    // Left where it is, and said.
+                    Ok(Err((e, file))) => {
+                        eprintln!("zajil: video {id} could not be moved: {e}");
+                        Ok(file)
+                    }
+                    Err(e) => Err(VideoErrorView {
+                        kind: "io".into(),
+                        message: e.to_string(),
+                    }),
+                }
+            }
+            (result, _) => result,
+        };
         let lang = handle
             .state::<crate::App>()
             .settings
@@ -1684,6 +1889,7 @@ mod tests {
             error: None,
             file: None,
             private: false,
+            move_to: None,
         }
     }
 

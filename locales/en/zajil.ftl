@@ -645,6 +645,9 @@ video-error-challenge = Zajil could not pass YouTube's check for this video. Try
 video-error-other = This video could not be downloaded.
 video-error-other-details = This video could not be downloaded. Details: { $details }
 video-error-details = Details
+video-started-reading = Zajil is reading the video…
+video-started-done = finished
+video-started-note = The download has already started. Change its name or folder if you like: the file moves there once finished. «Cancel» stops it and deletes what came.
 
 ## Video downloads in the list (M6, #149)
 queue-video = Video

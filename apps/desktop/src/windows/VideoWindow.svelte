@@ -8,7 +8,7 @@
   import { licenseOf, toolName, versionOf } from "../lib/about";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
-  import { size } from "../lib/format";
+  import { size, speed as speedText } from "../lib/format";
   import { startWindow } from "../lib/windowStart";
   import { fileName, options, picked, type Option } from "../lib/videoChoices";
   import { errorDetails, errorKey } from "../lib/videoErrors";
@@ -27,6 +27,9 @@
     | { kind: "video"; info: Extract<VideoInfoView, { kind: "video" }>; list: Option[] }
     | { kind: "playlist"; info: Extract<VideoInfoView, { kind: "playlist" }>; chosen: boolean[] }
     | { kind: "downloading"; label: string; done: number; total: number | null; speed: number | null; id: number | null }
+    // A format chosen in the browser: it downloads already, while the
+    // user says where it goes (owner, 2026-10-29, as IDM).
+    | { kind: "started"; id: number; done: number; total: number | null; speed: number | null; status: string; error: string | null }
     | { kind: "failed"; error: VideoErrorView | string };
 
   // The UI test scenes («tools», «quality») start at a step, with demo
@@ -41,6 +44,9 @@
   // FileName draws it (as in «Download file info»).
   let editing = $state(false);
   let pick = $state(0);
+  // The name and folder the user changed (else they follow the download's).
+  let nameTouched = false;
+  let folderTouched = false;
   let unlisten: (() => void)[] = [];
 
   onMount(() => {
@@ -53,7 +59,14 @@
       void getCurrentWindow().setTitle(locale.t("video-title")).catch(() => {});
       folder = await api.videoFolder().catch(() => "");
       unlisten.push(await api.onVideoToolsProgress((p) => step.kind === "installing" && (step = { kind: "installing", tool: p.tool, done: p.done, total: p.total })));
-      unlisten.push(await api.onVideoProgress((p) => step.kind === "downloading" && p.id === step.id && (step = { ...step, done: p.done, total: p.total, speed: p.speed })));
+      unlisten.push(
+        await api.onVideoProgress((p) => {
+          if ((step.kind === "downloading" || step.kind === "started") && p.id === step.id) step = { ...step, done: p.done, total: p.total, speed: p.speed };
+        }),
+      );
+      unlisten.push(await api.onChange(() => step.kind === "started" && void showStarted()));
+      unlisten.push(await api.onVideoStarted(() => void showStarted(true)));
+      if (await showStarted(true)) return;
       const pending = await api.videoPending().catch(() => null);
       if (pending) {
         url = pending;
@@ -62,6 +75,35 @@
     })();
     return () => unlisten.forEach((u) => u());
   });
+
+  /** The download the browser's list started, if any: its name once the
+   * page is read, its folder, and how far it is. `fresh`: a new one. */
+  async function showStarted(fresh = false): Promise<boolean> {
+    const s = await api.videoStarted().catch(() => null);
+    if (!s) return false;
+    if (fresh || step.kind !== "started" || step.id !== s.id) {
+      nameTouched = false;
+      folderTouched = false;
+      step = { kind: "started", id: s.id, done: s.done, total: s.size, speed: null, status: s.status, error: s.error };
+      await tick();
+      document.querySelector<HTMLElement>("[data-first]")?.focus();
+    } else step = { ...step, status: s.status, error: s.error, done: s.status === "done" ? (s.size ?? step.done) : step.done, total: s.size ?? step.total };
+    if (!nameTouched && !editing && s.name) name = s.name;
+    if (!folderTouched) folder = s.folder;
+    return true;
+  }
+
+  /** «Start download»: it goes on, where the user said; its progress
+   * window takes over. */
+  async function keep(id: number) {
+    try {
+      await api.videoKeep(id, folder, name.trim());
+      await api.openProgress(id, name.trim() || "Zajil").catch(() => {});
+      await api.closeWindow();
+    } catch (e) {
+      step = { kind: "failed", error: String(e) };
+    }
+  }
 
   function showScene(which: "tools" | "quality") {
     folder = "~/Downloads";
@@ -171,13 +213,17 @@
 
   async function chooseFolder() {
     const chosen = await openDialog({ directory: true, multiple: false }).catch(() => null);
-    if (typeof chosen === "string") folder = chosen;
+    if (typeof chosen === "string") {
+      folder = chosen;
+      folderTouched = true;
+    }
   }
 
   async function close() {
     if (step.kind === "installing") await api.videoToolsCancel().catch(() => {});
     if (step.kind === "probing") await api.videoProbeCancel().catch(() => {});
     if (step.kind === "downloading" && step.id !== null) await api.videoCancel(step.id).catch(() => {});
+    if (step.kind === "started") await api.videoDiscard(step.id).catch(() => {});
     await api.closeWindow();
   }
 
@@ -290,6 +336,47 @@
       <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       <div class="actions">
         <button class="btn primary" disabled={!list.chosen.some(Boolean) || !folder} onclick={() => void downloadList(list.info, list.chosen)}><Icon name="download" size={15} />{locale.t("video-download-chosen")}</button>
+        <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>
+      </div>
+    </section>
+  {:else if step.kind === "started"}
+    {@const s = step}
+    <section class="col" aria-live="polite">
+      <h2 class="title" dir="auto">{name || locale.t("video-started-reading")}</h2>
+      <div class="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={s.total ? Math.round((s.done / s.total) * 100) : 0}>
+        <b style:inline-size="{s.total ? Math.min((s.done / s.total) * 100, 100) : 3}%"></b>
+      </div>
+      <p class="muted num">
+        {size(locale.lang, locale.digits, s.done)}{s.total ? ` / ${size(locale.lang, locale.digits, s.total)}` : ""}{s.speed && s.status === "active"
+          ? ` · ${speedText(locale.lang, locale.digits, s.speed)}`
+          : ""}{s.status === "done" ? ` · ${locale.t("video-started-done")}` : ""}
+      </p>
+      {#if s.status === "failed"}
+        <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
+      {/if}
+      <div class="grid">
+        <label class="label" for="started-name">{locale.t("add-file-name")}</label>
+        <div class="namebox">
+          <input
+            id="started-name"
+            class="box"
+            class:quiet={!editing && name !== ""}
+            dir="auto"
+            bind:value={name}
+            oninput={() => (nameTouched = true)}
+            onfocus={() => (editing = true)}
+            onblur={() => (editing = false)}
+          />
+          {#if !editing && name !== ""}<span class="box shown" dir={nameDir(name)} aria-hidden="true"><FileName {name} /></span>{/if}
+        </div>
+        <span class="label">{locale.t("add-folder")}</span>
+        <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
+      </div>
+      <p class="muted">{locale.t("video-started-note")}</p>
+      <div class="actions">
+        <button class="btn primary" disabled={!folder || s.status === "failed"} onclick={() => void keep(s.id)} data-first>
+          <Icon name="download" size={15} />{locale.t("add-start")}
+        </button>
         <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>
       </div>
     </section>

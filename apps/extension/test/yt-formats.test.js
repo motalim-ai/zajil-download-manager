@@ -45,6 +45,18 @@ describe("the video button's list", () => {
     expect(list.audio.map((/** @type {any} */ c) => c.send.id)).toEqual(["251", "140"]);
   });
 
+  // The owner's video of 2026-10-29: one language, no track marked the
+  // default; its pictures were left out for want of a sound.
+  it("takes a sound with a language as the video's own when no track is the default", () => {
+    const track = { name: "English (US)", main: false };
+    const list = load()({
+      ...page,
+      formats: page.formats.map((f) => (f.mime.startsWith("audio/") ? { ...f, track } : f)),
+    });
+    expect(list.video.map((/** @type {any} */ c) => c.send)).toContainEqual({ video: "299", audio: "140" });
+    expect(list.audio.map((/** @type {any} */ c) => c.name)).toEqual(["WEBM 140 kbps", "M4A 130 kbps"]);
+  });
+
   it("checks what the page says: nothing for a live stream, no format, or nonsense", () => {
     const choicesOf = load();
     expect(choicesOf(null)).toBeNull();
