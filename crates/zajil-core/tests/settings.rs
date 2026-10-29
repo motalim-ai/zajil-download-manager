@@ -212,3 +212,33 @@ fn the_update_check_is_on_unless_turned_off() {
         .unwrap();
     assert!(!store.load().unwrap().update_check);
 }
+
+/// Videos at once (owner's request, 2026-10-29): 3 when absent, 1 to 8,
+/// and a file without it stays as it was.
+#[test]
+fn videos_at_once_is_three_unless_set_from_one_to_eight() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(data.path());
+    assert_eq!(store.load().unwrap().videos_at_once(), 3);
+    store.update(|_| Ok(())).unwrap();
+    assert!(
+        !fs::read_to_string(store.path())
+            .unwrap()
+            .contains("videos_at_once")
+    );
+    store
+        .update(|file| {
+            file.videos_at_once = Some(6);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(store.load().unwrap().videos_at_once(), 6);
+    for bad in [0, 9] {
+        let refused = store.update(|file| {
+            file.videos_at_once = Some(bad);
+            Ok(())
+        });
+        assert!(refused.is_err(), "{bad}");
+    }
+    assert_eq!(store.load().unwrap().videos_at_once(), 6);
+}

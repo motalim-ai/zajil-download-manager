@@ -1,4 +1,5 @@
 <script lang="ts">
+  import QueuePick from "../lib/components/QueuePick.svelte";
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -174,9 +175,7 @@
 
     <div class="grid">
       <label class="label" for="batch-queue">{locale.t("add-queue")}</label>
-      <select id="batch-queue" class="box" bind:value={queue}>
-        {#each queues as q (q)}<option value={q}>{q === "main" ? locale.t("queue-main") : q}</option>{/each}
-      </select>
+      <div class="box qpick"><QueuePick id="batch-queue" names={queues} bind:value={queue} /></div>
       <span class="label">{locale.t("add-folder")}</span>
       <div class="with">
         <bdi class="box path" dir={folder ? "ltr" : "auto"}>{folder ?? locale.t("batch-folder-category")}</bdi>
@@ -215,6 +214,21 @@
   .label {
     font-size: 13px;
     color: var(--muted);
+  }
+  .qpick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .qpick :global(select),
+  .qpick :global(input) {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    outline: none;
   }
   .box {
     border: 1px solid var(--line);

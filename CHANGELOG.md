@@ -14,7 +14,8 @@ Fixes for what the owner found while downloading a YouTube playlist. The cause o
 ### Added
 
 - **«Resume all»** in the toolbar and the «Downloads» menu: every paused or failed download, of every queue and the videos, starts again, so what «Pause all» stopped comes back (owner's report, 2026-10-29). Ctrl+Shift+R, or ⌘⌥R on macOS.
-- **«New queue» in the main window,** under «Queues» in the tree, its name typed in place (it was only in the schedule window). A queue's name may now have single spaces between words, as a category's.
+- **«New queue» in the main window,** under «Queues» in the tree, its name typed in place (it was only in the schedule window), and **«New queue…» at the end of the queue list** of «Download file info» and of batch download, for the download being added (owner's request, 2026-10-29). A queue's name may now have single spaces between words, as a category's.
+- **Videos at once** in Settings › Video tools: 1 to 8, 3 by default (it was always 2), applied at once.
 
 ### Fixed
 

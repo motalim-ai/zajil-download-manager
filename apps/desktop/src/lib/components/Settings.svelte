@@ -250,6 +250,27 @@
   // missing (owner, 2026-10-29), and deleting them.
   let tools = $state<ToolView[]>([]);
   let installing = $state<{ tool: string; done: number; total: number | null } | null>(null);
+  // Video downloads at once (owner's request, 2026-10-29), applied at once.
+  const MAX_VIDEOS = 8;
+  let videosAtOnce = $state(3);
+  onMount(() => {
+    void api.videosAtOnce().then((n) => (videosAtOnce = n), () => {});
+  });
+  async function setVideosAtOnce(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const n = Math.round(Number(input.value));
+    if (!Number.isFinite(n) || n < 1 || n > MAX_VIDEOS) {
+      input.value = String(videosAtOnce);
+      return;
+    }
+    try {
+      await api.setVideosAtOnce(n);
+      videosAtOnce = n;
+    } catch (e) {
+      input.value = String(videosAtOnce);
+      toolsSaid = { text: String(e), problem: true };
+    }
+  }
   let toolsSaid = $state<{ text: string; problem: boolean } | null>(null);
   onMount(() => {
     void api.videoToolsStatus().then((t) => (tools = t), (e) => (toolsSaid = { text: String(e), problem: true }));
@@ -442,6 +463,22 @@
   </fieldset>
   <fieldset>
     <legend>{locale.t("settings-video-tools")}</legend>
+    <div class="row">
+      <label for="videos-at-once">{locale.t("settings-videos-at-once")}</label>
+      <input
+        id="videos-at-once"
+        class="number num"
+        type="number"
+        min="1"
+        max={MAX_VIDEOS}
+        value={videosAtOnce}
+        onchange={(e) => void setVideosAtOnce(e)}
+        aria-describedby="videos-at-once-hint"
+      />
+    </div>
+    <p class="hint" id="videos-at-once-hint">
+      {locale.t("settings-videos-at-once-hint", { default: num(locale.lang, locale.digits, 3, 0), max: num(locale.lang, locale.digits, MAX_VIDEOS, 0) })}
+    </p>
     <p class="hint">{locale.t("settings-video-tools-hint")}</p>
     {#if tools.length > 0}
       <table class="tools">

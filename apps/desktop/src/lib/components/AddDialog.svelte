@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import QueuePick from "./QueuePick.svelte";
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
   import { nameDir } from "../fname";
@@ -302,11 +303,7 @@
     <div class="with">
       <label class="value pick">
         <Icon name="list-ordered" size={15} />
-        <select id="add-queue" bind:value={queue} disabled={page}>
-          {#each queues as q (q.name)}
-            <option value={q.name}>{q.name === "main" ? locale.t("queue-main") : q.name}</option>
-          {/each}
-        </select>
+        <QueuePick id="add-queue" names={queues.map((q) => q.name)} bind:value={queue} disabled={page} />
       </label>
       <label class="conns">
         <span class="label">{locale.t("add-connections")}</span>
@@ -528,7 +525,9 @@
   .name::placeholder {
     color: var(--faint);
   }
-  .pick select {
+  .pick select,
+  .pick :global(select),
+  .pick :global(input) {
     flex: 1;
     min-width: 0;
     border: 0;

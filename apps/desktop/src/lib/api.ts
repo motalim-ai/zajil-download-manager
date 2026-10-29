@@ -151,6 +151,9 @@ export const api = {
    * applies when Zajil next starts. */
   proxySetting: () => invoke<string | null>("proxy_setting"),
   setProxy: (proxy: string | null) => invoke<void>("set_proxy", { proxy }),
+  /** How many video downloads run at once, 1 to 8. */
+  videosAtOnce: () => invoke<number>("videos_at_once_setting"),
+  setVideosAtOnce: (n: number) => invoke<void>("set_videos_at_once", { n }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

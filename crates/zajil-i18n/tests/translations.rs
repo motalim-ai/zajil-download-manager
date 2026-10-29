@@ -876,6 +876,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("settings-browser-failed", &["browser", "error"]),
     ("settings-browser-ok", &["browser"]),
     ("settings-video-tools-installing", &["percent", "tool"]),
+    ("settings-videos-at-once-hint", &["default", "max"]),
     ("settings-connections-hint", &["default", "max"]),
     ("size-bytes", &["value"]),
     ("size-gib", &["value"]),
@@ -1426,6 +1427,17 @@ const WHOLE_TEXTS: &[Whole] = &[
         key: "settings-browser-ok",
         ar: (&[("browser", "Chrome")], "Chrome: مسجَّل"),
         en: (&[("browser", "Chrome")], "Chrome: registered"),
+    },
+    Whole {
+        key: "settings-videos-at-once-hint",
+        ar: (
+            &[("default", "3"), ("max", "8")],
+            "الافتراضي 3، والحد الأقصى 8. كل فيديو من يوتيوب يفتح عدة اتصالات، وكثرتها قد تجعل يوتيوب يبطئها.",
+        ),
+        en: (
+            &[("default", "3"), ("max", "8")],
+            "3 by default, at most 8. Each YouTube video opens several connections, and too many may make YouTube slow them down.",
+        ),
     },
     Whole {
         key: "settings-video-tools-installing",

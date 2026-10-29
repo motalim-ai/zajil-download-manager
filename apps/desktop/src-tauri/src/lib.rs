@@ -323,6 +323,12 @@ pub fn run() {
                 let app = tauri_app.state::<App>();
                 video::clean_leftovers(&app);
                 video::load_rows(&app, &tauri_app.state::<video::VideoState>());
+                if let Ok(settings) = app.settings.load() {
+                    video::keep_at_once(
+                        &tauri_app.state::<video::VideoState>(),
+                        settings.videos_at_once(),
+                    );
+                }
             }
             // A video tool the user had in an earlier build (yt-dlp's
             // one-file build) is brought up to date in the background.
@@ -489,6 +495,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::open_settings,
         proxy_setting,
         set_proxy,
+        videos_at_once_setting,
+        set_videos_at_once,
         set_limit,
         menu::set_menu,
         quit_app,
@@ -601,6 +609,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::open_settings,
         proxy_setting,
         set_proxy,
+        videos_at_once_setting,
+        set_videos_at_once,
         set_limit,
         menu::set_menu,
         quit_app,
@@ -4791,6 +4801,38 @@ async fn save_settings<R: tauri::Runtime>(
     // The other windows follow (the main one and the settings window).
     let _ = handle.emit("settings-changed", saved.clone());
     Ok(saved)
+}
+
+/// How many video downloads run at once.
+#[tauri::command]
+async fn videos_at_once_setting(app: State<'_, App>) -> Result<u32, String> {
+    let settings = app.settings.clone();
+    tokio::task::spawn_blocking(move || settings.load().map(|s| s.videos_at_once()))
+        .await
+        .map_err(blocking_err)?
+        .map_err(blocking_err)
+}
+
+/// Sets how many video downloads run at once, 1 to 8: at once, the
+/// waiting ones that may now start start.
+#[tauri::command]
+async fn set_videos_at_once<R: tauri::Runtime>(
+    app: State<'_, App>,
+    n: u32,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let settings = app.settings.clone();
+    tokio::task::spawn_blocking(move || {
+        settings.update(|file| {
+            file.videos_at_once = Some(n);
+            Ok(())
+        })
+    })
+    .await
+    .map_err(blocking_err)?
+    .map_err(blocking_err)?;
+    video::set_at_once(&handle, n);
+    Ok(())
 }
 
 /// The proxy of the settings (`None`: none).

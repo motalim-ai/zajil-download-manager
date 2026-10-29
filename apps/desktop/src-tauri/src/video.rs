@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,9 @@ const TOOLS: [Tool; 4] = Tool::ALL;
 /// What the app keeps for video downloads.
 #[derive(Default)]
 pub struct VideoState {
+    /// How many run at once, from the settings (0 until read: the
+    /// default).
+    at_once: AtomicUsize,
     /// A page's cookies, by link, as the extension sent them.
     cookies: Mutex<HashMap<String, String>>,
     /// A page's video's own link, by page, as the extension saw it: asked
@@ -153,9 +156,27 @@ fn ahead_fits(sent: &zajil_core::video::Sent, page: &str, media: Option<&str>) -
     sent.url == page || media == Some(sent.url.as_str())
 }
 
-/// At most this many video downloads run at once; the others wait in the
+/// How many video downloads run at once: the settings' number, 1 to 8
+/// (owner's request, 2026-10-29; it was always 2); the others wait in the
 /// list (a playlist's items, many at a time).
-const MAX_RUNNING: usize = 2;
+fn at_once(state: &VideoState) -> usize {
+    match state.at_once.load(Ordering::Relaxed) {
+        0 => zajil_core::settings::DEFAULT_VIDEOS_AT_ONCE as usize,
+        n => n,
+    }
+}
+
+/// The settings' number of videos at once, read at the start.
+pub fn keep_at_once(state: &VideoState, n: u32) {
+    state.at_once.store(n as usize, Ordering::Relaxed);
+}
+
+/// The number changed in the settings: the waiting ones that may start
+/// now start.
+pub fn set_at_once<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, n: u32) {
+    keep_at_once(&handle.state::<VideoState>(), n);
+    pump(handle);
+}
 
 /// Video downloads' ids start here, far above the queues' (JavaScript's
 /// numbers stay exact up to 2^53), so one list holds both.
@@ -424,9 +445,9 @@ pub fn resume<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
 }
 
 /// The waiting video downloads that may start now, first come first: as
-/// many as leave at most [`MAX_RUNNING`] running.
-fn to_start(rows: &[Row], running: &HashSet<u64>) -> Vec<u64> {
-    let free = MAX_RUNNING.saturating_sub(running.len());
+/// many as leave at most `most` running.
+fn to_start(rows: &[Row], running: &HashSet<u64>, most: usize) -> Vec<u64> {
+    let free = most.saturating_sub(running.len());
     rows.iter()
         .filter(|r| r.status == StatusView::Waiting && !running.contains(&r.id))
         .map(|r| r.id)
@@ -438,7 +459,7 @@ fn to_start(rows: &[Row], running: &HashSet<u64>) -> Vec<u64> {
 fn pump<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     let state = handle.state::<VideoState>();
     let running = state.downloads.lock().unwrap().keys().copied().collect();
-    let ids = to_start(&state.rows.lock().unwrap(), &running);
+    let ids = to_start(&state.rows.lock().unwrap(), &running, at_once(&state));
     for id in ids {
         // A page «Video quality» asked just now is not asked again.
         let ask = !state.fresh.lock().unwrap().remove(&id);
@@ -1541,7 +1562,7 @@ pub struct NewVideo {
 }
 
 /// A playlist's chosen videos join the list at once, each at its best,
-/// named after its title; they start in turn, at most [`MAX_RUNNING`] at
+/// named after its title; they start in turn, at most the settings' number at
 /// a time, and each asks its own page then. Those on the playlist's site
 /// take its cookies, if the browser sent any. Returns their ids.
 #[tauri::command]
@@ -2289,24 +2310,26 @@ mod tests {
     }
 
     /// A playlist's chosen videos all join the list at once, and at most
-    /// [`MAX_RUNNING`] run: the rest wait their turn, first come first.
+    /// the settings' number run: the rest wait their turn, first come
+    /// first.
     #[test]
     fn a_playlist_s_videos_wait_their_turn() {
         let mut rows: Vec<Row> = (1..=5)
             .map(|n| new_row(FIRST_ID + n, item("https://example.com/v", Some("v")), "/d"))
             .collect();
         let none = HashSet::new();
-        assert_eq!(to_start(&rows, &none), [FIRST_ID + 1, FIRST_ID + 2]);
+        assert_eq!(to_start(&rows, &none, 2), [FIRST_ID + 1, FIRST_ID + 2]);
+        assert_eq!(to_start(&rows, &none, 3).len(), 3);
         let two: HashSet<u64> = [FIRST_ID + 1, FIRST_ID + 2].into();
         for row in &mut rows[..2] {
             row.status = StatusView::Active;
         }
-        assert!(to_start(&rows, &two).is_empty());
+        assert!(to_start(&rows, &two, 2).is_empty());
         // One ended, one paused: the next waiting one, not the paused.
         rows[0].status = StatusView::Done;
         rows[2].status = StatusView::Paused;
         let one: HashSet<u64> = [FIRST_ID + 2].into();
-        assert_eq!(to_start(&rows, &one), [FIRST_ID + 4]);
+        assert_eq!(to_start(&rows, &one, 2), [FIRST_ID + 4]);
     }
 
     /// Each one goes at the engine's best, named after its title as a

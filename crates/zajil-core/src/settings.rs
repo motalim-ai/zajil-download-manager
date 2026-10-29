@@ -97,6 +97,12 @@ pub struct SettingsFile {
     /// when absent: none. Not written while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
+    /// How many video downloads run at once, 1 to [`MAX_VIDEOS_AT_ONCE`]
+    /// (the owner's request, 2026-10-29: a playlist ran two at a time).
+    /// `None`, and when absent: [`DEFAULT_VIDEOS_AT_ONCE`]. Not written
+    /// while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub videos_at_once: Option<u32>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -149,13 +155,25 @@ impl Default for SettingsFile {
             update_check: true,
             site_connections: Vec::new(),
             proxy: None,
+            videos_at_once: None,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }
     }
 }
 
+/// Video downloads at once by default: each YouTube one takes about 12
+/// connections (8 for the picture, 4 for the sound).
+pub const DEFAULT_VIDEOS_AT_ONCE: u32 = 3;
+/// The most video downloads at once.
+pub const MAX_VIDEOS_AT_ONCE: u32 = 8;
+
 impl SettingsFile {
+    /// How many video downloads run at once.
+    pub fn videos_at_once(&self) -> u32 {
+        self.videos_at_once.unwrap_or(DEFAULT_VIDEOS_AT_ONCE)
+    }
+
     /// Every value in its range: a file that breaks this is refused when
     /// read, and never written.
     pub fn check(&self) -> Result<(), String> {
@@ -177,6 +195,13 @@ impl SettingsFile {
         }
         if let Some(proxy) = &self.proxy {
             check_proxy(proxy)?;
+        }
+        if let Some(n) = self.videos_at_once
+            && !(1..=MAX_VIDEOS_AT_ONCE).contains(&n)
+        {
+            return Err(format!(
+                "videos at once must be from 1 to {MAX_VIDEOS_AT_ONCE}, not {n}"
+            ));
         }
         let mut seen = Vec::new();
         for entry in &self.site_connections {
