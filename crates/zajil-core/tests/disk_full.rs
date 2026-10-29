@@ -48,24 +48,46 @@ fn volume() -> Option<(&'static str, PathBuf)> {
 
 /// A file that takes all the free space of a volume, with zeros written for
 /// real (no holes). Removed when dropped, even when the test fails.
-struct Filler(PathBuf);
+///
+/// On CI's NTFS a filler closed at once left room: a download of 12 MiB
+/// more finished on the "full" volume, and only its last save failed. A
+/// file system may give a growing file more blocks than it wrote and free
+/// the rest when it is closed, so the filler stays open until dropped, and
+/// filling goes on until a new file cannot take a block either.
+struct Filler {
+    path: PathBuf,
+    file: Option<fs::File>,
+}
 
 impl Filler {
     fn fill(volume: &Path) -> Self {
         let path = volume.join(format!("filler-{}", std::process::id()));
+        let probe = volume.join(format!("probe-{}", std::process::id()));
         let mut file = fs::File::create(&path).unwrap();
-        for chunk in [MIB, 4096] {
-            let zeros = vec![0; chunk];
-            while file.write_all(&zeros).is_ok() {}
+        for _ in 0..64 {
+            for chunk in [MIB, 4096] {
+                let zeros = vec![0; chunk];
+                while file.write_all(&zeros).is_ok() {}
+            }
+            let _ = file.sync_all();
+            let room = fs::File::create(&probe)
+                .and_then(|mut f| f.write_all(&[0; 4096]).and_then(|()| f.sync_all()));
+            let _ = fs::remove_file(&probe);
+            if room.is_err() {
+                return Filler {
+                    path,
+                    file: Some(file),
+                };
+            }
         }
-        let _ = file.sync_all();
-        Filler(path)
+        panic!("{} could not be filled", volume.display());
     }
 }
 
 impl Drop for Filler {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        drop(self.file.take());
+        let _ = fs::remove_file(&self.path);
     }
 }
 

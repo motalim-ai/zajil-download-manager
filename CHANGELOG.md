@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixes
 
 - fix: a download no longer reserves its whole size on disk when it starts, on any system: a second download of the same 6.2 GB file failed at once on a disk with 7 GB free. The part file is sparse; the free-space check before the start stays on all three systems, and a disk that fills up mid-download stops it at once, resumable from its last saved state.
+- fix: a download whose every byte was written but whose last save failed (a full disk; seen on NTFS) now stops resumable from its last saved state, instead of failing with the raw save error.
 
 ## [1.0.0] - 2026-10-28
 

@@ -2216,16 +2216,30 @@ pub(crate) async fn finish_download(
 ) -> Result<Finished, Error> {
     let bytes = state.bytes_done();
     let state_file = state_path(&final_path);
-    let part = blocking(move || {
+    // Every byte was written, but the disk can still refuse the sync or the
+    // save (a full disk: nothing was reserved at the start). The state file
+    // saved last counts only bytes on disk, so the download stops there,
+    // resumable, as when a write fails (`segmented.rs`).
+    let unfinished = |state_file: PathBuf, err: &dyn std::fmt::Display| Error::Interrupted {
+        state_file,
+        reason: format!("could not finish the file: {err}"),
+    };
+    let synced = blocking(move || {
         // A file of unknown size may have been pre-sized differently.
         part.set_len(bytes)?;
         part.sync_all()?;
         Ok::<_, io::Error>(part)
     })
-    .await?;
+    .await;
+    let part = match synced {
+        Ok(part) => part,
+        Err(err) => return Err(unfinished(state_file, &err)),
+    };
     // Record that everything is on disk before renaming, so a failed
     // rename leaves a download that `resume` completes at once.
-    save_state(&mut state, &state_file, None).await?;
+    if let Err(err) = save_state(&mut state, &state_file, None).await {
+        return Err(unfinished(state_file, &err));
+    }
     drop(part); // releases the lock before the rename
 
     let part = part_path(&final_path);
