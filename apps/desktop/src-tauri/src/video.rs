@@ -456,6 +456,28 @@ pub fn remove<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
     let _ = handle.emit("downloads-changed", ());
 }
 
+/// «Delete» with the unfinished files: an unfinished video goes as a
+/// cancelled one does, with its parts (Zajil's own way leaves them in its
+/// folder; yt-dlp's run is swept); a finished one leaves the list and
+/// keeps its file.
+pub fn remove_with_files<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
+    let state = handle.state::<VideoState>();
+    let (unfinished, finished) = by_finished(&state.rows.lock().unwrap(), ids);
+    remove(handle, &finished);
+    for id in unfinished {
+        discard(handle, id);
+    }
+}
+
+/// `ids` split into those not finished and those finished; an id not in
+/// `rows` is among the finished (only taken off the list).
+fn by_finished(rows: &[Row], ids: &[u64]) -> (Vec<u64>, Vec<u64>) {
+    ids.iter().copied().partition(|&id| {
+        rows.iter()
+            .any(|r| r.id == id && r.status != StatusView::Done)
+    })
+}
+
 fn folders(app: &crate::App) -> (PathBuf, PathBuf) {
     (app.data_dir.join("tools"), app.data_dir.join("run"))
 }
@@ -2095,6 +2117,33 @@ mod tests {
         .map(|e| VideoErrorView::from(e).kind)
         .collect();
         assert_eq!(kinds, ["drm", "refused", "tool", "output", "stopped", "io"]);
+    }
+
+    /// «Delete» with the unfinished files: only the unfinished go with
+    /// their parts; a finished one, or one not in the list, keeps its file.
+    #[test]
+    fn deleting_with_files_spares_the_finished() {
+        let row = |id, status| Row {
+            status,
+            ..new_row(
+                id,
+                NewVideo {
+                    url: "https://example.com/v".into(),
+                    title: None,
+                },
+                "/tmp",
+            )
+        };
+        let rows = [
+            row(1, StatusView::Paused),
+            row(2, StatusView::Done),
+            row(3, StatusView::Failed),
+            row(4, StatusView::Active),
+        ];
+        assert_eq!(
+            by_finished(&rows, &[1, 2, 3, 4, 9]),
+            (vec![1, 3, 4], vec![2, 9])
+        );
     }
 
     /// A format as the page sees it: its kind from its codecs, its size

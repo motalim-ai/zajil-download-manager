@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deleting a download that had not finished** left its unfinished file on the disk unless «Also delete the unfinished files» was ticked, and it started unticked. It now starts ticked (owner's decision, 2026-10-29); unticking it keeps the files. A video deleted before it finished now goes with its parts too, and a state file a stopping download saves once more after it was deleted is deleted again.
+
 ## [1.1.0] - 2026-10-29
 
 Speed in downloads and in the windows, and a new look (owner's decision of 2026-10-29, after the owner tried 1.0 on a Mac). Signed automatic updates move from 1.1 to 1.2 (owner's decision of 2026-10-29). Tried by hand on macOS by the owner; on Windows and Linux, checked by CI's tests only, its UI tests among them (every window opened with its page, and a download from the link to «Open folder»).

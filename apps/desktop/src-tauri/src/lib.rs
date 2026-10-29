@@ -2727,9 +2727,8 @@ async fn remove_with_files<R: tauri::Runtime>(
     ids: Vec<u64>,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    // A stopped video leaves no file of its own (its run is swept).
     let (videos, ids) = video::split(ids);
-    video::remove(&handle, &videos);
+    video::remove_with_files(&handle, &videos);
     let store = app.store.clone();
     let files = {
         let ids = ids.clone();
