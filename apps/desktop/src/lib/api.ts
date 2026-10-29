@@ -3,6 +3,7 @@
 // tests are in ../uitest/api.ts, never in a release build.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { IntegrationView } from "./bindings/IntegrationView";
 import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
@@ -126,8 +127,9 @@ export const api = {
   /** The role of this window, made beforehand and hidden: `null` until it
    * takes one. */
   windowRole: () => invoke<Role | null>("window_role"),
+  /** Only this window's role: a plain `listen` hears every window's. */
   onWindowRole: (handler: (role: Role) => void): Promise<UnlistenFn> =>
-    listen<Role>("window-role", (event) => handler(event.payload)),
+    getCurrentWebviewWindow().listen<Role>("window-role", (event) => handler(event.payload)),
   /** «Download file info» started download `id` in the background: closing
    * the window without placing it removes it with its files. */
   holdStarted: (id: number) => invoke<void>("hold_started", { id }),
@@ -135,6 +137,8 @@ export const api = {
    * `null`: as it is), then runs on (`start`) or waits paused. */
   placeStarted: (folder: string | null, name: string | null, start: boolean) =>
     invoke<number>("place_started", { folder, name, start }),
+  /** This window's page drew its first frame (timed with `ZAJIL_MEASURE=1`). */
+  windowPainted: () => invoke<void>("window_painted"),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

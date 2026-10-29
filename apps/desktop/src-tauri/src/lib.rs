@@ -16,6 +16,7 @@ mod complete;
 mod dropbox;
 mod grab;
 mod live;
+mod measure;
 mod menu;
 mod offers;
 mod removal;
@@ -139,6 +140,7 @@ fn start_line(process: u32) -> String {
 }
 
 pub fn run() {
+    measure::start();
     // Said at once, as each stage of the start below (#220: a start whose
     // window never came said nothing at all).
     eprintln!("{}", start_line(std::process::id()));
@@ -454,6 +456,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         background::place_started,
         windows::pending_info,
         windows::window_role,
+        measure::window_painted,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -556,6 +559,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         background::place_started,
         windows::pending_info,
         windows::window_role,
+        measure::window_painted,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -897,6 +901,9 @@ async fn snapshot<R: tauri::Runtime>(
         eprintln!("zajil: the window is ready");
         // The windows the user waits for are made now, hidden.
         windows::warm(&handle);
+        if measure::on() {
+            measure::drive(&handle);
+        }
     }
     #[cfg(feature = "ui-test")]
     if let Some(snapshot) = handle.state::<ui_test::UiTest>().demo() {

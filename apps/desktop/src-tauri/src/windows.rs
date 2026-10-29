@@ -111,6 +111,7 @@ pub(crate) fn open_page<R: tauri::Runtime>(
     (width, height): (f64, f64),
     owned: bool,
 ) -> tauri::Result<()> {
+    crate::measure::asked(label);
     if let Some(window) = find(handle, label) {
         let _ = window.unminimize();
         window.show()?;
@@ -328,7 +329,7 @@ pub fn window_role<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) -> Option
 /// is up (it comes first). Not in a UI test scene, whose windows are drawn
 /// in the main one.
 pub fn warm<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
-    if crate::in_scene(handle) {
+    if crate::in_scene(handle) || !crate::measure::pool_on() {
         return;
     }
     for kind in Kind::ALL {

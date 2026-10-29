@@ -38,6 +38,9 @@ function draw(win: string | null) {
       win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : win === "video" ? VideoWindow : win === "batch" ? BatchWindow : win === "grab" ? GrabWindow : App,
       { target: target! },
     );
+  // Drawn (timed with `ZAJIL_MEASURE=1`): at once, not at the next frame,
+  // which a window behind another app may never get.
+  void api.windowPainted().catch(() => {});
 }
 
 // A window made beforehand, hidden (`windows.rs`): its page loads and its
