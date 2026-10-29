@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import ColorIcon from "../lib/components/ColorIcon.svelte";
   import FileName from "../lib/components/FileName.svelte";
   import { nameDir } from "../lib/fname";
   import { licenseOf, toolName, versionOf } from "../lib/about";
@@ -383,7 +384,7 @@
       <!-- Its room is kept: the buttons do not move when it comes. -->
       <div class="slot">
         {#if s.status === "failed"}
-          <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
+          <p class="problem" role="alert"><ColorIcon name="s-failed" size={16} />{s.error ?? ""}</p>
         {/if}
       </div>
       <div class="actions">
@@ -405,7 +406,7 @@
     </section>
   {:else}
     <section class="col">
-      <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{locale.t(errorKey(step.error))}</p>
+      <p class="problem" role="alert"><ColorIcon name="s-failed" size={16} />{locale.t(errorKey(step.error))}</p>
       {#if errorDetails(step.error)}
         <details class="why"><summary>{locale.t("video-error-details")}</summary><p dir="ltr">{errorDetails(step.error)}</p></details>
       {/if}
