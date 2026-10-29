@@ -941,9 +941,13 @@ fn tools_status(toolbox: &Toolbox) -> Vec<ToolView> {
         .iter()
         .map(|&tool| {
             let pin = target.and_then(|t| zajil_core::tools::pinned(tool, t));
+            let why = toolbox.why_not_installed(tool);
+            if let Some(why) = &why {
+                eprintln!("zajil: {} is not ready: {why}", name(tool));
+            }
             ToolView {
                 tool: name(tool).into(),
-                installed: toolbox.is_installed(tool),
+                installed: why.is_none(),
                 version: pin.as_ref().map(|p| p.version.clone()),
                 host: pin
                     .as_ref()
@@ -1332,6 +1336,23 @@ pub async fn video_probe(
             .lock()
             .unwrap()
             .insert(url.clone(), sent.url.clone());
+    }
+    // Never the links (they may carry a token): which was read, and what.
+    if let Probed::Video(video) = &sent.probed {
+        let pictures = video
+            .formats
+            .iter()
+            .filter(|f| format_view(f).kind != "audio")
+            .count();
+        eprintln!(
+            "zajil: read from {}: {} formats, {pictures} with a picture",
+            if sent.url == url {
+                "the page"
+            } else {
+                "the page's playlist"
+            },
+            video.formats.len(),
+        );
     }
     let read = sent.url;
     Ok(match sent.probed {
@@ -1780,6 +1801,8 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 row.status = StatusView::Paused;
             }
             Err(e) => {
+                // Its kind only: yt-dlp's words may hold the page's link.
+                eprintln!("zajil: video {id} failed ({})", e.kind);
                 row.status = StatusView::Failed;
                 row.error = Some(e.text(lang));
             }
