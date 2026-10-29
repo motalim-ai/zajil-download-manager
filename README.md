@@ -38,13 +38,13 @@
 
 الاسم من **الحمام الزاجل** الذي كان يوصل الرسائل مهما بعدت المسافة. وهذا ما نريده من البرنامج: أن يوصل ملفك كاملًا وسليمًا، حتى لو انقطع الاتصال في الطريق.
 
-**[زاجِل 1.0](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.0.0) منشور.** والتحديث التلقائي الموقّع يأتي في 1.1، وما بعده في [ROADMAP](docs/ROADMAP.md).
+**[زاجِل 1.1](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.0) منشور.** الجديد فيه: جودات يوتيوب فورًا في زر الإضافة، يحمّلها محرّك زاجِل نفسه ويستكملها، والتحميل يبدأ في الخلفية و«معلومات ملف التحميل» مفتوحة، ونوافذ تفتح فورًا، ونافذة إعدادات فيها البروكسي، وشكل جديد بأيقونات ملونة. والتحديث التلقائي الموقّع يأتي في 1.2، وما بعده في [ROADMAP](docs/ROADMAP.md).
 
 ## ما يفعله زاجِل
 
 - **أسرع**: يقسم الملف إلى أجزاء ويحمّلها معًا، حتى 32 اتصالًا، وحين يفرغ اتصال يأخذ نصف ما بقي من أبطأ جزء.
 - **لا يضيع شيء**: يكمل التحميل بعد انقطاع الإنترنت أو إغلاق البرنامج، ويتأكد أن الملف على السيرفر لم يتغير.
-- **الفيديو**: نافذة «جودة الفيديو» تعرض الجودات بحجمها، و«صوت فقط»، وقوائم التشغيل كاملة، ومنها يوتيوب. ولا يتجاوز أي حماية DRM.
+- **الفيديو**: في يوتيوب يعرض زر الإضافة الجودات فورًا بحجمها، ويحمّل زاجِل الصورة والصوت بعدة اتصالات ويستكملهما. ونافذة «جودة الفيديو» تعرض الجودات بحجمها، و«صوت فقط»، وقوائم التشغيل كاملة. ولا يتجاوز أي حماية DRM.
 - **من المتصفح**: إضافة لـ Chrome وEdge وFirefox ترسل التحميلات إلى زاجِل، وزر «نزّل الفيديو» فوق الفيديو.
 - **تنظيم**: طوابير، وجدولة بالساعة واليوم، وحد للسرعة، وفئات تلقائية، و«تحميل الموقع»، و«تحميل بالجملة».
 - **عربي حقيقي**: الواجهة مصممة من اليمين إلى اليسار من البداية، بالوضع الفاتح والداكن.
@@ -65,7 +65,7 @@
 </tr>
 <tr>
 <td><img src="docs/screenshots/file-info-ar.png" alt="نافذة معلومات ملف التحميل"><br><sub>«معلومات ملف التحميل»</sub></td>
-<td><img src="docs/screenshots/video-button-ar.png" alt="زر نزّل الفيديو فوق فيديو تجريبي في المتصفح"><br><sub>زر «نزّل الفيديو» من الإضافة</sub></td>
+<td><img src="docs/screenshots/video-button-ar.png" alt="زر نزّل الفيديو فوق فيديو تجريبي في المتصفح، وقائمة جوداته بحجم كل منها"><br><sub>زر «نزّل الفيديو» من الإضافة</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/grab-ar.png" alt="نافذة تحميل الموقع"><br><sub>«تحميل الموقع»</sub></td>
@@ -155,13 +155,13 @@ This software uses code of [FFmpeg](https://ffmpeg.org) licensed under the [LGPL
 
 Zajil is Arabic for the **homing pigeon**, which carried messages however far they had to go. That is what we want from the program: your file gets to you whole and sound, even if the connection breaks on the way.
 
-**[Zajil 1.0](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.0.0) is out.** Signed automatic updates come in 1.1; what comes next is in the [ROADMAP](docs/ROADMAP.md).
+**[Zajil 1.1](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.0) is out.** New in it: YouTube's qualities at once in the extension's button, downloaded and resumed by Zajil's own engine; the download starting in the background while “Download file info” is open; windows that open at once; a Settings window with the proxy; and a new look with coloured icons. Signed automatic updates come in 1.2; what comes next is in the [ROADMAP](docs/ROADMAP.md).
 
 ## What Zajil does
 
 - **Faster**: it splits a file into parts and downloads them together, up to 32 connections, and when a connection is free it takes half of what is left of the slowest part.
 - **Nothing is lost**: downloads go on after the connection drops or the program closes, and Zajil makes sure the file on the server has not changed.
-- **Videos**: the “Video quality” window shows each quality with its size, “Sound only”, and whole playlists, YouTube included. It never gets around DRM.
+- **Videos**: on YouTube the extension's button lists the qualities at once with their sizes, and Zajil downloads the picture and the sound over several connections, resumable. The “Video quality” window shows each quality with its size, “Sound only”, and whole playlists. It never gets around DRM.
 - **From the browser**: an extension for Chrome, Edge and Firefox hands downloads to Zajil, with a “Download video” button over videos.
 - **Organised**: queues, scheduling by hour and day, speed limits, automatic categories, “Site grabber” and “Batch download”.
 - **Truly Arabic**: the interface was built right to left from the start, in light and dark modes.
@@ -182,7 +182,7 @@ Real screenshots of the program, in Arabic (test data only):
 </tr>
 <tr>
 <td><img src="docs/screenshots/file-info-ar.png" alt="The download file info window"><br><sub>“Download file info”</sub></td>
-<td><img src="docs/screenshots/video-button-ar.png" alt="The Download video button over a test video in the browser"><br><sub>The extension's “Download video” button</sub></td>
+<td><img src="docs/screenshots/video-button-ar.png" alt="The Download video button over a test video in the browser, with its list of qualities and their sizes"><br><sub>The extension's “Download video” button</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/grab-ar.png" alt="The site grabber window"><br><sub>“Site grabber”</sub></td>

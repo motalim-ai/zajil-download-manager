@@ -1,17 +1,17 @@
 <div dir="rtl">
 
-# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (1.1)
+# ADR-0011: التحديث التلقائي الموقّع بمفتاح المشروع (1.2)
 
 | البند | القيمة |
 |---|---|
-| الحالة | **مقبول، والتنفيذ في 1.1** (قرارات المالك في 2026-10-26، في آخر الورقة) |
+| الحالة | **مقبول، والتنفيذ في 1.2** (قرارات المالك في 2026-10-26، ونُقل من 1.1 إلى 1.2 في 2026-10-29، في آخر الورقة) |
 | التاريخ | 2026-10-26 |
 | صاحب القرار | Motalim (@motalim-ai) |
 
 > **English summary.**
 > - **Signed by the project's own key, never by Apple or Microsoft** (owner's decision, 2026-10-25). The signature proves an update comes from us; the operating systems' warnings on first install stay as they are.
-> - **When:** in 1.1. 1.0 ships with the update check's notice and link only (owner's decision, 2026-10-26, which replaces «in 0.3»).
-> - **`SHA256SUMS`:** no GPG. In 1.1 it is signed with the update key (Ed25519), and the release page says how to check it.
+> - **When:** in 1.2 (owner's decision, 2026-10-29: 1.1 is about speed and the new look). 1.0 and 1.1 ship with the update check's notice and link only (owner's decision, 2026-10-26, which replaced «in 0.3»).
+> - **`SHA256SUMS`:** no GPG. In 1.2 it is signed with the update key (Ed25519), and the release page says how to check it.
 > - **Zajil itself:** Tauri 2's updater (`tauri-plugin-updater`, minisign, Ed25519). Two public keys are built into Zajil: the signing key and an offline emergency key. Our own check accepts either before Tauri's runs. An update is downloaded and installed only after the user says yes. Nothing is silent. TLS is always fully checked. The `.deb` gets a notice and a link only; an apt repository comes after 1.0.
 > - **The video tools** (yt-dlp, FFmpeg, QuickJS-NG, ADR-0009) get a signed list, `tools.json`, under the same keys. It holds each tool's version, address and SHA-256, so a tool can be updated without a full Zajil release. A list is never older than the one Zajil has (no rollback), and the tools keep being checked by SHA-256 before every run.
 > - **The private key** is a GitHub secret in an environment named `release`. Each run needs the owner's approval, only on a `vX.Y.Z` tag from `main`. Only the owner and the release workflow reach it. The emergency key stays offline with the owner.
@@ -168,6 +168,10 @@
    - في 1.1 يُوقَّع `SHA256SUMS` نفسه بمفتاح التحديث (Ed25519)، في ملف بجانبه (`SHA256SUMS.minisig`).
    - وصفحة الإصدار تشرح التحقق منه بأداة minisign والمفتاح العام المنشور: `minisign -Vm SHA256SUMS -P <المفتاح العام>`، ثم التحقق من البصمات كما اليوم.
    - وحتى 1.1، `SHA256SUMS` بلا توقيع كما في 0.2.
+
+## قرار المالك (2026-10-29)
+
+10. **نُقل التحديث التلقائي الموقّع من 1.1 إلى 1.2.** صار 1.1 للسرعة والشكل الجديد. فكل «1.1» في القرارين 8 و9 أعلاه صار «1.2»: التحديث التلقائي و`SHA256SUMS.minisig` في 1.2، والإصدار 1.1 يطلع بالتحديث «إشعار ورابط» فقط، و`SHA256SUMS` فيه بلا توقيع.
 
 ## المصادر
 

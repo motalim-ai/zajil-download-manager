@@ -7,14 +7,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-29
+
+Speed in downloads and in the windows, and a new look (owner's decision of 2026-10-29, after the owner tried 1.0 on a Mac). Signed automatic updates move from 1.1 to 1.2 (owner's decision of 2026-10-29). Tried by hand on macOS by the owner; on Windows and Linux, checked by CI's tests only, its UI tests among them (every window opened with its page, and a download from the link to «Open folder»).
+
+What changes for users:
+
+- **YouTube's qualities at once:** on YouTube the extension's button is a pill, «Download video (N) ▾» with «?» and «✕», and a press lists every format at once (MP4/WebM, H.264/VP9/AV1, sound only) with its size and rate, read from YouTube's own player answer in the page. A choice starts the download at once: the picture and the sound come through Zajil's own engine (8 and 4 connections, resumable after a cut or a pause), and FFmpeg puts them together without re-encoding. yt-dlp stays for other sites, HLS formats, and a YouTube download whose first byte never came.
+- **The download starts in the background** while «Download file info» is open. «Start download» moves it to the folder and name chosen, «Download later» pauses it in the queue, and «Cancel» removes it with its unfinished file. «Download file info» also has the download's queue and its number of connections.
+- **Windows at once:** the add, link and progress windows are made beforehand, hidden, and «Download file info» shows once, at its full size, without growing after it shows. A long list draws only the rows in view.
+- **The Settings window,** with its sections at the side: the proxy (`http://host:port`, applied at the next start), and what a double-click on a finished download does.
+- **A new look:** coloured, filled icons drawn for Zajil in the toolbar, the tree, the list, the settings and the small windows; a green progress bar that shows where each connection started, with a table of the connections; and a status bar.
+- **The disk:** a download no longer reserves its whole size on disk when it starts, on any system (#304), and a download whose last save failed on a full disk stops resumable from its last saved state (#314).
+
+This list is the titles of the pull requests merged after 1.0.0.
+
 ### Features
 
-- feat(video): on YouTube the extension's button is a pill, «Download video (N) ▾» with «?» and «✕», and a press lists every format at once (MP4/WebM, H.264/VP9/AV1, sound only) with its size and rate, read from YouTube's own player answer in the page. A choice starts the download at once, without «Video quality»: the picture and the sound come through Zajil's own engine (8 and 4 connections, resumable after a cut or a pause) from the links of the read-ahead probe, and FFmpeg puts them together without re-encoding. yt-dlp stays for other sites, HLS formats, and a YouTube download whose first byte never came. Tried by hand on macOS (a 10-minute 1080p60 video, cut after 20 s and resumed); not tried on Windows or Linux yet.
+- feat(site): Zajil's website for zajil.by-wow.com, on GitHub Pages (#299)
+- feat: fast YouTube downloads, background start, instant windows and a new look (#313)
 
 ### Fixes
 
-- fix: a download no longer reserves its whole size on disk when it starts, on any system: a second download of the same 6.2 GB file failed at once on a disk with 7 GB free. The part file is sparse; the free-space check before the start stays on all three systems, and a disk that fills up mid-download stops it at once, resumable from its last saved state.
-- fix: a download whose every byte was written but whose last save failed (a full disk; seen on NTFS) now stops resumable from its last saved state, instead of failing with the raw save error.
+- fix: reserve no disk space when a download starts, on any system (#304)
+- fix: a full disk at the last save stops the download resumable (#314)
+
+### Documentation
+
+- docs: a README front page that matches the site (#300)
+
+### Tests
+
+- test(desktop): the Windows close tests time Zajil, not PowerShell's start or the whole download (#305)
+- test(testserver): a response body never loses its last chunk (#308)
+- test(core): a pause, a closing window or a split always comes before the end it races (#309)
+- test(core): the speed, limit and two-queue tests hold the server instead of racing the clock (#310)
+- test(extension): the strict-cookies test finds each link by its page, and the browser tests warm Chrome up once (#311)
+
+### CI
+
+- ci: remove the stop-race tests' temporary loop that came in with #309 (#312)
 
 ## [1.0.0] - 2026-10-28
 
@@ -335,6 +367,7 @@ The first build of the release workflow, a draft that was never published (see 1
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.0
 [1.0.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.0.0
 [0.2.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.2.0
