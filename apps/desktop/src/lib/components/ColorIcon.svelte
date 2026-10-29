@@ -21,14 +21,7 @@
 
   let next = 0;
 
-  /** The icon of category `id` (`null`: none). */
-  export function typeIcon(id: string | null): string {
-    return (
-      ({ programs: "t-programs", video: "t-video", music: "t-music", documents: "t-documents", archives: "t-archives", images: "t-images" } as Record<string, string>)[
-        id ?? ""
-      ] ?? "t-file"
-    );
-  }
+  export { typeIcon, nameIcon } from "../fileIcon";
   export { TONES };
   export type { Tone };
 </script>

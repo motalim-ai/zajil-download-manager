@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import ColorIcon from "./ColorIcon.svelte";
   import { locale } from "../i18n.svelte";
   import { fitWindow } from "../fitWindow";
 
@@ -71,7 +72,7 @@
       </div>
       {#if problem}
         <span></span>
-        <p class="problem" role="alert"><Icon name="circle-alert" size={15} />{problem}</p>
+        <p class="problem" role="alert"><ColorIcon name="s-failed" size={15} />{problem}</p>
       {/if}
       {#if fromClipboard}
         <span></span>

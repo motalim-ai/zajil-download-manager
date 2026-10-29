@@ -4,6 +4,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { ask } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import ColorIcon, { nameIcon } from "../lib/components/ColorIcon.svelte";
   import FileName from "../lib/components/FileName.svelte";
   import { api } from "../lib/api";
   import { completeApi, saveShow } from "../lib/completeApi";
@@ -77,7 +78,7 @@
 <svelte:window {onkeydown} />
 
 <main class="complete" aria-labelledby="complete-heading">
-  <h1 id="complete-heading"><span class="badge" aria-hidden="true"><Icon name="check" /></span>{locale.t("complete-title")}</h1>
+  <h1 id="complete-heading"><span class="badge" aria-hidden="true"><ColorIcon name="s-done" size={26} /></span>{locale.t("complete-title")}</h1>
 
   {#if done}
     <div class="body">
@@ -88,7 +89,7 @@
         title={locale.t("complete-drag-hint")}
         onpointerdown={dragOut}
       >
-        <Icon name="file" size={40} stroke={1.4} />
+        <ColorIcon name={nameIcon(done.name)} size={44} />
         <span class="tile-hint">{locale.t("complete-drag")}</span>
       </div>
       <div class="fields">
@@ -103,7 +104,7 @@
       </div>
     </div>
   {/if}
-  {#if problem}<p class="problem" role="alert"><Icon name="alert" />{problem}</p>{/if}
+  {#if problem}<p class="problem" role="alert"><ColorIcon name="s-failed" size={17} />{problem}</p>{/if}
 
   <label class="check"><input type="checkbox" bind:checked={never} />{locale.t("complete-dont-show")}</label>
 
@@ -135,11 +136,6 @@
   .badge {
     display: inline-grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 99px;
-    background: var(--green-bg);
-    color: var(--green);
   }
   .body {
     flex: 1;

@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import ColorIcon from "../lib/components/ColorIcon.svelte";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { counted, num } from "../lib/format";
@@ -156,7 +157,7 @@
       <span class="muted end">{locale.t("batch-max", { max: num(locale.lang, locale.digits, preview?.max ?? 1000, 0) })}</span>
     </div>
     {#if problem}
-      <div class="problem" role="alert"><Icon name="alert" size={16} /><span>{#each problem as line (line)}<span class="line">{line}</span>{/each}</span></div>
+      <div class="problem" role="alert"><ColorIcon name="s-failed" size={16} /><span>{#each problem as line (line)}<span class="line">{line}</span>{/each}</span></div>
     {:else if preview}
       <!-- Focusable, so the keyboard can scroll it (axe
            «scrollable-region-focusable»). -->
@@ -182,7 +183,7 @@
         <button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button>
       </div>
     </div>
-    {#if failed}<p class="problem" role="alert"><Icon name="alert" size={16} />{failed}</p>{/if}
+    {#if failed}<p class="problem" role="alert"><ColorIcon name="s-failed" size={16} />{failed}</p>{/if}
     <div class="actions">
       <button class="btn primary" disabled={!preview || busy} onclick={() => void add(true)}><Icon name="download" size={15} />{locale.t("add-start")}</button>
       <button class="btn" disabled={!preview || busy} onclick={() => void add(false)}>{locale.t("add-later")}</button>

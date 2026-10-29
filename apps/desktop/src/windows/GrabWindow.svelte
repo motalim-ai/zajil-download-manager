@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import ColorIcon from "../lib/components/ColorIcon.svelte";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { counted, num } from "../lib/format";
@@ -186,7 +187,7 @@
       {/if}
     </div>
 
-    {#if problem}<p class="problem" role="alert"><Icon name="alert" size={16} />{problem}</p>{/if}
+    {#if problem}<p class="problem" role="alert"><ColorIcon name="s-failed" size={16} />{problem}</p>{/if}
 
     {#if scan}
       <div class="head" id="grab-results">

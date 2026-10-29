@@ -317,7 +317,7 @@
       </div>
     {/if}
 
-    {#if problem}<p class="problem" role="alert"><Icon name="alert" />{problem}</p>{/if}
+    {#if problem}<p class="problem" role="alert"><ColorIcon name="s-failed" size={17} />{problem}</p>{/if}
 
     <div class="actions">
       {#if !d?.video}

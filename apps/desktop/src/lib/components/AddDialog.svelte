@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import FileName from "./FileName.svelte";
   import { nameDir } from "../fname";
-  import { categoryIcon } from "./Tree.svelte";
+  import ColorIcon, { typeIcon } from "./ColorIcon.svelte";
   import { locale } from "../i18n.svelte";
   import { categoryName as nameOf } from "../categoryName";
   import { probeSentence, sizeText } from "../probeText";
@@ -211,12 +211,12 @@
   <!-- What the server said, in one line (as IDM's). -->
   <div class="about" aria-live="polite" aria-label={locale.t("add-about-file")}>
     {#if error}
-      <p class="problem" role="alert"><Icon name="alert" size={15} /><span>{error}</span></p>
+      <p class="problem" role="alert"><ColorIcon name="s-failed" size={16} /><span>{error}</span></p>
     {:else if page}
       <p class="page" role="alert"><Icon name="circle-alert" size={15} /><span>{locale.t("add-web-page")}</span></p>
     {:else if probe}
       <p class="known" title={probeSentence(locale.t, locale.lang, locale.digits, probe)}>
-        <span class="type" aria-hidden="true"><Icon name={categoryIcon(probe.category)} size={15} /></span>
+        <span class="type" aria-hidden="true"><ColorIcon name={typeIcon(probe.category)} size={22} /></span>
         <strong>{sizeText(locale.t, locale.lang, locale.digits, probe)}</strong>
         <span class="kind">{probe.category ? categoryName(probe.category) : locale.t("category-none")} {extension}</span>
         <span class="resume" class:no={!probe.resumable}>
@@ -227,7 +227,7 @@
       <!-- The same line while the server is asked: the size waits in its
            place, and nothing moves when it comes. -->
       <p class="known" role="status">
-        <span class="type" aria-hidden="true"><Icon name={categoryIcon(shown?.category ?? null)} size={15} /></span>
+        <span class="type" aria-hidden="true"><ColorIcon name={typeIcon(shown?.category ?? null)} size={22} /></span>
         <strong class="pending" aria-hidden="true">…</strong>
         <span class="kind">{shown?.category ? categoryName(shown.category) : locale.t("category-none")} {extension}</span>
         <span class="waiting">{locale.t("add-checking")}</span>
@@ -244,7 +244,7 @@
     <span class="label">{locale.t("add-category")}</span>
     <div class="with">
       <label class="value pick">
-        <Icon name={categoryIcon(category)} size={15} />
+        <ColorIcon name={typeIcon(category)} size={17} />
         <select
           aria-label={locale.t("add-category")}
           value={category ?? ""}
@@ -408,11 +408,7 @@
   .type {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
-    background: var(--sel);
-    color: var(--accent);
+    filter: drop-shadow(0 1px 0.5px rgb(0 0 0 / 0.15));
   }
   .kind {
     color: var(--muted);
@@ -473,7 +469,7 @@
     gap: 8px;
     border: 1px solid var(--line);
     background: var(--sunken);
-    border-radius: 7px;
+    border-radius: 4px;
     padding: 4px 9px;
     min-height: 30px;
     min-width: 0;
