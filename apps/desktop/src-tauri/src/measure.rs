@@ -41,10 +41,9 @@ pub fn start() {
 /// Window `role` is asked to open now.
 pub fn asked(role: &str) {
     if on() {
-        ASKED
-            .lock()
-            .unwrap()
-            .insert(role.to_owned(), Instant::now());
+        let now = Instant::now();
+        ASKED.lock().unwrap().insert(role.to_owned(), now);
+        SHOWN.lock().unwrap().insert(role.to_owned(), now);
     }
 }
 
@@ -64,6 +63,39 @@ pub fn window_painted<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
         "zajil-measure: {role} {:.0} ms",
         took.as_secs_f64() * 1000.0
     );
+}
+
+/// A window that took its role shows now ([`crate::windows::window_ready`]).
+pub fn shown<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    if !on() {
+        return;
+    }
+    let role = crate::windows::role_of(window);
+    if let Some(at) = SHOWN.lock().unwrap().remove(&role) {
+        eprintln!(
+            "zajil-measure: {role} shown after {:.0} ms",
+            at.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
+/// When each window was asked to open, by role, for [`shown`].
+static SHOWN: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Default::default);
+
+/// A window grew or shrank to what its page shows, after it opened.
+pub fn resized<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, from: f64, to: f64) {
+    if on() {
+        eprintln!(
+            "zajil-measure: {} resized from {from:.0} to {to:.0} after it opened ({}, at {:.0} ms)",
+            crate::windows::role_of(window),
+            if window.is_visible().unwrap_or(false) {
+                "shown"
+            } else {
+                "hidden"
+            },
+            STARTED.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 }
 
 /// Opens and closes each kind of window `ROUNDS` times, once the spare
@@ -134,7 +166,11 @@ pub fn drive<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
                         .set_info(
                             label,
                             crate::windows::InfoStart {
-                                url: "http://127.0.0.1:9/measure.bin".into(),
+                                // `ZAJIL_MEASURE_URL`: a server that
+                                // answers slowly shows what the window does
+                                // meanwhile.
+                                url: std::env::var("ZAJIL_MEASURE_URL")
+                                    .unwrap_or_else(|_| "http://127.0.0.1:9/measure.bin".into()),
                                 offer: None,
                             },
                         );

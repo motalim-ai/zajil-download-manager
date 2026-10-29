@@ -35,6 +35,7 @@ import type { Role } from "./bindings/Role";
 export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   probe: (url: string) => invoke<ProbeView>("probe", { url }),
+  guessInfo: (url: string) => invoke<ProbeView>("guess_info", { url }),
   cancelProbe: () => invoke<void>("cancel_probe"),
   /** The tray menu's texts, and the notification the first time the
    * window hides into the tray. */
@@ -140,6 +141,7 @@ export const api = {
     invoke<number>("place_started", { folder, name, start, connections }),
   /** This window's page drew its first frame (timed with `ZAJIL_MEASURE=1`). */
   windowPainted: () => invoke<void>("window_painted"),
+  windowReady: () => invoke<void>("window_ready"),
   /** The settings window (a window of its own), titled `title`. */
   openSettings: (title: string) => invoke<void>("open_settings", { title }),
   /** Saved in any window: every window follows. */

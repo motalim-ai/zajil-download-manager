@@ -401,6 +401,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
     tauri::generate_handler![
         snapshot,
         probe,
+        guess_info,
         cancel_probe,
         add,
         pause,
@@ -470,6 +471,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::window_role,
         measure::window_painted,
+        windows::window_ready,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -511,6 +513,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
     tauri::generate_handler![
         snapshot,
         probe,
+        guess_info,
         cancel_probe,
         add,
         pause,
@@ -580,6 +583,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::pending_info,
         windows::window_role,
         measure::window_painted,
+        windows::window_ready,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -986,6 +990,41 @@ async fn probe(app: State<'_, App>, url: String) -> Result<ProbeView, String> {
     })
     .await
     .map_err(blocking_err)
+}
+
+/// What «Download file info» shows before the server answers: the name the
+/// link's address gives, its category by that name and the site, and the
+/// folder it would go to, with no size. The window is drawn whole from its
+/// first frame, and the server's answer only fills it in (the owner's
+/// notes: it opened small and grew once the server answered).
+#[tauri::command]
+async fn guess_info(app: State<'_, App>, url: String) -> Result<ProbeView, String> {
+    let found = guessed(&url)?;
+    let (categories, settings, system) = (
+        app.categories.clone(),
+        app.settings.clone(),
+        app.system_download_dir.clone(),
+    );
+    tokio::task::spawn_blocking(move || {
+        let categories = categories.load().unwrap_or_else(|_| no_categories());
+        let given = download_dir(&settings, &system);
+        view::probe(&found, &categories, &given)
+    })
+    .await
+    .map_err(blocking_err)
+}
+
+/// What `url` says of its file by itself ([`guess_info`]).
+fn guessed(url: &str) -> Result<zajil_core::Probe, String> {
+    let parsed = zajil_core::Url::parse(url.trim()).map_err(|e| e.to_string())?;
+    Ok(zajil_core::Probe {
+        name: zajil_core::naming::suggested_name(None, &parsed),
+        size: None,
+        resumable: false,
+        ranges: false,
+        host: parsed.host_str().map(str::to_owned),
+        content_type: None,
+    })
 }
 
 /// Gives up the add dialog's probe (the dialog was closed).
@@ -2747,6 +2786,29 @@ async fn remove<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// «Download file info» draws its rows before the server answers with
+    /// what the address says: the file's name (decoded and made safe), its
+    /// site for the categories, and no size.
+    #[test]
+    fn the_info_window_guesses_from_the_address() {
+        let found =
+            guessed(" https://files.example.com/a/%D9%85%D9%84%D9%81%20v2.zip?x=1 ").unwrap();
+        assert_eq!(found.name, "ملف v2.zip");
+        assert_eq!(found.host.as_deref(), Some("files.example.com"));
+        assert_eq!(
+            (found.size, found.resumable, found.is_page()),
+            (None, false, false)
+        );
+        assert_eq!(guessed("https://example.com/").unwrap().name, "download");
+        assert_eq!(
+            guessed("https://example.com/../../etc/passwd")
+                .unwrap()
+                .name,
+            "passwd"
+        );
+        assert!(guessed("not a link").is_err());
+    }
 
     /// #248: the start line said 0.0.0, this crate's version, whatever the
     /// installer's was.

@@ -4,6 +4,7 @@
   import AddDialog from "../lib/components/AddDialog.svelte";
   import { api } from "../lib/api";
   import { startWindow } from "../lib/windowStart";
+  import { showFitted } from "../lib/fitWindow";
   import { locale } from "../lib/i18n.svelte";
   import type { ProbeView } from "../lib/bindings/ProbeView";
   import type { AddRequest } from "../lib/bindings/AddRequest";
@@ -30,6 +31,19 @@
   let categories = $state<CategoryView[]>([]);
   let connections = $state(8);
   let maxConnections = $state(32);
+  /** How long the window waits for the server's answer before it shows
+   * with what the link's address says. */
+  const QUICK_ANSWER_MS = 150;
+
+  // What the link's address says before the server answers: every row is
+  // drawn with it from the first frame, and the answer fills them in (the
+  // owner's notes: the window opened small and grew once the server
+  // answered).
+  let guess = $state<ProbeView | null>(null);
+  // The server's answer on its way, and the download started in the
+  // background on its way: «Start download» before them waits for them.
+  let answered: Promise<unknown> = Promise.resolve();
+  let starting: Promise<unknown> = Promise.resolve();
 
   onMount(() => {
     void (async () => {
@@ -41,37 +55,53 @@
         (s) => ((connections = s.connections), (maxConnections = s.max_connections)),
         () => {},
       );
-      try {
-        const snapshot = await api.snapshot();
-        queues = snapshot.queues;
-        categories = snapshot.categories;
-      } catch {
-        queues = [{ name: "main", max_active: 1, active: 0, window: null }];
-      }
       // A file that can run code never starts before «Start download».
       let runsCode = false;
-      try {
+      const asked = (async () => {
         if (offer !== null) {
           const answer = await api.offerAnswer(offer);
-          probe = answer.probe;
           runsCode = answer.runs_code;
-        } else probe = await api.probe(url);
+          return answer.probe;
+        }
+        return api.probe(url);
+      })();
+      answered = asked.catch(() => {});
+      const [guessed, snapshot] = await Promise.all([
+        api.guessInfo(url).catch(() => null),
+        api.snapshot().catch(() => null),
+      ]);
+      guess = guessed;
+      queues = snapshot?.queues ?? [{ name: "main", max_active: 1, active: 0, window: null }];
+      categories = snapshot?.categories ?? [];
+      // A server that answers at once is shown with its answer; one that
+      // takes longer is not waited for.
+      const quick = await Promise.race([asked.then((p) => p, () => null), new Promise<null>((r) => setTimeout(() => r(null), QUICK_ANSWER_MS))]);
+      if (quick) probe = quick;
+      await showFitted();
+      try {
+        probe = await asked;
       } catch (e) {
         error = String(e);
         return;
       }
+      // The user added it before the server answered: it is not started
+      // a second time.
+      if (busy || added) return;
       const prefs = await api.addPrefs().catch(() => null);
+      if (busy || added) return;
       if ((prefs?.start_at_once ?? true) && !probe.page && !runsCode) {
         const request = { url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null, connections: null };
-        try {
-          const id = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
-          // Held by this window until the user says where it goes: closing
-          // it removes the download with its files (Rust).
-          await api.holdStarted(id);
-          started = id;
-        } catch {
-          started = null;
-        }
+        starting = (async () => {
+          try {
+            const id = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
+            // Held by this window until the user says where it goes: closing
+            // it removes the download with its files (Rust).
+            await api.holdStarted(id);
+            started = id;
+          } catch {
+            started = null;
+          }
+        })();
       }
     })();
   });
@@ -80,6 +110,10 @@
     if (busy || added) return;
     busy = true;
     error = null;
+    // A browser's download is added once Zajil has its answer; one started
+    // in the background meanwhile is placed, not added again.
+    if (offer !== null) await answered;
+    await starting;
     try {
       if (started !== null) {
         // Running already: it moves to the folder and name the user chose
@@ -136,6 +170,7 @@
 <AddDialog
   {url}
   {probe}
+  {guess}
   {error}
   {busy}
   {queues}

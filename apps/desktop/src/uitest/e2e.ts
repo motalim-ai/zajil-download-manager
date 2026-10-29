@@ -75,8 +75,9 @@ export async function drive(win: string | null): Promise<void> {
     await step("link", { url: box.value, fit: await fit() });
     ok.click();
   } else if (win === "add-info") {
-    // Enabled once the link has been checked.
-    const start = await until("«Start download»", () => button("add-start"));
+    // Once the server has answered: before it, the rows hold what the
+    // link's address says.
+    const start = await until("«Start download» with the server's answer", () => document.querySelector(".about .resume") && button("add-start"));
     // «Save as» holds the whole path: the name is its last part.
     const path = (document.getElementById("add-name") as HTMLInputElement | null)?.value ?? null;
     await step("info", { name: path?.split(/[\\/]/).pop() ?? null, fit: await fit() });
