@@ -25,6 +25,7 @@
   import { locale } from "../i18n.svelte";
   import { categoryName as nameOf } from "../categoryName";
   import { num } from "../format";
+  import { scheduleApi } from "../scheduleApi";
   import type { Snapshot } from "../bindings/Snapshot";
 
   let {
@@ -52,6 +53,28 @@
   const current = (f: Filter) => (view === "list" && same(filter, f) ? "page" : undefined);
   const categoryName = (c: Snapshot["categories"][number]) => nameOf(c.id, c.name, (k) => locale.t(k));
   const queueName = (name: string) => (name === "main" ? locale.t("queue-main") : name);
+  // «New queue» right under the queues (owner's report, 2026-10-29: it
+  // was only in the schedule window), its name typed in place.
+  let adding = $state(false);
+  let newName = $state("");
+  let said = $state<string | null>(null);
+  function stopAdding() {
+    adding = false;
+    newName = "";
+    said = null;
+  }
+  async function create() {
+    const name = newName.trim();
+    if (!name) return stopAdding();
+    try {
+      await scheduleApi.newQueue(name);
+      stopAdding();
+      show({ kind: "queue", name });
+    } catch (e) {
+      const text = String(e);
+      said = text.includes("invalid queue name") ? locale.t("schedule-new-hint") : text.includes("already a queue") ? locale.t("tree-queue-exists") : text;
+    }
+  }
   const SECTIONS = [
     { section: "unfinished", icon: "unfinished", key: "tree-unfinished" },
     { section: "finished", icon: "finished", key: "tree-finished" },
@@ -135,6 +158,25 @@
       <span class="n num">{count((d) => d.queue === q.name)}</span>
     </button>
   {/each}
+  {#if adding}
+    <form class="newq" onsubmit={(e) => (e.preventDefault(), void create())}>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        bind:value={newName}
+        dir="auto"
+        placeholder={locale.t("schedule-new-name")}
+        aria-label={locale.t("schedule-new-name")}
+        autofocus
+        onkeydown={(e) => e.key === "Escape" && (e.stopPropagation(), stopAdding())}
+        onblur={() => !newName.trim() && stopAdding()}
+      />
+      {#if said}<small class="said" role="alert">{said}</small>{/if}
+    </form>
+  {:else}
+    <button class="node l0 add" onclick={() => (adding = true)}>
+      <ColorIcon name="add" size={15} /><span class="label">{locale.t("schedule-new")}</span>
+    </button>
+  {/if}
 </nav>
 
 <style>
@@ -147,6 +189,29 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+  }
+  .newq {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 2px 5px;
+  }
+  .newq input {
+    font: inherit;
+    padding: 3px 6px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--ink);
+    min-width: 0;
+  }
+  .said {
+    color: var(--red);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .add {
+    color: var(--muted);
   }
   h2 {
     font-size: 11.5px;

@@ -23,6 +23,7 @@ export const MENU_BAR: Menu[] = [
       { command: "resume" },
       { command: "pause" },
       { command: "pause-all" },
+      { command: "resume-all" },
       "-",
       { command: "delete", danger: true },
       "-",

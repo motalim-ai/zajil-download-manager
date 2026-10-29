@@ -19,6 +19,7 @@ export type Command =
   | "resume"
   | "pause"
   | "pause-all"
+  | "resume-all"
   | "delete"
   | "run-queue"
   | "halt-queue"
@@ -45,6 +46,8 @@ export const KEYS: Partial<Record<Command, { other: Key; mac: Key }>> = {
   resume: { other: { key: "r", mod: true }, mac: { key: "r", mod: true } },
   pause: { other: { key: "p", mod: true }, mac: { key: "p", mod: true } },
   "pause-all": { other: { key: "p", mod: true, shift: true }, mac: { key: "p", mod: true, shift: true } },
+  // ⌘⇧R runs the queue on macOS: ⌘⌥R there.
+  "resume-all": { other: { key: "r", mod: true, shift: true }, mac: { key: "r", mod: true, alt: true } },
   delete: { other: { key: "Delete" }, mac: { key: "Backspace", mod: true } },
   "delete-done": { other: { key: "Delete", mod: true, shift: true }, mac: { key: "Backspace", mod: true, shift: true } },
   settings: { other: { key: ",", mod: true }, mac: { key: ",", mod: true } },

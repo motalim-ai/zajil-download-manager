@@ -5,6 +5,7 @@
     | "resume"
     | "pause"
     | "pause-all"
+    | "resume-all"
     | "delete"
     | "delete-done"
     | "settings"
@@ -44,6 +45,7 @@
     resume: { key: "tb-resume" },
     pause: { key: "tb-pause" },
     "pause-all": { key: "tb-pause-all" },
+    "resume-all": { key: "tb-resume-all" },
     delete: { key: "tb-delete" },
     "delete-done": { key: "tb-delete-done" },
     settings: { key: "tb-settings" },

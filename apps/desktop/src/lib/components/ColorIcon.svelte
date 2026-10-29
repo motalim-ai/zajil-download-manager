@@ -57,6 +57,9 @@
     <rect x="3" y="9" width="20" height="20" rx="5" fill={g("red")} />
     <rect x="8.8" y="14" width="3.2" height="10" rx="1.1" fill="#fff" />
     <rect x="14" y="14" width="3.2" height="10" rx="1.1" fill="#fff" />
+  {:else if name === "resume-all"}
+    <path d="M12 4.6c0-1.3 1.5-2.1 2.6-1.4l11.6 7.8c1 .7 1 2.1 0 2.8L14.6 21.6c-1.1.7-2.6-.1-2.6-1.4z" fill={TONES.green[1]} opacity="0.5" />
+    <path d="M5 11.6c0-1.3 1.5-2.1 2.6-1.4l11.6 7.8c1 .7 1 2.1 0 2.8L7.6 28.6C6.5 29.3 5 28.5 5 27.2z" fill={g("green")} />
   {:else if name === "delete" || name === "delete-done"}
     <g transform={name === "delete-done" ? "translate(-2.5 -2) scale(0.9)" : undefined}>
       <path d="M12.6 6.6V5c0-1 .8-1.8 1.8-1.8h3.2c1 0 1.8.8 1.8 1.8v1.6" fill="none" stroke={TONES.red[1]} stroke-width="2" />

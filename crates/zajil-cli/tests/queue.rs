@@ -232,7 +232,7 @@ fn queue_commands_change_the_queues_file() {
         (&["queue", "pause", "99"][..], 1),
         (&["queue", "set", "--max-active", "0"], 2),
         (&["queue", "set", "--max-active", "33"], 2),
-        (&["queue", "set", "--queue", "a b"], 1),
+        (&["queue", "set", "--queue", "a/b"], 1),
     ] {
         let out = zajil(data.path(), args);
         assert_eq!(out.status.code(), Some(code), "{args:?}: {}", printed(&out));

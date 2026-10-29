@@ -373,7 +373,8 @@
   const tableShown = $derived(view === "list" && !details);
   // A download held for the user's OK (#84) starts only when it is chosen,
   // never with a whole queue (review of #96).
-  const runnable = (d: Snapshot["downloads"][number]) => d.queue === queueShown && !d.needs_ok && (d.status === "paused" || d.status === "failed");
+  const resumable = (d: Snapshot["downloads"][number]) => !d.needs_ok && (d.status === "paused" || d.status === "failed");
+  const runnable = (d: Snapshot["downloads"][number]) => d.queue === queueShown && resumable(d);
 
   /** Whether a toolbar button has something to act on. */
   function can(action: ToolAction): boolean {
@@ -388,6 +389,8 @@
         return chosen.length > 0;
       case "pause-all":
         return snapshot.downloads.some((d) => d.status === "active" || d.status === "waiting");
+      case "resume-all":
+        return snapshot.downloads.some(resumable);
       case "delete-done":
         return shown.some((d) => d.status === "done");
       case "run-queue":
@@ -420,6 +423,11 @@
       }
       case "pause-all":
         void act("pause", idsOf((d) => d.status === "active" || d.status === "waiting"));
+        break;
+      // Every stopped download, of every queue and the videos: what «Pause
+      // all» stopped comes back (owner's report, 2026-10-29).
+      case "resume-all":
+        void act("resume", idsOf(resumable));
         break;
       // Only the finished downloads the table shows, and once the user
       // agrees (review of #96: every category's went, with no word).
@@ -470,7 +478,7 @@
 
   // The commands of the menus, the right-click menu and the keyboard
   // (M5.5): the toolbar's own, and the rest.
-  const TOOL: Command[] = ["add", "resume", "pause", "pause-all", "delete", "delete-done", "run-queue", "halt-queue", "schedule", "settings"];
+  const TOOL: Command[] = ["add", "resume", "pause", "pause-all", "resume-all", "delete", "delete-done", "run-queue", "halt-queue", "schedule", "settings"];
   const one = $derived(chosen.length === 1 ? chosen[0] : undefined);
 
   /** Whether `command` has something to act on now. */

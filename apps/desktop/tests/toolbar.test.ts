@@ -33,4 +33,10 @@ describe("the toolbar", () => {
     expect(shift(DEFAULT, "add", -1)).toBe(DEFAULT);
     expect(shift(DEFAULT, "halt-queue", 1)).toBe(DEFAULT);
   });
+
+  it("puts a new button after the one before it, in a toolbar kept from before", () => {
+    const before = DEFAULT.order.filter((a) => a !== "resume-all");
+    const kept = clean({ order: before, hidden: [], small: false });
+    expect(kept.order.indexOf("resume-all")).toBe(kept.order.indexOf("pause-all") + 1);
+  });
 });

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
   "description": "__MSG_extensionDescription__",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "default_locale": "ar",
   "browser_specific_settings": {
     "gecko": { "id": "zajil@motalim-ai.github.io", "strict_min_version": "142.0", "data_collection_permissions": { "required": ["none"] } }

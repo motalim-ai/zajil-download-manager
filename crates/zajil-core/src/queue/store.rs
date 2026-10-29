@@ -287,7 +287,9 @@ pub enum StoreError {
     NoSuchItem(u64),
     #[error("there is no queue {0:?}")]
     NoSuchQueue(String),
-    #[error("invalid queue name {0:?}: use 1 to {MAX_NAME_CHARS} letters, digits, `-` or `_`")]
+    #[error(
+        "invalid queue name {0:?}: use 1 to {MAX_NAME_CHARS} letters, digits, `-`, `_` or single spaces between words"
+    )]
     InvalidName(String),
     #[error("the number of downloads at once must be from 1 to {MAX_ACTIVE}, not {0}")]
     InvalidMaxActive(u32),
@@ -580,14 +582,18 @@ impl Queue {
     }
 }
 
-/// A queue name: 1 to [`MAX_NAME_CHARS`] letters (any script), digits, `-`
-/// or `_`. Nothing that could confuse a terminal or a file name.
+/// A queue name: 1 to [`MAX_NAME_CHARS`] letters (any script), digits, `-`,
+/// `_`, and single spaces between words («طابور ليلي», as a category's
+/// name; owner's report, 2026-10-29). Nothing that could confuse a terminal
+/// or a file name.
 pub fn check_name(name: &str) -> Result<(), StoreError> {
     let count = name.chars().count();
     let ok = (1..=MAX_NAME_CHARS).contains(&count)
+        && name.trim() == name
+        && !name.contains("  ")
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == ' ')
         // The Hangul fillers count as letters but show nothing (review of
         // #41, round 4).
         && !crate::category::has_hidden(name);
@@ -826,11 +832,22 @@ mod tests {
 
     #[test]
     fn queue_names_are_plain() {
-        for good in ["main", "ليلي", "night_2", "a-b"] {
+        for good in ["main", "ليلي", "night_2", "a-b", "طابور ليلي", "a b c"] {
             check_name(good).unwrap();
         }
         let long = "a".repeat(MAX_NAME_CHARS + 1);
-        for bad in ["", "a b", "a/b", "..", "a\u{202e}b", "a\nb", long.as_str()] {
+        for bad in [
+            "",
+            " a",
+            "a ",
+            "a  b",
+            "a\tb",
+            "a/b",
+            "..",
+            "a\u{202e}b",
+            "a\nb",
+            long.as_str(),
+        ] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
     }

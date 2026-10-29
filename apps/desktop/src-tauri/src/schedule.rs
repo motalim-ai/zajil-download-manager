@@ -724,9 +724,11 @@ mod tests {
         create(&mut q, "evening").unwrap();
         assert!(q.queue("evening").unwrap().items.is_empty());
         assert!(create(&mut q, "evening").is_err());
-        assert!(create(&mut q, "two words").is_err());
+        // A space between words is fine (owner's report, 2026-10-29).
+        create(&mut q, "two words").unwrap();
+        assert!(create(&mut q, "two  words").is_err());
         assert!(create(&mut q, "").is_err());
-        assert_eq!(q.queues.len(), 3);
+        assert_eq!(q.queues.len(), 4);
     }
 
     /// #142 (review notes in #161): tries out of range change nothing; one

@@ -662,7 +662,8 @@ impl Video {
     /// The best choice when the user names none: the highest picture
     /// with sound in one format, or the highest picture-only format with
     /// the best sound-only one when that picture is higher; sound alone
-    /// for a page that has no picture. `None` when nothing is usable.
+    /// for a page that has no picture. `None` when nothing is usable. A
+    /// direct file comes before an HLS playlist of the same kind.
     ///
     /// An MP4 that every player opens (H.264 picture, AAC sound) comes
     /// first when the page has one: VP9, AV1 or Opus would be merged into
@@ -684,11 +685,21 @@ impl Video {
         let mp4_sound = |f: &Format| {
             f.acodec.as_deref().is_some_and(|c| c.starts_with("mp4a")) || f.ext == "m4a"
         };
-        // The best of `kind`, among those `preferred` if any.
+        // The best of `kind`: a direct file before an HLS playlist, then
+        // among those `preferred` if any. Zajil's own engine downloads a
+        // direct file with several connections and resumes it; an HLS
+        // playlist goes piece by piece through yt-dlp and starts over
+        // (owner's report, 2026-10-29: a playlist's YouTube videos went
+        // as itag 96, slowly).
         let top = |kind: &dyn Fn(&Format) -> bool,
                    preferred: &dyn Fn(&Format) -> bool,
                    order: &dyn Fn(&&Format, &&Format) -> std::cmp::Ordering| {
-            let of_kind = || self.formats.iter().filter(|f| kind(f));
+            let direct = self.formats.iter().any(|f| kind(f) && !f.is_hls());
+            let of_kind = move || {
+                self.formats
+                    .iter()
+                    .filter(move |f| kind(f) && !(direct && f.is_hls()))
+            };
             of_kind()
                 .filter(|f| preferred(f))
                 .max_by(|a, b| order(a, b))
@@ -2430,6 +2441,28 @@ mod tests {
         assert_eq!(
             video(vec![f("140", None, "none", "mp4a")]).best_choice(),
             Some(Choice::AudioOnly)
+        );
+        // A direct picture and sound before HLS with both, at the same
+        // height (YouTube's itag 96 beside 137 and 140): Zajil's engine.
+        let mut hls = f("96", Some(1080), "avc1.640028", "mp4a.40.2");
+        hls.protocol = Some("m3u8_native".into());
+        assert_eq!(
+            video(vec![
+                hls.clone(),
+                f("18", Some(360), "avc1.42001E", "mp4a.40.2"),
+                f("137", Some(1080), "avc1.640028", "none"),
+                f("140", None, "none", "mp4a.40.2"),
+            ])
+            .best_choice(),
+            Some(Choice::Merge {
+                video: "137".into(),
+                audio: "140".into()
+            })
+        );
+        // HLS only: it still goes.
+        assert_eq!(
+            video(vec![hls]).best_choice(),
+            Some(Choice::Format("96".into()))
         );
         // Unknown codecs (a direct file): the last.
         let mut plain = f("0", None, "x", "x");

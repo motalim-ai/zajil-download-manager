@@ -10,6 +10,7 @@ export const BUTTONS: { action: ToolAction; group: number }[] = [
   { action: "resume", group: 1 },
   { action: "pause", group: 1 },
   { action: "pause-all", group: 1 },
+  { action: "resume-all", group: 1 },
   { action: "delete", group: 2 },
   { action: "delete-done", group: 2 },
   { action: "settings", group: 3 },
@@ -26,7 +27,8 @@ const KEY = "zajil.toolbar.v1";
 const known = new Set<string>(BUTTONS.map((b) => b.action));
 
 /** What was kept, checked: unknown or repeated buttons dropped, missing
- * ones back at the end. Anything unreadable: the defaults. */
+ * ones back after the one before them in the design (a new button shows
+ * where it belongs). Anything unreadable: the defaults. */
 export function clean(value: unknown): ToolbarPrefs {
   if (typeof value !== "object" || value === null) return { ...DEFAULT, order: [...DEFAULT.order] };
   const v = value as Partial<Record<keyof ToolbarPrefs, unknown>>;
@@ -34,7 +36,12 @@ export function clean(value: unknown): ToolbarPrefs {
   for (const a of Array.isArray(v.order) ? v.order : []) {
     if (typeof a === "string" && known.has(a) && !order.includes(a as ToolAction)) order.push(a as ToolAction);
   }
-  for (const b of BUTTONS) if (!order.includes(b.action)) order.push(b.action);
+  BUTTONS.forEach((b, i) => {
+    if (order.includes(b.action)) return;
+    const previous = BUTTONS[i - 1];
+    const before = previous ? order.indexOf(previous.action) : -1;
+    order.splice(before + 1, 0, b.action);
+  });
   const hidden = [...new Set((Array.isArray(v.hidden) ? v.hidden : []).filter((a): a is ToolAction => typeof a === "string" && known.has(a)))];
   return { order, hidden, small: v.small === true };
 }
