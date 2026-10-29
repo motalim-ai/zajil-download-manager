@@ -867,14 +867,22 @@ fn keep_archive_if_pinned(
     Ok(dest.to_owned())
 }
 
+/// A tool's [`tree_sha256`], and its files by their path inside its folder
+/// (open only on Windows).
+type CheckedTree = (String, Vec<(String, Option<File>)>);
+
 /// Every file under `dir` (a tool unpacked from a zip), checked as each
 /// tool file is right before it runs: each folder one only this user can
 /// change, each file a regular one only this user can change, opened and
 /// hashed; nothing else (no link). Returns the [`tree_sha256`] and the
-/// opened files by their path inside `dir`.
-fn checked_tree(tool: Tool, dir: &Path) -> Result<(String, Vec<(String, File)>), ToolError> {
+/// files by their path inside `dir`: on Windows still open, so they stay
+/// locked until the program started; elsewhere each one is closed once
+/// hashed (yt-dlp's 134 files, held open by two checks at once, took
+/// macOS past a program's 256 open files: «Too many open files», and the
+/// tool was asked for again; owner's report, 2026-10-29).
+fn checked_tree(tool: Tool, dir: &Path) -> Result<CheckedTree, ToolError> {
     let mut sums: Vec<(String, String)> = Vec::new();
-    let mut files: Vec<(String, File)> = Vec::new();
+    let mut files: Vec<(String, Option<File>)> = Vec::new();
     let mut folders: Vec<(PathBuf, String)> = vec![(dir.to_path_buf(), String::new())];
     while let Some((folder, inside)) = folders.pop() {
         if !zajil_platform::fs::is_private_dir(&folder)? {
@@ -913,7 +921,7 @@ fn checked_tree(tool: Tool, dir: &Path) -> Result<(String, Vec<(String, File)>),
             let mut hasher = Sha256::new();
             io::copy(&mut file, &mut HashWriter(&mut hasher))?;
             sums.push((relative.clone(), hex(&hasher.finalize())));
-            files.push((relative, file));
+            files.push((relative, cfg!(windows).then_some(file)));
         }
     }
     Ok((tree_sha256(&sums), files))
@@ -1033,11 +1041,7 @@ fn check_installed(
         }
         unmark_all(dir)?;
         unmark_folders(root, dir)?;
-        let kept = if cfg!(windows) {
-            files.into_iter().map(|(_, file)| file).collect()
-        } else {
-            Vec::new()
-        };
+        let kept = files.into_iter().filter_map(|(_, file)| file).collect();
         return Ok(VerifiedTool {
             path: path.to_owned(),
             _files: kept,

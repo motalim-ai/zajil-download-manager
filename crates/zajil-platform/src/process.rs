@@ -197,11 +197,46 @@ pub fn end_leftover(record: Record) -> io::Result<()> {
     imp::end_leftover(record)
 }
 
+/// Lets this process hold as many open files as the system allows it,
+/// not the low default a program started from the Finder gets (256 on
+/// macOS): a download's connections and files, and the video tools'
+/// checks, all at once (owner's report, 2026-10-29: «Too many open
+/// files»). Returns the limit now, if it could be read. Nothing to do on
+/// Windows, which has no such limit.
+pub fn raise_open_files_limit() -> Option<u64> {
+    imp::raise_open_files_limit()
+}
+
 #[cfg(unix)]
 #[allow(unsafe_code)]
 mod imp {
     use std::io;
     use std::os::unix::process::CommandExt;
+
+    pub fn raise_open_files_limit() -> Option<u64> {
+        // SAFETY: getrlimit and setrlimit read and write the rlimit given.
+        let mut limit: libc::rlimit = unsafe { std::mem::zeroed() };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+            return None;
+        }
+        // macOS refuses more than OPEN_MAX (10240) for one process.
+        let most: libc::rlim_t = if cfg!(target_os = "macos") {
+            10240
+        } else {
+            65536
+        };
+        let wanted = limit.rlim_max.min(most);
+        if limit.rlim_cur < wanted {
+            let raised = libc::rlimit {
+                rlim_cur: wanted,
+                rlim_max: limit.rlim_max,
+            };
+            if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } == 0 {
+                limit.rlim_cur = wanted;
+            }
+        }
+        Some(limit.rlim_cur as u64)
+    }
     use std::process::{Child, Command};
 
     use super::Record;
@@ -511,6 +546,10 @@ mod imp {
     use std::io;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
+
+    pub fn raise_open_files_limit() -> Option<u64> {
+        None
+    }
     use std::process::{Child, Command};
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
@@ -721,6 +760,19 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Raised, or already as high as allowed; never lowered.
+    #[test]
+    fn the_open_files_limit_is_raised_not_lowered() {
+        let before = raise_open_files_limit();
+        let after = raise_open_files_limit();
+        if cfg!(unix) {
+            assert!(after.unwrap() >= before.unwrap());
+            assert!(after.unwrap() >= 256);
+        } else {
+            assert_eq!(after, None);
+        }
+    }
 
     #[test]
     fn a_record_reads_back_what_it_wrote_and_nothing_else() {

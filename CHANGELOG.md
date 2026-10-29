@@ -9,7 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- **The video tools asked for again while they were there** (owner's reports, 2026-10-29): a tool that fails its check is checked once more a moment later before «Video quality» asks for it, and the first failure is said in the log.
+- **The video tools asked for again while they were there** (owner's reports, 2026-10-29; a playlist made it happen at once): checking yt-dlp kept its 134 files open until the check ended, and two checks at once took macOS past a program's 256 open files («Too many open files»), so yt-dlp was taken for missing. Each file is now closed once hashed (Windows keeps them open, locked, as before), Zajil asks the system for its full limit of open files at the start, and a tool that still fails its check is checked once more a moment later, the first failure said in the log.
 - **A log file when Zajil is started from the Finder, the Start menu or a desktop file:** what it says went nowhere; it now goes to `zajil.log` in the system's log folder (`~/Library/Logs/zajil` on macOS), moved to `zajil.log.1` past 2 MiB. A terminal keeps it as before.
 
 ## [1.1.1] - 2026-10-29

@@ -148,6 +148,7 @@ pub fn run() {
     {
         eprintln!("zajil: no log file: {e}");
     }
+    zajil_platform::process::raise_open_files_limit();
     // Said at once, as each stage of the start below (#220: a start whose
     // window never came said nothing at all).
     eprintln!("{}", start_line(std::process::id()));
