@@ -200,6 +200,7 @@ export const api = {
   onVideoStarted: (handler: (id: number) => void): Promise<UnlistenFn> => listen<number>("video-started", (e) => handler(e.payload)),
   videoKeep: (id: number, folder: string, name: string) => invoke<void>("video_keep", { id, folder, name }),
   videoDiscard: (id: number) => invoke<void>("video_discard", { id }),
+  videoLater: (id: number, folder: string, name: string) => invoke<void>("video_later", { id, folder, name }),
   onVideoToolsProgress: (handler: (p: { tool: string; done: number; total: number | null }) => void): Promise<UnlistenFn> =>
     listen<{ tool: string; done: number; total: number | null }>("video-tools-progress", (e) => handler(e.payload)),
   onVideoProgress: (handler: (p: { id: number; done: number; total: number | null; speed: number | null }) => void): Promise<UnlistenFn> =>

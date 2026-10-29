@@ -126,6 +126,13 @@ pub enum Request {
         /// The sound merged with `format`, when it is a picture only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audio: Option<String>,
+        /// How the list said the chosen quality (`MP4 1080p60 · H.264`),
+        /// shown as it is in «Video quality».
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        /// The chosen quality's size, picture and sound, as the page said.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u64>,
     },
     /// The extension's video button showed over a video (owner,
     /// 2026-10-28, as IDM): Zajil reads its page now, in the background,
@@ -518,8 +525,19 @@ fn check(request: &Request) -> Result<(), String> {
             private,
             format,
             audio,
+            label,
             ..
         } => {
+            if let Some(label) = label
+                && (label.is_empty()
+                    || label.len() > 120
+                    || label.chars().any(|c| {
+                        c.is_control()
+                            || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+                    }))
+            {
+                return Err("not a label of the list".into());
+            }
             for id in [format, audio].into_iter().flatten() {
                 if id.is_empty() || id.len() > 8 || !id.bytes().all(|b| b.is_ascii_digit()) {
                     return Err("not a format of the list".into());
@@ -1033,6 +1051,8 @@ mod tests {
                 private: false,
                 format: None,
                 audio: None,
+                label: None,
+                size: None,
             }
         );
         assert_eq!(
@@ -1046,6 +1066,8 @@ mod tests {
                 private: false,
                 format: None,
                 audio: None,
+                label: None,
+                size: None,
             }
         );
         assert_eq!(
@@ -1059,6 +1081,8 @@ mod tests {
                 private: false,
                 format: Some("299".into()),
                 audio: Some("140".into()),
+                label: None,
+                size: None,
             }
         );
         for bad in [

@@ -549,11 +549,11 @@ async fn a_merge_s_progress_goes_on_from_the_picture_to_the_sound() {
         };
         let mut seen = Vec::new();
         s.runner
-            .download(
-                &request,
-                &Stop::new(),
-                &mut |VideoEvent::Progress { done, total, .. }| seen.push((done, total)),
-            )
+            .download(&request, &Stop::new(), &mut |event| {
+                if let VideoEvent::Progress { done, total, .. } = event {
+                    seen.push((done, total));
+                }
+            })
             .await
             .unwrap();
         assert_eq!(seen.first(), Some(&(500, Some(first_total))), "{seen:?}");

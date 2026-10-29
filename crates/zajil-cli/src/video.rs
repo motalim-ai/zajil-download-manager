@@ -483,7 +483,12 @@ impl Progress {
         if !self.terminal {
             return;
         }
-        let VideoEvent::Progress { done, total, speed } = event;
+        let VideoEvent::Progress { done, total, speed } = event else {
+            if let VideoEvent::StartedOver(why) = event {
+                eprintln!("\n{why}");
+            }
+            return;
+        };
         let mut line = crate::human_bytes(done);
         if let Some(total) = total {
             line.push_str(&format!(" of {}", crate::human_bytes(total)));

@@ -317,7 +317,7 @@ describe("the Download video button", () => {
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     });
     await page.mouse.click(first.x, first.y);
-    expect(await sent(page)).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4", format: { video: "299", audio: "140" } }]);
+    expect(await sent(page)).toEqual([{ type: "video-button", src: "https://media.invalid/v.mp4", format: { video: "299", audio: "140", label: "MP4 1080p · H.264", bytes: 9500000 } }]);
     await page.close();
   });
 

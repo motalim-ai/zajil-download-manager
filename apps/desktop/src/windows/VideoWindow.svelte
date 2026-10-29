@@ -8,7 +8,7 @@
   import { licenseOf, toolName, versionOf } from "../lib/about";
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
-  import { size, speed as speedText } from "../lib/format";
+  import { size } from "../lib/format";
   import { startWindow } from "../lib/windowStart";
   import { fileName, options, picked, type Option } from "../lib/videoChoices";
   import { errorDetails, errorKey } from "../lib/videoErrors";
@@ -29,7 +29,7 @@
     | { kind: "downloading"; label: string; done: number; total: number | null; speed: number | null; id: number | null }
     // A format chosen in the browser: it downloads already, while the
     // user says where it goes (owner, 2026-10-29, as IDM).
-    | { kind: "started"; id: number; done: number; total: number | null; speed: number | null; status: string; error: string | null }
+    | { kind: "started"; id: number; label: string | null; size: number | null; status: string; error: string | null }
     | { kind: "failed"; error: VideoErrorView | string };
 
   // The UI test scenes («tools», «quality») start at a step, with demo
@@ -61,7 +61,7 @@
       unlisten.push(await api.onVideoToolsProgress((p) => step.kind === "installing" && (step = { kind: "installing", tool: p.tool, done: p.done, total: p.total })));
       unlisten.push(
         await api.onVideoProgress((p) => {
-          if ((step.kind === "downloading" || step.kind === "started") && p.id === step.id) step = { ...step, done: p.done, total: p.total, speed: p.speed };
+          if (step.kind === "downloading" && p.id === step.id) step = { ...step, done: p.done, total: p.total, speed: p.speed };
         }),
       );
       unlisten.push(await api.onChange(() => step.kind === "started" && void showStarted()));
@@ -84,21 +84,24 @@
     if (fresh || step.kind !== "started" || step.id !== s.id) {
       nameTouched = false;
       folderTouched = false;
-      step = { kind: "started", id: s.id, done: s.done, total: s.size, speed: null, status: s.status, error: s.error };
+      step = { kind: "started", id: s.id, label: s.label, size: s.size, status: s.status, error: s.error };
       await tick();
       document.querySelector<HTMLElement>("[data-first]")?.focus();
-    } else step = { ...step, status: s.status, error: s.error, done: s.status === "done" ? (s.size ?? step.done) : step.done, total: s.size ?? step.total };
+    } else step = { ...step, label: s.label ?? step.label, size: step.size ?? s.size, status: s.status, error: s.error };
     if (!nameTouched && !editing && s.name) name = s.name;
     if (!folderTouched) folder = s.folder;
     return true;
   }
 
   /** «Start download»: it goes on, where the user said; its progress
-   * window takes over. */
-  async function keep(id: number) {
+   * window takes over, already showing what came. «Download later»: it
+   * waits paused in the list. */
+  async function keep(id: number, now: boolean) {
     try {
-      await api.videoKeep(id, folder, name.trim());
-      await api.openProgress(id, name.trim() || "Zajil").catch(() => {});
+      if (now) {
+        await api.videoKeep(id, folder, name.trim());
+        await api.openProgress(id, name.trim() || "Zajil").catch(() => {});
+      } else await api.videoLater(id, folder, name.trim());
       await api.closeWindow();
     } catch (e) {
       step = { kind: "failed", error: String(e) };
@@ -340,21 +343,18 @@
       </div>
     </section>
   {:else if step.kind === "started"}
+    <!-- As IDM's «Download file info»: it downloads unseen meanwhile, so
+         nothing here says it runs (owner, 2026-10-29). -->
     {@const s = step}
-    <section class="col" aria-live="polite">
+    <section class="col">
       <h2 class="title" dir="auto">{name || locale.t("video-started-reading")}</h2>
-      <div class="bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={s.total ? Math.round((s.done / s.total) * 100) : 0}>
-        <b style:inline-size="{s.total ? Math.min((s.done / s.total) * 100, 100) : 3}%"></b>
-      </div>
-      <p class="muted num">
-        {size(locale.lang, locale.digits, s.done)}{s.total ? ` / ${size(locale.lang, locale.digits, s.total)}` : ""}{s.speed && s.status === "active"
-          ? ` · ${speedText(locale.lang, locale.digits, s.speed)}`
-          : ""}{s.status === "done" ? ` · ${locale.t("video-started-done")}` : ""}
-      </p>
-      {#if s.status === "failed"}
-        <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
-      {/if}
       <div class="grid">
+        {#if s.label}
+          <span class="label">{locale.t("video-quality")}</span>
+          <bdi class="box" dir="ltr">{s.label}</bdi>
+        {/if}
+        <span class="label">{locale.t("video-size")}</span>
+        <span class="box num">{s.size === null ? locale.t("add-size-unknown") : size(locale.lang, locale.digits, s.size)}</span>
         <label class="label" for="started-name">{locale.t("add-file-name")}</label>
         <div class="namebox">
           <input
@@ -372,11 +372,14 @@
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       </div>
-      <p class="muted">{locale.t("video-started-note")}</p>
+      {#if s.status === "failed"}
+        <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
+      {/if}
       <div class="actions">
-        <button class="btn primary" disabled={!folder || s.status === "failed"} onclick={() => void keep(s.id)} data-first>
+        <button class="btn primary" disabled={!folder || s.status === "failed"} onclick={() => void keep(s.id, true)} data-first>
           <Icon name="download" size={15} />{locale.t("add-start")}
         </button>
+        <button class="btn" disabled={!folder || s.status === "failed"} onclick={() => void keep(s.id, false)}>{locale.t("add-later")}</button>
         <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>
       </div>
     </section>

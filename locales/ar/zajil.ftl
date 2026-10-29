@@ -716,8 +716,7 @@ video-error-other = تعذّر تحميل هذا الفيديو.
 video-error-other-details = تعذّر تحميل هذا الفيديو. التفاصيل: { $details }
 video-error-details = التفاصيل
 video-started-reading = يقرأ زاجِل الفيديو…
-video-started-done = اكتمل
-video-started-note = بدأ التحميل بالفعل. غيّر الاسم أو المجلد إن أردت، وسيُنقل الملف إليه حين يكتمل. «إلغاء» يوقفه ويحذف ما نزل منه.
+video-size = الحجم
 
 ## Video downloads in the list (M6, #149)
 queue-video = فيديو

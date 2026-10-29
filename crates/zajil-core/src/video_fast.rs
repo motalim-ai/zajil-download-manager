@@ -69,7 +69,7 @@ fn is_plain(ext: &str) -> bool {
 
 /// The container of the finished video: MP4 for H.264 or AV1 with AAC,
 /// WebM for VP9 or AV1 with Opus, else MKV, which holds anything.
-fn container(parts: &[&Format]) -> String {
+fn container(parts: &[Part]) -> String {
     match parts {
         [one] => one.ext.clone(),
         [video, audio] => match (video.ext.as_str(), audio.ext.as_str()) {
@@ -96,6 +96,74 @@ fn base_of(name: &str) -> String {
     }
 }
 
+/// One part to download: its format id and extension, its new link (none:
+/// continued from its state file with the link saved there), and its size
+/// if known.
+pub(super) struct Part {
+    pub id: String,
+    pub ext: String,
+    pub url: Option<String>,
+    pub size: Option<u64>,
+}
+
+impl Part {
+    pub(super) fn of(format: &Format) -> Part {
+        Part {
+            id: format.id.clone(),
+            ext: format.ext.clone(),
+            url: fast_url(format).map(str::to_owned),
+            size: format.filesize.or(format.filesize_approx),
+        }
+    }
+}
+
+/// How long a saved link must still be good for to be used without
+/// asking the page again: YouTube's last about six hours (`expire=`).
+const LINK_MARGIN_SECS: u64 = 10 * 60;
+
+/// Whether `url` is a YouTube video server's link still good for a while,
+/// by its own `expire=` (seconds since 1970).
+fn link_still_good(url: &str, now_unix: u64) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    if parsed.scheme() != "https" || !host.ends_with(".googlevideo.com") {
+        return false;
+    }
+    parsed
+        .query_pairs()
+        .find(|(k, _)| k == "expire")
+        .and_then(|(_, v)| v.parse::<u64>().ok())
+        .is_some_and(|expire| expire > now_unix.saturating_add(LINK_MARGIN_SECS))
+}
+
+/// Why a new link is not the file a saved part is of: YouTube names each
+/// file in its links by its format (`itag`), its exact size (`clen`) and
+/// when it was made (`lmt`); none when they agree (or a link does not say).
+fn not_the_same(old: &str, new: &str) -> Option<String> {
+    let params = |url: &str| -> std::collections::HashMap<String, String> {
+        reqwest::Url::parse(url)
+            .map(|u| {
+                u.query_pairs()
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (old, new) = (params(old), params(new));
+    for (key, what) in [("itag", "format"), ("clen", "size"), ("lmt", "version")] {
+        if let (Some(a), Some(b)) = (old.get(key), new.get(key))
+            && a != b
+        {
+            return Some(format!(
+                "the video's {what} on YouTube is not the one downloaded before ({key} {a} → {b})"
+            ));
+        }
+    }
+    None
+}
+
 /// Why this way did not finish: before any byte came (yt-dlp may try
 /// instead), or after (the parts stay, for a resume).
 pub(super) enum Failed {
@@ -118,7 +186,7 @@ impl VideoRunner {
     pub(super) async fn fast_download(
         &self,
         request: &Download<'_>,
-        parts: &[&Format],
+        parts: &[Part],
         stop: &Stop,
         on_event: &mut (dyn FnMut(VideoEvent) + Send),
     ) -> Result<PathBuf, Failed> {
@@ -133,18 +201,17 @@ impl VideoRunner {
                 .await
                 .map_err(|_| Failed::Untouched)?;
         }
-        let expected: Vec<Option<u64>> = parts
-            .iter()
-            .map(|f| f.filesize.or(f.filesize_approx))
-            .collect();
+        let expected: Vec<Option<u64>> = parts.iter().map(|p| p.size).collect();
 
         // Each part's progress comes through a channel: the parts run at
         // once, and `on_event` is only called here.
         let (send, mut receive) =
-            tokio::sync::mpsc::unbounded_channel::<(usize, u64, Option<u64>)>();
+            tokio::sync::mpsc::unbounded_channel::<(usize, Option<u64>, Option<u64>)>();
+        let (said, mut why) = tokio::sync::mpsc::unbounded_channel::<String>();
         let download = |index: usize| {
             let send = send.clone();
-            let url = fast_url(parts[index]).unwrap_or_default().to_owned();
+            let said = said.clone();
+            let url = parts[index].url.clone();
             let name = names[index].clone();
             let connections = if parts.len() > 1 && index == 1 {
                 AUDIO_CONNECTIONS
@@ -154,15 +221,26 @@ impl VideoRunner {
             let engine = self.engine.with_connections(connections);
             async move {
                 let mut events = |event: Event| match event {
-                    Event::Started { total, from, .. } => {
-                        let _ = send.send((index, from, total));
+                    // Its size only: a continued part's `from` is where its
+                    // first gap starts, not all it has.
+                    Event::Started { total, .. } => {
+                        let _ = send.send((index, None, total));
                     }
                     Event::Progress { done, total } => {
-                        let _ = send.send((index, done, total));
+                        let _ = send.send((index, Some(done), total));
                     }
                     _ => {}
                 };
-                part(&engine, &url, dest, &name, stop, &mut events).await
+                part(
+                    &engine,
+                    url.as_deref(),
+                    dest,
+                    &name,
+                    stop,
+                    &mut events,
+                    &said,
+                )
+                .await
             }
         };
         let all = async {
@@ -181,7 +259,9 @@ impl VideoRunner {
         let downloaded = loop {
             tokio::select! {
                 Some((index, bytes, total)) = receive.recv() => {
-                    done[index] = bytes;
+                    if let Some(bytes) = bytes {
+                        done[index] = bytes;
+                    }
                     if total.is_some() {
                         totals[index] = total;
                     }
@@ -193,6 +273,7 @@ impl VideoRunner {
                         speed: speed.of(so_far),
                     });
                 }
+                Some(reason) = why.recv() => on_event(VideoEvent::StartedOver(reason)),
                 result = &mut all => break result,
             }
         };
@@ -249,35 +330,155 @@ impl VideoRunner {
     }
 }
 
-/// One part: continued from its state file if an earlier run left one
-/// (with the new link: YouTube's links last hours, not days), else new.
+/// One part: continued from its state file if an earlier run left one,
+/// with `url` when given (a new link of the same file: YouTube's links
+/// last hours, not days), else with the link saved there; new otherwise.
+/// A saved part of another file (`not_the_same`) is removed, said on
+/// `said`, and downloaded again from the start.
 async fn part(
     engine: &Engine,
-    url: &str,
+    url: Option<&str>,
     dest: &Path,
     name: &str,
     stop: &Stop,
     on_event: &mut (dyn FnMut(Event) + Send),
+    said: &tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<PathBuf, crate::engine::Error> {
-    let state_file = crate::state::state_path(&dest.join(name));
+    let file = dest.join(name);
+    let state_file = crate::state::state_path(&file);
     if tokio::fs::try_exists(&state_file).await.unwrap_or(false) {
-        match engine.refresh_link_until(&state_file, url, stop).await {
-            Ok(()) => {
-                return engine
-                    .resume_until(&state_file, stop, on_event)
-                    .await
-                    .map(|f| f.file);
+        let Some(url) = url else {
+            return engine
+                .resume_until(&state_file, stop, on_event)
+                .await
+                .map(|f| f.file);
+        };
+        let saved = state_file.clone();
+        let old = tokio::task::spawn_blocking(move || crate::state::DownloadState::load(&saved))
+            .await
+            .ok()
+            .and_then(Result::ok);
+        let other = old.as_ref().and_then(|old| not_the_same(&old.url, url));
+        if other.is_none() {
+            match engine.refresh_link_until(&state_file, url, stop).await {
+                Ok(()) => {
+                    return engine
+                        .resume_until(&state_file, stop, on_event)
+                        .await
+                        .map(|f| f.file);
+                }
+                Err(e @ crate::engine::Error::Stopped { .. }) => return Err(e),
+                Err(e) => {
+                    let _ = said.send(format!(
+                        "the part saved before could not be continued ({}); it starts over",
+                        super::shown_message(&e.to_string())
+                    ));
+                }
             }
-            Err(e @ crate::engine::Error::Stopped { .. }) => return Err(e),
-            // Another file now, or a broken state: a new download beside it.
-            Err(_) => {}
+        } else if let Some(why) = other {
+            let _ = said.send(format!("{why}; it starts over"));
         }
+        // Removed, so the new one takes its name.
+        let part_file = crate::state::part_path(&file);
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = zajil_platform::fs::remove_file_retrying(&part_file);
+            zajil_platform::fs::remove_file_retrying(&state_file)
+        })
+        .await;
     }
+    let Some(url) = url else {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no saved part and no link").into());
+    };
     engine
         .named(Some(name))
         .download_until(url, dest, stop, on_event)
         .await
         .map(|f| f.file)
+}
+
+/// A video Zajil downloaded its own way and stopped: its page, the ids of
+/// its parts, where they are and the video's name.
+#[derive(Debug, Clone, Copy)]
+pub struct Saved<'a> {
+    pub page: &'a str,
+    pub ids: &'a [String],
+    pub dest: &'a Path,
+    pub name: &'a str,
+}
+
+impl VideoRunner {
+    /// Continues `saved` from its parts' state files, with the links saved
+    /// there, without asking the page again (no yt-dlp): while they are
+    /// still good, and every part has its state file. None when it cannot
+    /// (the caller asks the page for new links then, and
+    /// [`VideoRunner::download`] continues the parts with them).
+    pub async fn resume_saved(
+        &self,
+        saved: &Saved<'_>,
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(VideoEvent) + Send),
+    ) -> Option<Result<PathBuf, VideoError>> {
+        if saved.ids.is_empty()
+            || saved
+                .ids
+                .iter()
+                .any(|id| super::check_format_id(id).is_err())
+        {
+            return None;
+        }
+        let (dest, name, ids) = (
+            saved.dest.to_owned(),
+            saved.name.to_owned(),
+            saved.ids.to_vec(),
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(u64::MAX);
+        let parts = tokio::task::spawn_blocking(move || -> Option<Vec<Part>> {
+            let files = part_files(&dest, &name);
+            let prefix = format!("{}.f", base_of(&name));
+            ids.iter()
+                .map(|id| {
+                    let state = files.iter().find(|f| {
+                        f.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                            n.ends_with(".zajil-state")
+                                && n.strip_prefix(&prefix)
+                                    .and_then(|rest| rest.split_once('.'))
+                                    .is_some_and(|(found, _)| found == id)
+                        })
+                    })?;
+                    let loaded = crate::state::DownloadState::load(state).ok()?;
+                    if !link_still_good(&loaded.final_url, now) {
+                        return None;
+                    }
+                    let file = state.file_name()?.to_str()?.strip_suffix(".zajil-state")?;
+                    let ext = file.rsplit_once('.')?.1.to_owned();
+                    Some(Part {
+                        id: id.clone(),
+                        ext,
+                        url: None,
+                        size: loaded.content_length,
+                    })
+                })
+                .collect()
+        })
+        .await
+        .ok()??;
+        let request = Download {
+            url: saved.page,
+            choice: &Choice::AudioOnly,
+            formats: &[],
+            cookies: None,
+            dest: saved.dest,
+            name: saved.name,
+        };
+        match self.fast_download(&request, &parts, stop, on_event).await {
+            Ok(file) => Some(Ok(file)),
+            Err(Failed::Partway(e)) => Some(Err(e)),
+            Err(Failed::Untouched) => None,
+        }
+    }
 }
 
 /// The `.zajil-part` and `.zajil-state` files of the parts of `name` in
@@ -439,6 +640,7 @@ mod tests {
         };
         let got = parts(&merge, &formats).unwrap();
         assert_eq!(got.len(), 2);
+        let got: Vec<Part> = got.into_iter().map(Part::of).collect();
         assert_eq!(container(&got), "mp4");
         assert!(parts(&Choice::Format("22".into()), &formats).is_none());
         assert_eq!(parts(&Choice::AudioOnly, &formats).unwrap()[0].id, "140");
@@ -446,11 +648,45 @@ mod tests {
 
     #[test]
     fn mixed_codecs_go_to_mkv() {
-        let v = format("248", "webm", "vp9", "none", YT);
-        let a = format("140", "m4a", "none", "mp4a.40.2", YT);
-        let o = format("251", "webm", "none", "opus", YT);
-        assert_eq!(container(&[&v, &a]), "mkv");
-        assert_eq!(container(&[&v, &o]), "webm");
+        let v = Part::of(&format("248", "webm", "vp9", "none", YT));
+        let a = Part::of(&format("140", "m4a", "none", "mp4a.40.2", YT));
+        let o = Part::of(&format("251", "webm", "none", "opus", YT));
+        assert_eq!(container(&[v, a]), "mkv");
+        let v = Part::of(&format("248", "webm", "vp9", "none", YT));
+        assert_eq!(container(&[v, o]), "webm");
+    }
+
+    /// A saved part goes on with a new link only if YouTube's link names
+    /// the same file: the same format, exact size and version.
+    #[test]
+    fn a_new_link_must_name_the_same_file() {
+        let old =
+            "https://rr1---sn-a.googlevideo.com/videoplayback?itag=137&clen=100&lmt=5&expire=1";
+        let same =
+            "https://rr4---sn-b.googlevideo.com/videoplayback?expire=9&lmt=5&clen=100&itag=137";
+        assert_eq!(not_the_same(old, same), None);
+        let bigger = same.replace("clen=100", "clen=101");
+        assert!(not_the_same(old, &bigger).unwrap().contains("size"));
+        let newer = same.replace("lmt=5", "lmt=6");
+        assert!(not_the_same(old, &newer).unwrap().contains("version"));
+    }
+
+    #[test]
+    fn a_saved_link_is_used_only_while_it_is_good() {
+        let link = |expire: u64| {
+            format!("https://rr1---sn-a.googlevideo.com/videoplayback?itag=137&expire={expire}")
+        };
+        assert!(link_still_good(&link(10_000), 1_000));
+        assert!(!link_still_good(&link(1_300), 1_000), "within the margin");
+        assert!(!link_still_good(&link(900), 1_000));
+        assert!(!link_still_good(
+            "https://example.com/v.mp4?expire=99999999999",
+            1_000
+        ));
+        assert!(!link_still_good(
+            &format!("{}{}", link(10_000), "&expire=x").replace("expire=10000&", ""),
+            1_000
+        ));
     }
 
     #[test]

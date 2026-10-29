@@ -313,8 +313,6 @@
         <input type="checkbox" bind:checked={remember} />
         {locale.t("add-remember", { category: categoryName(category) })}
       </label>
-    {:else if started}
-      <p class="started" role="status">{locale.t("add-started-note")}</p>
     {/if}
     <div class="buttons">
       <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
@@ -530,7 +528,6 @@
     gap: 10px;
     align-items: center;
   }
-  .started,
   .check {
     margin: 0;
     font-size: 12px;

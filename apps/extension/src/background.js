@@ -338,7 +338,7 @@ async function openBehind(url, tab) {
  * @param {boolean} [quiet]
  * @param {boolean} [list] a YouTube playlist's page (`playlistPage`): no
  *   stream of the tab goes with it, that is the video playing now
- * @param {{ format?: string, audio?: string }} [format] the format chosen in
+ * @param {{ format?: string, audio?: string, label?: string, size?: number }} [format] the format chosen in
  *   the button's list: Zajil downloads it at once
  * @returns {Promise<import("./capture.js").Result | "not-web">}
  */
@@ -568,13 +568,22 @@ const ITAG = /^\d{1,4}$/;
  * with sound, or a picture and its sound. Anything else is no choice (the
  * press then opens Zajil's «Video quality»).
  * @param {any} format
- * @returns {{ format: string, audio?: string } | undefined}
+ * @returns {{ format: string, audio?: string, label?: string, size?: number } | undefined}
  */
 export function chosenFormat(format) {
   if (!format || typeof format !== "object") return undefined;
-  if (ITAG.test(format.video) && ITAG.test(format.audio)) return { format: format.video, audio: format.audio };
-  if (ITAG.test(format.id)) return { format: format.id };
-  return undefined;
+  /** @type {{ format: string, audio?: string, label?: string, size?: number }} */
+  let chosen;
+  if (ITAG.test(format.video) && ITAG.test(format.audio)) chosen = { format: format.video, audio: format.audio };
+  else if (ITAG.test(format.id)) chosen = { format: format.id };
+  else return undefined;
+  // How the list said it, and its size: shown in Zajil's window as they are.
+  if (typeof format.label === "string") {
+    const label = format.label.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").slice(0, 120).trim();
+    if (label) chosen.label = label;
+  }
+  if (Number.isSafeInteger(format.bytes) && format.bytes > 0) chosen.size = format.bytes;
+  return chosen;
 }
 
 /**

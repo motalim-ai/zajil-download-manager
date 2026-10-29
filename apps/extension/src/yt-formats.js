@@ -82,7 +82,7 @@
    * nothing usable (a live stream, or no format).
    * @param {any} data
    * @returns {{ title: string, duration: string, video: Choice[], audio: Choice[] } | null}
-   * @typedef {{ name: string, detail: string, size: string, send: { id?: string, video?: string, audio?: string } }} Choice
+   * @typedef {{ name: string, detail: string, size: string, bytes?: number, send: { id?: string, video?: string, audio?: string } }} Choice
    */
   function choicesOf(data) {
     if (!data || typeof data !== "object" || data.live === true || !Array.isArray(data.formats)) return null;
@@ -133,6 +133,7 @@
         name: `${ext.toUpperCase()} ${f.quality || (f.height ? `${f.height}p` : "")}`.trim(),
         detail: [f.codec, rateText(rate)].filter(Boolean).join(" · "),
         size: sizeText(size),
+        bytes: size,
         send: sound ? { video: f.itag, audio: sound.itag } : { id: f.itag },
       });
     }
@@ -144,6 +145,7 @@
         name: `${f.ext.toUpperCase()} ${rateText(f.bitrate)}`.trim() + (f.track?.name && languages > 1 ? ` · ${f.track.name}` : ""),
         detail: f.codec,
         size: sizeText(f.size),
+        bytes: f.size,
         send: { id: f.itag },
       }));
     if (!video.length && !audio.length) return null;

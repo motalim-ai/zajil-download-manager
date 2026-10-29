@@ -32,6 +32,7 @@ use crate::tools::{Tool, Toolbox, VerifiedTool};
 
 #[path = "video_fast.rs"]
 mod fast;
+pub use fast::Saved;
 
 /// The tools of one run, checked right before it ([`Toolbox::verified`]),
 /// and kept until its whole tree has ended: on Windows they stay locked
@@ -798,6 +799,9 @@ pub enum VideoEvent {
         total: Option<u64>,
         speed: Option<u64>,
     },
+    /// A part saved before could not be continued: it starts over, for
+    /// this reason (Zajil's own way, on YouTube).
+    StartedOver(String),
 }
 
 /// The folders of runs, `<data dir>/run`.
@@ -1154,7 +1158,9 @@ impl Overall {
     }
 
     fn of(&mut self, event: VideoEvent) -> VideoEvent {
-        let VideoEvent::Progress { done, total, speed } = event;
+        let VideoEvent::Progress { done, total, speed } = event else {
+            return event;
+        };
         if done < self.done {
             // Back to the start: the part before has ended.
             self.before += self.total.unwrap_or(0).max(self.done);
@@ -1603,6 +1609,7 @@ impl VideoRunner {
         self.check_hls(request, stop).await?;
         // YouTube: Zajil's own engine, when the probe's links allow it.
         if let Some(parts) = fast::parts(choice, request.formats) {
+            let parts: Vec<fast::Part> = parts.into_iter().map(fast::Part::of).collect();
             match self.fast_download(request, &parts, stop, on_event).await {
                 Ok(file) => return Ok(file),
                 Err(fast::Failed::Partway(e)) => return Err(e),

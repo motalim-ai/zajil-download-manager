@@ -9,4 +9,8 @@ export type StartedView = { id: number,
 /**
  * The page's title once read, else empty.
  */
-name: string, folder: string, status: StatusView, size: number | null, done: number, error: string | null, };
+name: string, folder: string, status: StatusView, 
+/**
+ * The quality, as the browser's list said it.
+ */
+label: string | null, size: number | null, done: number, error: string | null, };

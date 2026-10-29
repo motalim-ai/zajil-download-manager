@@ -601,7 +601,7 @@
 
   /** Sends the video, or the whole playlist it is played from, or one of
    * its formats (its itag, and its sound's).
-   * @param {boolean} whole @param {{ id?: string, video?: string, audio?: string }} [format] */
+   * @param {boolean} whole @param {{ id?: string, video?: string, audio?: string, label?: string, bytes?: number }} [format] */
   const press = async (whole, format) => {
     if (!video) return;
     const src = video.currentSrc || video.src || "";
@@ -644,7 +644,7 @@
     else if (act === "this") void press(false);
     else if (act === "format") {
       const picked = choices[Number(item.dataset.index)];
-      if (picked) void press(false, picked.send);
+      if (picked) void press(false, { ...picked.send, label: `${picked.name} · ${picked.detail}`, bytes: picked.bytes });
     }
   });
   listen(help, "click", (event) => {

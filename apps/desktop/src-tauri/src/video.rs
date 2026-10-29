@@ -197,6 +197,9 @@ struct Row {
     /// changed in «Video quality» while it was already downloading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     move_to: Option<MoveTo>,
+    /// The quality chosen in the browser's list, as it said it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
 }
 
 impl Row {
@@ -238,9 +241,9 @@ fn read_rows(path: &std::path::Path) -> Vec<Row> {
     // Never an id of the queues' (a file changed by hand).
     rows.retain(|r| is_video(r.id));
     for row in &mut rows {
+        // What came stays shown: Zajil's own way continues from it.
         if matches!(row.status, StatusView::Active | StatusView::Waiting) {
             row.status = StatusView::Paused;
-            row.done = 0;
         }
     }
     rows
@@ -357,14 +360,16 @@ pub fn details(
     categories: &zajil_core::category::CategoriesFile,
     id: u64,
 ) -> Option<DetailsView> {
-    let rows = state.rows.lock().unwrap();
-    let row = rows.iter().find(|r| r.id == id)?;
+    let row = with_row(state, id, |row| row.clone())?;
+    // Zajil's own way (YouTube) continues from its parts; yt-dlp's starts
+    // over. Its parts are there once it began, its file once it finished.
+    let resumable = row.status == StatusView::Done
+        || !zajil_core::video::part_files(std::path::Path::new(&row.folder), &row.name).is_empty();
     Some(DetailsView {
-        download: view_of(row, categories),
+        download: view_of(&row, categories),
         url: row.url.clone(),
         segments: Vec::new(),
-        // A stopped video starts over.
-        resumable: Some(false),
+        resumable: Some(resumable),
         limit: None,
     })
 }
@@ -410,8 +415,6 @@ pub fn resume<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, ids: &[u64]) {
             if matches!(row.status, StatusView::Paused | StatusView::Failed) {
                 row.status = StatusView::Waiting;
                 row.error = None;
-                row.done = 0;
-                row.size = None;
             }
         });
     }
@@ -505,7 +508,7 @@ pub fn receive<R: tauri::Runtime>(
     media: Option<String>,
     cookies: Option<String>,
     private: bool,
-    chosen: Option<ChoiceView>,
+    chosen: Option<Chosen>,
 ) {
     let state = handle.state::<VideoState>();
     if let Some(cookies) = cookies {
@@ -517,8 +520,39 @@ pub fn receive<R: tauri::Runtime>(
     if private {
         state.private.lock().unwrap().insert(url.clone());
     }
-    if let Some(choice) = chosen {
+    if let Some(Chosen {
+        choice,
+        label,
+        size,
+    }) = chosen
+    {
         let app = handle.state::<crate::App>();
+        // The same video and quality, stopped: it goes on from what came
+        // (with the cookies the browser just sent), not again from nothing.
+        let stopped = state
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|r| {
+                r.url == url
+                    && matches!(r.status, StatusView::Paused | StatusView::Failed)
+                    && same_itags(&r.choice, &choice)
+            })
+            .map(|r| (r.id, r.name.clone()));
+        if let Some((id, name)) = stopped {
+            resume(handle, &[id]);
+            let show = handle
+                .state::<crate::closing::Closing>()
+                .prefs()
+                .add
+                .progress_window;
+            if let Err(err) = crate::addprefs::show_started(handle, show, id, &name) {
+                eprintln!("zajil: the progress window of video {id}: {err}");
+            }
+            return;
+        }
         let id = FIRST_ID + state.next.fetch_add(1, Ordering::SeqCst) + 1;
         state.rows.lock().unwrap().push(Row {
             id,
@@ -530,13 +564,14 @@ pub fn receive<R: tauri::Runtime>(
                 .to_string(),
             choice,
             status: StatusView::Waiting,
-            size: None,
+            size,
             done: 0,
             speed: 0,
             error: None,
             file: None,
             private,
             move_to: None,
+            label,
         });
         save_rows(&app, &state);
         let _ = handle.emit("downloads-changed", ());
@@ -551,6 +586,34 @@ pub fn receive<R: tauri::Runtime>(
     let _ = open_window(handle);
 }
 
+/// A quality chosen in the browser's list: its formats (YouTube's itags),
+/// and how the list said it, with its size.
+pub struct Chosen {
+    pub choice: ChoiceView,
+    pub label: Option<String>,
+    pub size: Option<u64>,
+}
+
+/// Whether two choices are the same formats, by YouTube's itags (yt-dlp
+/// names a format `140-0` where the list says `140`).
+fn same_itags(a: &ChoiceView, b: &ChoiceView) -> bool {
+    let itag = |id: &str| id.split('-').next().unwrap_or_default().to_owned();
+    match (a, b) {
+        (ChoiceView::Format { id: x }, ChoiceView::Format { id: y }) => itag(x) == itag(y),
+        (
+            ChoiceView::Merge {
+                video: v1,
+                audio: a1,
+            },
+            ChoiceView::Merge {
+                video: v2,
+                audio: a2,
+            },
+        ) => itag(v1) == itag(v2) && itag(a1) == itag(a2),
+        _ => false,
+    }
+}
+
 /// A download from the browser's list, for «Video quality» while it asks
 /// where it goes.
 #[derive(Debug, Clone, Serialize, TS)]
@@ -562,6 +625,8 @@ pub struct StartedView {
     pub name: String,
     pub folder: String,
     pub status: StatusView,
+    /// The quality, as the browser's list said it.
+    pub label: Option<String>,
     #[ts(type = "number | null")]
     pub size: Option<u64>,
     #[ts(type = "number")]
@@ -578,6 +643,7 @@ pub fn video_started(state: State<'_, VideoState>) -> Option<StartedView> {
         name: row.name.clone(),
         folder: row.folder.clone(),
         status: row.status,
+        label: row.label.clone(),
         size: row.size,
         done: row.done,
         error: row.error.clone(),
@@ -625,6 +691,32 @@ pub async fn video_keep<R: tauri::Runtime>(
     save_rows(&handle.state::<crate::App>(), &state);
     let _ = handle.emit("downloads-changed", ());
     Ok(())
+}
+
+/// «Download later»: it stops, and waits paused in the list, to go to
+/// `folder` as `name` once it finishes; «Resume» goes on from what came.
+#[tauri::command]
+pub async fn video_later<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    id: u64,
+    folder: String,
+    name: String,
+) -> Result<(), String> {
+    video_keep(handle.clone(), id, folder, name).await?;
+    let state = handle.state::<VideoState>();
+    pause(&state, &[id]);
+    with_row(&state, id, |row| {
+        if row.status == StatusView::Waiting {
+            row.status = StatusView::Paused;
+        }
+    });
+    Ok(())
+}
+
+/// The download «Video quality» asks about, hidden from the list until
+/// the user says «Start download» (as IDM: nothing shows it runs before).
+pub fn asked(state: &VideoState) -> Option<u64> {
+    *state.started.lock().unwrap()
 }
 
 /// «Cancel» while it asks where the download goes: it stops, and leaves
@@ -1358,6 +1450,7 @@ pub fn video_download<R: tauri::Runtime>(
         file: None,
         private,
         move_to: None,
+        label: None,
     });
     state.fresh.lock().unwrap().insert(id);
     save_rows(&app, &state);
@@ -1441,6 +1534,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
         file: None,
         private: false,
         move_to: None,
+        label: None,
     }
 }
 
@@ -1457,109 +1551,143 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
     let stop = Stop::new();
     state.downloads.lock().unwrap().insert(id, stop.clone());
     let known = state.formats.lock().unwrap().get(&row.url).cloned();
-    // From the browser's list: what was read ahead, if it fits.
-    let ahead = (row.name.is_empty())
-        .then(|| {
-            let cookies = state.cookies.lock().unwrap().contains_key(&row.url);
-            let media = state.media.lock().unwrap().get(&row.url).cloned();
-            state
-                .ahead
-                .lock()
-                .unwrap()
-                .find(&row.url, cookies, Instant::now())
-                .map(|read| (read, media))
-        })
-        .flatten();
-    tauri::async_runtime::spawn(async move {
-        let runner = runner(&handle.state::<crate::App>()).await;
-        let read = match ahead {
-            Some((mut read, media)) => tokio::select! {
-                read = read.wait_for(Option::is_some) => read
-                    .ok()
-                    .and_then(|r| r.clone().flatten())
-                    .filter(|sent| ahead_fits(sent, &row.url, media.as_deref())),
-                () = stop.requested() => None,
-            },
-            None => None,
-        };
-        let probed = match read {
-            Some(sent) => Ok(sent.probed),
-            None if known.is_some() && !ask => Err(None),
-            None => probe(
-                handle.state::<VideoState>().inner(),
-                &runner,
-                &row.url,
-                &stop,
-            )
-            .await
-            .map_err(Some),
-        };
-        let formats = match probed {
-            Err(None) => Ok(known.unwrap_or_default()),
-            Err(Some(e)) => Err(e.into()),
-            Ok(Probed::Video(video)) => {
-                // From the browser's list: named after its title, and
-                // its choice in yt-dlp's names.
-                if row.name.is_empty() {
-                    let name = Some(video.title.trim())
-                        .filter(|t| !t.is_empty())
-                        .map_or_else(|| "video".into(), zajil_core::sanitize::sanitize_file_name);
-                    let choice = from_list(&row.choice, &video.formats);
-                    with_row(&handle.state::<VideoState>(), id, |r| {
-                        r.name = name.clone();
-                        r.choice = choice.clone();
-                    });
-                    row.name = name;
-                    row.choice = choice;
-                }
-                Ok(video.formats)
-            }
-            Ok(Probed::Playlist { .. }) => Err(VideoErrorView {
-                kind: "playlist".into(),
-                message: "the page is a playlist".into(),
-            }),
-        };
-        // The engine's best, once chosen, is the row's choice from now on.
-        let chosen = formats.and_then(|formats| {
-            let choice = row.choice.resolved(&formats)?;
-            if row.choice == ChoiceView::Best {
-                with_row(&handle.state::<VideoState>(), id, |row| {
-                    row.choice = ChoiceView::from(choice.clone());
-                });
-            }
-            Ok((formats, choice))
-        });
-        // After the probe: the cookies it went with, if any.
-        let cookies = handle
-            .state::<VideoState>()
-            .cookies
+    // What was read ahead (the browser's button showed over it), if it fits.
+    let ahead = {
+        let cookies = state.cookies.lock().unwrap().contains_key(&row.url);
+        let media = state.media.lock().unwrap().get(&row.url).cloned();
+        state
+            .ahead
             .lock()
             .unwrap()
-            .get(&row.url)
-            .cloned();
-        let result = match chosen {
-            Ok((formats, choice)) => {
-                let request = Download {
-                    url: &row.url,
-                    choice: &choice,
-                    formats: &formats,
-                    cookies: cookies.as_deref(),
-                    dest: std::path::Path::new(&row.folder),
-                    name: &row.name,
-                };
-                let events = handle.clone();
-                runner
-                    .download(
-                        &request,
-                        &stop,
-                        &mut |VideoEvent::Progress { done, total, speed }| {
-                            progressed(&events, id, done, total, speed);
-                        },
-                    )
-                    .await
-                    .map_err(VideoErrorView::from)
+            .find(&row.url, cookies, Instant::now())
+            .map(|read| (read, media))
+    };
+    tauri::async_runtime::spawn(async move {
+        let runner = runner(&handle.state::<crate::App>()).await;
+        let events = handle.clone();
+        let mut on_event = move |event: VideoEvent| match event {
+            VideoEvent::Progress { done, total, speed } => {
+                progressed(&events, id, done, total, speed);
             }
-            Err(e) => Err(e),
+            // A part saved before was of another file: said in the list.
+            VideoEvent::StartedOver(why) => {
+                eprintln!("zajil: video {id}: {why}");
+                with_row(&events.state::<VideoState>(), id, |row| {
+                    row.error = Some(why)
+                });
+            }
+        };
+        // Stopped before, Zajil's own way: continued from its parts with
+        // the links saved there, without asking the page again (no yt-dlp,
+        // which YouTube may stop without the browser's cookies).
+        let saved_ids = match &row.choice {
+            ChoiceView::Format { id } => vec![id.clone()],
+            ChoiceView::Merge { video, audio } => vec![video.clone(), audio.clone()],
+            _ => Vec::new(),
+        };
+        let resumed = if ask && !row.name.is_empty() && !saved_ids.is_empty() {
+            let saved = zajil_core::video::Saved {
+                page: &row.url,
+                ids: &saved_ids,
+                dest: std::path::Path::new(&row.folder),
+                name: &row.name,
+            };
+            runner.resume_saved(&saved, &stop, &mut on_event).await
+        } else {
+            None
+        };
+        let result = match resumed {
+            Some(done) => done.map_err(VideoErrorView::from),
+            None => {
+                async {
+                    let read = match ahead {
+                        Some((mut read, media)) => tokio::select! {
+                            read = read.wait_for(Option::is_some) => read
+                                .ok()
+                                .and_then(|r| r.clone().flatten())
+                                .filter(|sent| ahead_fits(sent, &row.url, media.as_deref())),
+                            () = stop.requested() => None,
+                        },
+                        None => None,
+                    };
+                    let probed = match read {
+                        Some(sent) => Ok(sent.probed),
+                        None if known.is_some() && !ask => Err(None),
+                        None => probe(
+                            handle.state::<VideoState>().inner(),
+                            &runner,
+                            &row.url,
+                            &stop,
+                        )
+                        .await
+                        .map_err(Some),
+                    };
+                    let formats = match probed {
+                        Err(None) => Ok(known.unwrap_or_default()),
+                        Err(Some(e)) => Err(e.into()),
+                        Ok(Probed::Video(video)) => {
+                            // From the browser's list: named after its title, and
+                            // its choice in yt-dlp's names.
+                            if row.name.is_empty() {
+                                let name = Some(video.title.trim())
+                                    .filter(|t| !t.is_empty())
+                                    .map_or_else(
+                                        || "video".into(),
+                                        zajil_core::sanitize::sanitize_file_name,
+                                    );
+                                let choice = from_list(&row.choice, &video.formats);
+                                with_row(&handle.state::<VideoState>(), id, |r| {
+                                    r.name = name.clone();
+                                    r.choice = choice.clone();
+                                });
+                                row.name = name;
+                                row.choice = choice;
+                            }
+                            Ok(video.formats)
+                        }
+                        Ok(Probed::Playlist { .. }) => Err(VideoErrorView {
+                            kind: "playlist".into(),
+                            message: "the page is a playlist".into(),
+                        }),
+                    };
+                    // The engine's best, once chosen, is the row's choice from now on.
+                    let chosen = formats.and_then(|formats| {
+                        let choice = row.choice.resolved(&formats)?;
+                        if row.choice == ChoiceView::Best {
+                            with_row(&handle.state::<VideoState>(), id, |row| {
+                                row.choice = ChoiceView::from(choice.clone());
+                            });
+                        }
+                        Ok((formats, choice))
+                    });
+                    // After the probe: the cookies it went with, if any.
+                    let cookies = handle
+                        .state::<VideoState>()
+                        .cookies
+                        .lock()
+                        .unwrap()
+                        .get(&row.url)
+                        .cloned();
+                    match chosen {
+                        Ok((formats, choice)) => {
+                            let request = Download {
+                                url: &row.url,
+                                choice: &choice,
+                                formats: &formats,
+                                cookies: cookies.as_deref(),
+                                dest: std::path::Path::new(&row.folder),
+                                name: &row.name,
+                            };
+                            runner
+                                .download(&request, &stop, &mut on_event)
+                                .await
+                                .map_err(VideoErrorView::from)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                .await
+            }
         };
         let state = handle.state::<VideoState>();
         state.downloads.lock().unwrap().remove(&id);
@@ -1577,6 +1705,10 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         }
         // Finished where it downloaded: moved where the user said meanwhile.
         let move_to = with_row(&state, id, |row| {
+            // Stopped: kept for when it finishes.
+            if result.is_err() {
+                return None;
+            }
             row.move_to
                 .take()
                 .filter(|to| !row.lands_at(to))
@@ -1627,13 +1759,13 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         with_row(&state, id, |row| match &result {
             Ok(file) => {
                 row.status = StatusView::Done;
+                row.error = None;
                 row.file = Some(file.display().to_string());
                 row.size = std::fs::metadata(file).ok().map(|m| m.len()).or(row.size);
                 row.done = row.size.unwrap_or(row.done);
             }
             Err(e) if e.kind == "stopped" => {
                 row.status = StatusView::Paused;
-                row.done = 0;
             }
             Err(e) => {
                 row.status = StatusView::Failed;
@@ -1890,6 +2022,7 @@ mod tests {
             file: None,
             private: false,
             move_to: None,
+            label: None,
         }
     }
 
@@ -1902,8 +2035,9 @@ mod tests {
         assert_eq!((videos, queues), (vec![FIRST_ID + 2], vec![3, 7]));
     }
 
-    /// After a restart, a video that ran is paused from zero (its run was
-    /// swept); a file changed by hand never takes a queue's id.
+    /// After a restart, a video that ran is paused with what came (Zajil's
+    /// own way continues from it); a file changed by hand never takes a
+    /// queue's id.
     #[test]
     fn the_list_comes_back_paused() {
         let dir = tempfile::tempdir().unwrap();
@@ -1916,7 +2050,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&rows).unwrap()).unwrap();
         let back = read_rows(&path);
         assert_eq!(back.len(), 2);
-        assert_eq!((back[0].status, back[0].done), (StatusView::Paused, 0));
+        assert_eq!((back[0].status, back[0].done), (StatusView::Paused, 40));
         assert_eq!((back[1].status, back[1].done), (StatusView::Done, 40));
         // The speed is not kept.
         assert_eq!(back[1].speed, 0);

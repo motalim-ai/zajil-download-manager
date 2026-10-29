@@ -422,6 +422,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_started,
         video::video_keep,
         video::video_discard,
+        video::video_later,
         video::open_video,
         batch::open_batch,
         batch::batch_pending,
@@ -531,6 +532,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_started,
         video::video_keep,
         video::video_discard,
+        video::video_later,
         video::open_video,
         batch::open_batch,
         batch::batch_pending,
@@ -945,6 +947,13 @@ async fn snapshot<R: tauri::Runtime>(
         &handle.state::<video::VideoState>(),
         &categories,
     ));
+    // A download an info window or «Video quality» still asks about is not
+    // in the list before «Start download» (as IDM: it runs unseen).
+    let held = handle.state::<background::Held>();
+    let asked = video::asked(&handle.state::<video::VideoState>());
+    snapshot
+        .downloads
+        .retain(|d| !held.holds(d.id) && Some(d.id) != asked);
     Ok(snapshot)
 }
 
@@ -1079,14 +1088,20 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                     private,
                     format,
                     audio,
+                    label,
+                    size,
                     ..
                 } = &request
                 {
                     // A format chosen in the button's list: downloaded at
                     // once, without «Video quality» (owner, 2026-10-29).
-                    let chosen = format.clone().map(|id| match audio.clone() {
-                        Some(audio) => video::ChoiceView::Merge { video: id, audio },
-                        None => video::ChoiceView::Format { id },
+                    let chosen = format.clone().map(|id| video::Chosen {
+                        choice: match audio.clone() {
+                            Some(audio) => video::ChoiceView::Merge { video: id, audio },
+                            None => video::ChoiceView::Format { id },
+                        },
+                        label: label.clone(),
+                        size: *size,
                     });
                     video::receive(
                         &handle,
