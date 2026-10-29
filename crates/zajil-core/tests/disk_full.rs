@@ -103,7 +103,10 @@ fn range_of(record: &RequestRecord) -> Option<(u64, u64)> {
     Some((from.parse().ok()?, to))
 }
 
-/// One connection, then four: the disk fills up a quarter of the way in.
+/// One connection, then four: the disk fills up a quarter of the way in,
+/// once a save has recorded at least 1 MiB (a fixed point in time did not
+/// do: on CI's macOS runner the last save before it had recorded only
+/// 786432 bytes).
 #[tokio::test]
 async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
     let Some((name, volume)) = volume() else {
@@ -114,9 +117,9 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
     for connections in [1, 4] {
         let case = format!("{name}, {connections} connection(s)");
         let path = format!("/f{connections}.bin");
-        // 8 MiB/s in all: a periodic save (every 100 ms) records progress
-        // before the disk fills up.
-        let spec = FileSpec::new(data.clone()).throttle(8 * MIB as u64 / connections as u64);
+        // 4 MiB/s in all: about 40 periodic saves (every 100 ms) can land
+        // before the end.
+        let spec = FileSpec::new(data.clone()).throttle(4 * MIB as u64 / connections as u64);
         server.put(&path, spec);
         let dir = volume.join(format!("core-full-{connections}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -130,10 +133,18 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
 
         let free_before = available_space(&volume).unwrap();
         let mut at_start = None;
+        let mut state_file = None;
+        // What the state file on disk counted when the disk was filled.
+        let mut saved_before_full = None;
         let mut filler = None;
         let result = engine
             .download(&server.url(&path), &dir, &mut |event| match event {
-                Event::Started { file, .. } => {
+                Event::Started {
+                    file,
+                    state_file: saved,
+                    ..
+                } => {
+                    state_file = Some(saved);
                     // The part file has its length, and takes nothing.
                     let part = part_path(&file);
                     at_start = Some((
@@ -143,9 +154,16 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
                     ));
                 }
                 // Filled here, blocking on purpose: the test's runtime has
-                // one thread, so no connection writes meanwhile.
+                // one thread, so no connection writes or saves meanwhile.
                 Event::Progress { done, .. } if filler.is_none() && done >= SIZE as u64 / 4 => {
-                    filler = Some(Filler::fill(&volume));
+                    let saved = state_file
+                        .as_deref()
+                        .and_then(|path| DownloadState::load(path).ok())
+                        .map_or(0, |state| state.bytes_done());
+                    if saved >= MIB as u64 {
+                        saved_before_full = Some(saved);
+                        filler = Some(Filler::fill(&volume));
+                    }
                 }
                 _ => {}
             })
@@ -163,7 +181,8 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
         assert!(free_at_start + MIB as u64 > free_before, "{case}");
         assert!(free_at_start > 2 * SIZE as u64, "{case}");
 
-        let filler = filler.expect("the disk was filled");
+        let filler = filler.expect("no save recorded 1 MiB before the end");
+        let saved_before_full = saved_before_full.expect("set with the filler");
         let (state_file, reason) = match result {
             Err(Error::Interrupted { state_file, reason }) => (state_file, reason),
             other => panic!("{case}: expected an interruption, got {other:?}"),
@@ -179,11 +198,22 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
             first.len()
         );
 
-        // What the state file counts is on disk, and is kept.
+        // The state file is whole (its checksum holds), and counts at least
+        // what it did when the disk filled up: a save that failed on the
+        // full disk never touched it, nor left its temporary file.
         let state = DownloadState::load(&state_file).unwrap();
         let kept = state.bytes_done();
-        eprintln!("{case}: {kept} bytes kept of {SIZE}");
-        assert!(kept >= MIB as u64, "{case}: only {kept} bytes kept");
+        eprintln!("{case}: {kept} bytes kept of {SIZE}, {saved_before_full} saved before");
+        assert!(
+            kept >= saved_before_full,
+            "{case}: {kept} bytes kept, {saved_before_full} were saved"
+        );
+        let tmp = state_file.with_file_name(format!(
+            "{}.tmp",
+            state_file.file_name().unwrap().to_str().unwrap()
+        ));
+        assert!(!tmp.exists(), "{case}: {} left", tmp.display());
+        // What the state file counts is on disk.
         let part = fs::read(part_path(&dir.join(format!("f{connections}.bin")))).unwrap();
         for segment in &state.segments {
             let (start, end) = (
