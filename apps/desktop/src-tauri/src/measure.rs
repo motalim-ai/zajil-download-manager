@@ -64,7 +64,25 @@ pub fn drive<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     const ROUNDS: usize = 6;
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        // The list as the main window reads it, four times a second while
+        // downloads run: the first read, then the next ones.
+        {
+            use tauri::Manager;
+            let app = handle.state::<crate::App>();
+            let (store, categories, live) =
+                (app.store.clone(), app.categories.clone(), app.live.clone());
+            for _ in 0..5 {
+                let at = Instant::now();
+                let read = crate::read_snapshot(&store, &categories, &live);
+                eprintln!(
+                    "zajil-measure: list of {} read in {:.1} ms",
+                    read.map(|s| s.downloads.len()).unwrap_or(0),
+                    at.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
         let progress = crate::windows::progress_label(999_999);
         for _ in 0..ROUNDS {
             for (label, size) in [

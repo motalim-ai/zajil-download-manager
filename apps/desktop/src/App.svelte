@@ -885,13 +885,14 @@
     let unlistenView: (() => void) | undefined;
     void (async () => {
       if (await runUiTest()) return;
-      try {
-        applySettings(await api.settings());
-      } catch (e) {
+      // The settings, the list and the listeners together: each is a call
+      // to Rust, and waiting for each in turn slowed the start.
+      const settings = api.settings().then(applySettings, (e) => {
         settingsProblem = String(e);
-      }
+      });
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
+      const first = refresh();
       // A copied download link waits in the paste bar, and the window
       // shows; nothing asks the server before the user presses "Download"
       // (review of #67). Ignored while a dialog is open: with the refresh
@@ -907,7 +908,9 @@
         view = "categories";
       });
       unlistenMenu = await api.onMenuCommand((command) => fromMenu(command as Command));
-      await refresh();
+      await Promise.all([settings, first]);
+      // The list is drawn (timed with `ZAJIL_MEASURE=1`).
+      void api.windowPainted().catch(() => {});
     })();
     return () => {
       unlisten?.();

@@ -2131,20 +2131,65 @@ fn add_blocking(
 /// What the page shows, read from the files. Blocking. A damaged categories
 /// file is said, not fatal: the downloads still show (review of #45: the
 /// whole list went blank while they ran).
+/// A file as it is on disk now: where, its size, and when it was made and
+/// last written (each change replaces the file, ADR-0004).
+type Stamp = (
+    PathBuf,
+    u64,
+    Option<std::time::SystemTime>,
+    Option<std::time::SystemTime>,
+);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = path.symlink_metadata().ok()?;
+    Some((
+        path.to_path_buf(),
+        meta.len(),
+        meta.created().ok(),
+        meta.modified().ok(),
+    ))
+}
+
+/// `load`'s answer, read again only when the file at `path` changed: while
+/// downloads run, the list asks four times a second, and their progress
+/// is in memory, not in the files (the owner's request: a faster list).
+fn cached<T: Clone, E>(
+    cell: &std::sync::Mutex<Option<(Stamp, T)>>,
+    path: &Path,
+    load: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    let now = stamp(path);
+    if let Some(now) = &now
+        && let Some((was, value)) = &*cell.lock().unwrap_or_else(|e| e.into_inner())
+        && was == now
+    {
+        return Ok(value.clone());
+    }
+    let value = load()?;
+    // Stamped before the read: a change during it is read next time.
+    *cell.lock().unwrap_or_else(|e| e.into_inner()) = now.map(|now| (now, value.clone()));
+    Ok(value)
+}
+
+static QUEUES_READ: std::sync::Mutex<Option<(Stamp, QueuesFile)>> = std::sync::Mutex::new(None);
+static CATEGORIES_READ: std::sync::Mutex<Option<(Stamp, CategoriesFile)>> =
+    std::sync::Mutex::new(None);
+
 fn read_snapshot(
     store: &QueueStore,
     categories: &CategoryStore,
     live: &Live,
 ) -> Result<Snapshot, String> {
-    let queues = store.load().map_err(blocking_err)?;
-    let (categories, problem) = match categories.load() {
-        Ok(c) => (c, None),
-        Err(err) => {
-            let mut none = CategoriesFile::built_in();
-            none.categories.clear();
-            (none, Some(err.to_string()))
-        }
-    };
+    let queues = cached(&QUEUES_READ, &store.path(), || store.load()).map_err(blocking_err)?;
+    let (categories, problem) =
+        match cached(&CATEGORIES_READ, &categories.path(), || categories.load()) {
+            Ok(c) => (c, None),
+            Err(err) => {
+                let mut none = CategoriesFile::built_in();
+                none.categories.clear();
+                (none, Some(err.to_string()))
+            }
+        };
     let mut snapshot = view::snapshot(&queues, &categories, live);
     snapshot.categories_problem = problem.clone();
     snapshot.problem = snapshot.problem.or(problem);
