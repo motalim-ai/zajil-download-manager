@@ -28,7 +28,12 @@
 //! free segment left takes the second half of what remains of the segment
 //! with the longest time left (remaining bytes ÷ its connection's speed),
 //! if each half is at least the minimum segment size. The old connection
-//! stops where the new segment begins. Every split is reported as
+//! stops where the new segment begins. A tail too small to halve whose
+//! connection would still take more than [`TAKE_OVER_AFTER`] is taken over
+//! whole, from where that connection is: a server that slows one request
+//! (YouTube slows the first, which asks for the whole file) no longer
+//! holds the last bytes for minutes (owner's report, 2026-10-29: 98% at
+//! 31 KB/s). Every split is reported as
 //! [`Event::Split`] and saved with the next checkpoint.
 //!
 //! **Retries and busy servers** (`retry`): a connection that fails (cut,
@@ -81,6 +86,14 @@ const SPEED_AFTER: Duration = Duration::from_millis(500);
 /// A connection that has sent nothing for this long counts as stalled: its
 /// segment is the first one to split.
 const STALLED_AFTER: Duration = Duration::from_secs(1);
+
+/// A tail too small to halve is taken over whole when its connection would
+/// still need longer than this.
+const TAKE_OVER_AFTER: f64 = 3.0;
+
+/// How many times one segment's tail may be taken over: a server that is
+/// slow for every connection is not asked again and again.
+const MAX_TAKE_OVERS: u32 = 4;
 
 /// How often a connection with nothing to do looks again for a segment to
 /// split.
@@ -137,6 +150,8 @@ pub(crate) struct Job {
     pub connections: usize,
     /// No split leaves a segment smaller than this.
     pub min_segment: u64,
+    /// At most this many bytes per range request (`Options::request_size`).
+    pub request_size: Option<u64>,
     pub save_interval: Duration,
     /// A segment whose connection fails this many times in a row, without
     /// writing in between, is given up.
@@ -175,6 +190,7 @@ pub(crate) async fn run(
         browser,
         connections,
         min_segment,
+        request_size,
         save_interval,
         max_failures,
         stop: user_stop,
@@ -196,6 +212,16 @@ pub(crate) async fn run(
     let (stop, stopped) = watch::channel(false);
     let connections = connections.clamp(1, MAX_CONNECTIONS);
     let mut board = Board::new(state, min_segment, connections, max_failures);
+    // With a request size, a response that is not a range of at most that
+    // size is let go before its body: YouTube slows a request for the whole
+    // file to the video's own pace, and its first segment then took minutes
+    // (owner's report, 2026-10-29). Its segment is asked for in parts.
+    let first = first.filter(|(response, _)| {
+        request_size.is_none_or(|n| {
+            response.status() == reqwest::StatusCode::PARTIAL_CONTENT
+                && response.content_length().is_some_and(|len| len <= n)
+        })
+    });
     if let Some((_, start)) = &first {
         let index = board
             .index_of(*start)
@@ -206,6 +232,7 @@ pub(crate) async fn run(
     let ctx = Arc::new(Ctx {
         limits,
         site,
+        request_size,
         client,
         browser,
         url,
@@ -463,6 +490,8 @@ async fn checkpoint(
 /// What workers share.
 struct Ctx {
     limits: Limits,
+    /// At most this many bytes per range request.
+    request_size: Option<u64>,
     /// See [`Job::site`].
     site: Option<Arc<tokio::sync::Semaphore>>,
     client: Client,
@@ -557,6 +586,8 @@ struct Live {
     /// speed.
     since: Option<Instant>,
     written: u64,
+    /// Times this segment's tail was taken over from a slow connection.
+    take_overs: u32,
 }
 
 impl Live {
@@ -774,10 +805,14 @@ impl Board {
         }
         let mut best: Option<(usize, f64)> = None;
         let mut may_wait = false;
+        // The least tail worth taking over: a sixteenth of a segment.
+        let least_tail = (self.min_segment / 16).max(1);
         for index in 0..self.live.len() {
             let live = &self.live[index];
             let remaining = self.remaining(index);
-            if live.owner.is_none() || live.owner == Some(id) || remaining / 2 < self.min_segment {
+            let halves = remaining / 2 >= self.min_segment;
+            let tail = remaining >= least_tail && live.take_overs < MAX_TAKE_OVERS;
+            if live.owner.is_none() || live.owner == Some(id) || !(halves || tail) {
                 continue;
             }
             let elapsed = live.since.map_or(Duration::ZERO, |since| now - since);
@@ -795,6 +830,10 @@ impl Board {
                 let speed = live.written as f64 / elapsed.as_secs_f64();
                 remaining as f64 / speed
             };
+            // A small tail that ends soon stays with its connection.
+            if !halves && seconds_left <= TAKE_OVER_AFTER {
+                continue;
+            }
             if best.is_none_or(|(_, longest)| seconds_left > longest) {
                 best = Some((index, seconds_left));
             }
@@ -809,8 +848,10 @@ impl Board {
         let segment = self.state.segments[index].clone();
         let end = self.end_of(index);
         let remaining = self.remaining(index);
-        // The new segment starts halfway through what is left.
-        let start = end + 1 - remaining / 2;
+        // The new segment starts halfway through what is left; a tail too
+        // small to halve is taken whole, from where its connection is.
+        let take_over = remaining / 2 < self.min_segment;
+        let start = end + 1 - if take_over { remaining } else { remaining / 2 };
         self.state.segments[index].end = Some(start - 1);
         self.state.segments.insert(
             index + 1,
@@ -822,6 +863,9 @@ impl Board {
         );
         let mut live = Live::default();
         live.take(id, now);
+        if take_over {
+            live.take_overs = self.live[index].take_overs + 1;
+        }
         self.live.insert(index + 1, live);
         Steal::Split {
             from: segment.start,
@@ -998,6 +1042,11 @@ async fn request_range(
     from: u64,
     to: u64,
 ) -> Option<Stream> {
+    // At most `request_size` bytes in one request: the rest of the segment
+    // is asked for once this part has come (`Options::request_size`).
+    let to = ctx
+        .request_size
+        .map_or(to, |n| to.min(from.saturating_add(n - 1)));
     let request = ctx
         .browser
         .apply(&ctx.url, ctx.client.get(ctx.url.clone()))
@@ -1401,6 +1450,30 @@ mod tests {
             board.split_slowest(9, now),
             Steal::Split { from: 1000, .. }
         ));
+    }
+
+    /// A tail too small to halve, on a connection a server slows (YouTube's
+    /// first request): taken over whole, from where it is.
+    #[test]
+    fn a_slow_tail_too_small_to_halve_is_taken_over_whole() {
+        let now = Instant::now();
+        // 150 bytes left of segment 0 at 8.5 bytes a second: 17 s. The
+        // other segment is done.
+        let mut board = board(&[100 * SECOND, 100 * SECOND], &[850, 1000], now);
+        assert_eq!(
+            board.split_slowest(9, now),
+            Steal::Split {
+                from: 0,
+                start: 850,
+                end: 999
+            }
+        );
+        assert_eq!(board.state.segments[0].end, Some(849));
+        assert_eq!(board.live[1].take_overs, 1);
+        // Not again and again: after the last allowed time, it stays.
+        let mut board = super::tests::board(&[100 * SECOND, 100 * SECOND], &[850, 1000], now);
+        board.live[0].take_overs = MAX_TAKE_OVERS;
+        assert_eq!(board.split_slowest(9, now), Steal::Nothing);
     }
 
     #[test]

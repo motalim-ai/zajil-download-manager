@@ -210,3 +210,37 @@ async fn a_change_during_splitting_leaves_only_the_new_version() {
         .count();
     assert_eq!(from_old, 0);
 }
+
+/// A server that slows a request for much (YouTube): with
+/// `request_size`, no range request asks for more, and each connection
+/// asks again for the next part of its segment (owner's report,
+/// 2026-10-29).
+#[tokio::test]
+async fn range_requests_ask_for_at_most_the_request_size() {
+    let server = TestServer::http();
+    let data = random_bytes(6 * MIB as usize, 71);
+    server.put("/f.bin", FileSpec::new(data.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let done = engine()
+        .with_request_size(Some(MIB))
+        .download(&server.url("/f.bin"), dir.path(), &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        sha256_hex(&fs::read(&done.file).unwrap()),
+        sha256_hex(&data)
+    );
+    let ranges: Vec<(u64, u64)> = server
+        .gets("/f.bin")
+        .iter()
+        .filter_map(|r| {
+            let spec = r.range.as_deref()?.strip_prefix("bytes=")?;
+            let (from, to) = spec.split_once('-')?;
+            Some((from.parse().ok()?, to.parse().ok()?))
+        })
+        .collect();
+    assert!(ranges.len() >= 5, "{ranges:?}");
+    for (from, to) in &ranges {
+        assert!(to - from < MIB, "{from}-{to}");
+    }
+}

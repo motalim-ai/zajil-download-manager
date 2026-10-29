@@ -19,6 +19,7 @@ Fixes for what the owner found while downloading a YouTube playlist. The cause o
 
 ### Fixed
 
+- **YouTube downloads ran to 90% at once, then crawled for minutes** (owner's report, 2026-10-29: 98% at 31 KB/s). YouTube slows a request for much more than 10 MiB to the video's own pace, and Zajil's first request asked for the whole file; its segment was the last to end, too small left to split. YouTube's parts are now asked for in requests of at most 10 MiB (`Options::request_size`, as yt-dlp's `http_chunk_size`), the whole-file response is let go before its body, the picture takes 16 connections and the sound 8 (were 8 and 4), and a free connection takes over the whole of a slow tail too small to halve.
 - **A stopped YouTube video chosen as HLS could never go on:** YouTube numbers an HLS format anew at each read (`96-2`, then `96-1`), and resuming failed with «the chosen format is not one the probe found». A format the new read no longer offers now goes at the engine's best.
 - **A playlist's YouTube videos went as HLS** (itag 96), piece by piece through yt-dlp and never resumed: the best choice now takes a direct file before an HLS playlist of the same kind, which Zajil's own engine downloads with several connections and resumes.
 

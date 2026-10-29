@@ -18,8 +18,10 @@ use crate::engine::{Engine, Event, Stop};
 use crate::tools::Tool;
 
 /// Connections for each part: the picture takes most of them.
-const VIDEO_CONNECTIONS: usize = 8;
-const AUDIO_CONNECTIONS: usize = 4;
+const VIDEO_CONNECTIONS: usize = 16;
+const AUDIO_CONNECTIONS: usize = 8;
+/// The most bytes one request asks YouTube for.
+const REQUEST_SIZE: u64 = 10 << 20;
 /// The longest part of a name kept before `.f<id>.<ext>`, in bytes: with
 /// `.zajil-state` it stays far under [`crate::sanitize::MAX_NAME_BYTES`].
 const MAX_BASE_BYTES: usize = 120;
@@ -218,7 +220,12 @@ impl VideoRunner {
             } else {
                 VIDEO_CONNECTIONS
             };
-            let engine = self.engine.with_connections(connections);
+            // In parts of at most 10 MiB, as yt-dlp asks YouTube: a request
+            // for more is slowed (owner's report, 2026-10-29).
+            let engine = self
+                .engine
+                .with_connections(connections)
+                .with_request_size(Some(REQUEST_SIZE));
             async move {
                 let mut events = |event: Event| match event {
                     // Its size only: a continued part's `from` is where its

@@ -212,6 +212,11 @@ pub struct Options {
     /// by [`crate::settings::check_proxy`]); `None`: straight to the
     /// server. TLS is still checked end to end through it.
     pub proxy: Option<String>,
+    /// At most this many bytes per range request: a connection asks again
+    /// for the next part of its segment (`None`: the rest of its segment in
+    /// one request). YouTube slows a request for much more than 10 MiB, as
+    /// yt-dlp knows (its `http_chunk_size`).
+    pub request_size: Option<u64>,
 }
 
 impl Default for Options {
@@ -228,6 +233,7 @@ impl Default for Options {
             download_limit: None,
             clock: Arc::new(SystemClock::default()),
             proxy: None,
+            request_size: None,
         }
     }
 }
@@ -671,6 +677,14 @@ impl Engine {
     pub fn with_connections(&self, connections: usize) -> Engine {
         let mut engine = self.clone();
         engine.options.connections = connections.clamp(1, crate::MAX_CONNECTIONS);
+        engine
+    }
+
+    /// This engine, asking for at most `bytes` per range request (see
+    /// [`Options::request_size`]).
+    pub fn with_request_size(&self, bytes: Option<u64>) -> Engine {
+        let mut engine = self.clone();
+        engine.options.request_size = bytes.map(|b| b.max(1));
         engine
     }
 
@@ -1331,6 +1345,7 @@ impl Engine {
                     browser: self.browser.clone(),
                     connections: self.options.connections,
                     min_segment: self.options.min_segment_size,
+                    request_size: self.options.request_size,
                     save_interval: self.options.save_interval,
                     max_failures: self.options.max_failures,
                     stop: attempt.stop.clone(),
@@ -1524,6 +1539,7 @@ impl Engine {
                 browser: self.browser.clone(),
                 connections: self.options.connections,
                 min_segment: self.options.min_segment_size,
+                request_size: self.options.request_size,
                 save_interval: self.options.save_interval,
                 max_failures: self.options.max_failures,
                 stop: attempt.stop.clone(),
