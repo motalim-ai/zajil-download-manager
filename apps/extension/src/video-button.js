@@ -617,9 +617,9 @@
     if (!video) return;
     const src = video.currentSrc || video.src || "";
     setState("working");
+    const post = whole ? "" : postOf(video);
     // A longer address is left out, never cut into another one (review).
     /** @type {Record<string, unknown>} */
-    const post = whole ? "" : postOf(video);
     const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "", ...(post ? { post } : {}) };
     if (format) message.format = format;
     const answer = await answerTo(message);
