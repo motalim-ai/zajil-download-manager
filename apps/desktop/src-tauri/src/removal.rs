@@ -19,21 +19,32 @@ pub fn files_of(queues: &QueuesFile, ids: &[u64]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Deletes `files`, trying again for up to 10 s while they are still open.
+/// Deletes `files`, trying again for up to 10 s while they are still open,
+/// and again if one comes back within 2 s of the last: a download still
+/// running when it was deleted may save its state once more as it stops.
 pub fn delete_soon(files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
     std::thread::spawn(move || {
-        let mut left = files;
+        let mut quiet = 0;
         for _ in 0..20 {
-            left.retain(|f| f.exists() && std::fs::remove_file(f).is_err());
-            if left.is_empty() {
+            let left: Vec<&PathBuf> = files
+                .iter()
+                .filter(|f| f.exists() && std::fs::remove_file(f).is_err())
+                .collect();
+            let there = files.iter().any(|f| f.exists());
+            quiet = if left.is_empty() && !there {
+                quiet + 1
+            } else {
+                0
+            };
+            if quiet > 4 {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        for f in left {
+        for f in files.iter().filter(|f| f.exists()) {
             eprintln!("zajil: could not delete {}", f.display());
         }
     });
@@ -74,5 +85,24 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         panic!("the unfinished files were not deleted");
+    }
+
+    /// A state file saved once more by a download stopping as it was
+    /// deleted goes too.
+    #[test]
+    fn a_file_that_comes_back_is_deleted_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("a.bin.zajil-state");
+        std::fs::write(&state, b"x").unwrap();
+        delete_soon(vec![state.clone()]);
+        let gone = |within: u32| {
+            (0..within).any(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                !state.exists()
+            })
+        };
+        assert!(gone(30), "not deleted");
+        std::fs::write(&state, b"saved again").unwrap();
+        assert!(gone(30), "not deleted again");
     }
 }

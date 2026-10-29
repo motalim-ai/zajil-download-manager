@@ -17,6 +17,7 @@ Fixes for what the owner found right after trying 1.1. Tried by hand on macOS by
 - **Videos from X offered sound only:** X's direct MP4s do not say their codecs, and «Video quality» took them for sound. A format with no codecs said and a picture's size or a video's extension is now a picture with its sound, as yt-dlp's own «best» takes it (owner's report, 2026-10-29).
 - **A video in X's timeline or a profile** went to Zajil as the page's link, which yt-dlp does not read, so Zajil fell back to the playlist the page loaded last: often its sound alone, or one picture with a file's id for a name. The extension now sends the post's own link (the one on its time, of the same site only), and among the playlists a page loaded, the main one before a rendition (owner's report, 2026-10-29).
 - **Settings › Video tools** has a «Download the video tools» button for the ones not downloaded, with its progress and «Cancel». The list's message for missing tools points there.
+- **Deleting a download that had not finished** left its unfinished file on the disk unless «Also delete the unfinished files» was ticked, and it started unticked. It now starts ticked (owner's decision, 2026-10-29); unticking it keeps the files. A video deleted before it finished now goes with its parts too, and a state file a stopping download saves once more after it was deleted is deleted again.
 
 ## [1.1.0] - 2026-10-29
 

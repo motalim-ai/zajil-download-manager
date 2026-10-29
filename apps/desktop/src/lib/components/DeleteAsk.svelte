@@ -4,8 +4,9 @@
   import { locale } from "../i18n.svelte";
 
   // Deleting downloads that have not finished (an IDM touch): asks first,
-  // and whether their unfinished files go too (off at first: what came is
-  // kept, as when a finished download is taken off the list).
+  // and whether their unfinished files go too: on at first (owner's
+  // decision, 2026-10-29: a download deleted before it finished leaves
+  // nothing on the disk unless the user keeps it).
   let {
     unfinished,
     total,
@@ -17,7 +18,7 @@
     onanswer: (withFiles: boolean | null) => void;
   } = $props();
 
-  let withFiles = $state(false);
+  let withFiles = $state(true);
   let dialog: HTMLDivElement | undefined = $state();
   $effect(() => {
     void tick().then(() => dialog?.querySelector<HTMLButtonElement>("[data-cancel]")?.focus());
