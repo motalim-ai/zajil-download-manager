@@ -55,11 +55,14 @@
         return;
       }
       const prefs = await api.addPrefs().catch(() => null);
-      if (prefs?.start_while_open && !probe.page && !runsCode) {
+      if ((prefs?.start_at_once ?? true) && !probe.page && !runsCode) {
         const request = { url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null };
         try {
-          started = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
-          void api.openStartedProgress(started, probe.name).catch(() => {});
+          const id = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
+          // Held by this window until the user says where it goes: closing
+          // it removes the download with its files (Rust).
+          await api.holdStarted(id);
+          started = id;
         } catch {
           started = null;
         }
@@ -73,13 +76,14 @@
     error = null;
     try {
       if (started !== null) {
-        // Running already: «Start download» keeps it as the user leaves
-        // the category and description; «Download later» pauses it and
-        // moves it to the chosen queue.
+        // Running already: it moves to the folder and name the user chose
+        // and runs on («Start download»), or waits paused in the chosen
+        // queue («Download later»).
+        await api.placeStarted(request.folder, request.name, request.start);
         await api.setItemDetails(started, request.category, request.description);
-        if (!request.start) await api.pause([started]);
         if (request.queue && request.queue !== "main") await api.moveToQueue([started], request.queue);
         added = true;
+        if (request.start) void api.openStartedProgress(started, request.name ?? probe?.name ?? "").catch(() => {});
       } else {
         // From the browser, «Start download» is the user's OK for a file
         // that can run code: it is not held again.
@@ -112,9 +116,8 @@
   }
 
   // «Cancel»: a download started in the background is taken off the list
-  // and its unfinished files are deleted.
+  // with its files as the window closes (Rust).
   async function cancel() {
-    if (started !== null) await api.removeWithFiles([started]).catch(() => {});
     await api.closeWindow();
   }
 

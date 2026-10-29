@@ -122,7 +122,7 @@ fn open_window<R: tauri::Runtime>(
         windows::INFO_SIZE,
         false,
     )?;
-    let Some(window) = handle.get_webview_window(&label) else {
+    let Some(window) = windows::find(handle, &label) else {
         return Ok(());
     };
     window.set_always_on_top(true)?;
@@ -143,7 +143,7 @@ fn open_window<R: tauri::Runtime>(
 /// keeps it).
 fn close_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, n: u64) {
     handle.state::<Offers>().remove(n);
-    if let Some(window) = handle.get_webview_window(&label(n)) {
+    if let Some(window) = windows::find(handle, &label(n)) {
         let _ = window.close();
     }
 }

@@ -48,8 +48,8 @@
     onchoosefolder: () => Promise<string | null>;
     onnewcategory: () => void;
     /// The download started already, in the background (the setting
-    /// «Start downloading while the window is open»): its name and folder
-    /// are taken; its category and description can still change.
+    /// «Start downloading while the window is open»): it moves to the name
+    /// and folder chosen here once the user says.
     started?: boolean;
   } = $props();
 
@@ -239,7 +239,6 @@
             autocomplete="off"
             spellcheck="false"
             value={editing ? typed : fullPath}
-            readonly={started}
             oninput={(e) => (typed = e.currentTarget.value)}
             onfocus={startEditing}
             onblur={takeTyped}
@@ -252,7 +251,7 @@
             </span>
           {/if}
         </div>
-        <button class="btn square" disabled={started} title={locale.t("add-choose-folder")} aria-label={locale.t("add-choose-folder")} onclick={() => void change()}>...</button>
+        <button class="btn square" title={locale.t("add-choose-folder")} aria-label={locale.t("add-choose-folder")} onclick={() => void change()}>...</button>
       </div>
 
       <!-- Not for a web page: its warning takes the room. -->
@@ -271,13 +270,13 @@
   </div>
 
   <div class="actions">
-    {#if started}
-      <p class="started" role="status">{locale.t("add-started-note")}</p>
-    {:else if probe && category && folder !== null}
+    {#if probe && category && folder !== null}
       <label class="check">
         <input type="checkbox" bind:checked={remember} />
         {locale.t("add-remember", { category: categoryName(category) })}
       </label>
+    {:else if started}
+      <p class="started" role="status">{locale.t("add-started-note")}</p>
     {/if}
     <div class="buttons">
       <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>

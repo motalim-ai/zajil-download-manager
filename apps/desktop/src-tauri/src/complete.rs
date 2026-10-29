@@ -177,7 +177,20 @@ pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
     if !handle.state::<Show>().0.load(Ordering::Relaxed) {
         return;
     }
-    let (handle, id) = (handle.clone(), *item);
+    // Started by «Download file info», which is still open: it shows once
+    // the file is where the user wants it (`background.rs`).
+    if handle.state::<crate::background::Held>().holds(*item) {
+        return;
+    }
+    show_if_done(handle, *item);
+}
+
+/// Download `id`'s window, if it is done (and the user wants the window).
+pub fn show_if_done<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, id: u64) {
+    if !handle.state::<Show>().0.load(Ordering::Relaxed) {
+        return;
+    }
+    let handle = handle.clone();
     tauri::async_runtime::spawn(async move {
         let (store, settings) = {
             let app = handle.state::<App>();

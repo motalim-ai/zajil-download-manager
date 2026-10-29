@@ -28,6 +28,7 @@ import type { SettingsView } from "./bindings/SettingsView";
 import type { SettingsChange } from "./bindings/SettingsChange";
 import type { CategoryView } from "./bindings/CategoryView";
 import type { ImportView } from "./bindings/ImportView";
+import type { Role } from "./bindings/Role";
 
 export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
@@ -122,6 +123,18 @@ export const api = {
   /** The add window that asks becomes `height` tall (logical pixels), and
    * no shorter; `page`: the page's own height now. */
   fitWindow: (height: number, page: number) => invoke<void>("fit_window", { height, page }),
+  /** The role of this window, made beforehand and hidden: `null` until it
+   * takes one. */
+  windowRole: () => invoke<Role | null>("window_role"),
+  onWindowRole: (handler: (role: Role) => void): Promise<UnlistenFn> =>
+    listen<Role>("window-role", (event) => handler(event.payload)),
+  /** «Download file info» started download `id` in the background: closing
+   * the window without placing it removes it with its files. */
+  holdStarted: (id: number) => invoke<void>("hold_started", { id }),
+  /** The download this window started goes to `folder` under `name` (each
+   * `null`: as it is), then runs on (`start`) or waits paused. */
+  placeStarted: (folder: string | null, name: string | null, start: boolean) =>
+    invoke<number>("place_started", { folder, name, start }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

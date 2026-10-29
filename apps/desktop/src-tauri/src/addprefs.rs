@@ -11,7 +11,7 @@
 //! Kept with the window preferences (`window.json`).
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::State;
 use ts_rs::TS;
 
 use crate::closing::Closing;
@@ -26,15 +26,32 @@ pub enum ProgressShow {
     Hidden,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AddPrefs {
     #[serde(default)]
     pub progress_window: ProgressShow,
-    #[serde(default)]
-    pub start_while_open: bool,
+    /// On unless the user turns it off (the owner's request after trying
+    /// other download managers); a new name, so an earlier «off» that was
+    /// only the old default does not stay.
+    #[serde(default = "on")]
+    pub start_at_once: bool,
     #[serde(default)]
     pub browser_at_once: bool,
+}
+
+fn on() -> bool {
+    true
+}
+
+impl Default for AddPrefs {
+    fn default() -> Self {
+        AddPrefs {
+            progress_window: ProgressShow::default(),
+            start_at_once: true,
+            browser_at_once: false,
+        }
+    }
 }
 
 #[tauri::command]
@@ -77,7 +94,7 @@ pub(crate) fn show_started<R: tauri::Runtime>(
     crate::windows::open(handle, &label, title, crate::windows::PROGRESS_SIZE)
         .map_err(|e| e.to_string())?;
     if show == ProgressShow::Minimized
-        && let Some(window) = handle.get_webview_window(&label)
+        && let Some(window) = crate::windows::find(handle, &label)
     {
         window.minimize().map_err(|e| e.to_string())?;
     }
@@ -88,20 +105,23 @@ pub(crate) fn show_started<R: tauri::Runtime>(
 mod tests {
     use super::*;
 
-    /// At first the progress window shows and nothing starts before
-    /// «Start download»; a preferences file from before has the same.
+    /// At first the progress window shows and the download starts while
+    /// «Download file info» is open; a preferences file from before has the
+    /// same, even one where the old setting was off.
     #[test]
-    fn the_defaults_show_the_progress_and_start_nothing_early() {
+    fn the_defaults_show_the_progress_and_start_at_once() {
         assert_eq!(
             AddPrefs::default(),
             AddPrefs {
                 progress_window: ProgressShow::Shown,
-                start_while_open: false,
+                start_at_once: true,
                 browser_at_once: false
             }
         );
         let old: crate::closing::WindowPrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(old.add, AddPrefs::default());
+        let off: AddPrefs = serde_json::from_str(r#"{"start_while_open":false}"#).unwrap();
+        assert!(off.start_at_once);
         let some: AddPrefs = serde_json::from_str(r#"{"progress_window":"minimized"}"#).unwrap();
         assert_eq!(some.progress_window, ProgressShow::Minimized);
     }
@@ -117,7 +137,7 @@ mod tests {
             (true, false, false)
         );
         assert_eq!(prefs.add.progress_window, ProgressShow::Shown);
-        assert!(!prefs.add.start_while_open);
+        assert!(prefs.add.start_at_once);
         // A download from the browser asks first, as in IDM.
         assert!(!prefs.add.browser_at_once);
         assert!(!zajil_core::settings::SettingsFile::default().clipboard);

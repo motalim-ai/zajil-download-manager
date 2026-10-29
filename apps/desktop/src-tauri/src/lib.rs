@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod addprefs;
+mod background;
 mod batch;
 mod closing;
 mod complete;
@@ -222,6 +223,8 @@ pub fn run() {
         ))
         .manage(app)
         .manage(windows::Shared::default())
+        .manage(windows::Pool::default())
+        .manage(background::Held::default())
         .manage(offers::Offers::default())
         .manage(video::VideoState::default())
         .manage(batch::Pending::default())
@@ -447,7 +450,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::open_add_link,
         windows::pending_link,
         windows::open_add_info,
+        background::hold_started,
+        background::place_started,
         windows::pending_info,
+        windows::window_role,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -546,7 +552,10 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         windows::open_add_link,
         windows::pending_link,
         windows::open_add_info,
+        background::hold_started,
+        background::place_started,
         windows::pending_info,
+        windows::window_role,
         windows::fit_window,
         offers::offer_answer,
         offers::add_offer,
@@ -820,6 +829,7 @@ async fn run_queues(handle: tauri::AppHandle) {
                 };
                 on_queue_event(&event, &live, &links, &asks, &from_browser, &store, changed);
                 schedule::on_event(&handle, &event);
+                background::on_event(&handle, &event);
                 complete::on_event(&handle, &event);
                 notify(&handle, &live);
             })
@@ -885,6 +895,8 @@ async fn snapshot<R: tauri::Runtime>(
         // The page is up and talking to the program (the open-and-close
         // check of CI waits for this line).
         eprintln!("zajil: the window is ready");
+        // The windows the user waits for are made now, hidden.
+        windows::warm(&handle);
     }
     #[cfg(feature = "ui-test")]
     if let Some(snapshot) = handle.state::<ui_test::UiTest>().demo() {

@@ -14,6 +14,7 @@ mod http_date;
 pub mod limit;
 pub mod naming;
 pub mod queue;
+pub mod relocate;
 mod retry;
 pub mod sanitize;
 mod segmented;
