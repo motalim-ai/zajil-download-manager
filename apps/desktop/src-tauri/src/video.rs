@@ -807,6 +807,25 @@ fn remove_leftovers(row: &Row) {
     }
 }
 
+/// `choice` if this read of the page still offers its formats, else the
+/// engine's best: YouTube numbers an HLS format anew at each read (`96-2`,
+/// then `96-1`), so a stopped download chosen so could never go on (owner's
+/// report, 2026-10-29: «the chosen format is not one the probe found»).
+/// Nothing read (no formats): as it was.
+fn still_offered(choice: &ChoiceView, formats: &[Format]) -> ChoiceView {
+    let there = |id: &String| formats.iter().any(|f| &f.id == id);
+    let offered = match choice {
+        ChoiceView::Format { id } => there(id),
+        ChoiceView::Merge { video, audio } => there(video) && there(audio),
+        ChoiceView::AudioOnly | ChoiceView::Best => true,
+    };
+    if offered || formats.is_empty() {
+        choice.clone()
+    } else {
+        ChoiceView::Best
+    }
+}
+
 /// The format of `formats` that YouTube's itag `wanted` names: yt-dlp
 /// names a format by its itag, with a suffix for another language's sound
 /// or a "stable volume" one (`140-drc`), the plain one first.
@@ -1746,6 +1765,11 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                     };
                     // The engine's best, once chosen, is the row's choice from now on.
                     let chosen = formats.and_then(|formats| {
+                        let wanted = still_offered(&row.choice, &formats);
+                        if wanted != row.choice {
+                            eprintln!("zajil: video {id}: its format is gone, the best goes");
+                            row.choice = wanted;
+                        }
                         let choice = row.choice.resolved(&formats)?;
                         if row.choice == ChoiceView::Best {
                             with_row(&handle.state::<VideoState>(), id, |row| {
@@ -2191,6 +2215,29 @@ mod tests {
         .map(|e| VideoErrorView::from(e).kind)
         .collect();
         assert_eq!(kinds, ["drm", "refused", "tool", "output", "stopped", "io"]);
+    }
+
+    /// A stopped download whose format this read no longer offers (an HLS
+    /// one, numbered anew) goes at the engine's best; one still offered,
+    /// or with nothing read, as chosen.
+    #[test]
+    fn a_format_gone_since_goes_at_the_best() {
+        let f = |id: &str| -> Format {
+            serde_json::from_value(
+                serde_json::json!({ "format_id": id, "vcodec": "avc1", "acodec": "mp4a" }),
+            )
+            .unwrap()
+        };
+        let read = [f("96-1"), f("137"), f("140")];
+        let format = |id: &str| ChoiceView::Format { id: id.into() };
+        assert_eq!(still_offered(&format("96-2"), &read), ChoiceView::Best);
+        assert_eq!(still_offered(&format("96-1"), &read), format("96-1"));
+        let merge = ChoiceView::Merge {
+            video: "137".into(),
+            audio: "140".into(),
+        };
+        assert_eq!(still_offered(&merge, &read), merge);
+        assert_eq!(still_offered(&format("96-2"), &[]), format("96-2"));
     }
 
     /// «Delete» with the unfinished files: only the unfinished go with

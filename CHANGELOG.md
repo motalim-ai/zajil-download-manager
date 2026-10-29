@@ -19,6 +19,7 @@ Fixes for what the owner found while downloading a YouTube playlist. The cause o
 
 ### Fixed
 
+- **A stopped YouTube video chosen as HLS could never go on:** YouTube numbers an HLS format anew at each read (`96-2`, then `96-1`), and resuming failed with «the chosen format is not one the probe found». A format the new read no longer offers now goes at the engine's best.
 - **A playlist's YouTube videos went as HLS** (itag 96), piece by piece through yt-dlp and never resumed: the best choice now takes a direct file before an HLS playlist of the same kind, which Zajil's own engine downloads with several connections and resumes.
 
 - **The video tools asked for again while they were there** (owner's reports, 2026-10-29; a playlist made it happen at once): checking yt-dlp kept its 134 files open until the check ended, and two checks at once took macOS past a program's 256 open files («Too many open files»), so yt-dlp was taken for missing. Each file is now closed once hashed (Windows keeps them open, locked, as before), Zajil asks the system for its full limit of open files at the start, and a tool that still fails its check is checked once more a moment later, the first failure said in the log.
