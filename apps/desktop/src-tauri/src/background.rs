@@ -93,7 +93,7 @@ pub async fn place_started<R: tauri::Runtime>(
         .unwrap()
         .get(&label)
         .ok_or("this window started no download")?;
-    let result = place(&app, &held, id, folder, name, start).await;
+    let result = place(&app.store, &held, id, folder, name, start).await;
     let _ = handle.emit("downloads-changed", ());
     // Released only once it is placed: closing the window on an error
     // still deletes it.
@@ -105,7 +105,7 @@ pub async fn place_started<R: tauri::Runtime>(
 }
 
 async fn place(
-    app: &App,
+    store: &zajil_core::queue::QueueStore,
     held: &Held,
     id: u64,
     folder: Option<String>,
@@ -114,7 +114,7 @@ async fn place(
 ) -> Result<(), String> {
     let mut ended = held.ended.subscribe();
     // Paused first: nothing writes to its files while they move.
-    let was = blocking(&app.store, move |q| {
+    let was = blocking(store, move |q| {
         let item = q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
         let was = item.status;
         if matches!(was, Status::Active | Status::Waiting) {
@@ -136,13 +136,10 @@ async fn place(
         .await;
     }
     let folder = match folder {
-        Some(folder) => Some(
-            crate::chosen_folder(Some(&folder), &app.system_download_dir)
-                .map_err(|e| e.to_string())?,
-        ),
+        Some(folder) => Some(crate::chosen_folder(Some(&folder), Path::new(""))?),
         None => None,
     };
-    let store = app.store.clone();
+    let store = store.clone();
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let queues = store.load().map_err(|e| e.to_string())?;
         let item = queues
@@ -310,6 +307,101 @@ mod tests {
             "{name}"
         );
         assert_eq!(item.status, Status::Waiting);
+    }
+
+    /// The whole way, with the queues' runner: a download running from a
+    /// local server is moved to another folder and name while it runs,
+    /// and finishes there with all its bytes, none asked for twice.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_running_download_moves_and_finishes_where_the_user_said() {
+        use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
+        let server = TestServer::http();
+        let data = random_bytes(6 * 1024 * 1024, 5);
+        server.put("/f.bin", FileSpec::new(data.clone()).throttle(1024 * 1024));
+        let tmp = tempfile::tempdir().unwrap();
+        let (first, chosen) = (tmp.path().join("first"), tmp.path().join("chosen"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&chosen).unwrap();
+        let store = zajil_core::queue::QueueStore::new(tmp.path());
+        let url = server.url("/f.bin");
+        let id = store.update(|q| q.add("main", &url, &first)).unwrap();
+        let held = Held::default();
+        let ended = held.ended.clone();
+        let stop = zajil_core::Stop::new();
+        let runner = zajil_core::queue::Runner::new(
+            zajil_core::Engine::new(zajil_core::Options {
+                connections: 2,
+                ..zajil_core::Options::default()
+            })
+            .unwrap(),
+            store.clone(),
+        )
+        .poll(Duration::from_millis(50));
+        let running = {
+            let stop = stop.clone();
+            // Run again when something waits, as the app does
+            // (`run_queues`): a runner ends when nothing is left to run.
+            tokio::spawn(async move {
+                while !stop.is_requested() {
+                    let _ = runner
+                        .run(&stop, &mut |event| {
+                            if let QueueEvent::Stopped { item }
+                            | QueueEvent::Finished { item, .. }
+                            | QueueEvent::Failed { item, .. } = event
+                            {
+                                let _ = ended.send(item);
+                            }
+                        })
+                        .await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+        };
+        let item = |store: &zajil_core::queue::QueueStore| {
+            store.load().unwrap().item(id).cloned().unwrap()
+        };
+        // Running, with some of it on disk.
+        let mut waited = 0;
+        while item(&store).state_file.is_none() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            waited += 1;
+            assert!(waited < 500, "the download never started");
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(item(&store).status, Status::Active);
+        place(
+            &store,
+            &held,
+            id,
+            Some(chosen.to_string_lossy().into_owned()),
+            Some("الملف الجديد.bin".into()),
+            true,
+        )
+        .await
+        .unwrap();
+        let mut waited = 0;
+        while item(&store).status != Status::Done {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 1;
+            assert!(
+                waited < 600,
+                "the download never finished: {:?}",
+                item(&store)
+            );
+        }
+        stop.request();
+        let _ = running.await;
+        let file = item(&store).file.unwrap();
+        assert_eq!(file.file_name().unwrap(), "الملف الجديد.bin");
+        assert_eq!(file.parent().unwrap().file_name(), chosen.file_name());
+        assert_eq!(
+            sha256_hex(&std::fs::read(&file).unwrap()),
+            sha256_hex(&data)
+        );
+        assert_eq!(std::fs::read_dir(&first).unwrap().count(), 0);
+        // Resumed from where it was: the bytes sent add up to the file once.
+        let sent: u64 = server.gets("/f.bin").iter().map(|g| g.bytes_sent).sum();
+        assert!(sent < data.len() as u64 + 1024 * 1024, "{sent}");
     }
 
     /// Paused part-way: its files move, and it waits paused for «Download
