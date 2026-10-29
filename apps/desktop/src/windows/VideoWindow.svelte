@@ -48,6 +48,10 @@
   let nameTouched = false;
   let folderTouched = false;
   let unlisten: (() => void)[] = [];
+  // Nothing is drawn before the window knows what it shows: a download the
+  // browser started, or a page to ask about (the owner's notes: no view
+  // that is replaced by another as soon as it shows).
+  let decided = $state(false);
 
   onMount(() => {
     if (scene) {
@@ -67,6 +71,7 @@
       unlisten.push(await api.onChange(() => step.kind === "started" && void showStarted()));
       unlisten.push(await api.onVideoStarted(() => void showStarted(true)));
       if (await showStarted(true)) return;
+      decided = true;
       const pending = await api.videoPending().catch(() => null);
       if (pending) {
         url = pending;
@@ -85,6 +90,7 @@
       nameTouched = false;
       folderTouched = false;
       step = { kind: "started", id: s.id, label: s.label, size: s.size, status: s.status, error: s.error };
+      decided = true;
       await tick();
       document.querySelector<HTMLElement>("[data-first]")?.focus();
     } else step = { ...step, label: s.label ?? step.label, size: step.size ?? s.size, status: s.status, error: s.error };
@@ -239,7 +245,9 @@
 <main class="video" aria-labelledby="video-title">
   <h1 id="video-title" class="visually-hidden">{locale.t("video-title")}</h1>
 
-  {#if step.kind === "link"}
+  {#if !decided && !scene}
+    <!-- Not known yet: nothing, for a few milliseconds. -->
+  {:else if step.kind === "link"}
     <form class="col" onsubmit={(e) => (e.preventDefault(), typed.trim() && ((url = typed.trim()), void begin()))}>
       <label class="label" for="video-url">{locale.t("video-page")}</label>
       <input id="video-url" class="box" dir="ltr" autocomplete="off" spellcheck="false" bind:value={typed} data-first />
@@ -349,10 +357,10 @@
     <section class="col">
       <h2 class="title" dir="auto">{name || locale.t("video-started-reading")}</h2>
       <div class="grid">
-        {#if s.label}
-          <span class="label">{locale.t("video-quality")}</span>
-          <bdi class="box" dir="ltr">{s.label}</bdi>
-        {/if}
+        <!-- Every row from the first frame: what comes later fills them
+             in, it adds none (the owner's notes). -->
+        <span class="label">{locale.t("video-quality")}</span>
+        <bdi class="box" dir="ltr">{s.label ?? "…"}</bdi>
         <span class="label">{locale.t("video-size")}</span>
         <span class="box num">{s.size === null ? locale.t("add-size-unknown") : size(locale.lang, locale.digits, s.size)}</span>
         <label class="label" for="started-name">{locale.t("add-file-name")}</label>
@@ -372,9 +380,12 @@
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
       </div>
-      {#if s.status === "failed"}
-        <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
-      {/if}
+      <!-- Its room is kept: the buttons do not move when it comes. -->
+      <div class="slot">
+        {#if s.status === "failed"}
+          <p class="problem" role="alert"><Icon name="circle-alert" size={16} />{s.error ?? ""}</p>
+        {/if}
+      </div>
       <div class="actions">
         <button class="btn primary" disabled={!folder || s.status === "failed"} onclick={() => void keep(s.id, true)} data-first>
           <Icon name="download" size={15} />{locale.t("add-start")}
@@ -560,6 +571,9 @@
     display: block;
     height: 100%;
     background: var(--accent);
+  }
+  .slot {
+    min-height: 22px;
   }
   .actions {
     display: flex;
