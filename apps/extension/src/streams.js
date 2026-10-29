@@ -139,10 +139,29 @@ export async function note(browserApi, details) {
 }
 
 /**
+ * Whether a playlist holds one rendition only (its sound, or one size of its
+ * picture), as a player loads after the main one: X's `/pl/mp4a/128000/…`
+ * and `/pl/avc1/1280x720/…`. yt-dlp reads the main one whole, picture and
+ * sound; a rendition alone gave sound only (owner's report, 2026-10-29).
+ *
+ * @param {string} url @returns {boolean}
+ */
+export function isRendition(url) {
+  let path;
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return path.split("/").some((part) => /^(mp4a|avc1|hvc1|hev1|av01|vp09|audio|video)$/.test(part) || /^\d{2,5}x\d{2,5}$/.test(part));
+}
+
+/**
  * The playlist to send with a tab's video whose own address only the page
  * can read: the newest one loaded by the same document (by its id when both
- * sides know it, else by its frame and origin); or none. Never another
- * frame's, nor another page's (review of #151).
+ * sides know it, else by its frame and origin), a main one before a
+ * rendition ([isRendition]); or none. Never another frame's, nor another
+ * page's (review of #151).
  *
  * @param {any} browserApi @param {number} tab
  * @param {{ frame?: number, doc?: string, origin?: string }} [want]
@@ -155,5 +174,6 @@ export async function streamFor(browserApi, tab, want = {}) {
     if (want.doc && s.doc) return s.doc === want.doc;
     return Boolean(want.origin && s.origin && s.origin === want.origin);
   };
-  return (await streamsOf(browserApi, tab)).filter(same).at(-1)?.url;
+  const mine = (await streamsOf(browserApi, tab)).filter(same);
+  return (mine.filter((s) => !isRendition(s.url)).at(-1) ?? mine.at(-1))?.url;
 }

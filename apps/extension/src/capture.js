@@ -158,13 +158,17 @@ export function menuMessage(info, cookies = null, from = {}) {
  * Without an address of its own, the playlist the tab loaded for it goes
  * instead (`streams.js`), when there is one.
  *
- * @param {{ pageUrl?: string, frameUrl?: string, srcUrl?: string }} info
+ * A video in a post of a feed (X's timeline, a profile) goes as that post's
+ * own page (`postUrl`, checked by the background to be of the same site):
+ * yt-dlp reads a post, not a feed (owner's report, 2026-10-29).
+ *
+ * @param {{ pageUrl?: string, frameUrl?: string, srcUrl?: string, postUrl?: string }} info
  * @param {{ cookies?: string | null, private?: boolean, stream?: string }} [extra]
  *   the page's `Cookie` header, if allowed; whether it is a private
  *   window's; the playlist noted for it
  */
 export function videoMessage(info, extra = {}) {
-  const page = isWeb(info.frameUrl) ? info.frameUrl : info.pageUrl;
+  const page = isWeb(info.postUrl) ? info.postUrl : isWeb(info.frameUrl) ? info.frameUrl : info.pageUrl;
   if (!isWeb(page)) return null;
   /** @type {Record<string, unknown>} */
   const message = { type: "video", protocol_version: PROTOCOL_VERSION, page };
@@ -174,6 +178,21 @@ export function videoMessage(info, extra = {}) {
   if (extra.private) message.private = true;
   else if (extra.cookies) message.cookies = extra.cookies;
   return message;
+}
+
+/**
+ * The post a video's button sent (`postUrl`), if it is a web page of the
+ * same site as the page it was found in; else undefined: a page's script
+ * never sends Zajil elsewhere.
+ * @param {unknown} post @param {string | undefined} page @returns {string | undefined}
+ */
+export function samePost(post, page) {
+  if (typeof post !== "string" || post.length > 8192 || !isWeb(post) || !isWeb(page)) return undefined;
+  try {
+    return new URL(post).origin === new URL(/** @type {string} */ (page)).origin ? post : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** YouTube's own sites, where a playlist has a page of its own. */
