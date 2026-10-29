@@ -24,6 +24,7 @@
   let {
     url,
     probe,
+    guess = null,
     error,
     busy,
     queues,
@@ -38,6 +39,10 @@
   }: {
     url: string;
     probe: ProbeView | null;
+    /// What the link's address says, before the server answers: every row
+    /// is drawn with it, and the answer fills them in, so the window never
+    /// grows (the owner's notes: it opened small, then grew).
+    guess?: ProbeView | null;
     error: string | null;
     /// An add is on its way: the buttons wait (review of #48: two clicks
     /// added the download twice).
@@ -74,16 +79,18 @@
   // becomes the download's; the category itself is kept once zajil-core
   // keeps one for an item (#103).
   let picked = $state<string | null | undefined>(undefined);
-  const category = $derived(picked === undefined ? (probe?.category ?? null) : picked);
+  // The server's answer, else what the address says.
+  const shown = $derived(probe ?? guess);
+  const category = $derived(picked === undefined ? (shown?.category ?? null) : picked);
   const where = $derived(
-    probe
+    shown
       ? chosenFolder({
           categories,
-          detected: probe.category,
+          detected: shown.category,
           picked: category,
           byHand: folder,
-          detectedFolder: probe.folder,
-          downloadFolder: probe.download_folder,
+          detectedFolder: shown.folder,
+          downloadFolder: shown.download_folder,
         })
       : { shown: "", request: null },
   );
@@ -91,24 +98,34 @@
   let later = $state(false);
   let main: HTMLElement | undefined = $state();
 
-  // The focus goes to the main button once the server has answered:
-  // «Start download», or «Cancel» when the link is a web page. Without
-  // scrolling: the window is still growing to the answer's height (the
-  // owner's notes on the 1.0 draft, the rows went off the top).
-  $effect(() => {
-    if (probe && !busy) main?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus({ preventScroll: true });
-  });
+  // The focus goes to the main button once the window has its rows:
+  // «Start download», or «Cancel» once the server says the link is a web
+  // page, unless the user is typing in a box by then. Without scrolling
+  // (the owner's notes on the 1.0 draft, the rows went off the top).
+  let focused = false;
   const page = $derived(probe?.page === true);
+  // The buttons wait for an add on its way, and for a link the server
+  // refused; before the server answers they add with what the address says.
+  const blocked = $derived(busy || (error !== null && !probe));
+  $effect(() => {
+    if (!shown || busy) return;
+    const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLSelectElement;
+    if (focused && (!page || typing)) return;
+    focused = true;
+    main?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus({ preventScroll: true });
+  });
 
   // The user's own name, else the translated built-in one (as the sidebar).
   const categoryName = (id: string) => nameOf(id, categories.find((c) => c.id === id)?.name, (k) => locale.t(k));
-  const extension = $derived((/\.([^.]+)$/.exec(probe?.name ?? "")?.[1] ?? "").toUpperCase());
+  const extension = $derived((/\.([^.]+)$/.exec(shown?.name ?? "")?.[1] ?? "").toUpperCase());
 
   // The name and the description as the user leaves them (#103, #95).
   let name = $state("");
   let description = $state("");
+  // The user's own name stays when the server answers.
+  let ownName = false;
   $effect(() => {
-    if (probe) name = probe.name;
+    if (shown && !ownName) name = shown.name;
   });
   // «Save as»: one box with the whole path, the folder and the name (as
   // IDM's). Typed, its last part is the name and the rest the folder.
@@ -127,7 +144,9 @@
     editing = false;
     const said = typedPath(typed, where.shown);
     // An emptied name means the server's.
-    name = said.name || (probe?.name ?? "");
+    if (said.name && said.name !== name) ownName = true;
+    if (!said.name) ownName = false;
+    name = said.name || (shown?.name ?? "");
     if (said.folder !== null) folder = said.folder;
   }
   function add(start: boolean, into = queue) {
@@ -136,7 +155,7 @@
     const own = name.trim();
     const request = {
       url,
-      name: own && own !== probe?.name ? own : null,
+      name: own && own !== shown?.name ? own : null,
       // Kept only when the user picked one (#103); else by name or site.
       category: picked === undefined ? null : category,
       description: description.trim() || null,
@@ -170,7 +189,7 @@
   // its own, and on a web page; Escape closes the queues, then cancels.
   function onkeydown(event: KeyboardEvent) {
     if (event.key === "Enter") {
-      if (event.target instanceof HTMLButtonElement || later || !probe || busy || page || event.isComposing) return;
+      if (event.target instanceof HTMLButtonElement || later || blocked || page || event.isComposing) return;
       event.preventDefault();
       add(true);
       return;
@@ -205,7 +224,14 @@
         </span>
       </p>
     {:else}
-      <p class="waiting" role="status">{locale.t("add-checking")}</p>
+      <!-- The same line while the server is asked: the size waits in its
+           place, and nothing moves when it comes. -->
+      <p class="known" role="status">
+        <span class="type" aria-hidden="true"><Icon name={categoryIcon(shown?.category ?? null)} size={15} /></span>
+        <strong class="pending" aria-hidden="true">…</strong>
+        <span class="kind">{shown?.category ? categoryName(shown.category) : locale.t("category-none")} {extension}</span>
+        <span class="waiting">{locale.t("add-checking")}</span>
+      </p>
     {/if}
   </div>
 
@@ -213,121 +239,119 @@
     <span class="label">{locale.t("add-url")}</span>
     <div class="value"><bdi dir="ltr" class="text">{url}</bdi></div>
 
-    {#if probe}
-      <span class="label">{locale.t("add-category")}</span>
-      <div class="with">
-        <label class="value pick">
-          <Icon name={categoryIcon(category)} size={15} />
-          <select
-            aria-label={locale.t("add-category")}
-            value={category ?? ""}
-            onchange={(e) => (picked = e.currentTarget.value || null)}
-          >
-            {#each categories as c (c.id)}
-              <option value={c.id}>
-                {#if c.id === probe.category && probe.category_site}
-                  {locale.t("add-category-site", { category: categoryName(c.id), site: probe.category_site })}
-                {:else if c.id === probe.category && probe.category_extension}
-                  {locale.t("add-category-extension", { category: categoryName(c.id), extension: probe.category_extension })}
-                {:else}
-                  {categoryName(c.id)}
-                {/if}
-              </option>
-            {/each}
-            <option value="">{locale.t("category-none")}</option>
-          </select>
-        </label>
-        <button class="btn square" title={locale.t("add-new-category")} aria-label={locale.t("add-new-category")} onclick={onnewcategory}>
-          <Icon name="circle-plus" size={15} />
-        </button>
-      </div>
+    <!-- Every row from the first frame (the owner's notes): the server's
+         answer fills them in, it adds none. -->
+    <span class="label">{locale.t("add-category")}</span>
+    <div class="with">
+      <label class="value pick">
+        <Icon name={categoryIcon(category)} size={15} />
+        <select
+          aria-label={locale.t("add-category")}
+          value={category ?? ""}
+          onchange={(e) => (picked = e.currentTarget.value || null)}
+        >
+          {#each categories as c (c.id)}
+            <option value={c.id}>
+              {#if c.id === shown?.category && shown.category_site}
+                {locale.t("add-category-site", { category: categoryName(c.id), site: shown.category_site })}
+              {:else if c.id === shown?.category && shown.category_extension}
+                {locale.t("add-category-extension", { category: categoryName(c.id), extension: shown.category_extension })}
+              {:else}
+                {categoryName(c.id)}
+              {/if}
+            </option>
+          {/each}
+          <option value="">{locale.t("category-none")}</option>
+        </select>
+      </label>
+      <button class="btn square" title={locale.t("add-new-category")} aria-label={locale.t("add-new-category")} onclick={onnewcategory}>
+        <Icon name="circle-plus" size={15} />
+      </button>
+    </div>
 
-      <label class="label" for="add-name">{locale.t("add-save-as")}</label>
-      <div class="with">
-        <!-- The whole path: the folder, then the name it is saved under
-             (the server's, or the user's own, #103). -->
-        <div class="namebox">
-          <input
-            id="add-name"
-            class="value name"
-            class:quiet={!editing}
-            dir="ltr"
-            autocomplete="off"
-            spellcheck="false"
-            value={editing ? typed : fullPath}
-            oninput={(e) => (typed = e.currentTarget.value)}
-            onfocus={startEditing}
-            onblur={takeTyped}
-          />
-          <!-- Only drawn: the box holds the path for the keyboard and
-               screen readers, and clicks go through to it. -->
-          {#if !editing}
-            <span class="value name shown" dir="ltr" aria-hidden="true">
-              <bdi class="dir">{fullPath.slice(0, fullPath.length - name.length)}</bdi><span class="file" dir={nameDir(name)}><FileName {name} /></span>
-            </span>
-          {/if}
-        </div>
-        <button class="btn square" title={locale.t("add-choose-folder")} aria-label={locale.t("add-choose-folder")} onclick={() => void change()}>...</button>
-      </div>
-
-      <!-- Not for a web page: its warning takes the room. -->
-      {#if !page}
-        <label class="label" for="add-queue">{locale.t("add-queue")}</label>
-        <div class="with">
-          <label class="value pick">
-            <Icon name="list-ordered" size={15} />
-            <select id="add-queue" bind:value={queue}>
-              {#each queues as q (q.name)}
-                <option value={q.name}>{q.name === "main" ? locale.t("queue-main") : q.name}</option>
-              {/each}
-            </select>
-          </label>
-          <label class="conns">
-            <span class="label">{locale.t("add-connections")}</span>
-            <input
-              class="value num count"
-              type="number"
-              min="1"
-              max={maxConnections}
-              value={ownConnections ?? connections}
-              onchange={(e) => connectionsTyped(e.currentTarget)}
-            />
-          </label>
-        </div>
-        <label class="label" for="add-description">{locale.t("add-description")}</label>
+    <label class="label" for="add-name">{locale.t("add-save-as")}</label>
+    <div class="with">
+      <!-- The whole path: the folder, then the name it is saved under
+           (the server's, or the user's own, #103). -->
+      <div class="namebox">
         <input
-          id="add-description"
+          id="add-name"
           class="value name"
-          dir="auto"
-          maxlength="1000"
-          placeholder={locale.t("add-description-hint")}
-          bind:value={description}
+          class:quiet={!editing}
+          dir="ltr"
+          autocomplete="off"
+          spellcheck="false"
+          value={editing ? typed : fullPath}
+          oninput={(e) => (typed = e.currentTarget.value)}
+          onfocus={startEditing}
+          onblur={takeTyped}
         />
-      {/if}
-    {/if}
+        <!-- Only drawn: the box holds the path for the keyboard and
+             screen readers, and clicks go through to it. -->
+        {#if !editing}
+          <span class="value name shown" dir="ltr" aria-hidden="true">
+            <bdi class="dir">{fullPath.slice(0, fullPath.length - name.length)}</bdi><span class="file" dir={nameDir(name)}><FileName {name} /></span>
+          </span>
+        {/if}
+      </div>
+      <button class="btn square" title={locale.t("add-choose-folder")} aria-label={locale.t("add-choose-folder")} onclick={() => void change()}>...</button>
+    </div>
+
+    <!-- Off for a web page, in their place. -->
+    <label class="label" for="add-queue">{locale.t("add-queue")}</label>
+    <div class="with">
+      <label class="value pick">
+        <Icon name="list-ordered" size={15} />
+        <select id="add-queue" bind:value={queue} disabled={page}>
+          {#each queues as q (q.name)}
+            <option value={q.name}>{q.name === "main" ? locale.t("queue-main") : q.name}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="conns">
+        <span class="label">{locale.t("add-connections")}</span>
+        <input
+          class="value num count"
+          type="number"
+          min="1"
+          max={maxConnections}
+          value={ownConnections ?? connections}
+          disabled={page}
+          onchange={(e) => connectionsTyped(e.currentTarget)}
+        />
+      </label>
+    </div>
+    <label class="label" for="add-description">{locale.t("add-description")}</label>
+    <input
+      id="add-description"
+      class="value name"
+      dir="auto"
+      maxlength="1000"
+      placeholder={locale.t("add-description-hint")}
+      disabled={page}
+      bind:value={description}
+    />
   </div>
 
   <div class="actions">
-    {#if probe && category && folder !== null}
+    {#if shown && category && folder !== null}
       <label class="check">
         <input type="checkbox" bind:checked={remember} />
         {locale.t("add-remember", { category: categoryName(category) })}
       </label>
-    {:else if started}
-      <p class="started" role="status">{locale.t("add-started-note")}</p>
     {/if}
     <div class="buttons">
-      <button class="btn" class:primary={!page} disabled={!probe || busy} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
+      <button class="btn" class:primary={!page} disabled={blocked} onclick={() => add(true)} data-autofocus={page ? undefined : true}>
         <Icon name="down" size={15} />{locale.t("add-start")}
       </button>
       <div class="split">
-        <button class="btn" disabled={!probe || busy} onclick={() => add(false)}>
+        <button class="btn" disabled={blocked} onclick={() => add(false)}>
           <Icon name="list-ordered" size={15} />{locale.t("add-later")}
         </button>
         <button
           id="add-later-more"
           class="btn more"
-          disabled={!probe || busy}
+          disabled={blocked}
           aria-label={locale.t("add-later-queue")}
           aria-haspopup="menu"
           aria-expanded={later}
@@ -360,7 +384,17 @@
     background: var(--surface);
     box-sizing: border-box;
   }
+  /* Two lines, whatever it says (the size, a web page, an error): the rows
+     under it never move. */
+  .about {
+    display: flex;
+    align-items: center;
+    height: 40px;
+    min-width: 0;
+  }
   .about p {
+    flex: 1;
+    min-width: 0;
     display: flex;
     gap: 8px;
     align-items: center;
@@ -392,7 +426,8 @@
   .resume.no {
     color: var(--amber);
   }
-  .waiting {
+  .waiting,
+  .pending {
     color: var(--muted);
   }
   .problem {
@@ -530,7 +565,6 @@
     gap: 10px;
     align-items: center;
   }
-  .started,
   .check {
     margin: 0;
     font-size: 12px;

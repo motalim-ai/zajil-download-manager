@@ -4,6 +4,7 @@
   import { api } from "../lib/api";
   import { locale } from "../lib/i18n.svelte";
   import { startWindow } from "../lib/windowStart";
+  import { showFitted } from "../lib/fitWindow";
   import type { PendingLink } from "../lib/bindings/PendingLink";
 
   // The «Add a link» window: OK opens «Download file info» for the link,
@@ -22,6 +23,7 @@
         problem = null;
       });
       pending ??= (await api.pendingLink().catch(() => null)) ?? { url: "", from_clipboard: false };
+      await showFitted();
     })();
     return () => unlisten?.();
   });

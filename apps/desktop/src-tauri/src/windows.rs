@@ -30,11 +30,12 @@ pub const INFO: &str = "add-info";
 /// page makes it taller when what it shows needs more ([`fit_window`]).
 /// Its link, its note and its buttons, with room under them.
 pub const LINK_SIZE: (f64, f64) = (560.0, 190.0);
-/// The «Download file info» window's, the same way: the server's answer
-/// with every row (the line about the file, the link, the category, «Save
-/// as», the description and the buttons), with room under them, so it
-/// opens at the size it keeps (the owner's notes on the 1.0 draft).
-pub const INFO_SIZE: (f64, f64) = (560.0, 290.0);
+/// The «Download file info» window's, the same way: every row (the line
+/// about the file, the link, the category, «Save as», the queue, the
+/// description and the buttons), drawn from its first frame, so it opens
+/// at the size it keeps and never grows when the server answers (the
+/// owner's notes: it opened small, then grew).
+pub const INFO_SIZE: (f64, f64) = (560.0, 316.0);
 
 /// The settings window (the owner's request: a window of its own with a
 /// list of sections at its side, as in other download managers).
@@ -136,9 +137,12 @@ pub(crate) fn open_page<R: tauri::Runtime>(
     // A window made beforehand, hidden, with its page loaded: it only
     // takes its role and shows (the owner's request: windows open at once).
     if let Some(window) = take_spare(handle, label, page) {
+        // What the page misses of the window, once learned: the window
+        // opens at the height its page fits, not 32 pixels short of it.
+        let missing = missing(Kind::of(label));
         window.set_title(title)?;
-        window.set_min_size(Some(tauri::LogicalSize::new(least.0, least.1)))?;
-        window.set_size(tauri::LogicalSize::new(width, height))?;
+        window.set_min_size(Some(tauri::LogicalSize::new(least.0, least.1 + missing)))?;
+        window.set_size(tauri::LogicalSize::new(width, height + missing))?;
         window.center()?;
         on_gone(handle, &window, label);
         let _ = handle.emit_to(
@@ -149,8 +153,19 @@ pub(crate) fn open_page<R: tauri::Runtime>(
                 page: page.to_owned(),
             },
         );
-        window.show()?;
-        return window.set_focus();
+        // A progress window shows at once: it can be minimized next
+        // (`addprefs::show_started`), and its size never changes.
+        if !matches!(Kind::of(label), Some(Kind::Link | Kind::Info)) {
+            window.show()?;
+            return window.set_focus();
+        }
+        // An add window shows once its page has drawn the role, at its
+        // height ([`window_ready`]), so its first frame is the whole
+        // window, not an empty or short one that fills in and grows (the
+        // owner's notes). Shown anyway if the page does not say so soon: a
+        // page asleep must not keep the window from the user.
+        show_at_latest(&window);
+        return Ok(());
     }
     let builder = WebviewWindowBuilder::new(
         handle,
@@ -170,10 +185,15 @@ pub(crate) fn open_page<R: tauri::Runtime>(
     };
     #[cfg(not(windows))]
     let _ = owned;
+    // An add window made now is hidden until its page is drawn, as a
+    // spare one ([`window_ready`]).
+    let add = matches!(Kind::of(label), Some(Kind::Link | Kind::Info));
+    let missing = missing(Kind::of(label));
     let window = builder
         .title(title)
-        .inner_size(width, height)
-        .min_inner_size(least.0, least.1)
+        .inner_size(width, height + missing)
+        .min_inner_size(least.0, least.1 + missing)
+        .visible(!add)
         .resizable(true)
         .maximizable(false)
         .minimizable(false)
@@ -181,6 +201,9 @@ pub(crate) fn open_page<R: tauri::Runtime>(
         .focused(true)
         .build()?;
     on_gone(handle, &window, label);
+    if add {
+        show_at_latest(&window);
+    }
     Ok(())
 }
 
@@ -319,6 +342,39 @@ fn take_spare<R: tauri::Runtime>(
     );
     refill(handle, kind, std::time::Duration::from_millis(400));
     Some(window)
+}
+
+/// How long a spare window that took a role waits for its page to say it
+/// is drawn before it shows anyway.
+const SHOW_AT_LATEST: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Shows add window `window` after [`SHOW_AT_LATEST`] if its page has not
+/// said it is drawn by then ([`window_ready`]).
+fn show_at_latest<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let late = window.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(SHOW_AT_LATEST).await;
+        show_once(&late);
+    });
+}
+
+/// Shows `window` and brings it to the front, unless it shows already.
+fn show_once<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    if window.is_visible().unwrap_or(true) {
+        return;
+    }
+    crate::measure::shown(window);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// The page of an add window has drawn its rows, at its height: the
+/// window shows ([`open_page`]).
+#[tauri::command]
+pub fn window_ready<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
+    if matches!(Kind::of(&role_of(&window)), Some(Kind::Link | Kind::Info)) {
+        show_once(&window);
+    }
 }
 
 /// The role of the window that asks, once it has one (`None`: a spare).
@@ -502,6 +558,10 @@ pub async fn fit_window<R: tauri::Runtime>(
         .entry(kind)
         .or_insert((now.height - page).clamp(0.0, 100.0));
     let height = height.max(opened) + missing;
+    if (height - now.height).abs() < 1.0 {
+        return Ok(());
+    }
+    crate::measure::resized(&window, now.height, height);
     // The least first: a window going shorter is not held by the old one.
     if let Some(least) = least {
         window
@@ -511,6 +571,17 @@ pub async fn fit_window<R: tauri::Runtime>(
     window
         .set_size(tauri::LogicalSize::new(now.width, height))
         .map_err(|e| e.to_string())
+}
+
+/// What the page of a window of `kind` misses of its content's height, if
+/// [`fit_window`] learned it already (else 0).
+fn missing(kind: Option<Kind>) -> f64 {
+    let kind = match kind {
+        Some(Kind::Link) => LINK,
+        Some(Kind::Info) => INFO,
+        _ => return 0.0,
+    };
+    MISSING.lock().unwrap().get(kind).copied().unwrap_or(0.0)
 }
 
 /// What the page of each kind of add window misses of its content's
