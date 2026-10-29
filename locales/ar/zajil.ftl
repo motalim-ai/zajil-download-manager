@@ -705,7 +705,7 @@ video-playlists-only = هذه قوائم تشغيل: افتح كل واحدة م
 video-error-playlist = هذا الرابط قائمة تشغيل لا فيديو. افتحه في «جودة الفيديو» لتختار منه.
 video-done = اكتمل تحميل الفيديو.
 video-drm = هذا الفيديو محمي، وزاجِل لا يحمّل المحتوى المحمي.
-video-tools-missing = أدوات الفيديو غير مثبتة أو تغيّرت. افتح النافذة من جديد لتنزيلها.
+video-tools-missing = أدوات الفيديو غير منزّلة أو تغيّرت. نزّلها من الإعدادات ← أدوات الفيديو، أو حمّل الفيديو من جديد.
 video-tools-not-ready = نُزِّل yt-dlp لكنه لم يبدأ، فأدوات الفيديو ليست جاهزة. حاول مرة أخرى، وإن تكرر ذلك فأخبرنا بما في «التفاصيل».
 video-error-no_formats = لم يجد زاجِل جودة يمكن تحميلها من هذا الفيديو. جرّب مرة أخرى بعد قليل.
 video-error-sign_in = هذا الفيديو لا يُفتح إلا بعد تسجيل الدخول في موقعه. سجّل دخولك في المتصفح واسمح للإضافة بإرسال الكوكيز، ثم أعد المحاولة.
@@ -723,12 +723,15 @@ queue-video = فيديو
 
 ## Video tools in the settings and «About» (M6, #149)
 settings-video-tools = أدوات الفيديو
-settings-video-tools-hint = تُنزَّل بموافقتك أول مرة تحمّل فيها فيديو، وتُحفظ في مجلد بيانات زاجِل.
+settings-video-tools-hint = تُنزَّل بموافقتك أول مرة تحمّل فيها فيديو، أو من هنا، وتُحفظ في مجلد بيانات زاجِل.
 settings-video-tools-ready = جاهزة
 settings-video-tools-missing = غير منزّلة
 settings-video-tools-remove = حذف أدوات الفيديو
 settings-video-tools-remove-question = تُحذف أدوات الفيديو، وتُنزَّل من جديد بموافقتك حين تحمّل فيديو. هل تحذفها؟
 settings-video-tools-removed = حُذفت أدوات الفيديو.
+settings-video-tools-install = نزّل أدوات الفيديو
+settings-video-tools-installing = تنزيل { $tool }… { $percent }
+settings-video-tools-installed = أدوات الفيديو جاهزة.
 about-video-tools = يحمّل زاجِل الفيديو بأدوات حرة، تُنزَّل من مصادرها:
 about-ffmpeg = يستعمل هذا البرنامج مكتبات من مشروع FFmpeg بترخيص { $license }.
 about-tool = { $tool } { $version }، بترخيص { $license }. مصدره: { $source }

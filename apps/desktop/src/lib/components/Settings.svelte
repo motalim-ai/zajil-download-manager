@@ -17,6 +17,8 @@
   import SiteLimitsSetting from "./SiteLimitsSetting.svelte";
   import type { ToolView } from "../bindings/ToolView";
   import { licenseOf, toolName, versionOf } from "../about";
+  import { errorDetails, errorKey } from "../videoErrors";
+  import type { VideoErrorView } from "../bindings/VideoErrorView";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { loadDoubleClick, saveDoubleClick, type DoubleClick } from "../doubleClick";
 
@@ -244,12 +246,31 @@
     box.checked = autostart === true;
   }
 
-  // The video tools (M6, #149): what is installed, and deleting them.
+  // The video tools (M6, #149): what is installed, downloading what is
+  // missing (owner, 2026-10-29), and deleting them.
   let tools = $state<ToolView[]>([]);
+  let installing = $state<{ tool: string; done: number; total: number | null } | null>(null);
   let toolsSaid = $state<{ text: string; problem: boolean } | null>(null);
   onMount(() => {
     void api.videoToolsStatus().then((t) => (tools = t), (e) => (toolsSaid = { text: String(e), problem: true }));
   });
+  async function installTools() {
+    installing = { tool: "", done: 0, total: null };
+    toolsSaid = null;
+    const off = await api.onVideoToolsProgress((p) => installing && (installing = p)).catch(() => () => {});
+    try {
+      await api.videoToolsInstall();
+      toolsSaid = { text: locale.t("settings-video-tools-installed"), problem: false };
+    } catch (e) {
+      const why = e as VideoErrorView | string;
+      const details = errorDetails(why);
+      toolsSaid = { text: locale.t(errorKey(why)) + (details ? ` (${details})` : ""), problem: true };
+    } finally {
+      off();
+      installing = null;
+      tools = await api.videoToolsStatus().catch(() => tools);
+    }
+  }
   async function removeTools() {
     const yes = await ask(locale.t("settings-video-tools-remove-question"), {
       title: locale.t("settings-video-tools"),
@@ -439,9 +460,19 @@
         </tbody>
       </table>
     {/if}
-    {#if tools.some((t) => t.installed)}
+    {#if installing}
       <div class="row">
-        <button class="btn" onclick={() => void removeTools()}><Icon name="trash" />{locale.t("settings-video-tools-remove")}</button>
+        <p role="status">{locale.t("settings-video-tools-installing", { tool: toolName(installing.tool), percent: installing.total ? `${Math.round((installing.done / installing.total) * 100)}%` : "" })}</p>
+        <button class="btn" onclick={() => void api.videoToolsCancel().catch(() => {})}>{locale.t("add-cancel")}</button>
+      </div>
+    {:else if tools.length > 0}
+      <div class="row">
+        {#if tools.some((t) => !t.installed)}
+          <button class="btn primary" onclick={() => void installTools()}><Icon name="download" />{locale.t("settings-video-tools-install")}</button>
+        {/if}
+        {#if tools.some((t) => t.installed)}
+          <button class="btn" onclick={() => void removeTools()}><Icon name="trash" />{locale.t("settings-video-tools-remove")}</button>
+        {/if}
       </div>
     {/if}
     {#if toolsSaid}<p class={toolsSaid.problem ? "problem" : "done"} role="status">{toolsSaid.text}</p>{/if}

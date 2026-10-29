@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **The video tools from the browser's list:** a quality chosen in the browser while the video tools were not downloaded ended in «Video quality» with only a message to open the window again, which said the same. Now the window asks for the tools, downloads them, and the download starts again; «Cancel» removes it (owner's report, 2026-10-29).
+- **Settings › Video tools** has a «Download the video tools» button for the ones not downloaded, with its progress and «Cancel». The list's message for missing tools points there.
+
 ## [1.1.0] - 2026-10-29
 
 Speed in downloads and in the windows, and a new look (owner's decision of 2026-10-29, after the owner tried 1.0 on a Mac). Signed automatic updates move from 1.1 to 1.2 (owner's decision of 2026-10-29). Tried by hand on macOS by the owner; on Windows and Linux, checked by CI's tests only, its UI tests among them (every window opened with its page, and a download from the link to «Open folder»).
