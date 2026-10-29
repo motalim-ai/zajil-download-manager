@@ -17,6 +17,7 @@
   import type { ToolView } from "../bindings/ToolView";
   import { licenseOf, toolName, versionOf } from "../about";
   import { ask } from "@tauri-apps/plugin-dialog";
+  import { loadDoubleClick, saveDoubleClick, type DoubleClick } from "../doubleClick";
 
   let {
     settings,
@@ -40,6 +41,53 @@
     /** What the last action said (an import's summary, or an error). */
     message: { text: string; problem: boolean } | null;
   } = $props();
+
+  // The sections at the window's side (the owner's request, as in other
+  // download managers), each with its icon.
+  const SECTIONS = [
+    ["general", "sliders"],
+    ["types", "tag"],
+    ["saveto", "folder"],
+    ["downloads", "down"],
+    ["connection", "link-2"],
+    ["proxy", "globe"],
+    ["logins", "key"],
+    ["sounds", "sound"],
+    ["speed", "gauge"],
+    ["appearance", "sun"],
+  ] as const;
+  let section = $state<(typeof SECTIONS)[number][0]>("general");
+
+  // What a double-click on a finished download does.
+  const DOUBLE = [
+    ["open", "settings-double-click-open"],
+    ["folder", "settings-double-click-folder"],
+    ["details", "settings-double-click-details"],
+  ] as const;
+  let doubleClick = $state<DoubleClick>(loadDoubleClick());
+  function setDoubleClick(choice: DoubleClick) {
+    doubleClick = choice;
+    saveDoubleClick(choice);
+  }
+
+  // The proxy: it applies when Zajil next starts.
+  let proxy = $state("");
+  let proxyOn = $state(false);
+  let proxySaid = $state<{ text: string; problem: boolean } | null>(null);
+  onMount(() => {
+    api.proxySetting().then(
+      (p) => ((proxy = p ?? ""), (proxyOn = p !== null)),
+      () => {},
+    );
+  });
+  async function saveProxy() {
+    try {
+      await api.setProxy(proxyOn ? proxy.trim() || null : null);
+      proxySaid = { text: locale.t("settings-proxy-saved"), problem: false };
+    } catch (e) {
+      proxySaid = { text: String(e), problem: true };
+    }
+  }
 
   const KIB = 1024;
   const MIB = 1024 * 1024;
@@ -234,11 +282,19 @@
 </script>
 
 <section class="page" aria-labelledby="settings-title">
+  <nav class="sections" aria-label={locale.t("settings-title")}>
+    {#each SECTIONS as [id, icon] (id)}
+      <button class="section" class:on={section === id} aria-current={section === id ? "page" : undefined} onclick={() => (section = id)}>
+        <Icon name={icon} size={16} />{locale.t(`settings-section-${id}`)}
+      </button>
+    {/each}
+  </nav>
+  <div class="content">
   <header>
-    <h1 id="settings-title">{locale.t("settings-title")}</h1>
+    <h1 id="settings-title">{locale.t(`settings-section-${section}`)}</h1>
     <p class="hint">{locale.t("settings-applied")}</p>
   </header>
-
+  {#if section === "general"}
   <fieldset>
     <legend>{locale.t("settings-language")}</legend>
     <div class="choices">
@@ -251,33 +307,73 @@
     </div>
     <p class="hint">{locale.t("settings-language-hint")}</p>
   </fieldset>
-
   <fieldset>
-    <legend>{locale.t("settings-theme")}</legend>
-    <div class="choices">
-      {#each ["system", "light", "dark"] as value (value)}
-        <label class="choice">
-          <input type="radio" name="theme" {value} checked={settings.theme === value} onchange={() => change({ theme: value as SettingsChange["theme"] })} />
-          <span>{locale.t(`settings-theme-${value}`)}</span>
-        </label>
-      {/each}
-    </div>
-    <p class="hint">{locale.t("settings-theme-hint")}</p>
+    <legend>{locale.t("settings-autostart")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget)} />
+      <span>{locale.t("settings-autostart-label")}</span>
+    </label>
+    {#if autostartProblem}<p class="hint problem" role="alert">{autostartProblem}</p>{/if}
   </fieldset>
-
   <fieldset>
-    <legend>{locale.t("settings-digits")}</legend>
-    <div class="choices">
-      {#each [["latn", "123"], ["arab", "١٢٣"]] as [value, label] (value)}
-        <label class="choice">
-          <input type="radio" name="digits" {value} checked={settings.digits === value} onchange={() => change({ digits: value as SettingsChange["digits"] })} />
-          <span class="num">{label}</span>
-        </label>
-      {/each}
-    </div>
-    <p class="hint">{locale.t("settings-digits-hint")}</p>
+    <legend>{locale.t("settings-closing")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={closeQuits || !hasTray} disabled={!hasTray} onchange={(e) => void setCloseQuits(e.currentTarget.checked)} />
+      <span>{locale.t("settings-closing-label")}</span>
+    </label>
+    <p class="hint">{locale.t(hasTray ? "settings-closing-hint" : "settings-closing-no-tray")}</p>
   </fieldset>
-
+  <fieldset>
+    <legend>{locale.t("settings-double-click")}</legend>
+    {#each DOUBLE as [value, text] (value)}
+      <label class="choice">
+        <input type="radio" name="double-click" checked={doubleClick === value} onchange={() => setDoubleClick(value)} />
+        <span>{locale.t(text)}</span>
+      </label>
+    {/each}
+    <p class="hint">{locale.t("settings-double-click-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-clipboard")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={settings.clipboard} onchange={(e) => change({ clipboard: e.currentTarget.checked })} />
+      <span>{locale.t("settings-clipboard-label")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-clipboard-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-notifications")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
+      <span>{locale.t("settings-notifications-label")}</span>
+    </label>
+    <CompleteSetting />
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("update-setting-title")}</legend>
+    <UpdateSetting checked={settings.update_check} onchange={(on) => change({ update_check: on })} />
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("drop-box")}</legend>
+    <label class="choice">
+      <input type="checkbox" checked={dropBox} onchange={(e) => void setDropBox(e.currentTarget.checked)} />
+      <span>{locale.t("settings-drop-box-label")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-drop-box-hint")}</p>
+  </fieldset>
+  {:else if section === "types"}
+  <fieldset>
+    <legend>{locale.t("settings-section-types")}</legend>
+    <p class="hint">{locale.t("settings-types-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("categories-title")}</legend>
+    <p class="hint">{locale.t("categories-hint")}</p>
+    <div class="row">
+      <button class="btn" onclick={oncategories}><Icon name="tag" />{locale.t("settings-edit-categories")}</button>
+    </div>
+  </fieldset>
+  {:else if section === "saveto"}
   <fieldset>
     <legend>{locale.t("settings-folder")}</legend>
     <div class="row">
@@ -289,7 +385,67 @@
     </div>
     <p class="hint">{locale.t("settings-folder-hint")}</p>
   </fieldset>
-
+  {:else if section === "downloads"}
+  <fieldset>
+    <legend>{locale.t("settings-new-download")}</legend>
+    <span class="sub">{locale.t("settings-progress-window")}</span>
+    {#each PROGRESS as [value, text] (value)}
+      <label class="choice">
+        <input type="radio" name="progress-window" checked={addPrefs.progress_window === value} onchange={() => void setAddPrefs({ ...addPrefs, progress_window: value })} />
+        <span>{locale.t(text)}</span>
+      </label>
+    {/each}
+    <label class="choice">
+      <input type="checkbox" checked={addPrefs.start_at_once} onchange={(e) => void setAddPrefs({ ...addPrefs, start_at_once: e.currentTarget.checked })} />
+      <span>{locale.t("settings-start-while-open")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-start-while-open-hint")}</p>
+    <label class="choice">
+      <input type="checkbox" checked={addPrefs.browser_at_once} onchange={(e) => void setAddPrefs({ ...addPrefs, browser_at_once: e.currentTarget.checked })} />
+      <span>{locale.t("settings-browser-at-once")}</span>
+    </label>
+    <p class="hint">{locale.t("settings-browser-at-once-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-queues")}</legend>
+    <div class="row">
+      <button class="btn" onclick={onexport}><Icon name="down" />{locale.t("settings-export")}</button>
+      <button class="btn" onclick={onimport}><Icon name="open" />{locale.t("settings-import")}</button>
+      <label class="check"><input type="checkbox" bind:checked={keepFolders} />{locale.t("settings-import-keep-folders")}</label>
+    </div>
+    <p class="hint warn"><Icon name="alert" />{locale.t("settings-export-warning")}</p>
+    {#if message}
+      <p class={message.problem ? "problem" : "done"} role={message.problem ? "alert" : "status"}>{message.text}</p>
+    {/if}
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-video-tools")}</legend>
+    <p class="hint">{locale.t("settings-video-tools-hint")}</p>
+    {#if tools.length > 0}
+      <table class="tools">
+        <thead>
+          <tr><th scope="col">{locale.t("video-tool")}</th><th scope="col">{locale.t("video-version")}</th><th scope="col">{locale.t("video-license")}</th><th scope="col">{locale.t("progress-status")}</th></tr>
+        </thead>
+        <tbody>
+          {#each tools as t (t.tool)}
+            <tr>
+              <td>{toolName(t.tool)}</td>
+              <td>{versionOf(t)}</td>
+              <td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td>
+              <td class:ready={t.installed}>{locale.t(t.installed ? "settings-video-tools-ready" : "settings-video-tools-missing")}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+    {#if tools.some((t) => t.installed)}
+      <div class="row">
+        <button class="btn" onclick={() => void removeTools()}><Icon name="trash" />{locale.t("settings-video-tools-remove")}</button>
+      </div>
+    {/if}
+    {#if toolsSaid}<p class={toolsSaid.problem ? "problem" : "done"} role="status">{toolsSaid.text}</p>{/if}
+  </fieldset>
+  {:else if section === "connection"}
   <fieldset>
     <legend><label for="connections">{locale.t("settings-connections")}</label></legend>
     <input
@@ -309,12 +465,75 @@
       })}
     </p>
   </fieldset>
-
   <fieldset>
     <legend>{locale.t("sites-title")}</legend>
     <SiteLimitsSetting list={settings.site_connections} onsave={(list) => change({ site_connections: list })} />
   </fieldset>
-
+  {:else if section === "proxy"}
+  <fieldset>
+    <legend><label for="proxy">{locale.t("settings-proxy")}</label></legend>
+    <div class="choices">
+      <label class="choice">
+        <input type="radio" name="proxy" checked={!proxyOn} onchange={() => { proxyOn = false; void saveProxy(); }} />
+        <span>{locale.t("settings-proxy-none")}</span>
+      </label>
+      <label class="choice">
+        <input type="radio" name="proxy" checked={proxyOn} onchange={() => (proxyOn = true)} />
+        <span>{locale.t("settings-proxy-use")}</span>
+      </label>
+    </div>
+    <div class="row">
+      <input id="proxy" class="value wide" dir="ltr" placeholder="http://proxy.example:8080" bind:value={proxy} disabled={!proxyOn} spellcheck="false" autocomplete="off" />
+      <button class="btn" disabled={!proxyOn} onclick={() => void saveProxy()}>{locale.t("settings-proxy-save")}</button>
+    </div>
+    <p class="hint">{locale.t("settings-proxy-hint")}</p>
+    {#if proxySaid}<p class={proxySaid.problem ? "problem" : "done"} role="status">{proxySaid.text}</p>{/if}
+  </fieldset>
+  {:else if section === "logins"}
+  <fieldset>
+    <legend>{locale.t("settings-section-logins")}</legend>
+    <p class="hint">{locale.t("settings-logins-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-browser")}</legend>
+    <p class="hint">{locale.t("settings-browser-hint")}</p>
+    <div class="row">
+      <button class="btn" aria-disabled={fixing} onclick={() => void fixIntegration()}>{locale.t("settings-browser-fix")}</button>
+    </div>
+    <div role="status" aria-live="polite" aria-busy={fixing}>
+      {#if fixing}
+        <p class="hint">{locale.t("settings-browser-working")}</p>
+      {:else if integrationProblem}
+        <p class="problem">{integrationProblem}</p>
+      {:else if integration?.host_problem}
+        <p class="problem">{locale.t(HOST_PROBLEMS[integration.host_problem])}</p>
+      {:else if integration}
+        <ul class="browsers">
+          {#each integration.browsers as b (b.browser)}
+            <li class={b.error ? "problem" : "done"}>
+              {b.error
+                ? locale.t("settings-browser-failed", { browser: BROWSERS[b.browser] ?? b.browser, error: b.error })
+                : locale.t("settings-browser-ok", { browser: BROWSERS[b.browser] ?? b.browser })}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  </fieldset>
+  {:else if section === "sounds"}
+  <fieldset>
+    <legend>{locale.t("settings-sounds")}</legend>
+    {#each SOUNDS as [key, text] (key)}
+      <label class="choice">
+        <input type="checkbox" checked={sounds[key]} onchange={(e) => void setSound(key, e.currentTarget.checked)} />
+        <span>{locale.t(text)}</span>
+        <button class="btn quiet hear" type="button" aria-label={locale.t("settings-sound-try")} title={locale.t("settings-sound-try")} onclick={() => play(key)}>
+          <Icon name="play" size={13} />
+        </button>
+      </label>
+    {/each}
+  </fieldset>
+  {:else if section === "speed"}
   <fieldset>
     <legend>{locale.t("settings-limit")}</legend>
     <div class="choices">
@@ -343,166 +562,33 @@
     </div>
     <p class="hint">{locale.t("settings-limit-hint")}</p>
   </fieldset>
-
+  {:else if section === "appearance"}
   <fieldset>
-    <legend>{locale.t("settings-notifications")}</legend>
-    <label class="choice">
-      <input type="checkbox" checked={settings.notifications} onchange={(e) => change({ notifications: e.currentTarget.checked })} />
-      <span>{locale.t("settings-notifications-label")}</span>
-    </label>
-    <CompleteSetting />
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("update-setting-title")}</legend>
-    <UpdateSetting checked={settings.update_check} onchange={(on) => change({ update_check: on })} />
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-closing")}</legend>
-    <label class="choice">
-      <input type="checkbox" checked={closeQuits || !hasTray} disabled={!hasTray} onchange={(e) => void setCloseQuits(e.currentTarget.checked)} />
-      <span>{locale.t("settings-closing-label")}</span>
-    </label>
-    <p class="hint">{locale.t(hasTray ? "settings-closing-hint" : "settings-closing-no-tray")}</p>
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("drop-box")}</legend>
-    <label class="choice">
-      <input type="checkbox" checked={dropBox} onchange={(e) => void setDropBox(e.currentTarget.checked)} />
-      <span>{locale.t("settings-drop-box-label")}</span>
-    </label>
-    <p class="hint">{locale.t("settings-drop-box-hint")}</p>
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-new-download")}</legend>
-    <span class="sub">{locale.t("settings-progress-window")}</span>
-    {#each PROGRESS as [value, text] (value)}
-      <label class="choice">
-        <input type="radio" name="progress-window" checked={addPrefs.progress_window === value} onchange={() => void setAddPrefs({ ...addPrefs, progress_window: value })} />
-        <span>{locale.t(text)}</span>
-      </label>
-    {/each}
-    <label class="choice">
-      <input type="checkbox" checked={addPrefs.start_at_once} onchange={(e) => void setAddPrefs({ ...addPrefs, start_at_once: e.currentTarget.checked })} />
-      <span>{locale.t("settings-start-while-open")}</span>
-    </label>
-    <p class="hint">{locale.t("settings-start-while-open-hint")}</p>
-    <label class="choice">
-      <input type="checkbox" checked={addPrefs.browser_at_once} onchange={(e) => void setAddPrefs({ ...addPrefs, browser_at_once: e.currentTarget.checked })} />
-      <span>{locale.t("settings-browser-at-once")}</span>
-    </label>
-    <p class="hint">{locale.t("settings-browser-at-once-hint")}</p>
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-sounds")}</legend>
-    {#each SOUNDS as [key, text] (key)}
-      <label class="choice">
-        <input type="checkbox" checked={sounds[key]} onchange={(e) => void setSound(key, e.currentTarget.checked)} />
-        <span>{locale.t(text)}</span>
-        <button class="btn quiet hear" type="button" aria-label={locale.t("settings-sound-try")} title={locale.t("settings-sound-try")} onclick={() => play(key)}>
-          <Icon name="play" size={13} />
-        </button>
-      </label>
-    {/each}
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-clipboard")}</legend>
-    <label class="choice">
-      <input type="checkbox" checked={settings.clipboard} onchange={(e) => change({ clipboard: e.currentTarget.checked })} />
-      <span>{locale.t("settings-clipboard-label")}</span>
-    </label>
-    <p class="hint">{locale.t("settings-clipboard-hint")}</p>
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-browser")}</legend>
-    <p class="hint">{locale.t("settings-browser-hint")}</p>
-    <div class="row">
-      <button class="btn" aria-disabled={fixing} onclick={() => void fixIntegration()}>{locale.t("settings-browser-fix")}</button>
+    <legend>{locale.t("settings-theme")}</legend>
+    <div class="choices">
+      {#each ["system", "light", "dark"] as value (value)}
+        <label class="choice">
+          <input type="radio" name="theme" {value} checked={settings.theme === value} onchange={() => change({ theme: value as SettingsChange["theme"] })} />
+          <span>{locale.t(`settings-theme-${value}`)}</span>
+        </label>
+      {/each}
     </div>
-    <div role="status" aria-live="polite" aria-busy={fixing}>
-      {#if fixing}
-        <p class="hint">{locale.t("settings-browser-working")}</p>
-      {:else if integrationProblem}
-        <p class="problem">{integrationProblem}</p>
-      {:else if integration?.host_problem}
-        <p class="problem">{locale.t(HOST_PROBLEMS[integration.host_problem])}</p>
-      {:else if integration}
-        <ul class="browsers">
-          {#each integration.browsers as b (b.browser)}
-            <li class={b.error ? "problem" : "done"}>
-              {b.error
-                ? locale.t("settings-browser-failed", { browser: BROWSERS[b.browser] ?? b.browser, error: b.error })
-                : locale.t("settings-browser-ok", { browser: BROWSERS[b.browser] ?? b.browser })}
-            </li>
-          {/each}
-        </ul>
-      {/if}
+    <p class="hint">{locale.t("settings-theme-hint")}</p>
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-digits")}</legend>
+    <div class="choices">
+      {#each [["latn", "123"], ["arab", "١٢٣"]] as [value, label] (value)}
+        <label class="choice">
+          <input type="radio" name="digits" {value} checked={settings.digits === value} onchange={() => change({ digits: value as SettingsChange["digits"] })} />
+          <span class="num">{label}</span>
+        </label>
+      {/each}
     </div>
+    <p class="hint">{locale.t("settings-digits-hint")}</p>
   </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-video-tools")}</legend>
-    <p class="hint">{locale.t("settings-video-tools-hint")}</p>
-    {#if tools.length > 0}
-      <table class="tools">
-        <thead>
-          <tr><th scope="col">{locale.t("video-tool")}</th><th scope="col">{locale.t("video-version")}</th><th scope="col">{locale.t("video-license")}</th><th scope="col">{locale.t("progress-status")}</th></tr>
-        </thead>
-        <tbody>
-          {#each tools as t (t.tool)}
-            <tr>
-              <td>{toolName(t.tool)}</td>
-              <td>{versionOf(t)}</td>
-              <td>{licenseOf((key, args) => locale.t(key, args), t.tool)}</td>
-              <td class:ready={t.installed}>{locale.t(t.installed ? "settings-video-tools-ready" : "settings-video-tools-missing")}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {/if}
-    {#if tools.some((t) => t.installed)}
-      <div class="row">
-        <button class="btn" onclick={() => void removeTools()}><Icon name="trash" />{locale.t("settings-video-tools-remove")}</button>
-      </div>
-    {/if}
-    {#if toolsSaid}<p class={toolsSaid.problem ? "problem" : "done"} role="status">{toolsSaid.text}</p>{/if}
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-autostart")}</legend>
-    <label class="choice">
-      <input type="checkbox" checked={autostart === true} disabled={autostart === null} onchange={(e) => void setAutostart(e.currentTarget)} />
-      <span>{locale.t("settings-autostart-label")}</span>
-    </label>
-    {#if autostartProblem}<p class="hint problem" role="alert">{autostartProblem}</p>{/if}
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("categories-title")}</legend>
-    <p class="hint">{locale.t("categories-hint")}</p>
-    <div class="row">
-      <button class="btn" onclick={oncategories}><Icon name="tag" />{locale.t("settings-edit-categories")}</button>
-    </div>
-  </fieldset>
-
-  <fieldset>
-    <legend>{locale.t("settings-queues")}</legend>
-    <div class="row">
-      <button class="btn" onclick={onexport}><Icon name="down" />{locale.t("settings-export")}</button>
-      <button class="btn" onclick={onimport}><Icon name="open" />{locale.t("settings-import")}</button>
-      <label class="check"><input type="checkbox" bind:checked={keepFolders} />{locale.t("settings-import-keep-folders")}</label>
-    </div>
-    <p class="hint warn"><Icon name="alert" />{locale.t("settings-export-warning")}</p>
-    {#if message}
-      <p class={message.problem ? "problem" : "done"} role={message.problem ? "alert" : "status"}>{message.text}</p>
-    {/if}
-  </fieldset>
+  {/if}
+  </div>
 </section>
 
 <style>
@@ -514,10 +600,54 @@
     margin-inline-start: 4px;
     padding: 2px 6px;
   }
+  /* The sections at the side, the chosen one beside them. */
   .page {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sections {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 10px;
+    border-inline-end: 1px solid var(--line);
+    background: var(--sunken);
+    overflow: auto;
+  }
+  .section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    font: inherit;
+    font-size: 13.5px;
+    color: var(--ink);
+    text-align: start;
+    cursor: pointer;
+  }
+  .section:hover {
+    background: var(--sel);
+  }
+  .section.on {
+    background: var(--sel);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .content {
     overflow: auto;
     padding: 20px 28px 32px;
     max-width: 760px;
+  }
+  .wide {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
   }
   header {
     margin-bottom: 8px;

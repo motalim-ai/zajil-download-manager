@@ -28,6 +28,8 @@
   let started = $state<number | null>(null);
   let queues = $state<QueueView[]>([]);
   let categories = $state<CategoryView[]>([]);
+  let connections = $state(8);
+  let maxConnections = $state(32);
 
   onMount(() => {
     void (async () => {
@@ -35,6 +37,10 @@
       const start = await api.pendingInfo().catch(() => null);
       url = start?.url ?? "";
       offer = start?.offer ?? null;
+      void api.settings().then(
+        (s) => ((connections = s.connections), (maxConnections = s.max_connections)),
+        () => {},
+      );
       try {
         const snapshot = await api.snapshot();
         queues = snapshot.queues;
@@ -56,7 +62,7 @@
       }
       const prefs = await api.addPrefs().catch(() => null);
       if ((prefs?.start_at_once ?? true) && !probe.page && !runsCode) {
-        const request = { url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null };
+        const request = { url, name: null, category: null, description: null, queue: "main", folder: null, start: true, limit: null, connections: null };
         try {
           const id = offer !== null ? await api.addOffer(offer, request, true) : await api.add(request);
           // Held by this window until the user says where it goes: closing
@@ -79,7 +85,7 @@
         // Running already: it moves to the folder and name the user chose
         // and runs on («Start download»), or waits paused in the chosen
         // queue («Download later»).
-        await api.placeStarted(request.folder, request.name, request.start);
+        await api.placeStarted(request.folder, request.name, request.start, request.connections);
         await api.setItemDetails(started, request.category, request.description);
         if (request.queue && request.queue !== "main") await api.moveToQueue([started], request.queue);
         added = true;
@@ -139,4 +145,6 @@
   onchoosefolder={chooseFolder}
   onnewcategory={() => void api.showMainView("categories")}
   started={started !== null}
+  {connections}
+  {maxConnections}
 />

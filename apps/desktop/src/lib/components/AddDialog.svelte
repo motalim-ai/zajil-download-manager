@@ -33,6 +33,8 @@
     onchoosefolder,
     onnewcategory,
     started = false,
+    connections = 8,
+    maxConnections = 32,
   }: {
     url: string;
     probe: ProbeView | null;
@@ -51,7 +53,20 @@
     /// «Start downloading while the window is open»): it moves to the name
     /// and folder chosen here once the user says.
     started?: boolean;
+    /// The program's connections for a download, shown at first.
+    connections?: number;
+    maxConnections?: number;
   } = $props();
+
+  // The queue it goes to, and its own connections (the owner's request, as
+  // in other download managers); `null`: the program's.
+  let queue = $state("main");
+  let ownConnections = $state<number | null>(null);
+  function connectionsTyped(box: HTMLInputElement) {
+    const n = Math.round(Number(box.value));
+    if (Number.isFinite(n) && n >= 1 && n <= maxConnections) ownConnections = n === connections ? null : n;
+    else box.value = String(ownConnections ?? connections);
+  }
 
   // A folder the user chose by hand; `null`: the picked category's.
   let folder = $state<string | null>(null);
@@ -115,7 +130,7 @@
     name = said.name || (probe?.name ?? "");
     if (said.folder !== null) folder = said.folder;
   }
-  function add(start: boolean, queue = "main") {
+  function add(start: boolean, into = queue) {
     if (editing) takeTyped();
     later = false;
     const own = name.trim();
@@ -125,10 +140,11 @@
       // Kept only when the user picked one (#103); else by name or site.
       category: picked === undefined ? null : category,
       description: description.trim() || null,
-      queue,
+      queue: into,
       folder: where.request,
       start,
       limit: null,
+      connections: ownConnections,
     };
     if (!busy) onadd(request, remember && folder !== null ? category : null);
   }
@@ -256,6 +272,28 @@
 
       <!-- Not for a web page: its warning takes the room. -->
       {#if !page}
+        <label class="label" for="add-queue">{locale.t("add-queue")}</label>
+        <div class="with">
+          <label class="value pick">
+            <Icon name="list-ordered" size={15} />
+            <select id="add-queue" bind:value={queue}>
+              {#each queues as q (q.name)}
+                <option value={q.name}>{q.name === "main" ? locale.t("queue-main") : q.name}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="conns">
+            <span class="label">{locale.t("add-connections")}</span>
+            <input
+              class="value num count"
+              type="number"
+              min="1"
+              max={maxConnections}
+              value={ownConnections ?? connections}
+              onchange={(e) => connectionsTyped(e.currentTarget)}
+            />
+          </label>
+        </div>
         <label class="label" for="add-description">{locale.t("add-description")}</label>
         <input
           id="add-description"
@@ -470,6 +508,17 @@
   }
   .pick:focus-within {
     border-color: var(--accent);
+  }
+  .conns {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex: none;
+  }
+  .count {
+    width: 64px;
+    font: inherit;
+    color: var(--ink);
   }
   .square {
     padding-inline: 8px;

@@ -77,12 +77,14 @@ pub fn hold_started<R: tauri::Runtime>(
 /// asks started: it goes to `folder` (`None`: where it is) under `name`
 /// (`None`: its name), then runs on when `start`, or waits paused.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // a command's arguments are the page's
 pub async fn place_started<R: tauri::Runtime>(
     app: State<'_, App>,
     held: State<'_, Held>,
     folder: Option<String>,
     name: Option<String>,
     start: bool,
+    connections: Option<u32>,
     window: tauri::WebviewWindow<R>,
     handle: tauri::AppHandle<R>,
 ) -> Result<u64, String> {
@@ -93,7 +95,7 @@ pub async fn place_started<R: tauri::Runtime>(
         .unwrap()
         .get(&label)
         .ok_or("this window started no download")?;
-    let result = place(&app.store, &held, id, folder, name, start).await;
+    let result = place(&app.store, &held, id, folder, name, start, connections).await;
     let _ = handle.emit("downloads-changed", ());
     // Released only once it is placed: closing the window on an error
     // still deletes it.
@@ -111,6 +113,7 @@ async fn place(
     folder: Option<String>,
     name: Option<String>,
     start: bool,
+    connections: Option<u32>,
 ) -> Result<(), String> {
     let mut ended = held.ended.subscribe();
     // Paused first: nothing writes to its files while they move.
@@ -148,6 +151,10 @@ async fn place(
         let moved = moved(item, folder.as_deref(), name.as_deref())?;
         store
             .update(move |q| {
+                // Before it runs on, so it runs with them.
+                if connections.is_some() {
+                    q.set_connections(id, connections)?;
+                }
                 let item = q.item_mut(id).ok_or(StoreError::NoSuchItem(id))?;
                 apply(item, moved, start);
                 Ok(())
@@ -376,6 +383,7 @@ mod tests {
             Some(chosen.to_string_lossy().into_owned()),
             Some("الملف الجديد.bin".into()),
             true,
+            Some(4),
         )
         .await
         .unwrap();
@@ -391,6 +399,7 @@ mod tests {
         }
         stop.request();
         let _ = running.await;
+        assert_eq!(item(&store).connections, Some(4));
         let file = item(&store).file.unwrap();
         assert_eq!(file.file_name().unwrap(), "الملف الجديد.bin");
         assert_eq!(file.parent().unwrap().file_name(), chosen.file_name());

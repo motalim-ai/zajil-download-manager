@@ -208,6 +208,10 @@ pub struct Options {
     /// Where the limits take their time from (tests use a
     /// [`crate::limit::ManualClock`]).
     pub clock: Arc<dyn Clock>,
+    /// Every request goes through this proxy (`http://host:port`, checked
+    /// by [`crate::settings::check_proxy`]); `None`: straight to the
+    /// server. TLS is still checked end to end through it.
+    pub proxy: Option<String>,
 }
 
 impl Default for Options {
@@ -223,6 +227,7 @@ impl Default for Options {
             speed_limit: None,
             download_limit: None,
             clock: Arc::new(SystemClock::default()),
+            proxy: None,
         }
     }
 }
@@ -2363,7 +2368,7 @@ fn build_client(
         builder =
             builder.tls_certs_merge([reqwest::Certificate::from_der(der).map_err(Error::Http)?]);
     }
-    builder
+    let builder = builder
         .redirect(match redirects {
             Redirects::Follow => follow,
             Redirects::Never => redirect::Policy::none(),
@@ -2374,8 +2379,17 @@ fn build_client(
         .referer(false)
         .connect_timeout(options.connect_timeout)
         .read_timeout(options.idle_timeout)
-        // Proxies arrive in M3; until then never pick them up implicitly.
-        .no_proxy()
+        // Never one picked up implicitly from the system or the
+        // environment: only the user's own.
+        .no_proxy();
+    let builder = match &options.proxy {
+        Some(proxy) => {
+            crate::settings::check_proxy(proxy).map_err(|e| Error::Io(std::io::Error::other(e)))?;
+            builder.proxy(reqwest::Proxy::all(proxy.as_str()).map_err(Error::Http)?)
+        }
+        None => builder,
+    };
+    builder
         .user_agent(concat!("Zajil/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(Error::Http)

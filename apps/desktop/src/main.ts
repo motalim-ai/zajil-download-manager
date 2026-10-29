@@ -10,6 +10,7 @@ import DropBox from "./windows/DropBox.svelte";
 import VideoWindow from "./windows/VideoWindow.svelte";
 import BatchWindow from "./windows/BatchWindow.svelte";
 import GrabWindow from "./windows/GrabWindow.svelte";
+import SettingsWindow from "./windows/SettingsWindow.svelte";
 import { completeApi, loadShow } from "./lib/completeApi";
 import { api } from "./lib/api";
 import { loadSettings, startWindow } from "./lib/windowStart";
@@ -35,7 +36,7 @@ function draw(win: string | null) {
   if (progress) mount(ProgressWindow, { target: target!, props: { id: Number(progress[1]) } });
   else
     mount(
-      win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : win === "video" ? VideoWindow : win === "batch" ? BatchWindow : win === "grab" ? GrabWindow : App,
+      win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : win === "video" ? VideoWindow : win === "batch" ? BatchWindow : win === "grab" ? GrabWindow : win === "settings" ? SettingsWindow : App,
       { target: target! },
     );
   // Drawn (timed with `ZAJIL_MEASURE=1`): at once, not at the next frame,

@@ -24,6 +24,11 @@
     back: '<path d="M14.5 6l-6 6 6 6"/>',
     gauge: '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="M12 16l3.5-4.5"/>',
     open: '<path d="M14 4.5h5.5V10M19.5 4.5L12 12M10 5.5H4.5v14h14V14"/>',
+    globe:
+      '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.7 5.4 3.7 8.5s-1.2 5.9-3.7 8.5M12 3.5c-2.5 2.6-3.7 5.4-3.7 8.5s1.2 5.9 3.7 8.5"/>',
+    key: '<circle cx="8" cy="15" r="3.5"/><path d="M10.5 12.5L19 4M16 7l2.5 2.5M14 9l2 2"/>',
+    sound: '<path d="M4.5 9.5h3.5l4.5-4v13l-4.5-4H4.5z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>',
+    sun: '<circle cx="12" cy="12" r="3.5"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M6 18l1.4-1.4M16.6 7.4L18 6"/>',
   };
   let { name, size = 18, stroke = 1.8 }: { name: string; size?: number; stroke?: number } = $props();
 </script>

@@ -213,6 +213,7 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
             folder: None,
             start: true,
             limit: None,
+            connections: None,
         };
         return match crate::add_from_page(
             &app.store,

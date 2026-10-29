@@ -36,6 +36,14 @@ pub const LINK_SIZE: (f64, f64) = (560.0, 190.0);
 /// opens at the size it keeps (the owner's notes on the 1.0 draft).
 pub const INFO_SIZE: (f64, f64) = (560.0, 290.0);
 
+/// The settings window (the owner's request: a window of its own with a
+/// list of sections at its side, as in other download managers).
+pub const SETTINGS: &str = "settings";
+pub const SETTINGS_SIZE: (f64, f64) = (860.0, 620.0);
+
+/// The settings window's capability: its dialogs and launching at login.
+pub const SETTINGS_CAPABILITY: &str = include_str!("../runtime-capabilities/settings.json");
+
 /// A progress window's size with its details shown (design window 4).
 pub const PROGRESS_SIZE: (f64, f64) = (600.0, 640.0);
 
@@ -592,6 +600,18 @@ pub async fn open_progress<R: tauri::Runtime>(
         return Ok(());
     }
     open(&handle, &progress_label(id), &title, PROGRESS_SIZE).map_err(|e| e.to_string())
+}
+
+/// The settings window, titled `title`; an open one comes to the front.
+#[tauri::command]
+pub async fn open_settings<R: tauri::Runtime>(
+    title: String,
+    handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if crate::in_scene(&handle) {
+        return Ok(());
+    }
+    open(&handle, SETTINGS, &title, SETTINGS_SIZE).map_err(|e| e.to_string())
 }
 
 /// Shows the main window on `view` (the categories editor, from «New

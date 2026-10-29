@@ -135,10 +135,19 @@ export const api = {
   holdStarted: (id: number) => invoke<void>("hold_started", { id }),
   /** The download this window started goes to `folder` under `name` (each
    * `null`: as it is), then runs on (`start`) or waits paused. */
-  placeStarted: (folder: string | null, name: string | null, start: boolean) =>
-    invoke<number>("place_started", { folder, name, start }),
+  placeStarted: (folder: string | null, name: string | null, start: boolean, connections: number | null) =>
+    invoke<number>("place_started", { folder, name, start, connections }),
   /** This window's page drew its first frame (timed with `ZAJIL_MEASURE=1`). */
   windowPainted: () => invoke<void>("window_painted"),
+  /** The settings window (a window of its own), titled `title`. */
+  openSettings: (title: string) => invoke<void>("open_settings", { title }),
+  /** Saved in any window: every window follows. */
+  onSettingsChanged: (handler: (settings: SettingsView) => void): Promise<UnlistenFn> =>
+    listen<SettingsView>("settings-changed", (event) => handler(event.payload)),
+  /** The proxy every download goes through (`null`: none); a change
+   * applies when Zajil next starts. */
+  proxySetting: () => invoke<string | null>("proxy_setting"),
+  setProxy: (proxy: string | null) => invoke<void>("set_proxy", { proxy }),
   /** Closes the window that asks. */
   closeWindow: () => invoke<void>("close_window"),
   /** The main window, on `view` («New category»: the categories). */

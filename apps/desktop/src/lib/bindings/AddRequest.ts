@@ -20,4 +20,9 @@ folder: string | null,
 /**
  * Start when its queue has room; `false`: added paused.
  */
-start: boolean, limit: number | null, };
+start: boolean, limit: number | null, 
+/**
+ * Its own number of connections, 1 to 32 (the owner's request, as in
+ * other download managers); `null`: the program's.
+ */
+connections: number | null, };

@@ -90,6 +90,13 @@ pub struct SettingsFile {
     /// empty, so a file without limits stays as it was.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub site_connections: Vec<SiteConnections>,
+    /// The proxy every download goes through (the owner's request: a
+    /// «Proxy» section as in other download managers), such as
+    /// `http://proxy.example:8080`: http or https, a host and a port, no
+    /// user name or password (never saved, as for downloads). `None`, and
+    /// when absent: none. Not written while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -141,6 +148,7 @@ impl Default for SettingsFile {
             clipboard: false,
             update_check: true,
             site_connections: Vec::new(),
+            proxy: None,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }
@@ -166,6 +174,9 @@ impl SettingsFile {
                 "at most {} sites may have a connection limit",
                 crate::sites::MAX_SITES
             ));
+        }
+        if let Some(proxy) = &self.proxy {
+            check_proxy(proxy)?;
         }
         let mut seen = Vec::new();
         for entry in &self.site_connections {
@@ -201,6 +212,34 @@ impl SettingsFile {
         }
         Ok(())
     }
+}
+
+/// A proxy as [`SettingsFile::proxy`] takes it: `http://` or `https://`, a
+/// host and a port, nothing else (no user name or password, no path).
+pub fn check_proxy(proxy: &str) -> Result<(), String> {
+    let wrong = || {
+        format!(
+            "{:?} is not a proxy: write it as http://host:port",
+            crate::category::printable(proxy)
+        )
+    };
+    let url = crate::Url::parse(proxy).map_err(|_| wrong())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || url.port_or_known_default().is_none()
+        || !matches!(url.path(), "" | "/")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(wrong());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(
+            "a proxy with a user name or password is not supported: Zajil never saves passwords"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 /// One site's connection limit in [`SettingsFile::site_connections`].
