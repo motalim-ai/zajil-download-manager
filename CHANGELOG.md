@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **The video tools asked for again while they were there** (owner's reports, 2026-10-29): a tool that fails its check is checked once more a moment later before «Video quality» asks for it, and the first failure is said in the log.
+- **A log file when Zajil is started from the Finder, the Start menu or a desktop file:** what it says went nowhere; it now goes to `zajil.log` in the system's log folder (`~/Library/Logs/zajil` on macOS), moved to `zajil.log.1` past 2 MiB. A terminal keeps it as before.
+
 ## [1.1.1] - 2026-10-29
 
 Fixes for what the owner found right after trying 1.1. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.

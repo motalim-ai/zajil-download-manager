@@ -957,13 +957,31 @@ pub async fn video_tools_status(app: State<'_, crate::App>) -> Result<Vec<ToolVi
         .map_err(|e| e.to_string())
 }
 
+/// Why `tool` is not ready, checked again a moment later before it is
+/// asked for: a tool that was there was asked for again (owner's reports,
+/// 2026-10-29), and a check that failed once is said in the log. Blocking.
+fn checked_twice(toolbox: &Toolbox, tool: Tool) -> Option<zajil_core::tools::ToolError> {
+    let first = toolbox.why_not_installed(tool)?;
+    // Never there: no second look.
+    if matches!(first, zajil_core::tools::ToolError::Missing(_))
+        && !toolbox
+            .path(tool)
+            .is_ok_and(|p| p.parent().is_some_and(std::path::Path::exists))
+    {
+        return Some(first);
+    }
+    eprintln!("zajil: {} failed its check once: {first}", name(tool));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    toolbox.why_not_installed(tool)
+}
+
 fn tools_status(toolbox: &Toolbox) -> Vec<ToolView> {
     let target = zajil_platform::target::current();
     TOOLS
         .iter()
         .map(|&tool| {
             let pin = target.and_then(|t| zajil_core::tools::pinned(tool, t));
-            let why = toolbox.why_not_installed(tool);
+            let why = checked_twice(toolbox, tool);
             if let Some(why) = &why {
                 eprintln!("zajil: {} is not ready: {why}", name(tool));
             }

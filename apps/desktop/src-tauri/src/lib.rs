@@ -141,6 +141,13 @@ fn start_line(process: u32) -> String {
 
 pub fn run() {
     measure::start();
+    // Started from the Finder, the Start menu or a desktop file, what Zajil
+    // says goes to its log (~/Library/Logs/zajil and the like).
+    if let Ok(paths) = SystemPaths::new()
+        && let Err(e) = zajil_platform::console::log_stderr_to(&paths.log_dir().join("zajil.log"))
+    {
+        eprintln!("zajil: no log file: {e}");
+    }
     // Said at once, as each stage of the start below (#220: a start whose
     // window never came said nothing at all).
     eprintln!("{}", start_line(std::process::id()));
