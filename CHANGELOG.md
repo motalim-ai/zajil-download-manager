@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-29
+
+Fixes for what the owner found right after trying 1.1. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.
+
 ### Fixed
 
 - **The video tools from the browser's list:** a quality chosen in the browser while the video tools were not downloaded ended in «Video quality» with only a message to open the window again, which said the same. Now the window asks for the tools, downloads them, and the download starts again; «Cancel» removes it (owner's report, 2026-10-29).
@@ -374,7 +378,8 @@ The first build of the release workflow, a draft that was never published (see 1
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.1
 [1.1.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.0
 [1.0.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.0.0
 [0.2.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v0.2.0
