@@ -522,7 +522,7 @@
     peeked = post || location.href;
     readPage();
     const src = found.currentSrc || found.src || "";
-    void ask({ type: "video-peek", src: src.length <= 8192 ? src : "", post });
+    void ask({ type: "video-peek", src: src.length <= 8192 ? src : "", ...(post ? { post } : {}) });
   };
 
   /** The last pointer position not yet looked at, once per frame (review:
@@ -619,7 +619,8 @@
     setState("working");
     // A longer address is left out, never cut into another one (review).
     /** @type {Record<string, unknown>} */
-    const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "", post: postOf(video) };
+    const post = whole ? "" : postOf(video);
+    const message = whole ? { type: "video-button", whole: true } : { type: "video-button", src: src.length <= 8192 ? src : "", ...(post ? { post } : {}) };
     if (format) message.format = format;
     const answer = await answerTo(message);
     if (stopped) return;
