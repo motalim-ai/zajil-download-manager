@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - **The video tools from the browser's list:** a quality chosen in the browser while the video tools were not downloaded ended in «Video quality» with only a message to open the window again, which said the same. Now the window asks for the tools, downloads them, and the download starts again; «Cancel» removes it (owner's report, 2026-10-29).
+- **Videos from X offered sound only:** X's direct MP4s do not say their codecs, and «Video quality» took them for sound. A format with no codecs said and a picture's size or a video's extension is now a picture with its sound, as yt-dlp's own «best» takes it (owner's report, 2026-10-29).
 - **Settings › Video tools** has a «Download the video tools» button for the ones not downloaded, with its progress and «Cancel». The list's message for missing tools points there.
 
 ## [1.1.0] - 2026-10-29

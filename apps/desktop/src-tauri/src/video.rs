@@ -1255,9 +1255,21 @@ impl VideoErrorView {
 }
 
 pub fn format_view(f: &Format) -> FormatView {
+    // Codecs the site does not say (X's direct MP4s, a plain file): a
+    // picture with its sound when it has a picture's size or a video's
+    // extension, as yt-dlp's own «best» takes it (owner's report,
+    // 2026-10-29: X offered sound only).
+    let unknown = f.vcodec.is_none() && f.acodec.is_none();
+    let a_picture = f.height.is_some()
+        || f.width.is_some()
+        || matches!(
+            f.ext.as_str(),
+            "mp4" | "webm" | "mov" | "mkv" | "flv" | "3gp"
+        );
     let kind = match (f.has_video(), f.has_audio()) {
         (true, true) => "both",
         (true, false) => "video",
+        _ if unknown && a_picture => "both",
         _ => "audio",
     };
     FormatView {
@@ -2119,6 +2131,14 @@ mod tests {
             r#"{"format_id":"hls-720","ext":"mp4","vcodec":"avc1","acodec":"mp4a","protocol":"m3u8_native"}"#,
         );
         assert!(hls.hls);
+        // X's direct MP4: no codecs said, a picture's size.
+        let x = f(r#"{"format_id":"http-2176","ext":"mp4","width":1280,"height":720}"#);
+        assert_eq!((x.kind.as_str(), x.height), ("both", Some(720)));
+        let plain = f(r#"{"format_id":"0","ext":"mp4"}"#);
+        assert_eq!(plain.kind, "both");
+        // Nothing said, and no picture's sign: sound.
+        let mp3 = f(r#"{"format_id":"0","ext":"mp3"}"#);
+        assert_eq!(mp3.kind, "audio");
     }
 
     /// What the page sends comes back as the engine's choice, and back.
