@@ -544,3 +544,23 @@
     if (!reduceMotion.matches) start();
   }
 })();
+
+/* How many times Zajil was downloaded (site/downloads.mjs writes it once a
+   day, from GitHub's own counts): shown in the hero once known, never a
+   guess. Same site only; nothing is sent about the visitor. */
+(function () {
+  'use strict';
+  var slot = document.querySelector('[data-downloads]');
+  if (!slot || !window.fetch) return;
+  var ar = document.documentElement.dir !== 'ltr';
+  fetch('/downloads.json', { cache: 'no-cache', credentials: 'omit' })
+    .then(function (answer) { return answer.ok ? answer.json() : null; })
+    .then(function (counts) {
+      var n = counts && counts.total;
+      if (typeof n !== 'number' || !(n > 0)) return;
+      var shown = n.toLocaleString(ar ? 'ar' : 'en');
+      slot.querySelector('span').textContent = ar ? 'نُزِّل ' + shown + ' مرة' : 'Downloaded ' + shown + ' times';
+      slot.hidden = false;
+    })
+    .catch(function () {});
+})();

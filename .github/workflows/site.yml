@@ -2,8 +2,9 @@ name: Website deploy
 
 # Builds the site (site/) and publishes it on GitHub Pages, at
 # zajil.by-wow.com (the custom domain is set in the repository's Pages
-# settings). Only when the site, the screenshots or the icon change on main,
-# or by hand. The CI job "Website" checks the same build on every pull request.
+# settings). When the site, the screenshots or the icon change on main, when
+# a release is published, once a day (for the download count), or by hand.
+# The CI job "Website" checks the same build on every pull request.
 
 on:
   push:
@@ -15,6 +16,11 @@ on:
       - "apps/desktop/src-tauri/icons/32x32.png"
       - "apps/desktop/src-tauri/icons/128x128@2x.png"
       - ".github/workflows/site.yml"
+  release:
+    types: [published]
+  # The download count (site/downloads.mjs), once a day.
+  schedule:
+    - cron: "23 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -46,6 +52,13 @@ jobs:
       # missing twin page, or anything loaded from outside the site.
       - name: Build and check the site
         run: node site/check.mjs
+      # How many times the installers were downloaded, from GitHub's own
+      # counts (downloads.json). A failure leaves the count out, not the site.
+      - name: Count the downloads
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node site/downloads.mjs site/dist
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

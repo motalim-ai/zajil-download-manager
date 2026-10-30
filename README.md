@@ -17,6 +17,7 @@
 
 <p>
 <a href="https://github.com/motalim-ai/zajil-download-manager/releases/latest"><img src="https://img.shields.io/github/v/release/motalim-ai/zajil-download-manager?label=release&color=1747C9" alt="Latest release"></a>
+<a href="https://github.com/motalim-ai/zajil-download-manager/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fzajil.by-wow.com%2Fdownloads.json" alt="Downloads"></a>
 <a href="https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml"><img src="https://github.com/motalim-ai/zajil-download-manager/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License: GPL-3.0"></a>
 </p>
