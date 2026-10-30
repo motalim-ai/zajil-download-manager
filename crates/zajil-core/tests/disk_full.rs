@@ -55,9 +55,9 @@ fn volume() -> Option<(&'static str, PathBuf)> {
 /// the rest when it is closed, so the filler stays open until dropped, and
 /// filling goes on until a new file cannot take a block either.
 ///
-/// APFS frees a removed file's blocks in the background: on CI a download
-/// resumed right after the filler went still found the disk full. So the
-/// drop waits, up to 30 s, until the room is back.
+/// The drop waits, up to 30 s, until the file system says the room is
+/// back; on CI's APFS it could still refuse a write for a moment after
+/// that, so the test also resumes again (see the resume below).
 struct Filler {
     path: PathBuf,
     file: Option<fs::File>,
@@ -246,10 +246,22 @@ async fn a_full_disk_stops_the_download_which_resumes_once_there_is_room() {
             "{case}: free once the filler went: {}",
             available_space(&volume).unwrap()
         );
-        let done = engine
-            .resume(&state_file, &mut |_| {})
-            .await
-            .unwrap_or_else(|e| panic!("{case}: resuming: {e}"));
+        // As a user would: told the disk is still full, try again a little
+        // later. On CI's APFS the room the file system said was back could
+        // not be written at once (61 MB free, a resume of 14 MB stopped on
+        // «No space left»), a few times in many runs.
+        let mut tries = 0;
+        let done = loop {
+            match engine.resume(&state_file, &mut |_| {}).await {
+                Ok(done) => break done,
+                Err(e) if tries < 5 && e.to_string().contains("os error 28") => {
+                    tries += 1;
+                    eprintln!("{case}: the disk was not ready yet ({e}); again");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                Err(e) => panic!("{case}: resuming: {e}"),
+            }
+        };
         assert_eq!(
             sha256_hex(&fs::read(&done.file).unwrap()),
             sha256_hex(&data)
