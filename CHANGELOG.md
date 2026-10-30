@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-10-30
+
+What the owner and users asked for after 1.1.2. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.
+
 ### Added
 
 - **Videos and playlists in queues** (owner's request, 2026-10-30): «Video quality» and a playlist have a queue choice, with «New queue…» (none by default: it starts now), and «Add to queue» and «Remove from queue» take videos too. A video in a queue starts only while its queue may run (no schedule, its window open, or started now), within the queue's downloads at once, goes back to waiting when its window closes, and the queue's «after it ends» (opening a file, sleep, shutdown) waits for its videos too.
@@ -414,7 +418,8 @@ The first build of the release workflow, a draft that was never published (see 1
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.3
 [1.1.2]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.2
 [1.1.1]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.1
 [1.1.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.0
