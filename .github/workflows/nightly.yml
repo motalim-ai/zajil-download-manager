@@ -110,6 +110,55 @@ jobs:
           path: ${{ runner.temp }}/nightly-measurements
           if-no-files-found: warn
 
+  # The full disk on macOS's own file system, on a small APFS volume
+  # (crates/zajil-core/tests/disk_full.rs): on GitHub's Mac runners it said
+  # and refused room unevenly, so it runs here, not on pull requests
+  # (owner's decision, 2026-10-30).
+  disk-full-macos:
+    name: Full disk (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned toolchain
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Mount an APFS test volume
+        run: |
+          set -euo pipefail
+          hdiutil create -quiet -size 64m -fs APFS -volname ZAPFS "$RUNNER_TEMP/apfs.dmg"
+          hdiutil attach -quiet -nobrowse "$RUNNER_TEMP/apfs.dmg"
+          mount | grep -q '/Volumes/ZAPFS (apfs'
+          echo "ZAJIL_TEST_APFS=/Volumes/ZAPFS" >> "$GITHUB_ENV"
+      - name: Test the full disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p zajil-core --test disk_full -- --nocapture | tee disk-full.txt
+          grep -q 'test result: ok. 1 passed' disk-full.txt
+      # Its own issue, opened once and commented on after: it never blocks
+      # a merge, so it must not go unseen.
+      - name: Open or update the issue
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="الاختبارات الليلية: فشل اختبار القرص الممتلئ على ماك"
+          body="$(printf '%s\n' '<div dir="rtl">' '' "فشل التشغيل الليلي: $RUN_URL" '' '- الاختبار: `crates/zajil-core/tests/disk_full.rs` على قرص APFS صغير.' '' 'هذا لا يمنع الدمج.' '' '</div>')"
+          number="$(gh issue list --state all --limit 100 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+          if [ -z "$number" ]; then
+            gh issue create --title "$title" --body "$body"
+          else
+            gh issue reopen "$number" >/dev/null 2>&1 || true
+            gh issue comment "$number" --body "$body"
+          fi
+
   alert:
     name: Open an issue on failure
     needs: real-clock

@@ -34,6 +34,39 @@ env:
 # The Rust version comes from rust-toolchain.toml.
 
 jobs:
+  # What a run tests (owner's decision, 2026-10-30): a change to the
+  # site, the documents or the other workflows only does not build and
+  # test the app again; anything else, a run on main by schedule, or a
+  # change to this file, tests everything. The app's jobs still report
+  # (as passed when skipped), so a pull request can merge.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.look.outputs.app }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: look
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          app=true
+          if { [ "$EVENT" = pull_request ] || [ "$EVENT" = push ]; } \
+            && [ -n "$BASE" ] && ! [[ "$BASE" =~ ^0+$ ]] \
+            && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$BASE" HEAD)"
+            echo "$changed"
+            # Only these: the site, the documents, the root's Markdown, and
+            # the workflows other than this one.
+            others="$(printf '%s\n' "$changed" | grep -Ev '^(site/|docs/|[^/]+\.md$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md|workflows/(site|nightly|release|ffmpeg|ffmpeg-release)\.yml$))' || true)"
+            if [ -n "$changed" ] && [ -z "$others" ]; then app=false; fi
+          fi
+          echo "app=$app" | tee -a "$GITHUB_OUTPUT"
+
   pr-title:
     name: PR title (Conventional Commits)
     if: github.event_name == 'pull_request'
@@ -48,6 +81,7 @@ jobs:
             exit 1
           fi
 
+  # Always, whatever changed: its private-key check covers every file.
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -70,6 +104,7 @@ jobs:
 
   build-test:
     name: Build & test (${{ matrix.os }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
@@ -77,18 +112,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.app == 'true'
       - name: Install pinned toolchain
+        if: needs.changes.outputs.app == 'true'
         run: rustup toolchain install && rustup show active-toolchain
       # Saved from main only: PRs restore main's, and the repository's 10 GB
       # of caches keep room for the testgen cache (review of #172).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: needs.changes.outputs.app == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # USB drives use FAT32 or exFAT, where hard links and (on macOS exFAT)
       # the no-replace rename are refused. Tests in zajil-platform and
       # zajil-core run on a small image of each and fail on CI without them.
       - name: Mount FAT32 and exFAT test volumes (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         # A slow package mirror once hung this step for over 20 minutes.
         timeout-minutes: 10
         env:
@@ -123,7 +161,7 @@ jobs:
       # #28). Ubuntu runners have no zsh. Xvfb is the display for the real
       # clipboard test below.
       - name: Install zsh and Xvfb (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         timeout-minutes: 10
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
@@ -137,7 +175,7 @@ jobs:
       # is sparse and that a disk filling up mid-download stops and resumes
       # cleanly. They fail on CI without them.
       - name: Mount ext4 and btrfs test volumes (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         timeout-minutes: 10
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
@@ -157,7 +195,7 @@ jobs:
           echo "ZAJIL_TEST_EXT4=/mnt/zext4" >> "$GITHUB_ENV"
           echo "ZAJIL_TEST_BTRFS=/mnt/zbtrfs" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (macOS)
-        if: runner.os == 'macOS'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'macOS')
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -170,7 +208,7 @@ jobs:
           echo "ZAJIL_TEST_FAT32=/Volumes/ZFAT32" >> "$GITHUB_ENV"
           echo "ZAJIL_TEST_EXFAT=/Volumes/ZEXFAT" >> "$GITHUB_ENV"
       - name: Mount an APFS test volume (macOS)
-        if: runner.os == 'macOS'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'macOS')
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -179,7 +217,7 @@ jobs:
           mount | grep -q '/Volumes/ZAPFS (apfs'
           echo "ZAJIL_TEST_APFS=/Volumes/ZAPFS" >> "$GITHUB_ENV"
       - name: Mount FAT32 and exFAT test volumes (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Windows')
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -210,7 +248,7 @@ jobs:
           'ZAJIL_TEST_FAT32=Y:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           'ZAJIL_TEST_EXFAT=Z:\' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Mount an NTFS test volume (Windows)
-        if: runner.os == 'Windows'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Windows')
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -243,12 +281,14 @@ jobs:
       # cache gone since Sunday) the tests do not wait for a build:
       # video_real says NOT RUN, with a warning here.
       - name: Restore ffmpeg-testgen
+        if: needs.changes.outputs.app == 'true'
         id: testgen
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: test-tools/ffmpeg-testgen
           key: ffmpeg-testgen-${{ matrix.os == 'windows-latest' && 'windows-x86_64' || matrix.os == 'macos-latest' && 'macos-universal' || 'linux-x86_64' }}-${{ hashFiles('tools/ffmpeg/source.env', 'tools/ffmpeg/configure-testgen.txt', 'tools/ffmpeg/build.sh', '.github/workflows/ffmpeg.yml') }}
       - name: Video tools for the tests
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         timeout-minutes: 10
         env:
@@ -282,10 +322,16 @@ jobs:
             echo "ZAJIL_TEST_FFMPEG_DIR=$ffmpeg"
           } >> "$GITHUB_ENV"
       - name: Clippy
+        if: needs.changes.outputs.app == 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build
+        if: needs.changes.outputs.app == 'true'
         run: cargo build --workspace --all-targets --locked
       - name: Test
+        if: needs.changes.outputs.app == 'true'
+        env:
+          # The full disk on macOS: in the nightly workflow (disk_full.rs).
+          ZAJIL_DISK_FULL_NIGHTLY_ONLY: ${{ runner.os == 'macOS' && '1' || '' }}
         run: cargo test --workspace --locked
       # Clipboard monitoring (M5) reads the real clipboard: the test that
       # puts text there and reads it back is ignored by default, because it
@@ -293,7 +339,7 @@ jobs:
       # deny.toml leaves arboard's Windows backend (BSL-1.0) out of the
       # license check because no Zajil build contains it; this proves it.
       - name: arboard's Windows backend is in no build
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         shell: bash
         run: |
           set -euo pipefail
@@ -307,6 +353,7 @@ jobs:
           done
           echo "clipboard-win and error-code: in no build"
       - name: The real clipboard
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -315,10 +362,12 @@ jobs:
       # Release builds have no overflow checks, so arithmetic on untrusted
       # input (HTTP dates, ranges, state files) is tested there too.
       - name: Test engine in release mode
+        if: needs.changes.outputs.app == 'true'
         run: cargo test --release --locked -p zajil-core --lib --test resume --test state_file
       # `test-support` lets tests trust their temporary CA. Only
       # dev-dependencies may enable it; a release build must not contain it.
       - name: Release build has no test-only features
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -344,6 +393,7 @@ jobs:
 
   desktop:
     name: Desktop app (${{ matrix.os }})
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
@@ -359,14 +409,18 @@ jobs:
       GUI_DEBS: /home/runner/gui-debs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.app == 'true'
       - name: Install pinned toolchain
+        if: needs.changes.outputs.app == 'true'
         working-directory: .
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: needs.changes.outputs.app == 'true'
         with:
           workspaces: apps/desktop/src-tauri
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.changes.outputs.app == 'true'
         with:
           node-version: "24"
           cache: npm
@@ -379,7 +433,7 @@ jobs:
       # runner image and this list: then nothing is downloaded at all.
       # Saved from main only, as the other caches.
       - name: The GUI libraries' cache key (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         id: gui-key
         run: |
           set -euo pipefail
@@ -387,7 +441,7 @@ jobs:
           : "${ImageOS:?}" "${ImageVersion:?}"
           echo "key=gui-debs-$ImageOS-$ImageVersion-$(dpkg --print-architecture)-$(printf '%s' "$GUI_PACKAGES --no-install-recommends" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore the GUI libraries' packages (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         id: gui-debs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -396,7 +450,7 @@ jobs:
       # From the cache, with no network; otherwise downloaded, each try with
       # its own time limit and up to three tries.
       - name: Install the GUI libraries (Linux)
-        if: runner.os == 'Linux'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux')
         timeout-minutes: 40
         env:
           APT_OPTIONS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=60
@@ -435,23 +489,28 @@ jobs:
           done
           exit 1
       - name: Save the GUI libraries' packages (Linux)
-        if: runner.os == 'Linux' && steps.gui-debs.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        if: needs.changes.outputs.app == 'true' && (runner.os == 'Linux' && steps.gui-debs.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.GUI_DEBS }}
           key: ${{ steps.gui-key.outputs.key }}
       - name: Install npm packages (from the lock file only)
+        if: needs.changes.outputs.app == 'true'
         run: npm ci
       - name: Licenses and advisories of npm packages
+        if: needs.changes.outputs.app == 'true'
         run: |
           npm run licenses
           npm audit --audit-level=high
       - name: Svelte check (accessibility warnings are errors)
+        if: needs.changes.outputs.app == 'true'
         run: npm run check
       - name: Unit tests of the interface
+        if: needs.changes.outputs.app == 'true'
         run: npm test
       # A release build of the page has no test page and no test command.
       - name: Release build has no UI test code
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -479,12 +538,14 @@ jobs:
           fi
           echo "no UI test code in the release build"
       - name: Clippy (desktop)
+        if: needs.changes.outputs.app == 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
           cargo clippy --locked --all-targets -- -D warnings
           cargo clippy --locked --all-targets --features ui-test -- -D warnings
       - name: Tests (desktop) and generated types up to date
+        if: needs.changes.outputs.app == 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
@@ -501,6 +562,7 @@ jobs:
             exit 1
           fi
       - name: Build the app
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: npx tauri build --debug --no-bundle
       # The program built without `ui-test` has no UI test command: not even
@@ -508,6 +570,7 @@ jobs:
       # the unit test `the_ui_test_commands_exist_only_in_a_ui_test_build`
       # shows through Tauri's IPC in both builds.
       - name: The release program has no UI test commands
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -522,6 +585,7 @@ jobs:
           echo "no UI test command in $app"
       # The built app opens its window and closes cleanly (exit code 0).
       - name: The app opens and closes
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -538,6 +602,7 @@ jobs:
       # the download goes on from its recorded progress and the file is
       # whole (src-tauri/tests/close_resume.rs, owner's request on #45).
       - name: Closing during a download, then opening again
+        if: needs.changes.outputs.app == 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
@@ -556,6 +621,7 @@ jobs:
             "${test[@]}"
           fi
       - name: Build the app with its UI test pages
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           npx tauri build --debug --no-bundle --features ui-test \
@@ -564,6 +630,7 @@ jobs:
       # tool, and the image test of mixed names (owner's decision on the
       # M4 plan).
       - name: Screenshots, accessibility, language switch and the image test of mixed names
+        if: needs.changes.outputs.app == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -591,6 +658,7 @@ jobs:
       # that has the UI test pages, copied aside for this step and the next
       # (`cargo test` rebuilds the binary without them).
       - name: Every window opens with its page
+        if: needs.changes.outputs.app == 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
@@ -611,6 +679,7 @@ jobs:
       # folder», with the copy of the build that has the UI test pages
       # (the step above made it).
       - name: End-to-end tests, from a link and from the browser to «Open folder»
+        if: needs.changes.outputs.app == 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
@@ -628,7 +697,7 @@ jobs:
             "${test[@]}"
           fi
       - name: Upload the screenshots
-        if: always()
+        if: needs.changes.outputs.app == 'true' && (always())
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-screenshots-${{ matrix.os }}
@@ -637,6 +706,8 @@ jobs:
 
   extension:
     name: Browser extension
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -687,6 +758,8 @@ jobs:
 
   desktop-licenses:
     name: Desktop licenses & advisories (cargo-deny)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -698,6 +771,8 @@ jobs:
 
   licenses:
     name: Licenses & advisories (cargo-deny)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

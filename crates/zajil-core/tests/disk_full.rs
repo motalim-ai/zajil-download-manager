@@ -8,7 +8,11 @@
 //! mounts and passes in `ZAJIL_TEST_EXT4` (Linux), `ZAJIL_TEST_APFS` (macOS)
 //! or `ZAJIL_TEST_NTFS` (Windows); see `.github/workflows/ci.yml`. On CI a
 //! missing variable is a failure; elsewhere the test is skipped with a
-//! message.
+//! message. On macOS it runs in the nightly workflow only
+//! (`ZAJIL_DISK_FULL_NIGHTLY_ONLY` skips it in ci.yml): a tiny APFS volume
+//! on GitHub's Mac runners said and refused room unevenly, and failed
+//! pull requests that had nothing to do with it (owner's decision,
+//! 2026-10-30).
 
 use std::fs;
 use std::io::Write;
@@ -25,6 +29,10 @@ const SIZE: usize = 16 * MIB;
 
 /// The mounted small volume of this system's file system, if any.
 fn volume() -> Option<(&'static str, PathBuf)> {
+    if std::env::var_os("ZAJIL_DISK_FULL_NIGHTLY_ONLY").is_some_and(|v| !v.is_empty()) {
+        eprintln!("skipping: the full disk runs in the nightly workflow here");
+        return None;
+    }
     let (name, var) = match std::env::consts::OS {
         "linux" => ("ext4", "ZAJIL_TEST_EXT4"),
         "macos" => ("APFS", "ZAJIL_TEST_APFS"),
