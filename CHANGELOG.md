@@ -24,6 +24,7 @@ What the owner and users asked for after 1.1.2. Tried by hand on macOS by the ow
 
 ### Fixed
 
+- **A finished download showed «0 bytes» and «size unknown»** once its state file was gone (owner's report, 2026-10-30): it now shows its file's own size.
 - **On a Mac in Arabic the window's buttons covered the logo** (a user's report, 2026-10-30): macOS puts them on the right there, and the title bar left room on the left only. It now leaves room on both sides.
 - **«Resume: not possible» before a video's first byte:** it is now «unknown» until something has come.
 - **An Instagram video played as sound only in QuickTime** (owner's report, 2026-10-30): the best choice merged a higher VP9 picture, which QuickTime cannot play, rather than take the H.264 with its sound beside it. A higher picture is now merged only if it is H.264 too, or if the format with sound is not one every player opens; and a VP9 or AV1 picture is not merged at all beside the site's own MP4 file whose codecs it does not say (Facebook's, the same report). «Video quality» says each picture's codec (H.264, VP9, AV1, HEVC), and on macOS «Won't play in QuickTime» beside VP9 and AV1 (owner's decision, 2026-10-30).

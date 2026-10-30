@@ -626,7 +626,16 @@ pub fn download(
             l.speed,
         ),
         (None, Some(s)) => (s.bytes_done(), s.content_length, 0.0),
-        (None, None) => (0, None, 0.0),
+        // Finished, its state file gone: its file's own size (owner's
+        // report, 2026-10-30: «0 bytes, size unknown» once done).
+        (None, None) => {
+            let on_disk = (item.status == Status::Done)
+                .then_some(item.file.as_deref())
+                .flatten()
+                .and_then(|file| std::fs::metadata(file).ok())
+                .map(|m| m.len());
+            (on_disk.unwrap_or(0), on_disk, 0.0)
+        }
     };
     let done = if item.status == Status::Done {
         size.unwrap_or(done)
@@ -798,6 +807,30 @@ mod tests {
             ..file
         };
         assert!(!probe(&unknown, &categories, Path::new("/d")).page);
+    }
+
+    /// A finished download whose state file is gone shows its file's own
+    /// size (owner's report, 2026-10-30: «0 bytes, size unknown»).
+    #[test]
+    fn a_finished_download_shows_its_file_s_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.bin");
+        std::fs::write(&file, vec![0u8; 1234]).unwrap();
+        let mut queues = QueuesFile::empty();
+        let id = queues
+            .add("main", "https://example.com/a.bin", dir.path())
+            .unwrap();
+        let item = queues.item_mut(id).unwrap();
+        item.status = Status::Done;
+        item.file = Some(file);
+        item.state_file = None;
+        let shown = download(
+            queues.item(id).unwrap(),
+            "main",
+            &CategoriesFile::built_in(),
+            &Live::default(),
+        );
+        assert_eq!((shown.size, shown.done), (Some(1234), 1234));
     }
 
     /// AGENTS.md §10.3: what the page receives never holds a URL's query
