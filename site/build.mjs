@@ -23,14 +23,16 @@ export const ORIGIN = "https://zajil.by-wow.com";
 
 // GitHub Pages sets no headers of ours, so the policy goes in each page's
 // head. Scripts, styles, images and fonts come from the site only; the one
-// address beyond it is GitHub's API, for the download buttons.
+// address beyond it is GitHub's API, for the download buttons. The site
+// itself too for fetching, for the download count (downloads.json): without
+// it the count stayed hidden (owner's report, 2026-10-30).
 export const CSP = [
   "default-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self'",
   "font-src 'self'",
-  "connect-src https://api.github.com",
+  "connect-src 'self' https://api.github.com",
   "base-uri 'none'",
   "form-action 'none'",
 ].join("; ");
