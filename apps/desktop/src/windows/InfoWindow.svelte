@@ -165,6 +165,13 @@
     const chosen = await openDialog({ directory: true, multiple: false }).catch(() => null);
     return typeof chosen === "string" ? chosen : null;
   }
+
+  // A page, not a file: its video, in «Video quality» (owner's report,
+  // 2026-10-30: a YouTube link added by hand stopped at «a web page»).
+  async function videoFromPage() {
+    await api.openVideo(url).catch(() => {});
+    await cancel();
+  }
 </script>
 
 <AddDialog
@@ -179,6 +186,7 @@
   oncancel={() => void cancel()}
   onchoosefolder={chooseFolder}
   onnewcategory={() => void api.showMainView("categories")}
+  onvideo={() => void videoFromPage()}
   started={started !== null}
   {connections}
   {maxConnections}

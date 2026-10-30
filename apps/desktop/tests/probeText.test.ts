@@ -36,7 +36,7 @@ describe("«Download file info»", () => {
   it("warns, in both languages, when the link is a web page", () => {
     for (const lang of LANGS) expect(makeBundle(lang).hasMessage("add-web-page"), lang).toBe(true);
     expect(t("ar")("add-web-page")).toBe(
-      "هذا الرابط صفحة ويب، لا ملف. لتحميل الملف افتح الصفحة في المتصفح واضغط زر التحميل فيها، أو انسخ رابط الملف نفسه إن كان الموقع يعطيه وأضفه هنا.",
+      "هذا الرابط صفحة ويب، لا ملف. إن كان فيها فيديو، فاضغط «حمّل الفيديو من الصفحة». وإلا فافتح الصفحة في المتصفح واضغط زر التحميل فيها.",
     );
     expect(t("en")("add-web-page")).toMatch(/^This link is a web page, not a file\./);
   });

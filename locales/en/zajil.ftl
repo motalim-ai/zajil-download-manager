@@ -569,7 +569,8 @@ progress-connections = { $connections }, { $working }
 
 ## «Download file info»: the owner's test with a Google Drive link
 add-size-unknown = Size unknown
-add-web-page = This link is a web page, not a file. To download the file, open the page in the browser and press its download button, or copy the file's own link, if the site gives one, and add it here.
+add-web-page = This link is a web page, not a file. If it has a video, press «Download the video from the page». Otherwise open the page in the browser and press its download button.
+add-video-from-page = Download the video from the page
 add-probe-unsure-no-size = { $size }. The server allows ranges but gives no way to be sure the file has not changed, so it downloads over one connection and starts over if cut.
 
 ## «Download file info»: the user's name, category and description (#103, #95)

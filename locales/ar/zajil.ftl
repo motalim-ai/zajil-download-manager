@@ -627,7 +627,8 @@ progress-connections = { $connections }، { $working }
 
 ## «Download file info»: the owner's test with a Google Drive link
 add-size-unknown = الحجم غير معروف
-add-web-page = هذا الرابط صفحة ويب، لا ملف. لتحميل الملف افتح الصفحة في المتصفح واضغط زر التحميل فيها، أو انسخ رابط الملف نفسه إن كان الموقع يعطيه وأضفه هنا.
+add-web-page = هذا الرابط صفحة ويب، لا ملف. إن كان فيها فيديو، فاضغط «حمّل الفيديو من الصفحة». وإلا فافتح الصفحة في المتصفح واضغط زر التحميل فيها.
+add-video-from-page = حمّل الفيديو من الصفحة
 add-probe-unsure-no-size = { $size }. السيرفر يدعم التقسيم، لكنه لا يعطي ما يُتأكَّد به أن الملف لم يتغيّر، فسيُحمَّل باتصال واحد، ويبدأ من جديد إذا انقطع.
 
 ## «Download file info»: the user's name, category and description (#103, #95)

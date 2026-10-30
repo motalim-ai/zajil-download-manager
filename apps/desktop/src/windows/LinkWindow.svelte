@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isVideoPage } from "../lib/videoSites";
   import { onMount } from "svelte";
   import AddLink from "../lib/components/AddLink.svelte";
   import { api } from "../lib/api";
@@ -31,6 +32,12 @@
   async function ok(url: string) {
     problem = null;
     try {
+      // A video's page: «Video quality», as from the browser's button.
+      if (isVideoPage(url)) {
+        await api.openVideo(url.trim());
+        await api.closeWindow();
+        return;
+      }
       await api.openAddInfo(url, locale.t("info-title"));
     } catch (e) {
       problem = String(e) === "info-open" ? locale.t("addlink-info-open") : String(e);

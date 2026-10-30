@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A YouTube link added by hand stopped at «this link is a web page»** (owner's report, 2026-10-30): a video's page on the big sites (YouTube, X, Instagram, Facebook, TikTok, Vimeo, Dailymotion) now opens «Video quality», as from the browser's button; and any other link that turns out to be a page offers «Download the video from the page».
+
 ## [1.1.3] - 2026-10-30
 
 What the owner and users asked for after 1.1.2. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.

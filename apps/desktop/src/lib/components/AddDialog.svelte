@@ -34,6 +34,7 @@
     oncancel,
     onchoosefolder,
     onnewcategory,
+    onvideo,
     started = false,
     connections = 8,
     maxConnections = 32,
@@ -55,6 +56,8 @@
     oncancel: () => void;
     onchoosefolder: () => Promise<string | null>;
     onnewcategory: () => void;
+    /// A page: its video, in «Video quality».
+    onvideo?: () => void;
     /// The download started already, in the background (the setting
     /// «Start downloading while the window is open»): it moves to the name
     /// and folder chosen here once the user says.
@@ -105,6 +108,7 @@
   // (the owner's notes on the 1.0 draft, the rows went off the top).
   let focused = false;
   const page = $derived(probe?.page === true);
+
   // The buttons wait for an add on its way, and for a link the server
   // refused; before the server answers they add with what the address says.
   const blocked = $derived(busy || (error !== null && !probe));
@@ -366,7 +370,14 @@
           </div>
         {/if}
       </div>
-      <button class="btn" class:primary={page} onclick={oncancel} data-autofocus={page ? true : undefined}>{locale.t("add-cancel")}</button>
+      <!-- A page: its video, in «Video quality» (owner's report, 2026-10-30:
+           a YouTube link added by hand stopped here). -->
+      {#if page && onvideo}
+        <button class="btn primary" onclick={onvideo} data-autofocus>
+          <Icon name="download" size={15} />{locale.t("add-video-from-page")}
+        </button>
+      {/if}
+      <button class="btn" onclick={oncancel}>{locale.t("add-cancel")}</button>
     </div>
   </div>
 </main>
