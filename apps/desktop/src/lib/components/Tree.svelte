@@ -185,7 +185,7 @@
     border-inline-end: 1px solid var(--line);
     padding: 6px 6px;
     overflow: auto;
-    font-size: 12.5px;
+    font-size: 13.5px;
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -255,8 +255,8 @@
   .node {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 5px;
+    gap: 7px;
+    padding: 5px 6px;
     border-radius: 3px;
     border: 0;
     background: none;

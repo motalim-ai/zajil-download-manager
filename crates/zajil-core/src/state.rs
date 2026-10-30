@@ -433,7 +433,8 @@ fn temporary_path(path: &Path) -> PathBuf {
     with_suffix(path, ".tmp")
 }
 
-pub(crate) fn now_rfc3339() -> String {
+/// Now, as `YYYY-MM-DDTHH:MM:SSZ`.
+pub fn now_rfc3339() -> String {
     rfc3339_utc(SystemTime::now())
 }
 

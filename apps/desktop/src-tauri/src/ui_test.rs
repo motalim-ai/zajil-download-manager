@@ -236,6 +236,8 @@ fn d(
         // «Last try» and «Description» (#95), on a few rows.
         last_try: (status != StatusView::Waiting)
             .then(|| format!("2026-10-25T{:02}:{:02}:00Z", 6 + id % 7, (id * 13) % 60)),
+        // In the order the demo lists them: the first one the newest.
+        added: Some(format!("2026-10-25T05:{:02}:00Z", 59 - id % 60)),
         description: match id {
             1 => Some("للتثبيت على جهاز المكتب".into()),
             3 => Some("Q3 sales, for the board".into()),

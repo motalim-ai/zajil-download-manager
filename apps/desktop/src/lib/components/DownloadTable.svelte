@@ -403,14 +403,15 @@
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    font-size: 13px;
+    /* Room to read (the users' notes, 2026-10-30: rows too tight). */
+    font-size: 14px;
   }
   th {
     text-align: start;
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 600;
     color: var(--muted);
-    padding: 4px 8px;
+    padding: 7px 10px;
     border-bottom: 1px solid var(--line);
     background: linear-gradient(var(--surface), var(--sunken));
     position: sticky;
@@ -499,9 +500,9 @@
     width: 1px;
     background: var(--line);
   }
-  /* Desktop density: tight rows with their grid lines. */
+  /* Rows with room between them, and their grid lines. */
   td {
-    padding: 3px 8px;
+    padding: 8px 10px;
     border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
     border-inline-start: 1px solid color-mix(in oklab, var(--line) 45%, transparent);
     white-space: nowrap;

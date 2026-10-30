@@ -221,6 +221,10 @@ struct Row {
     /// The quality chosen in the browser's list, as it said it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     label: Option<String>,
+    /// When it joined the list (RFC 3339), for the list's newest first;
+    /// none in a list saved before (owner's request, 2026-10-30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    added: Option<String>,
 }
 
 impl Row {
@@ -370,6 +374,7 @@ fn view_of(row: &Row, categories: &zajil_core::category::CategoriesFile) -> Down
         waits_for_site: false,
         description: None,
         last_try: None,
+        added: row.added.clone(),
         needs_ok: false,
         video: true,
     }
@@ -386,11 +391,14 @@ pub fn details(
     // over. Its parts are there once it began, its file once it finished.
     let resumable = row.status == StatusView::Done
         || !zajil_core::video::part_files(std::path::Path::new(&row.folder), &row.name).is_empty();
+    // Not known before its first byte (owner's report, 2026-10-29: «not
+    // possible» at the start of a download that could).
+    let known = resumable || row.done > 0;
     Some(DetailsView {
         download: view_of(&row, categories),
         url: row.url.clone(),
         segments: Vec::new(),
-        resumable: Some(resumable),
+        resumable: known.then_some(resumable),
         limit: None,
     })
 }
@@ -615,6 +623,7 @@ pub fn receive<R: tauri::Runtime>(
             private,
             move_to: None,
             label,
+            added: Some(zajil_core::state::now_rfc3339()),
         });
         save_rows(&app, &state);
         let _ = handle.emit("downloads-changed", ());
@@ -1600,6 +1609,7 @@ pub fn video_download<R: tauri::Runtime>(
         private,
         move_to: None,
         label: None,
+        added: Some(zajil_core::state::now_rfc3339()),
     });
     state.fresh.lock().unwrap().insert(id);
     save_rows(&app, &state);
@@ -1684,6 +1694,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
         private: false,
         move_to: None,
         label: None,
+        added: Some(zajil_core::state::now_rfc3339()),
     }
 }
 
@@ -2179,6 +2190,7 @@ mod tests {
             private: false,
             move_to: None,
             label: None,
+            added: None,
         }
     }
 

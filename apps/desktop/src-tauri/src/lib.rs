@@ -1690,6 +1690,9 @@ fn browser_name(browser: Browser) -> &'static str {
         Browser::Chrome => "chrome",
         Browser::Chromium => "chromium",
         Browser::Edge => "edge",
+        Browser::Brave => "brave",
+        Browser::Opera => "opera",
+        Browser::Vivaldi => "vivaldi",
         Browser::Firefox => "firefox",
     }
 }
@@ -3037,7 +3040,7 @@ mod tests {
         });
         let integration = register_all(&registrar, &host);
         assert_eq!(integration.host_problem, None);
-        assert_eq!(integration.browsers.len(), 4);
+        assert_eq!(integration.browsers.len(), Browser::ALL.len());
         for (browser, view) in Browser::ALL.iter().zip(&integration.browsers) {
             assert_eq!(view.error, None, "{browser:?}");
             assert!(registrar.is_registered(*browser).unwrap());

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { newestFirst } from "./lib/order";
   import { onMount, tick } from "svelte";
   import { openError } from "./lib/openError";
   import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
@@ -98,7 +99,7 @@
   // site (Ctrl+F).
   const shown = $derived.by(() => {
     const words = search.trim().toLocaleLowerCase();
-    return snapshot.downloads.filter((d) => {
+    const found = snapshot.downloads.filter((d) => {
       const picked = (() => {
         switch (filter.kind) {
           case "all":
@@ -115,6 +116,9 @@
       })();
       return picked && (!words || d.name.toLocaleLowerCase().includes(words) || (d.host ?? "").toLocaleLowerCase().includes(words));
     });
+    // The newest first (owner's request, 2026-10-30); a queue keeps the
+    // order it runs in.
+    return filter.kind === "queue" ? found : newestFirst(found);
   });
   // The toolbar acts only on downloads the user sees: one filtered out or
   // gone is no longer selected (review of #46: Delete removed a hidden one).

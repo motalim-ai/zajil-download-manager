@@ -51,6 +51,11 @@ description: string | null,
  */
 last_try: string | null, 
 /**
+ * When it joined the list: RFC 3339 in UTC; none for a video saved
+ * before 1.1.3. The list shows the newest first.
+ */
+added: string | null, 
+/**
  * A file that can run code, from the browser: it waits for the user
  * to start it (security review #84).
  */

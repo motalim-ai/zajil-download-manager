@@ -135,7 +135,7 @@
   // The browser integration (M5): how the last registration went, the one
   // at the start until the button is pressed. The button stays focusable
   // while it works (aria-disabled), and one live region says the result.
-  const BROWSERS: Record<string, string> = { chrome: "Chrome", chromium: "Chromium", edge: "Microsoft Edge", firefox: "Firefox" };
+  const BROWSERS: Record<string, string> = { chrome: "Chrome", chromium: "Chromium", edge: "Microsoft Edge", brave: "Brave", opera: "Opera", vivaldi: "Vivaldi", firefox: "Firefox" };
   const HOST_PROBLEMS = { missing: "settings-browser-missing", temporary: "settings-browser-temporary", unsafe: "settings-browser-unsafe" } as const;
   let integration = $state<IntegrationView | null>(null);
   let integrationProblem = $state<string | null>(null);

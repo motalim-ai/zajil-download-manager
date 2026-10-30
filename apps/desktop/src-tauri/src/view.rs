@@ -79,6 +79,9 @@ pub struct DownloadView {
     pub description: Option<String>,
     /// When it last started or resumed (#95): RFC 3339 in UTC.
     pub last_try: Option<String>,
+    /// When it joined the list: RFC 3339 in UTC; none for a video saved
+    /// before 1.1.3. The list shows the newest first.
+    pub added: Option<String>,
     /// A file that can run code, from the browser: it waits for the user
     /// to start it (security review #84).
     pub needs_ok: bool,
@@ -642,6 +645,7 @@ pub fn download(
             .map(|c| c.id.clone()),
         description: item.description.clone(),
         last_try: item.last_try.clone(),
+        added: Some(item.added_at.clone()),
         name,
         host,
         size,

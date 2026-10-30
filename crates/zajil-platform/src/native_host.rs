@@ -40,20 +40,41 @@ use std::path::{Path, PathBuf};
 
 use crate::ids::NATIVE_HOST_NAME;
 
-/// The browsers Zajil's extension supports.
+/// The browsers Zajil's extension supports. Brave, Opera and Vivaldi
+/// take the Chrome extension (owner's request, 2026-10-30); on macOS each
+/// reads its own folder (the ones other hosts use there:
+/// `BraveSoftware/Brave-Browser`, `com.operasoftware.Opera`, `Vivaldi`). On
+/// Windows Brave and Opera read Chrome's key, so they are not registered
+/// apart (unregistering one would take Chrome's away); Vivaldi has its
+/// own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Browser {
     Chrome,
     Chromium,
     Edge,
+    Brave,
+    Opera,
+    Vivaldi,
     Firefox,
 }
 
 impl Browser {
-    pub const ALL: [Browser; 4] = [
+    #[cfg(not(windows))]
+    pub const ALL: [Browser; 7] = [
         Browser::Chrome,
         Browser::Chromium,
         Browser::Edge,
+        Browser::Brave,
+        Browser::Opera,
+        Browser::Vivaldi,
+        Browser::Firefox,
+    ];
+    #[cfg(windows)]
+    pub const ALL: [Browser; 5] = [
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Edge,
+        Browser::Vivaldi,
         Browser::Firefox,
     ];
 
@@ -67,9 +88,11 @@ impl Browser {
     #[cfg(windows)]
     fn vendor_key(self) -> &'static str {
         match self {
-            Browser::Chrome => r"Google\Chrome",
+            // Brave and Opera read Chrome's key (not registered apart).
+            Browser::Chrome | Browser::Brave | Browser::Opera => r"Google\Chrome",
             Browser::Chromium => "Chromium",
             Browser::Edge => r"Microsoft\Edge",
+            Browser::Vivaldi => "Vivaldi",
             Browser::Firefox => "Mozilla",
         }
     }
@@ -79,6 +102,9 @@ impl Browser {
             Browser::Chrome => "chrome",
             Browser::Chromium => "chromium",
             Browser::Edge => "edge",
+            Browser::Brave => "brave",
+            Browser::Opera => "opera",
+            Browser::Vivaldi => "vivaldi",
             Browser::Firefox => "firefox",
         }
     }
@@ -271,6 +297,9 @@ impl SystemRegistrar {
                 Browser::Chrome => "Google/Chrome",
                 Browser::Chromium => "Chromium",
                 Browser::Edge => "Microsoft Edge",
+                Browser::Brave => "BraveSoftware/Brave-Browser",
+                Browser::Opera => "com.operasoftware.Opera",
+                Browser::Vivaldi => "Vivaldi",
                 Browser::Firefox => "Mozilla",
             };
             (base, folder, HOSTS)
@@ -279,6 +308,13 @@ impl SystemRegistrar {
                 Browser::Chrome => (self.chrome_config.clone(), "google-chrome", HOSTS),
                 Browser::Chromium => (self.chrome_config.clone(), "chromium", HOSTS),
                 Browser::Edge => (self.chrome_config.clone(), "microsoft-edge", HOSTS),
+                Browser::Brave => (
+                    self.chrome_config.clone(),
+                    "BraveSoftware/Brave-Browser",
+                    HOSTS,
+                ),
+                Browser::Opera => (self.chrome_config.clone(), "opera", HOSTS),
+                Browser::Vivaldi => (self.chrome_config.clone(), "vivaldi", HOSTS),
                 Browser::Firefox => (self.home.clone(), ".mozilla", "native-messaging-hosts"),
             }
         }
@@ -1348,6 +1384,15 @@ mod tests {
                 (Browser::Chrome, "Google/Chrome/NativeMessagingHosts"),
                 (Browser::Chromium, "Chromium/NativeMessagingHosts"),
                 (Browser::Edge, "Microsoft Edge/NativeMessagingHosts"),
+                (
+                    Browser::Brave,
+                    "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+                ),
+                (
+                    Browser::Opera,
+                    "com.operasoftware.Opera/NativeMessagingHosts",
+                ),
+                (Browser::Vivaldi, "Vivaldi/NativeMessagingHosts"),
                 (Browser::Firefox, "Mozilla/NativeMessagingHosts"),
             ] {
                 assert_eq!(path(browser), format!("{support}/{folder}/{name}.json"));
@@ -1357,6 +1402,7 @@ mod tests {
                 (Browser::Chrome, r"Google\Chrome", "chrome"),
                 (Browser::Chromium, "Chromium", "chromium"),
                 (Browser::Edge, r"Microsoft\Edge", "edge"),
+                (Browser::Vivaldi, "Vivaldi", "vivaldi"),
                 (Browser::Firefox, "Mozilla", "firefox"),
             ] {
                 assert_eq!(
@@ -1376,6 +1422,12 @@ mod tests {
                 ),
                 (Browser::Chromium, ".config/chromium/NativeMessagingHosts"),
                 (Browser::Edge, ".config/microsoft-edge/NativeMessagingHosts"),
+                (
+                    Browser::Brave,
+                    ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+                ),
+                (Browser::Opera, ".config/opera/NativeMessagingHosts"),
+                (Browser::Vivaldi, ".config/vivaldi/NativeMessagingHosts"),
                 (Browser::Firefox, ".mozilla/native-messaging-hosts"),
             ] {
                 assert_eq!(path(browser), format!("/home/u/{folder}/{name}.json"));

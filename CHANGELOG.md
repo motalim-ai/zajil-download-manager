@@ -7,8 +7,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Brave, Opera and Vivaldi:** Zajil registers its browser host for them too (owner's request, 2026-10-30), and they take the Chrome extension. On macOS and Linux each has its own folder; on Windows Brave and Opera read Chrome's key, and Vivaldi has its own.
+
+### Changed
+
+- **The list is easier to read** (users' notes, 2026-10-30): rows with more room between them, a slightly larger font, and the tree likewise. **The newest download comes first** in every view but a queue's, which keeps the order it runs in.
+
 ### Fixed
 
+- **«Resume: not possible» before a video's first byte:** it is now «unknown» until something has come.
 - **An Instagram video played as sound only in QuickTime** (owner's report, 2026-10-30): the best choice merged a higher VP9 picture, which QuickTime cannot play, rather than take the H.264 with its sound beside it. A higher picture is now merged only if it is H.264 too, or if the format with sound is not one every player opens; and a VP9 or AV1 picture is not merged at all beside the site's own MP4 file whose codecs it does not say (Facebook's, the same report). «Video quality» says each picture's codec (H.264, VP9, AV1, HEVC).
 
 ## [1.1.2] - 2026-10-29
