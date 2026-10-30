@@ -11,7 +11,8 @@
   import { locale } from "../lib/i18n.svelte";
   import { size } from "../lib/format";
   import { startWindow } from "../lib/windowStart";
-  import { fileName, options, picked, type Option } from "../lib/videoChoices";
+  import { fileName, notForQuickTime, options, picked, type Option } from "../lib/videoChoices";
+  import { onMac } from "../lib/keys";
   import { errorDetails, errorKey } from "../lib/videoErrors";
   import type { ToolView } from "../lib/bindings/ToolView";
   import type { VideoInfoView } from "../lib/bindings/VideoInfoView";
@@ -319,6 +320,7 @@
           <label class="q" class:on={pick === i}>
             <input type="radio" name="quality" checked={pick === i} onchange={() => (pick = i)} data-first={i === 0 ? true : undefined} />
             <span>{quality(o)}</span>
+            {#if onMac() && notForQuickTime(o)}<small class="muted warn">{locale.t("video-not-quicktime")}</small>{/if}
             <span class="muted num">{o.size === null ? locale.t("add-size-unknown") : size(locale.lang, locale.digits, o.size)}</span>
           </label>
         {/each}
@@ -536,6 +538,10 @@
   }
   .q.on {
     background: var(--sel);
+  }
+  .warn {
+    font-size: 11.5px;
+    color: var(--amber);
   }
   .muted {
     color: var(--muted);

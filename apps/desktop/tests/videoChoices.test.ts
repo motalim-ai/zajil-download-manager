@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileName, options, picked } from "../src/lib/videoChoices";
+import { fileName, notForQuickTime, options, picked } from "../src/lib/videoChoices";
 import type { FormatView } from "../src/lib/bindings/FormatView";
 
 // «Video quality»'s choices (M6, #149).
@@ -59,5 +59,10 @@ describe("the quality choices", () => {
     expect(fileName("درس: الجزء 1/2")).toBe("درس الجزء 1 2");
     expect(fileName("Talk")).toBe("Talk");
     expect(fileName("")).toBe("video");
+  });
+
+  it("says which pictures QuickTime cannot play", () => {
+    const o = (codec: string | null) => ({ choice: { kind: "best" as const }, height: 1080, ext: "mp4", codec, fps: null, size: null });
+    expect(["VP9", "AV1", "H.264", null].map((c) => notForQuickTime(o(c)))).toEqual([true, true, false, false]);
   });
 });

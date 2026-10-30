@@ -56,6 +56,10 @@ export function options(formats: FormatView[], best: ChoiceView | null = null): 
 
 export const same = (a: ChoiceView, b: ChoiceView): boolean => JSON.stringify(a) === JSON.stringify(b);
 
+/** Whether QuickTime (macOS's own player) cannot play this picture:
+ * VP9, VP8 or AV1 (owner's decision, 2026-10-30: say so on the Mac). */
+export const notForQuickTime = (o: Option): boolean => o.codec === "VP9" || o.codec === "VP8" || o.codec === "AV1";
+
 /** The option picked at first: the engine's best, else the first. */
 export function picked(list: Option[], best: ChoiceView | null): number {
   const at = best ? list.findIndex((o) => same(o.choice, best)) : -1;
