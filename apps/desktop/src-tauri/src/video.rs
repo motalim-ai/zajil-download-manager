@@ -1025,18 +1025,29 @@ fn still_offered(choice: &ChoiceView, formats: &[Format]) -> ChoiceView {
 
 /// The format of `formats` that YouTube's itag `wanted` names: yt-dlp
 /// names a format by its itag, with a suffix for another language's sound
-/// or a "stable volume" one (`140-drc`), the plain one first.
+/// or a "stable volume" one (`140-drc`). Of those, the video's own sound
+/// before a dubbed one (users' reports, 2026-10-31), then the plain one.
 fn by_itag(formats: &[Format], wanted: &str) -> Option<String> {
-    formats
-        .iter()
-        .find(|f| f.id == wanted)
-        .or_else(|| {
-            formats.iter().find(|f| {
-                f.id.split_once('-')
-                    .is_some_and(|(itag, rest)| itag == wanted && !rest.contains("drc"))
-            })
-        })
-        .map(|f| f.id.clone())
+    let mut best: Option<&Format> = None;
+    for f in formats.iter().filter(|f| {
+        f.id == wanted
+            || f.id
+                .split_once('-')
+                .is_some_and(|(itag, rest)| itag == wanted && !rest.contains("drc"))
+    }) {
+        // Ties keep the first: the plain one, as yt-dlp lists it.
+        let wins = match best {
+            None => true,
+            Some(b) => {
+                f.sound_rank() > b.sound_rank()
+                    || (f.sound_rank() == b.sound_rank() && f.id == wanted && b.id != wanted)
+            }
+        };
+        if wins {
+            best = Some(f);
+        }
+    }
+    best.map(|f| f.id.clone())
 }
 
 /// A choice made in the browser's list, in the names of yt-dlp's formats;
@@ -1387,6 +1398,9 @@ pub struct FormatView {
     /// `HEVC`), if the site says it: QuickTime plays H.264 and HEVC only
     /// (owner's report, 2026-10-30).
     pub codec: Option<String>,
+    /// A sound that is the video's own (not a dubbed one), when the page
+    /// offers several (users' reports, 2026-10-31).
+    pub original: bool,
 }
 
 /// A picture codec's name as people know it, from yt-dlp's `vcodec`.
@@ -1582,7 +1596,22 @@ pub fn format_view(f: &Format) -> FormatView {
         kind: kind.into(),
         hls: f.is_hls(),
         codec: f.vcodec.as_deref().and_then(codec_name).map(Into::into),
+        original: false,
     }
+}
+
+/// The views of `formats`, the video's own sounds marked: those yt-dlp
+/// ranks highest.
+pub fn format_views(formats: &[Format]) -> Vec<FormatView> {
+    let sound = |f: &&Format| f.has_audio() && !f.has_video();
+    let top = formats.iter().filter(sound).map(Format::sound_rank).max();
+    formats
+        .iter()
+        .map(|f| FormatView {
+            original: sound(&f) && Some(f.sound_rank()) == top,
+            ..format_view(f)
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -1656,8 +1685,18 @@ pub async fn video_probe(
             .formats
             .iter()
             .map(|f| {
+                // A sound's language and rank: the video's own or dubbed.
+                let sound = if f.has_audio() && !f.has_video() {
+                    format!(
+                        " [{} {}]",
+                        f.language.as_deref().unwrap_or("?"),
+                        f.sound_rank()
+                    )
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{}p {} {}/{}",
+                    "{}p {} {}/{}{sound}",
                     f.height.unwrap_or(0),
                     f.ext,
                     f.vcodec.as_deref().unwrap_or("?"),
@@ -1671,7 +1710,7 @@ pub async fn video_probe(
     Ok(match sent.probed {
         Probed::Video(video) => {
             let best = video.best_choice().map(ChoiceView::from);
-            let formats = video.formats.iter().map(format_view).collect();
+            let formats = format_views(&video.formats);
             state
                 .formats
                 .lock()
@@ -2318,6 +2357,18 @@ mod tests {
             from_list(&ChoiceView::Format { id: "251".into() }, &formats),
             ChoiceView::Format { id: "251".into() }
         );
+        // The video's own sound before a dub of the same itag (users'
+        // reports, 2026-10-31), wherever yt-dlp lists it.
+        let sound = |id: &str, pref: i64| -> Format {
+            serde_json::from_value(
+                serde_json::json!({ "format_id": id, "language_preference": pref }),
+            )
+            .unwrap()
+        };
+        let dubbed = [sound("140-0", -1), sound("140-1", 10), sound("140-2", -1)];
+        assert_eq!(by_itag(&dubbed, "140").as_deref(), Some("140-1"));
+        let plain_first = [format("140"), format("140-1")];
+        assert_eq!(by_itag(&plain_first, "140").as_deref(), Some("140"));
         assert_eq!(
             from_list(&ChoiceView::Format { id: "18".into() }, &formats),
             ChoiceView::Best

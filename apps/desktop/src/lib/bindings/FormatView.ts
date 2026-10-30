@@ -17,4 +17,9 @@ kind: string, hls: boolean,
  * `HEVC`), if the site says it: QuickTime plays H.264 and HEVC only
  * (owner's report, 2026-10-30).
  */
-codec: string | null, };
+codec: string | null, 
+/**
+ * A sound that is the video's own (not a dubbed one), when the page
+ * offers several (users' reports, 2026-10-31).
+ */
+original: boolean, };

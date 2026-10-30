@@ -3,7 +3,7 @@ import { fileName, notForQuickTime, options, picked } from "../src/lib/videoChoi
 import type { FormatView } from "../src/lib/bindings/FormatView";
 
 // «Video quality»'s choices (M6, #149).
-const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false, codec: null });
+const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false, codec: null, original: false });
 
 describe("the quality choices", () => {
   const formats = [
@@ -21,6 +21,19 @@ describe("the quality choices", () => {
     expect(list[0]!.choice).toEqual({ kind: "merge", video: "137", audio: "140" });
     expect(list[0]!.size).toBe(105);
     expect(list.at(-1)!.choice).toEqual({ kind: "audio_only" });
+  });
+
+  it("merges the video's own sound, not a dubbed one, even a larger one (users' reports, 2026-10-31)", () => {
+    const own = { ...f("140-1", "audio", null, "m4a", 5), original: true };
+    const dubbed = f("140-0", "audio", null, "m4a", 6);
+    const list = options([f("137", "video", 1080, "mp4", 100), dubbed, own]);
+    expect(list[0]!.choice).toEqual({ kind: "merge", video: "137", audio: "140-1" });
+    // No sound marked: the largest m4a, as before.
+    expect(options([f("137", "video", 1080, "mp4", 100), dubbed, f("140-1", "audio", null, "m4a", 5)])[0]!.choice).toEqual({
+      kind: "merge",
+      video: "137",
+      audio: "140-0",
+    });
   });
 
   it("keeps each height once, the one with a size", () => {

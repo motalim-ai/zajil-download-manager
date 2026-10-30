@@ -51,10 +51,12 @@ pub(super) fn parts<'f>(choice: &Choice, formats: &'f [Format]) -> Option<Vec<&'
                 .filter(|f| f.has_audio() && !f.has_video() && f.ext == "m4a")
                 .filter(|f| fast_url(f).is_some())
                 .max_by(|a, b| {
-                    a.tbr
-                        .unwrap_or(0.0)
-                        .partial_cmp(&b.tbr.unwrap_or(0.0))
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                    a.sound_rank().cmp(&b.sound_rank()).then(
+                        a.tbr
+                            .unwrap_or(0.0)
+                            .partial_cmp(&b.tbr.unwrap_or(0.0))
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
                 })?,
         ],
     };

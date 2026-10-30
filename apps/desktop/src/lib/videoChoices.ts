@@ -18,8 +18,13 @@ export type Option = {
   size: number | null;
 };
 
+/** The sound merged with each picture: the engine's, else the largest m4a,
+ * among the video's own sounds when the page marks them (a dubbed one
+ * only when there is nothing else; users' reports, 2026-10-31). */
 function bestAudio(formats: FormatView[], best: ChoiceView | null): FormatView | undefined {
-  const audio = formats.filter((f) => f.kind === "audio");
+  const sounds = formats.filter((f) => f.kind === "audio");
+  const own = sounds.filter((f) => f.original);
+  const audio = own.length > 0 ? own : sounds;
   const largest = (list: FormatView[]) => list.reduce<FormatView | undefined>((a, f) => (!a || (f.size ?? 0) > (a.size ?? 0) ? f : a), undefined);
   return audio.find((f) => best?.kind === "merge" && f.id === best.audio) ?? largest(audio.filter((f) => f.ext === "m4a")) ?? largest(audio);
 }

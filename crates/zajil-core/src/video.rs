@@ -623,6 +623,15 @@ pub struct Format {
     /// 403, then yt-dlp from the start).
     #[serde(default, rename = "http_headers", deserialize_with = "user_agent_of")]
     agent: Option<String>,
+    /// A sound's language, and how much yt-dlp prefers it: YouTube offers
+    /// a video's own sound beside sounds dubbed by AI, in the same
+    /// formats, and marks its own `10` (and «original» in its note).
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    language_preference: Option<i64>,
+    #[serde(default)]
+    format_note: Option<String>,
 }
 
 /// The `User-Agent` of a format's `http_headers`, and nothing else.
@@ -647,6 +656,25 @@ impl std::fmt::Debug for Hidden {
 }
 
 impl Format {
+    /// How much its sound is the video's own: higher for the original, as
+    /// yt-dlp ranks it, lower for a dubbed one (users' reports, 2026-10-31:
+    /// YouTube videos came with an AI dub instead of their own voice).
+    pub fn sound_rank(&self) -> i64 {
+        let note = self
+            .format_note
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let marked = if note.contains("original") {
+            100
+        } else if note.contains("dubbed") {
+            -100
+        } else {
+            0
+        };
+        marked + self.language_preference.unwrap_or(0)
+    }
+
     /// The program its link was made for (its `User-Agent`), if it says.
     pub fn user_agent(&self) -> Option<&str> {
         self.agent.as_deref()
@@ -747,7 +775,10 @@ impl Video {
             .iter()
             .filter(|f| f.vcodec.is_none() && f.acodec.is_none() && f.ext == "mp4" && !f.is_hls())
             .max_by(&better);
-        let sound = top(&|f| f.has_audio() && !f.has_video(), &mp4_sound, &by_rate);
+        // The video's own sound before a dubbed one, then the best rate.
+        let by_sound =
+            |a: &&Format, b: &&Format| a.sound_rank().cmp(&b.sound_rank()).then(by_rate(a, b));
+        let sound = top(&|f| f.has_audio() && !f.has_video(), &mp4_sound, &by_sound);
         match (both, picture, sound) {
             // A higher picture is merged in, unless it would trade an MP4
             // every player opens for one QuickTime cannot play (owner's
@@ -2538,6 +2569,61 @@ mod tests {
         assert!(!format!("{format:?}").contains("SECRET"));
     }
 
+    /// YouTube offers a video's own sound beside AI dubs in the same
+    /// formats (users' reports, 2026-10-31): its own is taken, even when
+    /// a dub has the higher rate; without marks, the rate decides.
+    #[test]
+    fn the_best_choice_takes_the_video_s_own_sound() {
+        let sound = |id: &str, tbr: f64, pref: Option<i64>, note: &str| -> Format {
+            serde_json::from_value(serde_json::json!({
+                "format_id": id, "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2",
+                "tbr": tbr, "language_preference": pref, "format_note": note,
+            }))
+            .unwrap()
+        };
+        let picture: Format = serde_json::from_value(serde_json::json!({
+            "format_id": "137", "ext": "mp4", "height": 1080, "vcodec": "avc1.640028", "acodec": "none",
+        }))
+        .unwrap();
+        let video = |sounds: Vec<Format>| Video {
+            title: String::new(),
+            duration: None,
+            formats: std::iter::once(picture.clone()).chain(sounds).collect(),
+        };
+        let merge = |audio: &str| {
+            Some(Choice::Merge {
+                video: "137".into(),
+                audio: audio.into(),
+            })
+        };
+        let dubbed = sound("140-0", 130.0, Some(-1), "Arabic (dubbed-auto), medium");
+        let own = sound(
+            "140-1",
+            129.0,
+            Some(10),
+            "English original (default), medium",
+        );
+        assert_eq!(
+            video(vec![dubbed.clone(), own.clone()]).best_choice(),
+            merge("140-1")
+        );
+        assert_eq!(
+            video(vec![own.clone(), dubbed.clone()]).best_choice(),
+            merge("140-1")
+        );
+        // Marked by its note only.
+        let noted = sound("140-2", 100.0, None, "English original, medium");
+        let plain = sound("140-3", 200.0, None, "Arabic, medium");
+        assert_eq!(
+            video(vec![plain.clone(), noted]).best_choice(),
+            merge("140-2")
+        );
+        assert!(own.sound_rank() > dubbed.sound_rank());
+        // Nothing marked: the higher rate.
+        let low = sound("140", 100.0, None, "medium");
+        assert_eq!(video(vec![low, plain]).best_choice(), merge("140-3"));
+    }
+
     #[test]
     fn the_best_choice_prefers_higher_pictures_and_keeps_sound() {
         let f = |id: &str, h: Option<u32>, v: &str, a: &str| -> Format {
@@ -2713,6 +2799,9 @@ mod tests {
             protocol: None,
             url: None,
             agent: None,
+            language: None,
+            language_preference: None,
+            format_note: None,
         };
         assert!(f(serde_json::json!(true)).is_protected());
         assert!(f(serde_json::json!("maybe")).is_protected());
