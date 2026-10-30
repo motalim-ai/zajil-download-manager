@@ -179,6 +179,9 @@
   "videoListSound": {
     "message": "Sound"
   },
+  "videoListOriginal": {
+    "message": "Original"
+  },
   "videoListMore": {
     "message": "More qualities in Zajil…"
   },

@@ -85,9 +85,13 @@
   /**
    * The list's choices for what `yt-page.js` said, or null when it said
    * nothing usable (a live stream, or no format). The pictures go with the
-   * video's own sound, or with the sound of language `lang` when the user
-   * chose a dub (owner's request, 2026-10-31); `tracks` are the languages
-   * to choose from, when there are several.
+   * sound YouTube plays by default (Zajil then takes the video's own), or
+   * with the sound of language `lang` when the user chose one (owner's
+   * request, 2026-10-31), sent with it; `tracks` are the languages to
+   * choose from, when there are several. YouTube's «default» is not the
+   * video's own: it marks the dub in the viewer's language so (owner's
+   * report, 2026-10-31: an Arabic dub chosen came as English), so the list
+   * never says which is the original; Zajil knows, from yt-dlp.
    * @param {any} data @param {string | null} [lang]
    * @returns {{ title: string, duration: string, video: Choice[], audio: Choice[], tracks: Track[], lang: string } | null}
    * @typedef {{ name: string, detail: string, size: string, bytes?: number, send: { id?: string, video?: string, audio?: string, language?: string } }} Choice
@@ -123,8 +127,8 @@
         tracks.push({ name: f.track.name || f.track.lang, lang: f.track.lang, main: isMain(f) });
     }
     tracks.sort((a, b) => Number(b.main) - Number(a.main));
-    // The chosen dub, if it is one of them; else the video's own sound.
-    const dub = tracks.find((t) => t.lang === lang && !t.main) ?? null;
+    // The chosen language, if it is one of them; else YouTube's default.
+    const dub = tracks.find((t) => t.lang === lang) ?? null;
     const ofSound = (/** @type {any} */ f) => (dub ? f.track?.lang === dub.lang : isMain(f));
     const sounds = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.plain && ofSound(f));
     /** YouTube's usual one first (140, 251), else the best of its kind.
@@ -146,7 +150,8 @@
           CODEC_ORDER.indexOf(a.codec) - CODEC_ORDER.indexOf(b.codec),
       );
     for (const f of pictures) {
-      // A picture with its own sound has the video's own: not with a dub.
+      // A picture with its own sound has one we do not know: not with a
+      // chosen language.
       if (dub && f.kind === "both") continue;
       // A WebM picture goes with Opus; any other with AAC (else Opus: MKV).
       const sound = f.kind === "both" ? null : f.ext === "webm" ? (opus ?? m4a) : (m4a ?? opus);
@@ -172,7 +177,7 @@
         detail: f.codec,
         size: sizeText(f.size),
         bytes: f.size,
-        send: !isMain(f) && f.track?.lang ? { id: f.itag, language: f.track.lang } : { id: f.itag },
+        send: dub && f.track?.lang ? { id: f.itag, language: f.track.lang } : { id: f.itag },
       }));
     if (!video.length && !audio.length) return null;
     return {
@@ -181,7 +186,8 @@
       video,
       audio,
       tracks: tracks.length > 1 ? tracks : [],
-      lang: dub?.lang ?? tracks.find((t) => t.main)?.lang ?? "",
+      // The chosen language; "" for the video's own, Zajil's choice.
+      lang: dub?.lang ?? "",
     };
   }
 

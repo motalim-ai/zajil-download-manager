@@ -466,7 +466,7 @@ async function hostText(code) {
 /** The button's texts, in Zajil's language. */
 async function buttonTexts() {
   const lang = await zajilLanguage();
-  const [button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, more, help, hide] = await Promise.all(
+  const [button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, listOriginal, more, help, hide] = await Promise.all(
     [
       "videoButton",
       "videoButtonWorking",
@@ -478,12 +478,13 @@ async function buttonTexts() {
       "videoListVideo",
       "videoListAudio",
       "videoListSound",
+      "videoListOriginal",
       "videoListMore",
       "videoButtonHelp",
       "videoButtonHide",
     ].map((key) => textIn(lang, key)),
   );
-  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, more, help, hide } };
+  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, listOriginal, more, help, hide } };
 }
 
 /**

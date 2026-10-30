@@ -357,12 +357,13 @@
     if (listing.duration) title.append(line("length", listing.duration));
     menu.append(title);
     // The sound's language, when the video has several (owner's request,
-    // 2026-10-31): the video's own first, a dub on a press.
+    // 2026-10-31): «Original» first (Zajil takes the video's own), then
+    // each language by its name.
     if (listing.tracks?.length) {
       menu.append(line("head", texts.listSound ?? "Sound"));
       const row = document.createElement("div");
       row.className = "sounds";
-      for (const t of listing.tracks) {
+      for (const t of [{ lang: "", name: texts.listOriginal ?? "Original" }, ...listing.tracks]) {
         const made = choice();
         made.dataset.act = "sound";
         made.dataset.lang = t.lang;
@@ -416,7 +417,7 @@
    * move of the pointer or key press, never by the page alone). Until they come the button is not shown at
    * all, so it never shows in another language first (owner's decision on
    * #264); if they never come, it never shows.
-   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string, listVideo?: string, listAudio?: string, listSound?: string, more?: string, help?: string, hide?: string }} Texts
+   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string, listVideo?: string, listAudio?: string, listSound?: string, listOriginal?: string, more?: string, help?: string, hide?: string }} Texts
    * @type {Texts | null} */
   let texts = null;
   /** The video the pointer was on while the texts were on their way. */
@@ -436,7 +437,7 @@
       const dir = answer.lang === "en" ? "ltr" : "rtl";
       texts = /** @type {Texts} */ ({ dir, ...Object.fromEntries(keys.map((key) => [key, given[key]])) });
       // The list's words, when this Zajil has them.
-      for (const key of /** @type {const} */ (["listVideo", "listAudio", "listSound", "more", "help", "hide"])) {
+      for (const key of /** @type {const} */ (["listVideo", "listAudio", "listSound", "listOriginal", "more", "help", "hide"])) {
         if (typeof given[key] === "string" && given[key]) texts[key] = given[key];
       }
       help.title = texts.help ?? "Zajil";
@@ -684,7 +685,7 @@
     if (act === "sound") {
       const make = /** @type {any} */ (globalThis).__zajilFormats?.choicesOf;
       if (typeof make !== "function") return;
-      soundLang = item.dataset.lang ?? null;
+      soundLang = item.dataset.lang || null;
       listing = make(pageData, soundLang);
       choices = listing ? [...listing.video, ...listing.audio] : [];
       fillMenu();

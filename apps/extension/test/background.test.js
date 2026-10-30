@@ -669,6 +669,7 @@ describe("the background", () => {
             listVideo: locales.en.videoListVideo.message,
             listAudio: locales.en.videoListAudio.message,
             listSound: locales.en.videoListSound.message,
+            listOriginal: locales.en.videoListOriginal.message,
             more: locales.en.videoListMore.message,
             help: locales.en.videoButtonHelp.message,
             hide: locales.en.videoButtonHide.message,
