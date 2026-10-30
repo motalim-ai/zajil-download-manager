@@ -13,6 +13,7 @@
   import { startWindow } from "../lib/windowStart";
   import { fileName, notForQuickTime, options, picked, type Option } from "../lib/videoChoices";
   import { onMac } from "../lib/keys";
+  import QueuePick from "../lib/components/QueuePick.svelte";
   import { errorDetails, errorKey } from "../lib/videoErrors";
   import type { ToolView } from "../lib/bindings/ToolView";
   import type { VideoInfoView } from "../lib/bindings/VideoInfoView";
@@ -54,6 +55,10 @@
   // browser started, or a page to ask about (the owner's notes: no view
   // that is replaced by another as soon as it shows).
   let decided = $state(false);
+  // The queue it runs in (owner's request, 2026-10-30): none by default,
+  // so it starts now; a playlist's videos all go into the one chosen.
+  let queues = $state<string[]>([]);
+  let queue = $state("");
   // The browser's download that waits for the tools: it starts again
   // once they are in, and goes if the user cancels instead.
   let afterTools: number | null = null;
@@ -67,6 +72,10 @@
       await startWindow();
       void getCurrentWindow().setTitle(locale.t("video-title")).catch(() => {});
       folder = await api.videoFolder().catch(() => "");
+      queues = await api
+        .snapshot()
+        .then((snap) => snap.queues.map((q) => q.name))
+        .catch(() => []);
       unlisten.push(await api.onVideoToolsProgress((p) => step.kind === "installing" && (step = { kind: "installing", tool: p.tool, done: p.done, total: p.total })));
       unlisten.push(
         await api.onVideoProgress((p) => {
@@ -123,9 +132,9 @@
   async function keep(id: number, now: boolean) {
     try {
       if (now) {
-        await api.videoKeep(id, folder, name.trim());
+        await api.videoKeep(id, folder, name.trim(), queue || null);
         await api.openProgress(id, name.trim() || "Zajil").catch(() => {});
-      } else await api.videoLater(id, folder, name.trim());
+      } else await api.videoLater(id, folder, name.trim(), queue || null);
       await api.closeWindow();
     } catch (e) {
       step = { kind: "failed", error: String(e) };
@@ -215,7 +224,7 @@
   async function downloadOne(choice: Option["choice"], file: string) {
     step = { kind: "downloading", label: file, done: 0, total: null, speed: null, id: null };
     try {
-      const id = await api.videoDownload(url, choice, folder, file);
+      const id = await api.videoDownload(url, choice, folder, file, queue || null);
       await api.openProgress(id, file);
       await api.closeWindow();
     } catch (e) {
@@ -230,7 +239,7 @@
     const items = info.entries.filter((e, i) => chosen[i] && e.url && !e.playlist).map((e) => ({ url: e.url!, title: e.title }));
     step = { kind: "downloading", label: info.title, done: 0, total: null, speed: null, id: null };
     try {
-      await api.videoAddMany(url, items, folder);
+      await api.videoAddMany(url, items, folder, queue || null);
       await api.closeWindow();
     } catch (e) {
       step = { kind: "failed", error: String(e) };
@@ -341,6 +350,8 @@
         </div>
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
+        <label class="label" for="video-queue">{locale.t("add-queue")}</label>
+        <div class="box qpick"><QueuePick id="video-queue" names={queues} bind:value={queue} none={locale.t("queue-none-video")} /></div>
       </div>
       <div class="actions">
         <button class="btn primary" disabled={!name.trim() || !folder} onclick={() => void downloadOne(step.kind === "video" ? step.list[pick]!.choice : { kind: "audio_only" }, name.trim())}>
@@ -370,6 +381,10 @@
         <p class="muted">{locale.t("video-playlists-only")}</p>
       {/if}
       <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
+      <div class="with qline">
+        <label class="label" for="playlist-queue">{locale.t("add-queue")}</label>
+        <div class="box qpick"><QueuePick id="playlist-queue" names={queues} bind:value={queue} none={locale.t("queue-none-video")} /></div>
+      </div>
       <div class="actions">
         <button class="btn primary" disabled={!list.chosen.some(Boolean) || !folder} onclick={() => void downloadList(list.info, list.chosen)}><Icon name="download" size={15} />{locale.t("video-download-chosen")}</button>
         <button class="btn" onclick={() => void close()}>{locale.t("add-cancel")}</button>
@@ -404,6 +419,8 @@
         </div>
         <span class="label">{locale.t("add-folder")}</span>
         <div class="with"><bdi class="box path" dir="ltr">{folder}</bdi><button class="btn" onclick={() => void chooseFolder()}>{locale.t("add-change")}</button></div>
+        <label class="label" for="video-queue">{locale.t("add-queue")}</label>
+        <div class="box qpick"><QueuePick id="video-queue" names={queues} bind:value={queue} none={locale.t("queue-none-video")} /></div>
       </div>
       <!-- Its room is kept: the buttons do not move when it comes. -->
       <div class="slot">
@@ -513,6 +530,25 @@
     display: flex;
     gap: 8px;
     min-width: 0;
+  }
+  .qline {
+    align-items: center;
+  }
+  .qpick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    flex: 1;
+  }
+  .qpick :global(select),
+  .qpick :global(input) {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: inherit;
+    outline: none;
   }
   .qualities {
     border: 1px solid var(--line);

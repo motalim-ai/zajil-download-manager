@@ -484,6 +484,7 @@ schedule-new-name = اسم الطابور الجديد
 schedule-new-hint = حروف وأرقام ومسافة واحدة بين الكلمات، و - و _.
 tree-queue-exists = فيه طابور بالاسم ده.
 queue-new-option = طابور جديد…
+queue-none-video = بلا طابور (يبدأ الآن)
 schedule-create = إنشاء
 schedule-cancel = إلغاء
 schedule-delete = حذف

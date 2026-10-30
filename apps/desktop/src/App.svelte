@@ -501,7 +501,7 @@
         return tableShown && chosen.length > 0;
       // Back to the main queue: only what is in another one.
       case "remove-from-queue":
-        return tableShown && chosen.some((d) => !d.video && d.queue !== "main");
+        return tableShown && chosen.some((d) => (d.video ? d.queue !== "" : d.queue !== "main"));
       default:
         return true;
     }
@@ -553,7 +553,9 @@
       case "copy-link":
         return void copyLinks();
       case "remove-from-queue":
-        return void moveTo("main", chosen.filter((d) => !d.video && d.queue !== "main").map((d) => d.id));
+        // A video goes back to the videos' own list; the others to the main
+        // queue.
+        return void leaveQueues(chosen.filter((d) => (d.video ? d.queue !== "" : d.queue !== "main")));
       case "categories":
         details = null;
         view = "categories";
@@ -635,7 +637,20 @@
     }
   }
   // A video download has no queue (#149).
-  async function moveTo(queue: string, ids: number[] = chosen.filter((d) => !d.video).map((d) => d.id)) {
+  async function leaveQueues(list: Snapshot["downloads"]) {
+    failed = null;
+    try {
+      const videos = list.filter((d) => d.video).map((d) => d.id);
+      const others = list.filter((d) => !d.video).map((d) => d.id);
+      if (videos.length) await api.videoSetQueue(videos, null);
+      if (others.length) await api.moveToQueue(others, "main");
+    } catch (e) {
+      failed = String(e);
+    }
+    await refresh();
+  }
+  // Videos join a queue too (owner's request, 2026-10-30).
+  async function moveTo(queue: string, ids: number[] = chosen.map((d) => d.id)) {
     failed = null;
     try {
       await api.moveToQueue(ids, queue);

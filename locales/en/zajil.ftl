@@ -426,6 +426,7 @@ schedule-new-name = The new queue's name
 schedule-new-hint = Letters, digits, one space between words, - and _.
 tree-queue-exists = There is already a queue with this name.
 queue-new-option = New queue…
+queue-none-video = No queue (starts now)
 schedule-create = Create
 schedule-cancel = Cancel
 schedule-delete = Delete

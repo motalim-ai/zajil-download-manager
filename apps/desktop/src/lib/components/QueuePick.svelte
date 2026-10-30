@@ -11,7 +11,8 @@
     value = $bindable(),
     id,
     disabled = false,
-  }: { names: string[]; value: string; id: string; disabled?: boolean } = $props();
+    none,
+  }: { names: string[]; value: string; id: string; disabled?: boolean; /** A first choice of no queue (`""`), so named. */ none?: string } = $props();
 
   const NEW = "\u0000new";
   // Made here: in the list at once, before the parent's list comes again.
@@ -80,6 +81,7 @@
   {#if said}<small class="said" role="alert">{said}</small>{/if}
 {:else}
   <select {id} {value} onchange={(e) => void picked(e)} {disabled}>
+    {#if none !== undefined}<option value="">{none}</option>{/if}
     {#each all as q (q)}<option value={q}>{q === "main" ? locale.t("queue-main") : q}</option>{/each}
     <option value={NEW}>{locale.t("queue-new-option")}</option>
   </select>

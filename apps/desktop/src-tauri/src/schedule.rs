@@ -556,18 +556,21 @@ pub fn cancel_after(after: State<'_, SharedAfter>) {
 
 /// The queue whose chosen action is due once download `item` finished:
 /// the queue `item` is in, if the user chose an action for it and every
-/// one of its downloads is done. The choice is taken: it happens once.
+/// one of its downloads is done, its videos too (`videos_done`: a
+/// computer shut down in the middle of a playlist, otherwise). The choice
+/// is taken: it happens once.
 fn due(
     queues: &QueuesFile,
     item: u64,
     chosen: &mut HashMap<String, PowerAction>,
+    videos_done: impl Fn(&str) -> bool,
 ) -> Option<(String, PowerAction)> {
     let queue = queues
         .queues
         .iter()
         .find(|q| q.items.iter().any(|i| i.id == item))?;
     let all_done = queue.items.iter().all(|i| i.status == Status::Done);
-    if queue.items.is_empty() || !all_done {
+    if queue.items.is_empty() || !all_done || !videos_done(&queue.name) {
         return None;
     }
     let action = chosen.remove(&queue.name)?;
@@ -578,7 +581,10 @@ fn due(
 /// queue may be done, and the action the user chose for it is due.
 pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
     if let QueueEvent::QueueDone { queue } = event {
-        open_after(handle, queue.clone());
+        // Its videos still to come: their last one says when it is done.
+        if crate::video::queue_videos_done(&handle.state::<crate::video::VideoState>(), queue) {
+            open_after(handle, queue.clone());
+        }
         return;
     }
     let QueueEvent::Finished { item, .. } = event else {
@@ -594,10 +600,46 @@ pub fn on_event(handle: &tauri::AppHandle, event: &QueueEvent) {
         let Ok(Ok(queues)) = tokio::task::spawn_blocking(move || store.load()).await else {
             return;
         };
-        let Some((queue, action)) = due(&queues, item, &mut after.chosen.lock().unwrap()) else {
+        let videos = handle.state::<crate::video::VideoState>();
+        let videos_done = |queue: &str| crate::video::queue_videos_done(&videos, queue);
+        let Some((queue, action)) = due(
+            &queues,
+            item,
+            &mut after.chosen.lock().unwrap(),
+            videos_done,
+        ) else {
             return;
         };
         count_down(&handle, &after, queue, action).await;
+    });
+}
+
+/// A video of `queue` finished (owner's request, 2026-10-30): if that was
+/// the last of the queue, its other downloads done too, what the user chose
+/// for after the queue comes, the file to open and the countdown.
+pub fn video_done(handle: &tauri::AppHandle, queue: String) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let videos = handle.state::<crate::video::VideoState>();
+        if !crate::video::queue_videos_done(&videos, &queue) {
+            return;
+        }
+        let store = handle.state::<App>().store.clone();
+        let Ok(Ok(queues)) = tokio::task::spawn_blocking(move || store.load()).await else {
+            return;
+        };
+        let Some(found) = queues.queue(&queue) else {
+            return;
+        };
+        if !found.items.iter().all(|i| i.status == Status::Done) {
+            return;
+        }
+        open_after(&handle, queue.clone());
+        let after = handle.state::<SharedAfter>().inner().clone();
+        let action = after.chosen.lock().unwrap().remove(&queue);
+        if let Some(action) = action {
+            count_down(&handle, &after, queue, action).await;
+        }
     });
 }
 
@@ -881,20 +923,22 @@ mod tests {
         let mut chosen = HashMap::from([("night".to_owned(), PowerAction::Sleep)]);
 
         q.item_mut(main[0]).unwrap().status = Status::Done;
-        assert_eq!(due(&q, main[0], &mut chosen), None);
+        assert_eq!(due(&q, main[0], &mut chosen, |_| true), None);
         for id in &main {
             q.item_mut(*id).unwrap().status = Status::Done;
         }
         // The main queue is done, but nothing was chosen for it.
-        assert_eq!(due(&q, main[2], &mut chosen), None);
+        assert_eq!(due(&q, main[2], &mut chosen, |_| true), None);
         assert_eq!(chosen.len(), 1);
 
         q.item_mut(night).unwrap().status = Status::Done;
+        // Its videos not done yet (owner's request, 2026-10-30): not yet.
+        assert_eq!(due(&q, night, &mut chosen, |_| false), None);
         assert_eq!(
-            due(&q, night, &mut chosen),
+            due(&q, night, &mut chosen, |_| true),
             Some(("night".to_owned(), PowerAction::Sleep))
         );
-        assert_eq!(due(&q, night, &mut chosen), None);
+        assert_eq!(due(&q, night, &mut chosen, |_| true), None);
     }
 
     /// The schedule window may listen to Zajil's events, and nothing more:

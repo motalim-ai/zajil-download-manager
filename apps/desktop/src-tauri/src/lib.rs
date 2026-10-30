@@ -333,6 +333,18 @@ pub fn run() {
             // A video tool the user had in an earlier build (yt-dlp's
             // one-file build) is brought up to date in the background.
             video::update_tools(tauri_app.handle().clone());
+            // Videos in queues follow their queues' windows, and the last
+            // of a queue brings what the user chose for after it.
+            video::watch_queues(tauri_app.handle().clone());
+            {
+                use tauri::Listener;
+                let handle = tauri_app.handle().clone();
+                tauri_app.listen_any(video::QUEUE_VIDEO_DONE, move |event| {
+                    if let Ok(queue) = serde_json::from_str::<String>(event.payload()) {
+                        schedule::video_done(&handle, queue);
+                    }
+                });
+            }
             tauri_app.add_capability(dropbox::CAPABILITY)?;
             // The drop box, if the user left it shown.
             if tauri_app.state::<closing::Closing>().prefs().drop_box {
@@ -454,6 +466,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_tools_install,
         video::video_tools_cancel,
         video::video_tools_remove,
+        video::video_set_queue,
         video::video_probe,
         video::video_probe_cancel,
         video::video_window_open,
@@ -568,6 +581,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         video::video_tools_install,
         video::video_tools_cancel,
         video::video_tools_remove,
+        video::video_set_queue,
         video::video_probe,
         video::video_probe_cancel,
         video::video_window_open,
@@ -2675,6 +2689,14 @@ async fn move_to_queue<R: tauri::Runtime>(
     queue: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    // Videos join a queue as well (owner's request, 2026-10-30).
+    let (videos, ids) = video::split(ids);
+    if !videos.is_empty() {
+        video::set_queue(&handle, &videos, Some(queue.clone()));
+    }
+    if ids.is_empty() {
+        return Ok(());
+    }
     change(&app, &handle, move |q| move_items(q, &ids, &queue)).await
 }
 
