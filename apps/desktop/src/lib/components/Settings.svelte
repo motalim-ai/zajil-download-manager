@@ -19,6 +19,7 @@
   import { licenseOf, toolName, versionOf } from "../about";
   import { errorDetails, errorKey } from "../videoErrors";
   import type { VideoErrorView } from "../bindings/VideoErrorView";
+  import type { FinishView } from "../bindings/FinishView";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { loadDoubleClick, saveDoubleClick, type DoubleClick } from "../doubleClick";
 
@@ -250,6 +251,23 @@
   // missing (owner, 2026-10-29), and deleting them.
   let tools = $state<ToolView[]>([]);
   let installing = $state<{ tool: string; done: number; total: number | null } | null>(null);
+  // What a progress window does when its download finishes, for every
+  // download (owner's request, 2026-10-30): it closes by default.
+  let finish = $state<FinishView>({ close_window: true, open_file: false, open_folder: false });
+  let finishSaid = $state<string | null>(null);
+  onMount(() => {
+    void api.finishSetting().then((f) => (finish = f), () => {});
+  });
+  async function setFinish(part: Partial<FinishView>) {
+    const next = { ...finish, ...part };
+    finishSaid = null;
+    try {
+      await api.setFinishSetting(next);
+      finish = next;
+    } catch (e) {
+      finishSaid = String(e);
+    }
+  }
   // Video downloads at once (owner's request, 2026-10-29), applied at once.
   const MAX_VIDEOS = 8;
   let videosAtOnce = $state(3);
@@ -391,6 +409,23 @@
       <span>{locale.t("settings-notifications-label")}</span>
     </label>
     <CompleteSetting />
+  </fieldset>
+  <fieldset>
+    <legend>{locale.t("settings-finish")}</legend>
+    <p class="hint">{locale.t("settings-finish-hint")}</p>
+    <label class="choice">
+      <input type="checkbox" checked={finish.close_window} onchange={(e) => void setFinish({ close_window: e.currentTarget.checked })} />
+      <span>{locale.t("progress-finish-close")}</span>
+    </label>
+    <label class="choice">
+      <input type="checkbox" checked={finish.open_folder} onchange={(e) => void setFinish({ open_folder: e.currentTarget.checked })} />
+      <span>{locale.t("progress-finish-folder")}</span>
+    </label>
+    <label class="choice">
+      <input type="checkbox" checked={finish.open_file} onchange={(e) => void setFinish({ open_file: e.currentTarget.checked })} />
+      <span>{locale.t("progress-finish-open")}</span>
+    </label>
+    {#if finishSaid}<p class="problem" role="alert">{finishSaid}</p>{/if}
   </fieldset>
   <fieldset>
     <legend>{locale.t("update-setting-title")}</legend>

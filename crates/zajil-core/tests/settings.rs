@@ -3,7 +3,7 @@
 
 use std::fs;
 
-use zajil_core::settings::{Digits, Language, SettingsError, SettingsStore, Theme};
+use zajil_core::settings::{Digits, FinishActions, Language, SettingsError, SettingsStore, Theme};
 use zajil_core::state::checksum_of;
 
 /// What a damaged or hostile settings file must never do: be used, or be
@@ -241,4 +241,35 @@ fn videos_at_once_is_three_unless_set_from_one_to_eight() {
         assert!(refused.is_err(), "{bad}");
     }
     assert_eq!(store.load().unwrap().videos_at_once(), 6);
+}
+
+/// When a download finishes (owner's request, 2026-10-30): its window
+/// closes and nothing opens unless set, and a file without it stays as it
+/// was.
+#[test]
+fn a_finished_download_s_window_closes_unless_set() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(data.path());
+    assert_eq!(
+        store.load().unwrap().finish(),
+        FinishActions {
+            close_window: true,
+            open_file: false,
+            open_folder: false
+        }
+    );
+    store.update(|_| Ok(())).unwrap();
+    assert!(!fs::read_to_string(store.path()).unwrap().contains("finish"));
+    let chosen = FinishActions {
+        close_window: false,
+        open_file: false,
+        open_folder: true,
+    };
+    store
+        .update(|file| {
+            file.finish = Some(chosen);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(store.load().unwrap().finish(), chosen);
 }

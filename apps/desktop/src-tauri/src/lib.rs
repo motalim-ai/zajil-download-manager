@@ -510,6 +510,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_proxy,
         videos_at_once_setting,
         set_videos_at_once,
+        finish_setting,
+        set_finish_setting,
         set_limit,
         menu::set_menu,
         quit_app,
@@ -625,6 +627,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         set_proxy,
         videos_at_once_setting,
         set_videos_at_once,
+        finish_setting,
+        set_finish_setting,
         set_limit,
         menu::set_menu,
         quit_app,
@@ -4826,6 +4830,48 @@ async fn save_settings<R: tauri::Runtime>(
     // The other windows follow (the main one and the settings window).
     let _ = handle.emit("settings-changed", saved.clone());
     Ok(saved)
+}
+
+/// What a progress window does when its download finishes, for every
+/// download (owner's request, 2026-10-30).
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct FinishView {
+    pub close_window: bool,
+    pub open_file: bool,
+    pub open_folder: bool,
+}
+
+#[tauri::command]
+async fn finish_setting(app: State<'_, App>) -> Result<FinishView, String> {
+    let settings = app.settings.clone();
+    let finish = tokio::task::spawn_blocking(move || settings.load().map(|s| s.finish()))
+        .await
+        .map_err(blocking_err)?
+        .map_err(blocking_err)?;
+    Ok(FinishView {
+        close_window: finish.close_window,
+        open_file: finish.open_file,
+        open_folder: finish.open_folder,
+    })
+}
+
+#[tauri::command]
+async fn set_finish_setting(app: State<'_, App>, finish: FinishView) -> Result<(), String> {
+    let settings = app.settings.clone();
+    tokio::task::spawn_blocking(move || {
+        settings.update(|file| {
+            file.finish = Some(zajil_core::settings::FinishActions {
+                close_window: finish.close_window,
+                open_file: finish.open_file,
+                open_folder: finish.open_folder,
+            });
+            Ok(())
+        })
+    })
+    .await
+    .map_err(blocking_err)?
+    .map_err(blocking_err)
 }
 
 /// How many video downloads run at once.

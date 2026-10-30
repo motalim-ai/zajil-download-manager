@@ -23,9 +23,11 @@
   // Shown or not, as the user left it last (a convenience: per viewer).
   let more = $state(readMore());
   // When finished (this window acts, while it is open).
+  // From the settings, for every download (owner's request, 2026-10-30);
+  // changed here, for this one only.
   let openFile = $state(false);
   let openFolder = $state(false);
-  let closeWhenDone = $state(false);
+  let closeWhenDone = $state(true);
   // The speed limit tab: KB/s, or none.
   let limited = $state(false);
   let limitKb = $state(512);
@@ -143,6 +145,12 @@
     let unlisten: (() => void) | undefined;
     void (async () => {
       await startWindow();
+      const finish = await api.finishSetting().catch(() => null);
+      if (finish) {
+        openFile = finish.open_file;
+        openFolder = finish.open_folder;
+        closeWhenDone = finish.close_window;
+      }
       unlisten = await api.onChange(() => void load());
       await load();
       await tick();

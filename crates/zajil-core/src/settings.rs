@@ -103,6 +103,12 @@ pub struct SettingsFile {
     /// while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub videos_at_once: Option<u32>,
+    /// What a download's progress window does when the download finishes,
+    /// for every download (owner's request, 2026-10-30); each window can
+    /// still change it for its own. `None`, and when absent: the defaults
+    /// ([`FinishActions::default`]). Not written while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish: Option<FinishActions>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -156,8 +162,30 @@ impl Default for SettingsFile {
             site_connections: Vec::new(),
             proxy: None,
             videos_at_once: None,
+            finish: None,
             updated_at: now_rfc3339(),
             checksum: String::new(),
+        }
+    }
+}
+
+/// What a progress window does when its download finishes: it closes by
+/// default (owner's request, 2026-10-30: it stayed open), and opens
+/// nothing. A file that can run code still asks before it opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FinishActions {
+    pub close_window: bool,
+    pub open_file: bool,
+    pub open_folder: bool,
+}
+
+impl Default for FinishActions {
+    fn default() -> Self {
+        FinishActions {
+            close_window: true,
+            open_file: false,
+            open_folder: false,
         }
     }
 }
@@ -169,6 +197,11 @@ pub const DEFAULT_VIDEOS_AT_ONCE: u32 = 3;
 pub const MAX_VIDEOS_AT_ONCE: u32 = 8;
 
 impl SettingsFile {
+    /// What a progress window does when its download finishes.
+    pub fn finish(&self) -> FinishActions {
+        self.finish.unwrap_or_default()
+    }
+
     /// How many video downloads run at once.
     pub fn videos_at_once(&self) -> u32 {
         self.videos_at_once.unwrap_or(DEFAULT_VIDEOS_AT_ONCE)

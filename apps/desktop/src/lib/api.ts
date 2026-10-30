@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import type { FinishView } from "./bindings/FinishView";
 import type { IntegrationView } from "./bindings/IntegrationView";
 import type { AddRequest } from "./bindings/AddRequest";
 import type { DetailsView } from "./bindings/DetailsView";
@@ -153,6 +154,9 @@ export const api = {
    * applies when Zajil next starts. */
   proxySetting: () => invoke<string | null>("proxy_setting"),
   setProxy: (proxy: string | null) => invoke<void>("set_proxy", { proxy }),
+  /** What a progress window does when its download finishes, for all. */
+  finishSetting: () => invoke<FinishView>("finish_setting"),
+  setFinishSetting: (finish: FinishView) => invoke<void>("set_finish_setting", { finish }),
   /** How many video downloads run at once, 1 to 8. */
   videosAtOnce: () => invoke<number>("videos_at_once_setting"),
   setVideosAtOnce: (n: number) => invoke<void>("set_videos_at_once", { n }),

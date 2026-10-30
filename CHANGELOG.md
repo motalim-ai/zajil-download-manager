@@ -13,6 +13,7 @@ What the owner and users asked for after 1.1.2. Tried by hand on macOS by the ow
 
 ### Added
 
+- **When a download finishes, for every download** (owner's request, 2026-10-30): Settings › General has «When a download finishes»: close the download's window (on by default; it stayed open), open the folder, open the file (a program still asks first). Each window can still change it for its own download.
 - **Videos and playlists in queues** (owner's request, 2026-10-30): «Video quality» and a playlist have a queue choice, with «New queue…» (none by default: it starts now), and «Add to queue» and «Remove from queue» take videos too. A video in a queue starts only while its queue may run (no schedule, its window open, or started now), within the queue's downloads at once, goes back to waiting when its window closes, and the queue's «after it ends» (opening a file, sleep, shutdown) waits for its videos too.
 - **A download count** on the site's first page and as a badge in the README (owner's request, 2026-10-30): how many times the installers of every release were downloaded, as GitHub counts them, updated once a day by the site's deploy. Nothing is sent from Zajil itself.
 - **Brave, Opera and Vivaldi:** Zajil registers its browser host for them too (owner's request, 2026-10-30), and they take the Chrome extension. On macOS and Linux each has its own folder; on Windows Brave and Opera read Chrome's key, and Vivaldi has its own.
