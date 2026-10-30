@@ -822,6 +822,69 @@ async fn a_stopped_run_ends_its_tree_and_leaves_nothing() {
     assert!(names_in(&s.dest).is_empty(), "{:?}", names_in(&s.dest));
 }
 
+/// The program is made to resume (owner, 2026-10-30): a video yt-dlp
+/// downloads keeps its folder when stopped, and the next run continues its
+/// `.part` there; once the video is out, the folder goes.
+#[tokio::test]
+async fn a_stopped_video_continues_from_its_kept_folder() {
+    let s = setup("resume");
+    let stop = Stop::new();
+    let watcher = {
+        let (stop, started) = (stop.clone(), s.control.join("started"));
+        tokio::spawn(async move {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while !started.exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the stand-in never started"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            stop.request();
+        })
+    };
+    let request = Download {
+        url: "https://example.com/v",
+        choice: &Choice::Format("1".into()),
+        formats: known(),
+        cookies: None,
+        dest: &s.dest,
+        name: "x",
+    };
+    let err = s
+        .runner
+        .download_keeping(&request, Some("1a"), &stop, &mut |_| {})
+        .await
+        .unwrap_err();
+    watcher.await.unwrap();
+    assert!(matches!(err, VideoError::Stopped), "{err}");
+    let kept = zajil_core::video::kept_folder(&s.dest, "1a");
+    assert_eq!(fs::read(kept.join("media.mp4.part")).unwrap().len(), 400);
+    assert!(names_in(&s.runs).is_empty(), "{:?}", names_in(&s.runs));
+
+    let mut events = Vec::new();
+    let file = s
+        .runner
+        .download_keeping(&request, Some("1a"), &Stop::new(), &mut |e| events.push(e))
+        .await
+        .unwrap();
+    assert_eq!(fs::read(&file).unwrap().len(), 1000);
+    assert!(matches!(
+        events.first(),
+        Some(VideoEvent::Progress { done: 400, .. })
+    ));
+    assert!(!kept.exists());
+    assert_eq!(names_in(&s.dest), ["x.mp4"]);
+
+    // A key that is not letters and digits is never a folder's name.
+    fs::write(s.control.join("script"), "download mp4").unwrap();
+    s.runner
+        .download_keeping(&request, Some("../up"), &Stop::new(), &mut |_| {})
+        .await
+        .unwrap();
+    assert!(names_in(&s.dest).iter().all(|n| !n.contains("keep")));
+}
+
 #[tokio::test]
 async fn a_playlist_lists_its_entries() {
     let s = setup("probe");

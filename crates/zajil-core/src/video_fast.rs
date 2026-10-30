@@ -395,6 +395,7 @@ impl VideoRunner {
             origin: reqwest::Url::parse(request.url)
                 .map(|u| u.origin().ascii_serialization())
                 .unwrap_or_default(),
+            keep: None,
         };
         tokio::task::spawn_blocking(move || {
             let placed = finish.place(&merged);

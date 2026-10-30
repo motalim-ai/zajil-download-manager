@@ -196,8 +196,9 @@ pub fn split(ids: Vec<u64>) -> (Vec<u64>, Vec<u64>) {
 
 const ROWS_FILE: &str = "videos.json";
 
-/// One video download of the list. A stopped one starts over (yt-dlp's
-/// run folder is swept), so «resume» asks the page again.
+/// One video download of the list. A stopped one continues from what it
+/// saved (Zajil's own parts, or yt-dlp's kept folder); «resume» may ask
+/// the page again for new links.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Row {
     id: u64,
@@ -399,10 +400,13 @@ pub fn details(
     id: u64,
 ) -> Option<DetailsView> {
     let row = with_row(state, id, |row| row.clone())?;
-    // Zajil's own way (YouTube) continues from its parts; yt-dlp's starts
-    // over. Its parts are there once it began, its file once it finished.
+    // Zajil's own way (YouTube) continues from its parts, yt-dlp from the
+    // folder kept for the video: there once it began, its file once it
+    // finished.
+    let folder = std::path::Path::new(&row.folder);
     let resumable = row.status == StatusView::Done
-        || !zajil_core::video::part_files(std::path::Path::new(&row.folder), &row.name).is_empty();
+        || !zajil_core::video::part_files(folder, &row.name).is_empty()
+        || zajil_core::video::kept_folder(folder, &key_of(row.id)).is_dir();
     // Not known before its first byte (owner's report, 2026-10-29: «not
     // possible» at the start of a download that could).
     let known = resumable || row.done > 0;
@@ -430,8 +434,8 @@ pub fn url_of(state: &VideoState, id: u64) -> Option<String> {
     with_row(state, id, |row| row.url.clone())
 }
 
-/// «Pause»: a running video stops (it starts over when resumed); a
-/// waiting one stays out of the turn.
+/// «Pause»: a running video stops (it continues when resumed); a waiting
+/// one stays out of the turn.
 pub fn pause(state: &VideoState, ids: &[u64]) {
     for &id in ids {
         with_row(state, id, |row| {
@@ -984,8 +988,14 @@ fn discard<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, id: u64) {
 }
 
 /// What a cancelled download wrote: its parts, and its file if finished.
+/// The video's own key, for the folder yt-dlp keeps for it.
+fn key_of(id: u64) -> String {
+    format!("{id:x}")
+}
+
 fn remove_leftovers(row: &Row) {
     let folder = std::path::Path::new(&row.folder);
+    zajil_core::video::remove_kept(&zajil_core::video::kept_folder(folder, &key_of(row.id)));
     for part in zajil_core::video::part_files(folder, &row.name) {
         let _ = zajil_platform::fs::remove_file_retrying(&part);
     }
@@ -2094,7 +2104,7 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                                 name: &row.name,
                             };
                             runner
-                                .download(&request, &stop, &mut on_event)
+                                .download_keeping(&request, Some(&key_of(id)), &stop, &mut on_event)
                                 .await
                                 .map_err(VideoErrorView::from)
                         }
@@ -2104,6 +2114,14 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 .await
             }
         };
+        // Finished either way: what yt-dlp kept for it is not needed.
+        if result.is_ok() {
+            let kept = zajil_core::video::kept_folder(std::path::Path::new(&row.folder), &key_of(id));
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                zajil_core::video::remove_kept(&kept)
+            })
+            .await;
+        }
         let state = handle.state::<VideoState>();
         state.downloads.lock().unwrap().remove(&id);
         state.told.lock().unwrap().remove(&id);

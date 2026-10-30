@@ -101,6 +101,32 @@ fn main() {
             );
             std::process::exit(1);
         }
+        // As yt-dlp continues a `.part` it finds in its folder: none, it
+        // writes 400 bytes of it, says it started and waits to be ended;
+        // one, it writes the rest of the 1000 and finishes.
+        "resume" => {
+            let dir = std::env::current_dir().unwrap();
+            let part = dir.join("media.mp4.part");
+            match std::fs::read(&part) {
+                Ok(mut data) => {
+                    println!("zajil-progress {} 1000 NA NA", data.len());
+                    data.resize(1000, 7);
+                    std::fs::write(&part, &data).unwrap();
+                    let file = dir.join("media.mp4");
+                    std::fs::rename(&part, &file).unwrap();
+                    println!("zajil-progress 1000 1000 NA NA");
+                    println!("{}", file.display());
+                }
+                Err(_) => {
+                    std::fs::write(&part, vec![7u8; 400]).unwrap();
+                    println!("zajil-progress 400 1000 NA NA");
+                    std::fs::write(control.join("started"), b"").unwrap();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
+                }
+            }
+        }
         // Says it started, then waits to be ended (a stop, a crash).
         "hang" => {
             std::fs::write(control.join("started"), b"").unwrap();

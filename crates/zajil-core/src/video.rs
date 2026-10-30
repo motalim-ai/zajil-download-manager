@@ -969,12 +969,15 @@ fn random_hex() -> io::Result<String> {
 struct Run {
     dir: PathBuf,
     out: Option<PathBuf>,
+    /// The output folder is the video's own, kept by [`Run::close`] for
+    /// the next run to continue its parts.
+    keep_out: bool,
     /// Locked while the run lives: another Zajil's sweep leaves it alone.
     lock: Option<std::fs::File>,
 }
 
 impl Run {
-    fn start(runs: &Runs, dest: Option<&Path>) -> io::Result<Run> {
+    fn start(runs: &Runs, dest: Option<(&Path, Option<&str>)>) -> io::Result<Run> {
         zajil_platform::fs::private_dir(&runs.root)?;
         let dir = runs.root.join(random_hex()?);
         zajil_platform::fs::private_dir(&dir)?;
@@ -983,10 +986,30 @@ impl Run {
         let mut run = Run {
             dir,
             out: None,
+            keep_out: false,
             lock: Some(lock),
         };
         zajil_platform::fs::private_dir(&run.tmp())?;
-        if let Some(dest) = dest {
+        if let Some((dest, Some(key))) = dest {
+            // The video's own folder, made or found again: a plain folder,
+            // never a link. Not named in the run's record, so a sweep
+            // after a crash keeps it too.
+            let out = kept_folder(dest, key);
+            match std::fs::create_dir(&out) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                    if !std::fs::symlink_metadata(&out)?.is_dir() {
+                        return Err(io::Error::other(format!(
+                            "{} is not a folder",
+                            out.display()
+                        )));
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+            run.out = Some(out);
+            run.keep_out = true;
+        } else if let Some((dest, None)) = dest {
             let out = dest.join(format!(".zajil-video-{}", random_hex()?));
             // Written before the folder exists, so a crash never leaves an
             // output folder that no record names.
@@ -1016,6 +1039,7 @@ impl Run {
     /// ended.
     fn close(mut self) -> io::Result<()> {
         let (dir, out) = (std::mem::take(&mut self.dir), self.out.take());
+        let out = out.filter(|_| !self.keep_out);
         // The lock is released before its folder goes (Windows cannot
         // remove an open file).
         drop(self.lock.take());
@@ -1037,6 +1061,7 @@ impl Drop for Run {
             let run = Run {
                 dir: std::mem::take(&mut self.dir),
                 out: self.out.take(),
+                keep_out: self.keep_out,
                 lock: self.lock.take(),
             };
             let _ = run.close();
@@ -1657,6 +1682,21 @@ impl VideoRunner {
         stop: &Stop,
         on_event: &mut (dyn FnMut(VideoEvent) + Send),
     ) -> Result<PathBuf, VideoError> {
+        self.download_keeping(request, None, stop, on_event).await
+    }
+
+    /// [`VideoRunner::download`], resumable whichever way it goes: `keep`
+    /// is the video's own key (letters and digits), and yt-dlp's folder is
+    /// kept when it stops or fails, for its next run to continue its parts
+    /// (owner's report, 2026-10-30: «the program is made to resume»).
+    pub async fn download_keeping(
+        &self,
+        request: &Download<'_>,
+        keep: Option<&str>,
+        stop: &Stop,
+        on_event: &mut (dyn FnMut(VideoEvent) + Send),
+    ) -> Result<PathBuf, VideoError> {
+        let keep = keep.filter(|k| is_key(k));
         let Download {
             url,
             choice,
@@ -1676,7 +1716,14 @@ impl VideoRunner {
                 .fast_download(request, &parts, stop, on_event, true)
                 .await
             {
-                Ok(file) => return Ok(file),
+                Ok(file) => {
+                    // What yt-dlp kept from an earlier run is not needed.
+                    if let Some(key) = keep {
+                        let kept = kept_folder(dest, key);
+                        let _ = tokio::task::spawn_blocking(move || remove_kept(&kept)).await;
+                    }
+                    return Ok(file);
+                }
                 Err(fast::Failed::Partway(e)) => return Err(e),
                 // Nothing came and nothing was saved before, or YouTube
                 // refused this way: yt-dlp tries.
@@ -1700,6 +1747,7 @@ impl VideoRunner {
             dest: dest.to_owned(),
             name: name.to_owned(),
             origin: url.origin().ascii_serialization(),
+            keep: keep.map(str::to_owned),
         };
         let mut overall = Overall::new(expected_size(choice, request.formats));
         let mut on_part = |event| on_event(overall.of(event));
@@ -1764,7 +1812,7 @@ impl VideoRunner {
             .map(|(qjs, sha256)| (qjs.path().to_owned(), sha256.clone()));
         let uses_qjs = qjs.is_some();
         let runs_root = self.runs.root.clone();
-        let dest = finish.as_ref().map(|f| f.dest.clone());
+        let dest = finish.as_ref().map(|f| (f.dest.clone(), f.keep.clone()));
         let cookie_text = cookies.map(|header| {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1777,7 +1825,11 @@ impl VideoRunner {
         // A `Running` from here: whoever drops it (this task's output, if
         // the future is gone) ends the tree before the folders go.
         let running = tokio::task::spawn_blocking(move || -> io::Result<Running> {
-            let run = Run::start(&Runs::new(runs_root), dest.as_deref())?;
+            let run = Run::start(
+                &Runs::new(runs_root),
+                dest.as_ref()
+                    .map(|(dest, keep)| (dest.as_path(), keep.as_deref())),
+            )?;
             let fail = |run: Run, err: io::Error| {
                 let _ = run.close();
                 err
@@ -1895,6 +1947,11 @@ impl VideoRunner {
                 // Before the run's folders go: the file is moved out.
                 output.placed = Some(place(out, &printed).and_then(|file| finish.place(&file)));
             }
+            // A kept folder goes once its video is out.
+            let mut run = run;
+            if matches!(output.placed, Some(Ok(_))) {
+                run.keep_out = false;
+            }
             run.close()?;
             Ok(output)
         })
@@ -1932,6 +1989,9 @@ const JS_REPORTS: &str = "js-report";
 struct Finish {
     dest: PathBuf,
     name: String,
+    /// The video's own key: yt-dlp works in a folder kept when it stops,
+    /// and continues there (see [`kept_folder`]); none, a new one each run.
+    keep: Option<String>,
     /// The page's origin, for the mark "from the internet" (#90): never its
     /// path or query, which may hold a token.
     origin: String,
@@ -1989,6 +2049,7 @@ pub fn move_video(file: &Path, folder: &Path, name: &str) -> io::Result<PathBuf>
         dest: dest.to_owned(),
         name: name.to_owned(),
         origin: String::new(),
+        keep: None,
     };
     match finish(folder).place(file) {
         Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
@@ -2017,6 +2078,25 @@ pub fn move_video(file: &Path, folder: &Path, name: &str) -> io::Result<PathBuf>
         }
         placed => placed,
     }
+}
+
+/// The folder yt-dlp keeps in `dest` for the video whose key is `key`
+/// ([`VideoRunner::download_keeping`]), for its next run to continue.
+pub fn kept_folder(dest: &Path, key: &str) -> PathBuf {
+    dest.join(format!(".zajil-video-keep-{key}"))
+}
+
+/// Removes a kept folder (its video finished, or was deleted): never what
+/// a link points to. Blocking.
+pub fn remove_kept(folder: &Path) {
+    if std::fs::symlink_metadata(folder).is_ok_and(|m| m.is_dir()) {
+        let _ = zajil_platform::fs::remove_dir_all_retrying(folder);
+    }
+}
+
+/// A key of letters and digits, at most 32: a folder's name, never a path.
+fn is_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 32 && key.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// The part and state files a stopped YouTube download named `name` left
@@ -2760,6 +2840,7 @@ mod more_tests {
                 dest: dest.clone(),
                 name: title.clone(),
                 origin: "https://example.com".into(),
+                keep: None,
             };
             let target = finish.place(&placed).unwrap();
             let got = target.file_name().unwrap().to_str().unwrap();
