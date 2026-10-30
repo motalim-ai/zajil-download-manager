@@ -1979,6 +1979,10 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
             Some(done) => done.map_err(VideoErrorView::from),
             None => {
                 async {
+                    // How long the page took before the first byte, for the
+                    // log (owner's report, 2026-10-30: a few seconds).
+                    let asked = Instant::now();
+                    let had_ahead = ahead.is_some();
                     let read = match ahead {
                         Some((mut read, media)) => tokio::select! {
                             read = read.wait_for(Option::is_some) => read
@@ -1989,6 +1993,7 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                         },
                         None => None,
                     };
+                    let read_used = read.is_some();
                     let probed = match read {
                         Some(sent) => Ok(sent.probed),
                         None if known.is_some() && !ask => Err(None),
@@ -2001,6 +2006,15 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                         .await
                         .map_err(Some),
                     };
+                    eprintln!(
+                        "zajil: video {id}: its page {} in {} ms",
+                        match (read_used, had_ahead) {
+                            (true, _) => "was read ahead",
+                            (false, true) => "read ahead did not fit, read again",
+                            (false, false) => "was read now",
+                        },
+                        asked.elapsed().as_millis()
+                    );
                     let formats = match probed {
                         Err(None) => Ok(known.unwrap_or_default()),
                         Err(Some(e)) => Err(e.into()),
