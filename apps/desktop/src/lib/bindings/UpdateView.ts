@@ -3,4 +3,8 @@
 /**
  * What the page shows of a newer release.
  */
-export type UpdateView = { version: string, };
+export type UpdateView = { version: string, 
+/**
+ * It can be installed from here («Update now»): a signed update.
+ */
+can_install: boolean, };

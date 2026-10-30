@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fails if the repository holds a private key (owner's decision on #7: the
-# extension's private key never enters the repository): a key or
+# extension's private key never enters the repository; ADR-0011: nor the
+# update's signing keys): a key or
 # certificate-store file name among the tracked files, or private-key text
 # in a tracked file or anywhere in the history (a key added, then removed,
 # is still there). Fails too when it cannot look (not a git repository).
@@ -9,6 +10,10 @@ set -euo pipefail
 cd "${1:-.}"
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository: cannot check for private keys" >&2; exit 2; }
 armor='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----'
+# Zajil's update keys (ADR-0011): a minisign or Tauri secret key, as text or
+# in Tauri's base64 (of "untrusted comment: rsign/minisign encrypted
+# secret key"). Written so that this file does not match itself.
+armor="$armor|untrusted comment: (rsign|minisign) encrypted secret[ ]key|dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V[5]|dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V[5]"
 found=0
 files=$(git ls-files -z | tr '\0' '\n') || { echo "cannot list the tracked files" >&2; exit 2; }
 while IFS= read -r file; do

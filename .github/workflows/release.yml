@@ -5,6 +5,14 @@
 # v<version> on main does the same and makes a DRAFT GitHub release with
 # SHA256SUMS: nothing is published until the owner publishes the draft.
 #
+# Zajil's signed update (ADR-0011): the draft also gets `latest.json`, which
+# names each system's update file and its signature, and `SHA256SUMS.minisig`.
+# They are signed in the release job only, in the `release` environment
+# (the owner approves each run; its secrets are the signing key and its
+# password), with the key whose public half is built into Zajil
+# (apps/desktop/src-tauri/update-keys/signing.pub), checked here before
+# anything is drafted.
+#
 # Owner's decision (2026-10-25): Zajil is not signed by Apple or Microsoft.
 # macOS gets an ad-hoc signature only; Windows is not signed.
 #
@@ -221,9 +229,16 @@ jobs:
           b="apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           find "$b" -maxdepth 2 -type f \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.deb' \) \
             -exec cp {} "$out/" \;
+          # macOS: the update file (ADR-0011) is the app in a tar.gz, as
+          # Tauri's updater unpacks it (Zajil.app at its top), without
+          # macOS's extra metadata files.
+          if [ "$RUNNER_OS" = macOS ]; then
+            COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$out/Zajil_${VERSION}_universal.app.tar.gz" -C "$b/macos" Zajil.app
+            tar -tzf "$out/Zajil_${VERSION}_universal.app.tar.gz" | head -3
+          fi
           ls -l "$out"
           n=$(ls "$out" | wc -l)
-          expected=1; [ "$RUNNER_OS" = Linux ] && expected=2
+          expected=1; [ "$RUNNER_OS" = Linux ] && expected=2; [ "$RUNNER_OS" = macOS ] && expected=2
           [ "$n" -eq "$expected" ] || { echo "::error::expected $expected installers, found $n"; exit 1; }
           for f in "$out"/*; do
             case "$(basename "$f")" in *"$VERSION"*) ;; *) echo "::error::$f does not carry $VERSION"; exit 1 ;; esac
@@ -359,6 +374,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [version, desktop, extension]
     runs-on: ubuntu-latest
+    # The signing key's secrets are here only; the owner approves each run.
+    environment: release
     permissions:
       contents: write
     env:
@@ -386,7 +403,61 @@ jobs:
           mkdir -p "$r"
           find "$RUNNER_TEMP/artifacts" -type f -exec cp {} "$r/" \;
           (cd "$r" && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
-          [ "$(wc -l < "$r/SHA256SUMS")" -eq 6 ] || { echo "::error::expected 6 files"; exit 1; }
+          [ "$(wc -l < "$r/SHA256SUMS")" -eq 7 ] || { echo "::error::expected 7 files"; exit 1; }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      # Each update file and SHA256SUMS signed for this version (Tauri's
+      # signer, from the lock file), checked with minisign against the key
+      # built into Zajil, then latest.json. No key yet (an empty
+      # signing.pub): no update files, the notice and release page only.
+      - name: Sign the update and write latest.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          r="$RUNNER_TEMP/release"
+          pub=apps/desktop/src-tauri/update-keys/signing.pub
+          if [ ! -s "$pub" ]; then
+            echo "::warning::no signing key in Zajil yet: no signed update in this release"
+            exit 0
+          fi
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          sudo apt-get install -y -q --no-install-recommends minisign
+          key="$(base64 -d "$pub" | sed -n 2p)"
+          mac="Zajil_${VERSION}_universal.app.tar.gz"
+          win="Zajil_${VERSION}_x64-setup.exe"
+          lin="Zajil_${VERSION}_amd64.AppImage"
+          for f in "$mac" "$win" "$lin" SHA256SUMS; do
+            test -f "$r/$f" || { echo "::error::$f is missing"; exit 1; }
+            (cd apps/desktop && npx tauri signer sign --app-version "$VERSION" "$r/$f" >/dev/null)
+            base64 -d "$r/$f.sig" > "$r/$f.minisig"
+            minisign -Vm "$r/$f" -x "$r/$f.minisig" -P "$key"
+          done
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          jq -n --arg v "$VERSION" --arg base "$base" \
+            --arg page "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg mac "$mac" --rawfile macsig "$r/$mac.sig" \
+            --arg win "$win" --rawfile winsig "$r/$win.sig" \
+            --arg lin "$lin" --rawfile linsig "$r/$lin.sig" '
+            {version: $v, notes: $page, pub_date: $date, platforms: {
+              "darwin-aarch64-app": {url: "\($base)/\($mac)", signature: ($macsig | rtrimstr("\n"))},
+              "darwin-x86_64-app": {url: "\($base)/\($mac)", signature: ($macsig | rtrimstr("\n"))},
+              "windows-x86_64-nsis": {url: "\($base)/\($win)", signature: ($winsig | rtrimstr("\n"))},
+              "linux-x86_64-appimage": {url: "\($base)/\($lin)", signature: ($linsig | rtrimstr("\n"))}
+            }}' > "$r/latest.json"
+          cat "$r/latest.json" | jq '.platforms | keys'
+          # Only what is published: latest.json carries the files'
+          # signatures, and SHA256SUMS.minisig is checked with minisign.
+          mv "$r/SHA256SUMS.minisig" "$RUNNER_TEMP/SHA256SUMS.minisig"
+          rm -f "$r"/*.sig "$r"/*.minisig
+          mv "$RUNNER_TEMP/SHA256SUMS.minisig" "$r/"
+          ls -l "$r"
       # A draft: visible to the repository's maintainers only, published by
       # the owner by hand after trying it. 0.x is a test build, so a
       # pre-release; from 1.0 on a full release named "زاجِل 1.0" (owner's

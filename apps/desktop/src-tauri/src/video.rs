@@ -2116,11 +2116,11 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
         };
         // Finished either way: what yt-dlp kept for it is not needed.
         if result.is_ok() {
-            let kept = zajil_core::video::kept_folder(std::path::Path::new(&row.folder), &key_of(id));
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                zajil_core::video::remove_kept(&kept)
-            })
-            .await;
+            let kept =
+                zajil_core::video::kept_folder(std::path::Path::new(&row.folder), &key_of(id));
+            let _ =
+                tauri::async_runtime::spawn_blocking(move || zajil_core::video::remove_kept(&kept))
+                    .await;
         }
         let state = handle.state::<VideoState>();
         state.downloads.lock().unwrap().remove(&id);

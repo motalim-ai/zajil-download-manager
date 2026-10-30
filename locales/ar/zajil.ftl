@@ -553,9 +553,14 @@ complete-drag-hint = اسحب الملف من هنا إلى أي برنامج أ
 update-available = توجد نسخة جديدة من زاجِل:
 update-release-page = صفحة الإصدار
 update-dismiss = إخفاء حتى التشغيل التالي
+update-install = حدّث الآن
+update-install-hint = تحفظ التحميلات تقدّمها وتتوقف، ثم يتحدّث زاجِل ويُفتح من جديد، فتُستكمل.
+update-skip = تخطَّ هذه النسخة
+update-downloading = يُنزَّل التحديث…
+update-failed = تعذّر تثبيت التحديث. نزّله من صفحة الإصدار.
 update-setting-title = التحديثات
 update-setting = ابحث عن نسخة جديدة عند التشغيل
-update-setting-hint = يسأل GitHub فقط، ولا يُنزَّل شيء.
+update-setting-hint = يسأل GitHub فقط. ولا يُنزَّل التحديث إلا إذا ضغطت «حدّث الآن».
 
 ## حد كل موقع
 

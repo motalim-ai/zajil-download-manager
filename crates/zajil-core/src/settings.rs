@@ -109,6 +109,11 @@ pub struct SettingsFile {
     /// ([`FinishActions::default`]). Not written while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finish: Option<FinishActions>,
+    /// The new version the user chose to skip («Skip this version»,
+    /// ADR-0011): its notice is not shown again, a newer one's is. `None`,
+    /// and when absent: none. Not written while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_update: Option<String>,
     /// RFC 3339 time in UTC.
     pub updated_at: String,
     /// `sha256:` and the hex digest of the file with this field empty.
@@ -163,6 +168,7 @@ impl Default for SettingsFile {
             proxy: None,
             videos_at_once: None,
             finish: None,
+            skip_update: None,
             updated_at: now_rfc3339(),
             checksum: String::new(),
         }

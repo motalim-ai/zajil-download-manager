@@ -235,6 +235,9 @@ pub fn run() {
         // Opens a finished download or its folder from Rust only
         // (`open_download`): the page has no opener permission.
         .plugin(tauri_plugin_opener::init())
+        // Zajil's own signed update (ADR-0011, `update.rs`): from Rust only,
+        // no permission for the page.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -535,6 +538,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         complete::complete_info,
         update::update_notice,
         update::open_release_page,
+        update::update_skip,
+        update::update_install,
         complete::drag_out
     ]
 }
@@ -652,6 +657,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         complete::complete_info,
         update::update_notice,
         update::open_release_page,
+        update::update_skip,
+        update::update_install,
         complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report,

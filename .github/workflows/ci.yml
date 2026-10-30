@@ -101,6 +101,13 @@ jobs:
         run: |
           bash scripts/test-check-no-private-keys.sh
           bash scripts/check-no-private-keys.sh
+      # The signed update checks TLS and the signature always (ADR-0011): no
+      # `dangerous…` setting of Tauri's updater, in any build.
+      - name: No dangerous updater setting
+        run: |
+          if grep -rniE 'dangerous' apps/desktop/src-tauri/tauri*.json scripts/release/tauri.release.json apps/desktop/src-tauri/src/update.rs; then
+            echo "::error::a dangerous updater setting"; exit 1
+          fi
 
   build-test:
     name: Build & test (${{ matrix.os }})

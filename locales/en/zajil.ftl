@@ -495,9 +495,14 @@ complete-drag-hint = Drag the file from here into any program or folder
 update-available = A new version of Zajil is available:
 update-release-page = Release page
 update-dismiss = Hide until the next start
+update-install = Update now
+update-install-hint = Downloads save their progress and stop, Zajil is updated and opens again, and they continue.
+update-skip = Skip this version
+update-downloading = Downloading the update…
+update-failed = The update could not be installed. Download it from the release page.
 update-setting-title = Updates
 update-setting = Check for a new version at start
-update-setting-hint = Only asks GitHub; nothing is downloaded.
+update-setting-hint = Only asks GitHub. An update is downloaded only when you press «Update now».
 
 ## حد كل موقع
 

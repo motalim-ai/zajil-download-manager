@@ -21,6 +21,14 @@ git rm -q --cached notes.txt && rm notes.txt
 ssh-keygen -q -t ed25519 -N "" -f "$work/ssh" && cp "$work/ssh" deploy.txt
 git add deploy.txt && refused "an OpenSSH key in deploy.txt"
 git rm -q --cached deploy.txt && rm deploy.txt
+# An update signing key (ADR-0011), as minisign writes it and as Tauri does
+# (that text in base64).
+printf 'untrusted comment: minisign encrypted secret %s\nRWRTY0IyAAAA\n' key > sign.txt
+git add sign.txt && refused "a minisign secret key in sign.txt"
+git rm -q --cached sign.txt && rm sign.txt
+printf 'untrusted comment: rsign encrypted secret %s\nRWRTY0IyAAAA\n' key | base64 > zajil.txt
+git add zajil.txt && refused "a Tauri update key in zajil.txt"
+git rm -q --cached zajil.txt && rm zajil.txt
 # A key committed, then removed: still in the history.
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null > old.txt
 git add old.txt && git commit -q -m "add" && git rm -q old.txt && git commit -q -m "remove"
@@ -28,4 +36,4 @@ refused "a key in the history"
 # Not a git repository: it fails rather than say nothing was found.
 cd "$work" && mkdir plain && cd plain
 if "$check" . >/dev/null 2>&1; then echo "FAIL: a folder that is not a repository passed"; exit 1; fi
-echo "check-no-private-keys: refuses a .pem name, PKCS#8 and OpenSSH key text, a key in the history, and a folder it cannot check; passes a clean repository"
+echo "check-no-private-keys: refuses a .pem name, PKCS#8, OpenSSH and update-key text, a key in the history, and a folder it cannot check; passes a clean repository"
