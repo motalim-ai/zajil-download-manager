@@ -11,7 +11,8 @@
   // Arabic, left in English). The window is dragged by it and a
   // double-click maximizes it (`data-tauri-drag-region`).
   // - macOS: the system's bar is hidden under the page (`Overlay`); its
-  //   coloured buttons stay on the left, so the bar leaves room for them.
+  //   coloured buttons are on the left, or on the right on a Mac in
+  //   Arabic, so the bar leaves room for them on both sides.
   // - Windows and Linux: the window has no system frame
   //   (`tauri.windows.conf.json`, `tauri.linux.conf.json`): the minimize,
   //   maximize and close buttons are here, at the end of the reading
@@ -68,14 +69,13 @@
     -webkit-user-select: none;
     flex: none;
   }
-  /* macOS: the coloured buttons sit on the left whatever the language. */
+  /* macOS: the coloured buttons sit on the left, or on the right on a
+     Mac in Arabic (a user's report, 2026-10-30: they covered the logo):
+     room for them on both sides. */
   .titlebar.mac {
     height: 30px;
     padding-left: 80px;
-  }
-  :global([dir="rtl"]) .titlebar.mac {
-    padding-left: 80px;
-    padding-right: 12px;
+    padding-right: 80px;
   }
   .brand {
     display: flex;
