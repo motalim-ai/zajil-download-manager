@@ -11,6 +11,8 @@ export type Option = {
   /** Picture height (0: sound only). */
   height: number;
   ext: string;
+  /** The picture's codec (`H.264`, `VP9`…), if the site says it. */
+  codec: string | null;
   fps: number | null;
   /** Bytes, or nothing if the site gives no size. */
   size: number | null;
@@ -26,12 +28,13 @@ export function options(formats: FormatView[], best: ChoiceView | null = null): 
   const audio = bestAudio(formats, best);
   const list: Option[] = [];
   for (const f of formats) {
-    if (f.kind === "both") list.push({ choice: { kind: "format", id: f.id }, height: f.height ?? 0, ext: f.ext, fps: f.fps, size: f.size });
+    if (f.kind === "both") list.push({ choice: { kind: "format", id: f.id }, height: f.height ?? 0, ext: f.ext, codec: f.codec ?? null, fps: f.fps, size: f.size });
     else if (f.kind === "video" && audio)
       list.push({
         choice: { kind: "merge", video: f.id, audio: audio.id },
         height: f.height ?? 0,
         ext: f.ext,
+        codec: f.codec ?? null,
         fps: f.fps,
         size: f.size !== null && audio.size !== null ? f.size + audio.size : null,
       });
@@ -47,7 +50,7 @@ export function options(formats: FormatView[], best: ChoiceView | null = null): 
   }
   const sorted = [...seen.values()].sort((a, b) => b.height - a.height || (b.size ?? 0) - (a.size ?? 0));
   if (formats.some((f) => f.kind === "audio" || f.kind === "both"))
-    sorted.push({ choice: { kind: "audio_only" }, height: 0, ext: "m4a", fps: null, size: audio?.size ?? null });
+    sorted.push({ choice: { kind: "audio_only" }, height: 0, ext: "m4a", codec: null, fps: null, size: audio?.size ?? null });
   return sorted;
 }
 

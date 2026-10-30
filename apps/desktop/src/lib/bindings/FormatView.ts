@@ -11,4 +11,10 @@ size: number | null,
 /**
  * `both`, `video` (picture only) or `audio`.
  */
-kind: string, hls: boolean, };
+kind: string, hls: boolean, 
+/**
+ * The picture's codec as people know it (`H.264`, `VP9`, `AV1`,
+ * `HEVC`), if the site says it: QuickTime plays H.264 and HEVC only
+ * (owner's report, 2026-10-30).
+ */
+codec: string | null, };

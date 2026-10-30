@@ -1186,6 +1186,25 @@ pub struct FormatView {
     /// `both`, `video` (picture only) or `audio`.
     pub kind: String,
     pub hls: bool,
+    /// The picture's codec as people know it (`H.264`, `VP9`, `AV1`,
+    /// `HEVC`), if the site says it: QuickTime plays H.264 and HEVC only
+    /// (owner's report, 2026-10-30).
+    pub codec: Option<String>,
+}
+
+/// A picture codec's name as people know it, from yt-dlp's `vcodec`.
+fn codec_name(vcodec: &str) -> Option<&'static str> {
+    let v = vcodec.to_ascii_lowercase();
+    [
+        (["avc1", "h264"], "H.264"),
+        (["vp09", "vp9"], "VP9"),
+        (["vp08", "vp8"], "VP8"),
+        (["av01", "av1"], "AV1"),
+        (["hvc1", "hev1"], "HEVC"),
+    ]
+    .into_iter()
+    .find(|(starts, _)| starts.iter().any(|s| v.starts_with(s)))
+    .map(|(_, name)| name)
 }
 
 /// What to download, as the page says it.
@@ -1365,6 +1384,7 @@ pub fn format_view(f: &Format) -> FormatView {
         size: f.filesize.or(f.filesize_approx),
         kind: kind.into(),
         hls: f.is_hls(),
+        codec: f.vcodec.as_deref().and_then(codec_name).map(Into::into),
     }
 }
 
@@ -2289,6 +2309,10 @@ mod tests {
             r#"{"format_id":"hls-720","ext":"mp4","vcodec":"avc1","acodec":"mp4a","protocol":"m3u8_native"}"#,
         );
         assert!(hls.hls);
+        assert_eq!(both.codec.as_deref(), Some("H.264"));
+        let vp9 = f(r#"{"format_id":"dash-1v","ext":"mp4","vcodec":"vp09.00.51.08","acodec":"none"}"#);
+        assert_eq!(vp9.codec.as_deref(), Some("VP9"));
+        assert_eq!(sound.codec, None);
         // X's direct MP4: no codecs said, a picture's size.
         let x = f(r#"{"format_id":"http-2176","ext":"mp4","width":1280,"height":720}"#);
         assert_eq!((x.kind.as_str(), x.height), ("both", Some(720)));

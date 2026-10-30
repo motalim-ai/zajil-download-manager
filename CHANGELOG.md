@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **An Instagram video played as sound only in QuickTime** (owner's report, 2026-10-30): the best choice merged a higher VP9 picture, which QuickTime cannot play, rather than take the H.264 with its sound beside it. A higher picture is now merged only if it is H.264 too, or if the format with sound is not one every player opens. «Video quality» says each picture's codec (H.264, VP9, AV1, HEVC).
+
 ## [1.1.2] - 2026-10-29
 
 Fixes for what the owner found while downloading a YouTube playlist. The cause of the video tools asked for again was found in Zajil's new log. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.

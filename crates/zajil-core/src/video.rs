@@ -713,7 +713,14 @@ impl Video {
         let picture = top(&|f| f.has_video() && !f.has_audio(), &mp4_picture, &better);
         let sound = top(&|f| f.has_audio() && !f.has_video(), &mp4_sound, &by_rate);
         match (both, picture, sound) {
-            (Some(both), Some(picture), Some(sound)) if height(picture) > height(both) => {
+            // A higher picture is merged in, unless it would trade an MP4
+            // every player opens for one QuickTime cannot play (owner's
+            // report, 2026-10-30: Instagram's 1440p VP9 played as sound
+            // only, beside its H.264 with sound).
+            (Some(both), Some(picture), Some(sound))
+                if height(picture) > height(both)
+                    && (mp4_picture(picture) || !(mp4_picture(both) && mp4_sound(both))) =>
+            {
                 Some(Choice::Merge {
                     video: picture.id.clone(),
                     audio: sound.id.clone(),
@@ -2507,6 +2514,25 @@ mod tests {
                 audio: "140".into()
             })
         );
+        // An H.264 with its sound beside only a higher VP9 picture
+        // (Instagram): the one every player opens.
+        let instagram = Video {
+            title: String::new(),
+            duration: None,
+            formats: vec![
+                f("8", Some(1280), "mp4", "avc1.64001F", "mp4a.40.2", 1500.0),
+                f(
+                    "dash-1v",
+                    Some(2560),
+                    "mp4",
+                    "vp09.00.51.08",
+                    "none",
+                    3000.0,
+                ),
+                f("dash-2a", None, "m4a", "none", "mp4a.40.5", 64.0),
+            ],
+        };
+        assert_eq!(instagram.best_choice(), Some(Choice::Format("8".into())));
         // No H.264 at all: the highest picture, with AAC still first.
         let mut other = page.clone();
         other

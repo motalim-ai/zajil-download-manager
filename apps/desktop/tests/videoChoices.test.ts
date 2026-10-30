@@ -3,7 +3,7 @@ import { fileName, options, picked } from "../src/lib/videoChoices";
 import type { FormatView } from "../src/lib/bindings/FormatView";
 
 // «Video quality»'s choices (M6, #149).
-const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false });
+const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false, codec: null });
 
 describe("the quality choices", () => {
   const formats = [

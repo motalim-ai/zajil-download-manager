@@ -150,10 +150,10 @@
       duration: 1830,
       best: { kind: "merge" as const, video: "137", audio: "140" },
       formats: [
-        { id: "137", ext: "mp4", width: 1920, height: 1080, fps: 30, size: 412 * MIB, kind: "video", hls: false },
-        { id: "136", ext: "mp4", width: 1280, height: 720, fps: 30, size: 218 * MIB, kind: "video", hls: false },
-        { id: "18", ext: "mp4", width: 640, height: 360, fps: 30, size: 64 * MIB, kind: "both", hls: false },
-        { id: "140", ext: "m4a", width: null, height: null, fps: null, size: 28 * MIB, kind: "audio", hls: false },
+        { id: "137", ext: "mp4", width: 1920, height: 1080, fps: 30, size: 412 * MIB, kind: "video", hls: false, codec: "H.264" },
+        { id: "136", ext: "mp4", width: 1280, height: 720, fps: 30, size: 218 * MIB, kind: "video", hls: false, codec: "H.264" },
+        { id: "18", ext: "mp4", width: 640, height: 360, fps: 30, size: 64 * MIB, kind: "both", hls: false, codec: "H.264" },
+        { id: "140", ext: "m4a", width: null, height: null, fps: null, size: 28 * MIB, kind: "audio", hls: false, codec: null },
       ],
     };
     const list = options(info.formats, info.best);
@@ -260,7 +260,7 @@
   }
 
   const quality = (o: Option) =>
-    o.choice.kind === "audio_only" ? locale.t("video-audio-only", { format: "m4a" }) : `${o.height}p${o.fps && o.fps > 30 ? ` ${Math.round(o.fps)}fps` : ""} · ${o.ext.toUpperCase()}`;
+    o.choice.kind === "audio_only" ? locale.t("video-audio-only", { format: "m4a" }) : `${o.height}p${o.fps && o.fps > 30 ? ` ${Math.round(o.fps)}fps` : ""} · ${o.ext.toUpperCase()}${o.codec ? ` · ${o.codec}` : ""}`;
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && void close()} />
