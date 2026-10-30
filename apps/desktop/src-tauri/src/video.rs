@@ -1453,6 +1453,22 @@ pub async fn video_probe(
             },
             video.formats.len(),
         );
+        // Each format's height and codecs, never its link (owner's
+        // reports, 2026-10-30: which picture a site offers).
+        let each: Vec<String> = video
+            .formats
+            .iter()
+            .map(|f| {
+                format!(
+                    "{}p {} {}/{}",
+                    f.height.unwrap_or(0),
+                    f.ext,
+                    f.vcodec.as_deref().unwrap_or("?"),
+                    f.acodec.as_deref().unwrap_or("?")
+                )
+            })
+            .collect();
+        eprintln!("zajil: the formats: {}", each.join(", "));
     }
     let read = sent.url;
     Ok(match sent.probed {
@@ -2310,7 +2326,8 @@ mod tests {
         );
         assert!(hls.hls);
         assert_eq!(both.codec.as_deref(), Some("H.264"));
-        let vp9 = f(r#"{"format_id":"dash-1v","ext":"mp4","vcodec":"vp09.00.51.08","acodec":"none"}"#);
+        let vp9 =
+            f(r#"{"format_id":"dash-1v","ext":"mp4","vcodec":"vp09.00.51.08","acodec":"none"}"#);
         assert_eq!(vp9.codec.as_deref(), Some("VP9"));
         assert_eq!(sound.codec, None);
         // X's direct MP4: no codecs said, a picture's size.

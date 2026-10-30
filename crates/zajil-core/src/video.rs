@@ -711,6 +711,12 @@ impl Video {
             &better,
         );
         let picture = top(&|f| f.has_video() && !f.has_audio(), &mp4_picture, &better);
+        // The highest MP4 file whose codecs the site does not say.
+        let plain_mp4 = self
+            .formats
+            .iter()
+            .filter(|f| f.vcodec.is_none() && f.acodec.is_none() && f.ext == "mp4" && !f.is_hls())
+            .max_by(&better);
         let sound = top(&|f| f.has_audio() && !f.has_video(), &mp4_sound, &by_rate);
         match (both, picture, sound) {
             // A higher picture is merged in, unless it would trade an MP4
@@ -727,6 +733,12 @@ impl Video {
                 })
             }
             (Some(both), _, _) => Some(Choice::Format(both.id.clone())),
+            // Only a VP9 or AV1 picture to merge, beside the site's own MP4
+            // file whose codecs it does not say (Facebook's and Instagram's
+            // are H.264 with their sound): that file, which plays anywhere.
+            (None, Some(picture), Some(_)) if !mp4_picture(picture) && plain_mp4.is_some() => {
+                plain_mp4.map(|f| Choice::Format(f.id.clone()))
+            }
             (None, Some(picture), Some(sound)) => Some(Choice::Merge {
                 video: picture.id.clone(),
                 audio: sound.id.clone(),
@@ -2533,6 +2545,25 @@ mod tests {
             ],
         };
         assert_eq!(instagram.best_choice(), Some(Choice::Format("8".into())));
+        // Facebook: its own MP4 files say no codecs, its DASH picture is
+        // VP9: the MP4 file.
+        let plain = |id: &str, h: u32| {
+            let mut format = f(id, Some(h), "mp4", "x", "x", 0.0);
+            format.vcodec = None;
+            format.acodec = None;
+            format
+        };
+        let facebook = Video {
+            title: String::new(),
+            duration: None,
+            formats: vec![
+                plain("sd", 360),
+                plain("hd", 720),
+                f("1v", Some(1280), "mp4", "vp09.00.40.08", "none", 2000.0),
+                f("1a", None, "m4a", "none", "mp4a.40.5", 64.0),
+            ],
+        };
+        assert_eq!(facebook.best_choice(), Some(Choice::Format("hd".into())));
         // No H.264 at all: the highest picture, with AAC still first.
         let mut other = page.clone();
         other
