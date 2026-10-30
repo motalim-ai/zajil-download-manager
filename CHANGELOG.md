@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A paused download's state file could not be used** (owner's report, 2026-10-30: «a segment ends before it starts», the video began again): a stalled segment with nothing written, taken over by a free connection, was split into an empty one. It now changes hands whole.
 - **YouTube refused Zajil's own way (403) and the video stopped**: yt-dlp downloads it then, as before a part was saved, and Zajil's parts are removed. The log says which of YouTube's clients each link is of and what YouTube answered, never the link.
 - **Every video download resumes, yt-dlp's too** (owner, 2026-10-30: «the program is made to resume»): a video yt-dlp downloads (other sites, or YouTube when it refuses Zajil's own way) keeps its folder when paused or failed, and the next run continues its parts there. The folder goes once the video is out, or when it is deleted.
+- **The site's download count lagged far behind** (owner's report, 2026-10-31: 389 shown, 826 counted): the page asks GitHub for it now, as `site/downloads.mjs` counts it, with that file as the answer when GitHub gives none; and the README badge's number is renewed every three hours, not once a day.
 
 ## [1.1.3] - 2026-10-30
 

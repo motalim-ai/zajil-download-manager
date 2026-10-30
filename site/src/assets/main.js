@@ -545,22 +545,58 @@
   }
 })();
 
-/* How many times Zajil was downloaded (site/downloads.mjs writes it once a
-   day, from GitHub's own counts): shown in the hero once known, never a
-   guess. Same site only; nothing is sent about the visitor. */
+/* How many times Zajil was downloaded: asked of GitHub now, as
+   site/downloads.mjs counts it (the installers of every release), since a
+   number written once a day lagged far behind after a release (owner's
+   report, 2026-10-31: 389 shown, 826 counted). That file is the answer
+   when GitHub does not give one (its limit is 60 asks an hour for each
+   visitor). Shown in the hero once known, never a guess; nothing is sent
+   about the visitor, no cookie and no referrer. */
 (function () {
   'use strict';
   var slot = document.querySelector('[data-downloads]');
   if (!slot || !window.fetch) return;
   var ar = document.documentElement.dir !== 'ltr';
-  fetch('/downloads.json', { cache: 'no-cache', credentials: 'omit' })
+  var INSTALLER = /^Zajil_\d+\.\d+\.\d+_/;
+  var TAG = /^v\d+\.\d+\.\d+$/;
+  var API = 'https://api.github.com/repos/motalim-ai/zajil-download-manager/releases?per_page=100';
+
+  function show(n) {
+    if (typeof n !== 'number' || !(n > 0)) return;
+    var shown = n.toLocaleString(ar ? 'ar' : 'en');
+    slot.querySelector('span').textContent = ar ? 'نُزِّل ' + shown + ' مرة' : 'Downloaded ' + shown + ' times';
+    slot.hidden = false;
+  }
+
+  function counted(releases) {
+    if (!Array.isArray(releases)) return null;
+    var total = 0;
+    releases.forEach(function (release) {
+      if (!release || release.draft || !TAG.test(release.tag_name || '')) return;
+      (release.assets || []).forEach(function (asset) {
+        if (INSTALLER.test(asset.name || '') && typeof asset.download_count === 'number') {
+          total += asset.download_count;
+        }
+      });
+    });
+    return total;
+  }
+
+  function written() {
+    return fetch('/downloads.json', { cache: 'no-cache', credentials: 'omit' })
+      .then(function (answer) { return answer.ok ? answer.json() : null; })
+      .then(function (counts) { return counts && counts.total; });
+  }
+
+  fetch(API, {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+    headers: { Accept: 'application/vnd.github+json' }
+  })
     .then(function (answer) { return answer.ok ? answer.json() : null; })
-    .then(function (counts) {
-      var n = counts && counts.total;
-      if (typeof n !== 'number' || !(n > 0)) return;
-      var shown = n.toLocaleString(ar ? 'ar' : 'en');
-      slot.querySelector('span').textContent = ar ? 'نُزِّل ' + shown + ' مرة' : 'Downloaded ' + shown + ' times';
-      slot.hidden = false;
-    })
+    .then(counted)
+    .catch(function () { return null; })
+    .then(function (n) { return n > 0 ? n : written(); })
+    .then(show)
     .catch(function () {});
 })();
