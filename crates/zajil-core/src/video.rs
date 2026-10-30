@@ -531,6 +531,15 @@ pub enum Choice {
 }
 
 impl Choice {
+    /// The format ids it names (none for `AudioOnly`, chosen as it runs).
+    pub fn ids(&self) -> Vec<&str> {
+        match self {
+            Choice::Format(id) => vec![id],
+            Choice::Merge { video, audio } => vec![video, audio],
+            Choice::AudioOnly => Vec::new(),
+        }
+    }
+
     fn args(&self) -> Result<Vec<Arg>, VideoError> {
         Ok(match self {
             Choice::Format(id) => vec![Arg::Format(format_spec(id)?)],
@@ -608,6 +617,22 @@ pub struct Format {
     /// Zajil's own DRM check: it may carry a token, so it is never shown.
     #[serde(default)]
     url: Option<Hidden>,
+    /// The program its link was made for, of its `http_headers`: the only
+    /// one of them read (the rest may hold secrets). YouTube refuses some
+    /// of its apps' links to another program (owner's report, 2026-10-30:
+    /// 403, then yt-dlp from the start).
+    #[serde(default, rename = "http_headers", deserialize_with = "user_agent_of")]
+    agent: Option<String>,
+}
+
+/// The `User-Agent` of a format's `http_headers`, and nothing else.
+fn user_agent_of<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    struct Headers {
+        #[serde(rename = "User-Agent")]
+        agent: Option<String>,
+    }
+    Ok(Option::<Headers>::deserialize(d)?.and_then(|h| h.agent))
 }
 
 /// A value that may hold a secret: printed as `(hidden)`.
@@ -622,6 +647,11 @@ impl std::fmt::Debug for Hidden {
 }
 
 impl Format {
+    /// The program its link was made for (its `User-Agent`), if it says.
+    pub fn user_agent(&self) -> Option<&str> {
+        self.agent.as_deref()
+    }
+
     pub fn has_video(&self) -> bool {
         self.vcodec.as_deref().is_some_and(|c| c != "none")
     }
@@ -2596,6 +2626,7 @@ mod tests {
             has_drm: Some(v),
             protocol: None,
             url: None,
+            agent: None,
         };
         assert!(f(serde_json::json!(true)).is_protected());
         assert!(f(serde_json::json!("maybe")).is_protected());

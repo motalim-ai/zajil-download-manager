@@ -620,6 +620,12 @@ impl Engine {
         engine
     }
 
+    /// This engine, with its browser's headers, sent as `agent` (a
+    /// `User-Agent`) instead of Zajil.
+    pub fn with_user_agent(&self, agent: Option<&str>) -> Engine {
+        self.with_browser((*self.browser).clone().with_user_agent(agent))
+    }
+
     /// The site of `url` (#170): `None` when it has no limit; else the
     /// site's identity (the same number for every URL of that site) and its
     /// limit. A queue runner starts no more of its own downloads on a site

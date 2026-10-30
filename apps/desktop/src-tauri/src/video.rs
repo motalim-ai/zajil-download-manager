@@ -233,6 +233,10 @@ struct Row {
     /// «after it ends» waits for it. None: the videos' own list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     queue: Option<String>,
+    /// The program each part's link was made for (format id, `User-Agent`),
+    /// for a resume with the saved links: YouTube refuses some to another.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    agents: Vec<(String, String)>,
 }
 
 impl Row {
@@ -793,6 +797,7 @@ pub fn receive<R: tauri::Runtime>(
             label,
             added: Some(zajil_core::state::now_rfc3339()),
             queue: None,
+            agents: Vec::new(),
         });
         save_rows(&app, &state);
         let _ = handle.emit("downloads-changed", ());
@@ -1787,6 +1792,7 @@ pub fn video_download<R: tauri::Runtime>(
         label: None,
         added: Some(zajil_core::state::now_rfc3339()),
         queue: None,
+        agents: Vec::new(),
     });
     with_row(&state, id, |row| row.queue = queue);
     state.fresh.lock().unwrap().insert(id);
@@ -1914,6 +1920,7 @@ fn new_row(id: u64, item: NewVideo, dest: &str) -> Row {
         label: None,
         added: Some(zajil_core::state::now_rfc3339()),
         queue: None,
+        agents: Vec::new(),
     }
 }
 
@@ -1970,6 +1977,7 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 ids: &saved_ids,
                 dest: std::path::Path::new(&row.folder),
                 name: &row.name,
+                agents: &row.agents,
             };
             runner.resume_saved(&saved, &stop, &mut on_event).await
         } else {
@@ -2068,6 +2076,14 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                         .cloned();
                     match chosen {
                         Ok((formats, choice)) => {
+                            let agents: Vec<(String, String)> = formats
+                                .iter()
+                                .filter(|f| choice.ids().contains(&f.id.as_str()))
+                                .filter_map(|f| Some((f.id.clone(), f.user_agent()?.to_owned())))
+                                .collect();
+                            with_row(&handle.state::<VideoState>(), id, |row| {
+                                row.agents = agents;
+                            });
                             let request = Download {
                                 url: &row.url,
                                 choice: &choice,
@@ -2438,6 +2454,7 @@ mod tests {
             label: None,
             added: None,
             queue: None,
+            agents: Vec::new(),
         }
     }
 

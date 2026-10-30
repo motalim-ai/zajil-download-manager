@@ -99,13 +99,14 @@ fn base_of(name: &str) -> String {
 }
 
 /// One part to download: its format id and extension, its new link (none:
-/// continued from its state file with the link saved there), and its size
-/// if known.
+/// continued from its state file with the link saved there), its size if
+/// known, and the program its link was made for.
 pub(super) struct Part {
     pub id: String,
     pub ext: String,
     pub url: Option<String>,
     pub size: Option<u64>,
+    pub agent: Option<String>,
 }
 
 impl Part {
@@ -115,6 +116,7 @@ impl Part {
             ext: format.ext.clone(),
             url: fast_url(format).map(str::to_owned),
             size: format.filesize.or(format.filesize_approx),
+            agent: format.user_agent().map(str::to_owned),
         }
     }
 }
@@ -239,6 +241,7 @@ impl VideoRunner {
             // for more is slowed (owner's report, 2026-10-29).
             let engine = self
                 .engine
+                .with_user_agent(parts[index].agent.as_deref())
                 .with_connections(connections)
                 .with_request_size(Some(REQUEST_SIZE));
             async move {
@@ -464,13 +467,15 @@ fn exact_size(url: &str) -> Option<u64> {
 }
 
 /// A video Zajil downloaded its own way and stopped: its page, the ids of
-/// its parts, where they are and the video's name.
+/// its parts, where they are, the video's name, and the program each
+/// part's link was made for (by id).
 #[derive(Debug, Clone, Copy)]
 pub struct Saved<'a> {
     pub page: &'a str,
     pub ids: &'a [String],
     pub dest: &'a Path,
     pub name: &'a str,
+    pub agents: &'a [(String, String)],
 }
 
 impl VideoRunner {
@@ -495,11 +500,18 @@ impl VideoRunner {
         {
             return None;
         }
-        let (dest, name, ids) = (
+        let (dest, name, ids, agents) = (
             saved.dest.to_owned(),
             saved.name.to_owned(),
             saved.ids.to_vec(),
+            saved.agents.to_vec(),
         );
+        let agent_of = move |id: &str| {
+            agents
+                .iter()
+                .find(|(of, _)| of == id)
+                .map(|(_, agent)| agent.clone())
+        };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -516,6 +528,7 @@ impl VideoRunner {
                             ext,
                             url: None,
                             size: Some(size),
+                            agent: None,
                         });
                     }
                     let state = files.iter().find(|f| {
@@ -537,6 +550,7 @@ impl VideoRunner {
                         ext,
                         url: None,
                         size: loaded.content_length,
+                        agent: agent_of(id),
                     })
                 })
                 .collect()
@@ -553,8 +567,11 @@ impl VideoRunner {
         };
         match self.fast_download(&request, &parts, stop, on_event).await {
             Ok(file) => Some(Ok(file)),
-            Err(Failed::Partway(e)) => Some(Err(e)),
-            Err(Failed::Untouched(_)) => None,
+            Err(Failed::Partway(VideoError::Stopped)) => Some(Err(VideoError::Stopped)),
+            // A saved link refused (or a part saved without the program it
+            // was made for): the page is asked for new ones, and the parts
+            // continue with them.
+            Err(Failed::Partway(_) | Failed::Untouched(_)) => None,
         }
     }
 }
@@ -742,6 +759,25 @@ mod tests {
         assert_eq!(container(&got), "mp4");
         assert!(parts(&Choice::Format("22".into()), &formats).is_none());
         assert_eq!(parts(&Choice::AudioOnly, &formats).unwrap()[0].id, "140");
+    }
+
+    /// Of a format's `http_headers`, only the program is kept: YouTube
+    /// refuses some of its apps' links to another one.
+    #[test]
+    fn a_format_keeps_its_program_and_no_other_header() {
+        let format: Format = serde_json::from_value(serde_json::json!({
+            "format_id": "137", "ext": "mp4", "protocol": "https", "url": YT,
+            "http_headers": {"User-Agent": "App/1.0", "Cookie": "secret=1"},
+        }))
+        .unwrap();
+        assert_eq!(format.user_agent(), Some("App/1.0"));
+        assert!(!format!("{format:?}").contains("secret"));
+        assert_eq!(Part::of(&format).agent.as_deref(), Some("App/1.0"));
+        let bare = super::super::Format {
+            agent: None,
+            ..format
+        };
+        assert_eq!(bare.user_agent(), None);
     }
 
     #[test]

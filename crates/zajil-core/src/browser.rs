@@ -22,6 +22,9 @@ pub struct FromBrowser {
     /// decision: never another site's).
     cookies: Vec<(Origin, HeaderValue)>,
     referer: Option<Url>,
+    /// The program a link was made for (YouTube's links of some of its
+    /// apps are refused to another one: 403), in place of Zajil's own.
+    user_agent: Option<HeaderValue>,
 }
 
 /// A URL's scheme, host and port (the port the scheme implies, if none).
@@ -51,7 +54,18 @@ impl FromBrowser {
                 r.set_fragment(None);
                 r
             });
-        FromBrowser { cookies, referer }
+        FromBrowser {
+            cookies,
+            referer,
+            user_agent: None,
+        }
+    }
+
+    /// These headers, sent as `agent` (a `User-Agent`) instead of Zajil;
+    /// none, or one a header cannot hold, keeps Zajil's.
+    pub fn with_user_agent(mut self, agent: Option<&str>) -> Self {
+        self.user_agent = agent.and_then(|a| HeaderValue::from_str(a).ok());
+        self
     }
 
     /// These headers, and the `cookies` the browser has for `url` as well,
@@ -88,6 +102,9 @@ impl FromBrowser {
             .and_then(|page| referer_for(page, url))
         {
             request = request.header(header::REFERER, value);
+        }
+        if let Some(agent) = &self.user_agent {
+            request = request.header(header::USER_AGENT, agent.clone());
         }
         request
     }
