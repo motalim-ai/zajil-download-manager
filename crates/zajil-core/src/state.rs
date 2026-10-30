@@ -227,7 +227,7 @@ impl DownloadState {
     /// segments must cover the file from byte 0 without gaps or overlaps, in
     /// order; with an unknown size there is exactly one open-ended segment.
     /// The numbers are untrusted, so no arithmetic here can overflow.
-    fn check_consistency(&self) -> Result<(), StateError> {
+    pub(crate) fn check_consistency(&self) -> Result<(), StateError> {
         let bad = |why: &str| Err(StateError::Corrupt(why.to_owned()));
         let Some(first) = self.segments.first() else {
             return bad("no segments");

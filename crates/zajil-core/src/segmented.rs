@@ -852,6 +852,22 @@ impl Board {
         // small to halve is taken whole, from where its connection is.
         let take_over = remaining / 2 < self.min_segment;
         let start = end + 1 - if take_over { remaining } else { remaining / 2 };
+        if start == segment.start {
+            // Nothing of it written or reserved: the whole segment changes
+            // hands, as it is. Split, it left an empty segment that ends
+            // before it starts, and the state file could not be used for a
+            // resume (owner's report, 2026-10-30: a paused YouTube video
+            // began again). Its connection lets go when it next writes.
+            let take_overs = self.live[index].take_overs + 1;
+            self.live[index] = Live::default();
+            self.live[index].take(id, now);
+            self.live[index].take_overs = take_overs;
+            return Steal::Split {
+                from: segment.start,
+                start,
+                end,
+            };
+        }
         self.state.segments[index].end = Some(start - 1);
         self.state.segments.insert(
             index + 1,
@@ -985,10 +1001,13 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
                     Some(at) => Err(at),
                     None => match board.split_slowest(id, now) {
                         Steal::Split { from, start, end } => {
-                            let _ = ctx.events.send(Message::Split {
-                                segment: from,
-                                at: start,
-                            });
+                            // Not split when taken over whole.
+                            if start != from {
+                                let _ = ctx.events.send(Message::Split {
+                                    segment: from,
+                                    at: start,
+                                });
+                            }
                             Ok((start, start, end))
                         }
                         Steal::Wait => Err(now + LOOK_AGAIN),
@@ -1474,6 +1493,32 @@ mod tests {
         let mut board = super::tests::board(&[100 * SECOND, 100 * SECOND], &[850, 1000], now);
         board.live[0].take_overs = MAX_TAKE_OVERS;
         assert_eq!(board.split_slowest(9, now), Steal::Nothing);
+    }
+
+    /// A stalled segment with nothing written is taken over as it is, not
+    /// split into an empty one the state file could not hold.
+    #[test]
+    fn a_stalled_segment_with_nothing_written_changes_hands_whole() {
+        let now = Instant::now();
+        let mut board = board(&[100 * SECOND, 100 * SECOND], &[1000, 0], now);
+        board.state.segments[1].end = Some(1149);
+        board.state.content_length = Some(1150);
+        assert_eq!(
+            board.split_slowest(9, now),
+            Steal::Split {
+                from: 1000,
+                start: 1000,
+                end: 1149
+            }
+        );
+        assert_eq!(board.state.segments.len(), 2);
+        assert_eq!(board.live.len(), 2);
+        assert_eq!(board.live[1].owner, Some(9));
+        assert_eq!(board.live[1].take_overs, 1);
+        board.state.check_consistency().unwrap();
+        // Its first connection may no longer write there.
+        assert_eq!(board.reserve(1, 1000, 1000, 10), 0);
+        assert_eq!(board.reserve(9, 1000, 1000, 10), 10);
     }
 
     #[test]

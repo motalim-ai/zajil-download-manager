@@ -1956,6 +1956,7 @@ fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask: bool) {
                 progressed(&events, id, done, total, speed);
             }
             // A part saved before was of another file: said in the list.
+            VideoEvent::Note(note) => eprintln!("zajil: video {id}: {note}"),
             VideoEvent::StartedOver(why) => {
                 eprintln!("zajil: video {id}: {why}");
                 with_row(&events.state::<VideoState>(), id, |row| {

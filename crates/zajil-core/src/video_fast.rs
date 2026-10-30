@@ -168,9 +168,9 @@ fn not_the_same(old: &str, new: &str) -> Option<String> {
     None
 }
 
-/// Why this way did not finish: before any byte came, and nothing was
-/// saved before (yt-dlp may try instead), or after (the parts stay, for a
-/// resume).
+/// Why this way did not finish: before any byte came and with nothing
+/// saved before, or refused by YouTube (yt-dlp may try instead), or after
+/// (the parts stay, for a resume).
 pub(super) enum Failed {
     Untouched(String),
     Partway(VideoError),
@@ -188,12 +188,15 @@ fn engine_error(e: crate::engine::Error) -> VideoError {
 
 impl VideoRunner {
     /// Downloads `parts` of `request` with the engine, then merges them.
+    /// Refused by YouTube, the parts are removed if `give_up_parts` (yt-dlp
+    /// downloads it then), else kept (new links may be asked for).
     pub(super) async fn fast_download(
         &self,
         request: &Download<'_>,
         parts: &[Part],
         stop: &Stop,
         on_event: &mut (dyn FnMut(VideoEvent) + Send),
+        give_up_parts: bool,
     ) -> Result<PathBuf, Failed> {
         let dest = request.dest;
         let base = base_of(request.name);
@@ -207,6 +210,17 @@ impl VideoRunner {
                 .map_err(|e| Failed::Untouched(e.to_string()))?;
         }
         let expected: Vec<Option<u64>> = parts.iter().map(|p| p.size).collect();
+        // For the log: which of YouTube's apps each new link is of (a 403
+        // may depend on it), never the link.
+        for part in parts {
+            if let Some(url) = &part.url {
+                on_event(VideoEvent::Note(format!(
+                    "part {}: a new link of YouTube's client {}",
+                    part.id,
+                    client_of(url).unwrap_or_else(|| "?".into())
+                )));
+            }
+        }
         // What an earlier run left (a part, or a part that finished): never
         // handed to yt-dlp, which would start it all over (owner's report,
         // 2026-10-30: a resumed video began again from nothing).
@@ -226,9 +240,11 @@ impl VideoRunner {
         let (send, mut receive) =
             tokio::sync::mpsc::unbounded_channel::<(usize, Option<u64>, Option<u64>)>();
         let (said, mut why) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (noted, mut notes) = tokio::sync::mpsc::unbounded_channel::<String>();
         let download = |index: usize| {
             let send = send.clone();
             let said = said.clone();
+            let noted = noted.clone();
             let url = parts[index].url.clone();
             let size = parts[index].size;
             let name = names[index].clone();
@@ -246,6 +262,7 @@ impl VideoRunner {
                 .with_request_size(Some(REQUEST_SIZE));
             async move {
                 let restarted = said.clone();
+                let busy = noted.clone();
                 let mut events = |event: Event| match event {
                     // Its size only: a continued part's `from` is where its
                     // first gap starts, not all it has.
@@ -258,6 +275,15 @@ impl VideoRunner {
                     Event::Restarted { reason } => {
                         let _ = restarted
                             .send(format!("the part saved before started over ({reason:?})"));
+                    }
+                    Event::ServerBusy {
+                        status,
+                        connections,
+                        ..
+                    } => {
+                        let _ = busy.send(format!(
+                            "part {index}: YouTube answered {status}; {connections} connections from now on"
+                        ));
                     }
                     _ => {}
                 };
@@ -305,6 +331,7 @@ impl VideoRunner {
                     });
                 }
                 Some(reason) = why.recv() => on_event(VideoEvent::StartedOver(reason)),
+                Some(note) = notes.recv() => on_event(VideoEvent::Note(note)),
                 result = &mut all => break result,
             }
         };
@@ -312,16 +339,37 @@ impl VideoRunner {
         while let Ok(reason) = why.try_recv() {
             on_event(VideoEvent::StartedOver(reason));
         }
+        while let Ok(note) = notes.try_recv() {
+            on_event(VideoEvent::Note(note));
+        }
         let files = match downloaded {
             Ok(files) => files,
             Err(e) => {
+                let refused = refused(&e);
                 let got_some = saved_before || done.iter().any(|&d| d > 0);
                 let e = engine_error(e);
-                return Err(if got_some || matches!(e, VideoError::Stopped) {
-                    Failed::Partway(e)
-                } else {
-                    Failed::Untouched(e.to_string())
-                });
+                if matches!(e, VideoError::Stopped) || (got_some && !refused) {
+                    return Err(Failed::Partway(e));
+                }
+                // Refused (owner's report, 2026-10-30: 403 on every resume,
+                // the video stopped): yt-dlp gets it, so the parts would
+                // only be left behind.
+                if refused && give_up_parts {
+                    let files: Vec<PathBuf> = names.iter().map(|n| dest.join(n)).collect();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        for file in files {
+                            for path in [
+                                crate::state::part_path(&file),
+                                crate::state::state_path(&file),
+                                file,
+                            ] {
+                                let _ = zajil_platform::fs::remove_file_retrying(&path);
+                            }
+                        }
+                    })
+                    .await;
+                }
+                return Err(Failed::Untouched(e.to_string()));
             }
         };
 
@@ -440,6 +488,33 @@ async fn part(
         .download_until(url, dest, stop, on_event)
         .await
         .map(|f| f.file)
+}
+
+/// Whether YouTube refused the download (`403`, or `429` for too long),
+/// as it does some links or too many requests: yt-dlp may still get it.
+fn refused(e: &crate::engine::Error) -> bool {
+    match e {
+        crate::engine::Error::Status(status) => matches!(status.as_u16(), 403 | 429),
+        // A part's connections end with the server's answer in words.
+        e => {
+            let said = e.to_string();
+            said.contains("403 Forbidden") || said.contains("429 Too Many Requests")
+        }
+    }
+}
+
+/// The YouTube client a link was made for (its `c=`: `WEB`, `ANDROID_VR`…).
+fn client_of(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()?
+        .query_pairs()
+        .find(|(k, _)| k == "c")
+        .map(|(_, v)| {
+            v.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .take(32)
+                .collect()
+        })
 }
 
 /// The size of `file` when it is a part that finished before: a plain
@@ -565,7 +640,10 @@ impl VideoRunner {
             dest: saved.dest,
             name: saved.name,
         };
-        match self.fast_download(&request, &parts, stop, on_event).await {
+        match self
+            .fast_download(&request, &parts, stop, on_event, false)
+            .await
+        {
             Ok(file) => Some(Ok(file)),
             Err(Failed::Partway(VideoError::Stopped)) => Some(Err(VideoError::Stopped)),
             // A saved link refused (or a part saved without the program it
@@ -778,6 +856,26 @@ mod tests {
             ..format
         };
         assert_eq!(bare.user_agent(), None);
+    }
+
+    /// YouTube's refusal lets yt-dlp try; another failure keeps the parts.
+    #[test]
+    fn a_refusal_is_told_from_other_failures() {
+        use crate::engine::Error;
+        assert!(refused(&Error::Status(reqwest::StatusCode::FORBIDDEN)));
+        assert!(refused(&Error::NoData(
+            "the server answered 403 Forbidden".into()
+        )));
+        assert!(!refused(&Error::Status(reqwest::StatusCode::NOT_FOUND)));
+        assert!(!refused(&Error::NoData(
+            "the server stopped sending parts of the file".into()
+        )));
+        assert_eq!(
+            client_of(&format!("{YT}&c=ANDROID_VR")).as_deref(),
+            Some("ANDROID_VR")
+        );
+        assert_eq!(client_of(&format!("{YT}&c=W%0AEB")).as_deref(), Some("WEB"));
+        assert_eq!(client_of(YT), None);
     }
 
     #[test]

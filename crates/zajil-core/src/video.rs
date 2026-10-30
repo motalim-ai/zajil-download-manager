@@ -862,6 +862,8 @@ pub enum VideoEvent {
     /// A part saved before could not be continued: it starts over, for
     /// this reason (Zajil's own way, on YouTube).
     StartedOver(String),
+    /// What the log may say of how it goes (never a link).
+    Note(String),
 }
 
 /// The folders of runs, `<data dir>/run`.
@@ -1670,12 +1672,16 @@ impl VideoRunner {
         // YouTube: Zajil's own engine, when the probe's links allow it.
         if let Some(parts) = fast::parts(choice, request.formats) {
             let parts: Vec<fast::Part> = parts.into_iter().map(fast::Part::of).collect();
-            match self.fast_download(request, &parts, stop, on_event).await {
+            match self
+                .fast_download(request, &parts, stop, on_event, true)
+                .await
+            {
                 Ok(file) => return Ok(file),
                 Err(fast::Failed::Partway(e)) => return Err(e),
-                // Nothing came, and nothing was saved before: yt-dlp tries.
+                // Nothing came and nothing was saved before, or YouTube
+                // refused this way: yt-dlp tries.
                 Err(fast::Failed::Untouched(why)) => on_event(VideoEvent::StartedOver(format!(
-                    "Zajil's own way could not start ({why}); yt-dlp downloads it"
+                    "Zajil's own way could not go on ({why}); yt-dlp downloads it"
                 ))),
             }
         }

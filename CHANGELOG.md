@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A YouTube link added by hand stopped at «this link is a web page»** (owner's report, 2026-10-30): a video's page on the big sites (YouTube, X, Instagram, Facebook, TikTok, Vimeo, Dailymotion) now opens «Video quality», as from the browser's button; and any other link that turns out to be a page offers «Download the video from the page».
 - **A paused YouTube video began again from nothing** (owner's report, 2026-10-30): once its sound had finished, the resume asked the page again and could hand the video to yt-dlp from the start. The finished sound is kept and the picture continues with its saved links; a part saved before is never handed to yt-dlp, and the log says why a part started over.
 - **A YouTube link added by hand could not be resumed** (owner's report, 2026-10-30): YouTube refused Zajil's own way (403) for links made for one of its apps, so yt-dlp downloaded the video, from the start on every resume. Each part is now asked for as the program its link was made for (the format's `User-Agent`, the only header kept), saved for the resume; and a saved link refused asks the page for new ones.
+- **A paused download's state file could not be used** (owner's report, 2026-10-30: «a segment ends before it starts», the video began again): a stalled segment with nothing written, taken over by a free connection, was split into an empty one. It now changes hands whole.
+- **YouTube refused Zajil's own way (403) and the video stopped**: yt-dlp downloads it then, as before a part was saved, and Zajil's parts are removed. The log says which of YouTube's clients each link is of and what YouTube answered, never the link.
 
 ## [1.1.3] - 2026-10-30
 
