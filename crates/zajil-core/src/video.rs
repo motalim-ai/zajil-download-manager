@@ -1643,8 +1643,10 @@ impl VideoRunner {
             match self.fast_download(request, &parts, stop, on_event).await {
                 Ok(file) => return Ok(file),
                 Err(fast::Failed::Partway(e)) => return Err(e),
-                // Nothing came: yt-dlp tries.
-                Err(fast::Failed::Untouched) => {}
+                // Nothing came, and nothing was saved before: yt-dlp tries.
+                Err(fast::Failed::Untouched(why)) => on_event(VideoEvent::StartedOver(format!(
+                    "Zajil's own way could not start ({why}); yt-dlp downloads it"
+                ))),
             }
         }
         let mut args = base_args();

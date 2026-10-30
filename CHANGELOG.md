@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - **A YouTube link added by hand stopped at «this link is a web page»** (owner's report, 2026-10-30): a video's page on the big sites (YouTube, X, Instagram, Facebook, TikTok, Vimeo, Dailymotion) now opens «Video quality», as from the browser's button; and any other link that turns out to be a page offers «Download the video from the page».
+- **A paused YouTube video began again from nothing** (owner's report, 2026-10-30): once its sound had finished, the resume asked the page again and could hand the video to yt-dlp from the start. The finished sound is kept and the picture continues with its saved links; a part saved before is never handed to yt-dlp, and the log says why a part started over.
 
 ## [1.1.3] - 2026-10-30
 
