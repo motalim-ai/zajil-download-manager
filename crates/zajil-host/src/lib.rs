@@ -126,6 +126,11 @@ pub enum Request {
         /// The sound merged with `format`, when it is a picture only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audio: Option<String>,
+        /// The sound's language (`ar`, `en-US`) when the user chose a dub
+        /// in the list instead of the video's own sound (owner's request,
+        /// 2026-10-31); sent only then.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
         /// How the list said the chosen quality (`MP4 1080p60 · H.264`),
         /// shown as it is in «Video quality».
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -448,6 +453,19 @@ fn check_version(version: u32) -> Result<(), String> {
 }
 
 /// An instance or cookie store id: ASCII letters, digits, `-` and `_`.
+/// A sound's language as yt-dlp names it: 2 or 3 letters, then a dash and
+/// up to 8 letters or digits (`ar`, `en-US`).
+fn is_language(language: &str) -> bool {
+    let (base, rest) = language
+        .split_once('-')
+        .map_or((language, None), |(b, r)| (b, Some(r)));
+    (2..=3).contains(&base.len())
+        && base.bytes().all(|b| b.is_ascii_lowercase())
+        && rest.is_none_or(|r| {
+            (1..=8).contains(&r.len()) && r.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+}
+
 fn check_id(id: &str, what: &str) -> Result<(), String> {
     if id.is_empty()
         || id.len() > MAX_ID
@@ -525,9 +543,18 @@ fn check(request: &Request) -> Result<(), String> {
             private,
             format,
             audio,
+            language,
             label,
             ..
         } => {
+            if let Some(language) = language
+                && !is_language(language)
+            {
+                return Err("not a language of the list".into());
+            }
+            if language.is_some() && format.is_none() {
+                return Err("a language without its format".into());
+            }
             if let Some(label) = label
                 && (label.is_empty()
                     || label.len() > 120
@@ -1051,6 +1078,7 @@ mod tests {
                 private: false,
                 format: None,
                 audio: None,
+                language: None,
                 label: None,
                 size: None,
             }
@@ -1066,6 +1094,7 @@ mod tests {
                 private: false,
                 format: None,
                 audio: None,
+                language: None,
                 label: None,
                 size: None,
             }
@@ -1081,6 +1110,7 @@ mod tests {
                 private: false,
                 format: Some("299".into()),
                 audio: Some("140".into()),
+                language: None,
                 label: None,
                 size: None,
             }
@@ -1089,8 +1119,20 @@ mod tests {
             r#"{"type":"video","protocol_version":1,"page":"https://e.com/","format":"all"}"#,
             r#"{"type":"video","protocol_version":1,"page":"https://e.com/","format":"-1"}"#,
             r#"{"type":"video","protocol_version":1,"page":"https://e.com/","audio":"140"}"#,
+            // A dub's language (owner's request, 2026-10-31): a language,
+            // and with a format only.
+            r#"{"type":"video","protocol_version":1,"page":"https://e.com/","format":"140","language":"../x"}"#,
+            r#"{"type":"video","protocol_version":1,"page":"https://e.com/","format":"140","language":"Arabic"}"#,
+            r#"{"type":"video","protocol_version":1,"page":"https://e.com/","format":"140","language":"ar-"}"#,
+            r#"{"type":"video","protocol_version":1,"page":"https://e.com/","language":"ar"}"#,
         ] {
             assert!(parse(bad.as_bytes()).is_err(), "{bad}");
+        }
+        for good in ["ar", "en-US", "pt-BR", "yue"] {
+            let message = format!(
+                r#"{{"type":"video","protocol_version":1,"page":"https://e.com/","format":"299","audio":"140","language":"{good}"}}"#
+            );
+            assert!(parse(message.as_bytes()).is_ok(), "{good}");
         }
         for (message, why) in [
             (r#"{"type":"video","protocol_version":1}"#, "missing field"),

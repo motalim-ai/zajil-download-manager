@@ -1028,6 +1028,32 @@ fn still_offered(choice: &ChoiceView, formats: &[Format]) -> ChoiceView {
 /// or a "stable volume" one (`140-drc`). Of those, the video's own sound
 /// before a dubbed one (users' reports, 2026-10-31), then the plain one.
 fn by_itag(formats: &[Format], wanted: &str) -> Option<String> {
+    // A dub chosen in the browser's list: its itag and language (`140-ar`,
+    // owner's request, 2026-10-31); that language's sound, else as usual.
+    if !formats.iter().any(|f| f.id == wanted)
+        && let Some((itag, language)) = wanted.split_once('-')
+        && language.starts_with(|c: char| c.is_ascii_alphabetic())
+        && language != "drc"
+    {
+        let lang = |f: &Format| {
+            f.language.as_deref().is_some_and(|l| {
+                l.eq_ignore_ascii_case(language)
+                    || l.split('-')
+                        .next()
+                        .is_some_and(|b| b.eq_ignore_ascii_case(language))
+            })
+        };
+        return formats
+            .iter()
+            .find(|f| {
+                lang(f)
+                    && f.id
+                        .split_once('-')
+                        .map_or(f.id == itag, |(i, rest)| i == itag && !rest.contains("drc"))
+            })
+            .map(|f| f.id.clone())
+            .or_else(|| by_itag(formats, itag));
+    }
     let mut best: Option<&Format> = None;
     for f in formats.iter().filter(|f| {
         f.id == wanted
@@ -2378,6 +2404,40 @@ mod tests {
         assert_eq!(by_itag(&dubbed, "140").as_deref(), Some("140-1"));
         let plain_first = [format("140"), format("140-1")];
         assert_eq!(by_itag(&plain_first, "140").as_deref(), Some("140"));
+        // A dub chosen in the list: its language's sound (owner's request,
+        // 2026-10-31); a language the page lacks: the video's own.
+        let spoken = |id: &str, pref: i64, language: &str| -> Format {
+            serde_json::from_value(serde_json::json!({
+                "format_id": id, "language_preference": pref, "language": language,
+            }))
+            .unwrap()
+        };
+        let tracks = [
+            spoken("140-0", -1, "ar"),
+            spoken("140-drc", -1, "ar"),
+            spoken("140-1", 10, "en-US"),
+            spoken("251-0", -1, "ar"),
+        ];
+        assert_eq!(by_itag(&tracks, "140-ar").as_deref(), Some("140-0"));
+        assert_eq!(by_itag(&tracks, "140-en").as_deref(), Some("140-1"));
+        assert_eq!(by_itag(&tracks, "140-fr").as_deref(), Some("140-1"));
+        assert_eq!(
+            from_list(
+                &ChoiceView::Merge {
+                    video: "299".into(),
+                    audio: "140-ar".into()
+                },
+                &[
+                    format("299"),
+                    spoken("140-0", -1, "ar"),
+                    spoken("140-1", 10, "en")
+                ]
+            ),
+            ChoiceView::Merge {
+                video: "299".into(),
+                audio: "140-0".into()
+            }
+        );
         assert_eq!(
             from_list(&ChoiceView::Format { id: "18".into() }, &formats),
             ChoiceView::Best

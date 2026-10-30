@@ -221,6 +221,9 @@
     .menu .title { display: flex; gap: 8px; padding: 6px 8px; font-weight: 650; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 2px; }
     .menu .title .words { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; }
     .menu .title .length { flex: none; opacity: 0.6; font-weight: 500; direction: ltr; unicode-bidi: isolate; }
+    .menu .sounds { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 4px; }
+    .menu .sounds button.chip { width: auto; padding: 3px 10px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; font-size: 12px; unicode-bidi: plaintext; }
+    .menu .sounds button.chip.on { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.6); font-weight: 650; }
     .menu hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 3px 4px; width: auto; }
   `;
   const SVG = "http://www.w3.org/2000/svg";
@@ -298,8 +301,14 @@
 
   /** The video's formats, as the page's player says them (`yt-page.js`,
    * made into choices by `yt-formats.js`); none elsewhere.
-   * @type {{ title: string, duration: string, video: any[], audio: any[] } | null} */
+   * @type {{ title: string, duration: string, video: any[], audio: any[], tracks?: any[], lang?: string } | null} */
   let listing = null;
+  /** What the page said, read: the list is made again from it when
+   * another sound is chosen. */
+  /** @type {any} */
+  let pageData = null;
+  /** The sound's language chosen in the list (a dub), for this video. */
+  let soundLang = /** @type {string | null} */ (null);
   /** Every choice of `listing`, in the list's order. @type {any[]} */
   let choices = [];
   /** What the page's world answered last (a text, checked when read). */
@@ -319,7 +328,10 @@
     } catch {
       data = null;
     }
-    listing = make(data);
+    // Another video: its own sound again.
+    if (data?.video !== pageData?.video) soundLang = null;
+    pageData = data;
+    listing = make(data, soundLang);
     choices = listing ? [...listing.video, ...listing.audio] : [];
     arrow.toggleAttribute("hidden", !choices.length && !listHere("/watch"));
     if (!busy()) setState("idle");
@@ -344,6 +356,23 @@
     title.append(line("words", listing.title));
     if (listing.duration) title.append(line("length", listing.duration));
     menu.append(title);
+    // The sound's language, when the video has several (owner's request,
+    // 2026-10-31): the video's own first, a dub on a press.
+    if (listing.tracks?.length) {
+      menu.append(line("head", texts.listSound ?? "Sound"));
+      const row = document.createElement("div");
+      row.className = "sounds";
+      for (const t of listing.tracks) {
+        const made = choice();
+        made.dataset.act = "sound";
+        made.dataset.lang = t.lang;
+        made.className = t.lang === listing.lang ? "chip on" : "chip";
+        made.setAttribute("aria-pressed", String(t.lang === listing.lang));
+        made.textContent = t.name;
+        row.append(made);
+      }
+      menu.append(row);
+    }
     const group = (/** @type {string} */ head, /** @type {any[]} */ items, /** @type {number} */ from) => {
       if (!items.length) return;
       menu.append(line("head", head));
@@ -387,7 +416,7 @@
    * move of the pointer or key press, never by the page alone). Until they come the button is not shown at
    * all, so it never shows in another language first (owner's decision on
    * #264); if they never come, it never shows.
-   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string, listVideo?: string, listAudio?: string, more?: string, help?: string, hide?: string }} Texts
+   * @typedef {{ dir: string, button: string, working: string, done: string, failed: string, playlist: string, thisVideo: string, wholeList: string, listVideo?: string, listAudio?: string, listSound?: string, more?: string, help?: string, hide?: string }} Texts
    * @type {Texts | null} */
   let texts = null;
   /** The video the pointer was on while the texts were on their way. */
@@ -407,7 +436,7 @@
       const dir = answer.lang === "en" ? "ltr" : "rtl";
       texts = /** @type {Texts} */ ({ dir, ...Object.fromEntries(keys.map((key) => [key, given[key]])) });
       // The list's words, when this Zajil has them.
-      for (const key of /** @type {const} */ (["listVideo", "listAudio", "more", "help", "hide"])) {
+      for (const key of /** @type {const} */ (["listVideo", "listAudio", "listSound", "more", "help", "hide"])) {
         if (typeof given[key] === "string" && given[key]) texts[key] = given[key];
       }
       help.title = texts.help ?? "Zajil";
@@ -650,8 +679,19 @@
   listen(menu, "click", (event) => {
     const item = /** @type {HTMLElement | null} */ (event.target instanceof Element ? event.target.closest("button") : null);
     if (!item || menu.hidden || !pressable(event)) return;
-    closeMenu();
     const act = item.dataset.act;
+    // Another sound: the list made again with it, and left open.
+    if (act === "sound") {
+      const make = /** @type {any} */ (globalThis).__zajilFormats?.choicesOf;
+      if (typeof make !== "function") return;
+      soundLang = item.dataset.lang ?? null;
+      listing = make(pageData, soundLang);
+      choices = listing ? [...listing.video, ...listing.audio] : [];
+      fillMenu();
+      placeMenu();
+      return;
+    }
+    closeMenu();
     if (act === "whole") void press(true);
     else if (act === "this") void press(false);
     else if (act === "format") {

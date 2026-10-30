@@ -176,6 +176,9 @@
   "videoListAudio": {
     "message": "صوت فقط"
   },
+  "videoListSound": {
+    "message": "الصوت"
+  },
   "videoListMore": {
     "message": "جودات أخرى في زاجِل…"
   },

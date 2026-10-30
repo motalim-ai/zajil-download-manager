@@ -466,7 +466,7 @@ async function hostText(code) {
 /** The button's texts, in Zajil's language. */
 async function buttonTexts() {
   const lang = await zajilLanguage();
-  const [button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, more, help, hide] = await Promise.all(
+  const [button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, more, help, hide] = await Promise.all(
     [
       "videoButton",
       "videoButtonWorking",
@@ -477,12 +477,13 @@ async function buttonTexts() {
       "videoButtonWholeList",
       "videoListVideo",
       "videoListAudio",
+      "videoListSound",
       "videoListMore",
       "videoButtonHelp",
       "videoButtonHide",
     ].map((key) => textIn(lang, key)),
   );
-  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, more, help, hide } };
+  return { lang, texts: { button, working, done, failed, playlist, thisVideo, wholeList, listVideo, listAudio, listSound, more, help, hide } };
 }
 
 /**
@@ -564,20 +565,25 @@ api.runtime.onMessage.addListener((/** @type {any} */ message, /** @type {any} *
 /** An itag as YouTube numbers its formats. */
 const ITAG = /^\d{1,4}$/;
 
+/** A sound's language as yt-dlp names it (`ar`, `en-US`). */
+const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})?$/;
+
 /**
  * The format chosen in the button's list, as zajil-host takes it: a format
- * with sound, or a picture and its sound. Anything else is no choice (the
- * press then opens Zajil's «Video quality»).
+ * with sound, or a picture and its sound, and the sound's language when it
+ * is a dub the user chose. Anything else is no choice (the press then
+ * opens Zajil's «Video quality»).
  * @param {any} format
- * @returns {{ format: string, audio?: string, label?: string, size?: number } | undefined}
+ * @returns {{ format: string, audio?: string, language?: string, label?: string, size?: number } | undefined}
  */
 export function chosenFormat(format) {
   if (!format || typeof format !== "object") return undefined;
-  /** @type {{ format: string, audio?: string, label?: string, size?: number }} */
+  /** @type {{ format: string, audio?: string, language?: string, label?: string, size?: number }} */
   let chosen;
   if (ITAG.test(format.video) && ITAG.test(format.audio)) chosen = { format: format.video, audio: format.audio };
   else if (ITAG.test(format.id)) chosen = { format: format.id };
   else return undefined;
+  if (typeof format.language === "string" && LANGUAGE.test(format.language)) chosen.language = format.language;
   // How the list said it, and its size: shown in Zajil's window as they are.
   if (typeof format.label === "string") {
     const label = format.label.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").slice(0, 120).trim();

@@ -491,6 +491,21 @@ describe("the background", () => {
     expect(fake.done.sent).toEqual([{ type: "video", protocol_version: 1, page: "https://player.example/embed/9", media: "https://cdn.example/v.mp4" }]);
   });
 
+  it("a dub chosen in the button's list goes with its language, and nothing else does", async () => {
+    const fake = fakeChrome({ granted: false, video: true, answer: { ok: true } });
+    await load(fake);
+    await flush();
+    const sender = { id: "zajil", tab: { id: 2, url: "https://www.youtube.com/watch?v=x" }, frameId: 0, url: "https://www.youtube.com/watch?v=x" };
+    fake.listeners.message({ type: "video-button", src: "blob:https://www.youtube.com/1", format: { video: "299", audio: "140", language: "ar" } }, sender);
+    await flush();
+    fake.listeners.message({ type: "video-button", src: "blob:https://www.youtube.com/1", format: { video: "299", audio: "140", language: "../x" } }, sender);
+    await flush();
+    expect(fake.done.sent.map((/** @type {any} */ m) => [m.format, m.audio, m.language])).toEqual([
+      ["299", "140", "ar"],
+      ["299", "140", undefined],
+    ]);
+  });
+
   it("the button in a private window: no cookies, no playlist, marked private", async () => {
     const fake = fakeChrome({ granted: true, video: true, answer: { ok: true } });
     await load(fake);
@@ -653,6 +668,7 @@ describe("the background", () => {
             wholeList: locales.en.videoButtonWholeList.message,
             listVideo: locales.en.videoListVideo.message,
             listAudio: locales.en.videoListAudio.message,
+            listSound: locales.en.videoListSound.message,
             more: locales.en.videoListMore.message,
             help: locales.en.videoButtonHelp.message,
             hide: locales.en.videoButtonHide.message,

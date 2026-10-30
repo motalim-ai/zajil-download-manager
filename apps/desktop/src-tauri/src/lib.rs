@@ -1170,6 +1170,7 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                     private,
                     format,
                     audio,
+                    language,
                     label,
                     size,
                     ..
@@ -1177,10 +1178,19 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 {
                     // A format chosen in the button's list: downloaded at
                     // once, without «Video quality» (owner, 2026-10-29).
+                    // A dub's language goes with its sound's itag
+                    // (`140-ar`), which `by_itag` reads.
+                    let sound = |itag: String| match language {
+                        Some(language) => format!("{itag}-{language}"),
+                        None => itag,
+                    };
                     let chosen = format.clone().map(|id| video::Chosen {
                         choice: match audio.clone() {
-                            Some(audio) => video::ChoiceView::Merge { video: id, audio },
-                            None => video::ChoiceView::Format { id },
+                            Some(audio) => video::ChoiceView::Merge {
+                                video: id,
+                                audio: sound(audio),
+                            },
+                            None => video::ChoiceView::Format { id: sound(id) },
                         },
                         label: label.clone(),
                         size: *size,

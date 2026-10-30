@@ -55,7 +55,7 @@
     fps: f.fps,
     quality: f.qualityLabel,
     audio: f.audioQuality,
-    track: f.audioTrack ? { name: f.audioTrack.displayName, main: Boolean(f.audioTrack.audioIsDefault) } : undefined,
+    track: f.audioTrack ? { name: f.audioTrack.displayName, main: Boolean(f.audioTrack.audioIsDefault), lang: f.audioTrack.id } : undefined,
     drc: Boolean(f.isDrc),
     drm: Boolean(f.drmFamilies),
   });

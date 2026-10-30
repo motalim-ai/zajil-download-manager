@@ -48,7 +48,12 @@
       height: num(f.height, 10000),
       fps: num(f.fps, 1000),
       quality: text(f.quality, 24),
-      track: f.track && typeof f.track === "object" ? { name: text(f.track.name, 60), main: f.track.main === true } : null,
+      // A sound's track: its name, whether it is the video's own, and its
+      // language as yt-dlp names it (`ar` of YouTube's `ar.3`).
+      track:
+        f.track && typeof f.track === "object"
+          ? { name: text(f.track.name, 60), main: f.track.main === true, lang: /^([a-z]{2,3}(?:-[A-Za-z0-9]{1,8})?)(?:\.|$)/i.exec(text(f.track.lang, 40))?.[1] ?? "" }
+          : null,
       drc: f.drc === true,
     };
   };
@@ -79,12 +84,16 @@
 
   /**
    * The list's choices for what `yt-page.js` said, or null when it said
-   * nothing usable (a live stream, or no format).
-   * @param {any} data
-   * @returns {{ title: string, duration: string, video: Choice[], audio: Choice[] } | null}
-   * @typedef {{ name: string, detail: string, size: string, bytes?: number, send: { id?: string, video?: string, audio?: string } }} Choice
+   * nothing usable (a live stream, or no format). The pictures go with the
+   * video's own sound, or with the sound of language `lang` when the user
+   * chose a dub (owner's request, 2026-10-31); `tracks` are the languages
+   * to choose from, when there are several.
+   * @param {any} data @param {string | null} [lang]
+   * @returns {{ title: string, duration: string, video: Choice[], audio: Choice[], tracks: Track[], lang: string } | null}
+   * @typedef {{ name: string, detail: string, size: string, bytes?: number, send: { id?: string, video?: string, audio?: string, language?: string } }} Choice
+   * @typedef {{ name: string, lang: string, main: boolean }} Track
    */
-  function choicesOf(data) {
+  function choicesOf(data, lang = null) {
     if (!data || typeof data !== "object" || data.live === true || !Array.isArray(data.formats)) return null;
     // Once each: YouTube lists an itag again for a "stable volume" sound
     // or a variant of it; the plain one comes first.
@@ -93,7 +102,11 @@
       .slice(0, 200)
       .map(checked)
       .filter((/** @type {any} */ f) => f !== null && !f.drc && (f.kind !== "audio" || f.plain || f.codec === "AAC"))
-      .filter((/** @type {any} */ f) => !seen.has(f.itag) && seen.add(f.itag));
+      .filter((/** @type {any} */ f) => {
+        // An itag once for each sound's language: a dub has its own.
+        const key = `${f.itag}|${f.track?.lang ?? ""}`;
+        return !seen.has(key) && seen.add(key);
+      });
     // The sound that goes with a picture: the video's own track (not
     // another language's, not a "stable volume" one), the best of its kind.
     // A video whose sound has a language but no track marked the default
@@ -103,7 +116,17 @@
     const isMain = (/** @type {any} */ f) => !f.track || f.track.main || !anyMain;
     // A language is named only when there are several.
     const languages = new Set(tracked.map((/** @type {any} */ f) => f.track.name)).size;
-    const sounds = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.plain && isMain(f));
+    /** @type {Track[]} */
+    const tracks = [];
+    for (const f of tracked) {
+      if (f.track.lang && !tracks.some((t) => t.lang === f.track.lang))
+        tracks.push({ name: f.track.name || f.track.lang, lang: f.track.lang, main: isMain(f) });
+    }
+    tracks.sort((a, b) => Number(b.main) - Number(a.main));
+    // The chosen dub, if it is one of them; else the video's own sound.
+    const dub = tracks.find((t) => t.lang === lang && !t.main) ?? null;
+    const ofSound = (/** @type {any} */ f) => (dub ? f.track?.lang === dub.lang : isMain(f));
+    const sounds = all.filter((/** @type {any} */ f) => f.kind === "audio" && f.plain && ofSound(f));
     /** YouTube's usual one first (140, 251), else the best of its kind.
      * @param {string} ext @param {string} usual */
     const bestSound = (ext, usual) =>
@@ -123,6 +146,8 @@
           CODEC_ORDER.indexOf(a.codec) - CODEC_ORDER.indexOf(b.codec),
       );
     for (const f of pictures) {
+      // A picture with its own sound has the video's own: not with a dub.
+      if (dub && f.kind === "both") continue;
       // A WebM picture goes with Opus; any other with AAC (else Opus: MKV).
       const sound = f.kind === "both" ? null : f.ext === "webm" ? (opus ?? m4a) : (m4a ?? opus);
       if (f.kind === "video" && !sound) continue;
@@ -134,22 +159,30 @@
         detail: [f.codec, rateText(rate)].filter(Boolean).join(" · "),
         size: sizeText(size),
         bytes: size,
-        send: sound ? { video: f.itag, audio: sound.itag } : { id: f.itag },
+        send: sound ? { video: f.itag, audio: sound.itag, ...(dub ? { language: dub.lang } : {}) } : { id: f.itag },
       });
     }
     /** @type {Choice[]} */
+    // The sounds of the chosen language only, when there are several.
     const audio = all
-      .filter((/** @type {any} */ f) => f.kind === "audio")
+      .filter((/** @type {any} */ f) => f.kind === "audio" && (tracks.length < 2 || ofSound(f)))
       .sort((/** @type {any} */ a, /** @type {any} */ b) => Number(isMain(b)) - Number(isMain(a)) || (b.bitrate ?? 0) - (a.bitrate ?? 0))
       .map((/** @type {any} */ f) => ({
         name: `${f.ext.toUpperCase()} ${rateText(f.bitrate)}`.trim() + (f.track?.name && languages > 1 ? ` · ${f.track.name}` : ""),
         detail: f.codec,
         size: sizeText(f.size),
         bytes: f.size,
-        send: { id: f.itag },
+        send: !isMain(f) && f.track?.lang ? { id: f.itag, language: f.track.lang } : { id: f.itag },
       }));
     if (!video.length && !audio.length) return null;
-    return { title: text(data.title, 200), duration: durationText(num(data.seconds, 1e7)), video, audio };
+    return {
+      title: text(data.title, 200),
+      duration: durationText(num(data.seconds, 1e7)),
+      video,
+      audio,
+      tracks: tracks.length > 1 ? tracks : [],
+      lang: dub?.lang ?? tracks.find((t) => t.main)?.lang ?? "",
+    };
   }
 
   g.__zajilFormats = { choicesOf };
