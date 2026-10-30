@@ -22,4 +22,10 @@ codec: string | null,
  * A sound that is the video's own (not a dubbed one), when the page
  * offers several (users' reports, 2026-10-31).
  */
-original: boolean, };
+original: boolean, 
+/**
+ * A sound's language (`en`, `ar-EG`…), if the site says it: «Video
+ * quality» lets the user take a dubbed one (owner's request,
+ * 2026-10-31).
+ */
+language: string | null, };

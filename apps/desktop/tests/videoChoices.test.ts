@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { fileName, notForQuickTime, options, picked } from "../src/lib/videoChoices";
+import { fileName, notForQuickTime, options, picked, tracks } from "../src/lib/videoChoices";
 import type { FormatView } from "../src/lib/bindings/FormatView";
 
 // «Video quality»'s choices (M6, #149).
-const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false, codec: null, original: false });
+const f = (id: string, kind: string, height: number | null, ext: string, size: number | null): FormatView => ({ id, ext, width: null, height, fps: 30, size, kind, hls: false, codec: null, original: false, language: null });
 
 describe("the quality choices", () => {
   const formats = [
@@ -34,6 +34,33 @@ describe("the quality choices", () => {
       video: "137",
       audio: "140-0",
     });
+  });
+
+  it("offers the dub one hears when chosen: merges with it, and it as sound only (owner's request, 2026-10-31)", () => {
+    const sound = (id: string, ext: string, size: number, language: string, original: boolean): FormatView => ({ ...f(id, "audio", null, ext, size), language, original });
+    const page = [
+      f("18", "both", 360, "mp4", 10),
+      f("137", "video", 1080, "mp4", 100),
+      sound("140-1", "m4a", 5, "en", true),
+      sound("251-1", "webm", 6, "en", true),
+      sound("140-0", "m4a", 5, "ar", false),
+    ];
+    const found = tracks(page);
+    expect(found).toEqual([
+      { language: "en", original: true },
+      { language: "ar", original: false },
+    ]);
+    const own = options(page, null, found[0]!);
+    expect(own[0]!.choice).toEqual({ kind: "merge", video: "137", audio: "140-1" });
+    expect(own.at(-1)!.choice).toEqual({ kind: "audio_only" });
+    const dub = options(page, null, found[1]!);
+    // 360p's own format holds the original sound: only merges with the dub.
+    expect(dub.map((o) => o.height)).toEqual([1080, 0]);
+    expect(dub[0]!.choice).toEqual({ kind: "merge", video: "137", audio: "140-0" });
+    expect(dub.at(-1)!.choice).toEqual({ kind: "format", id: "140-0" });
+    expect(dub.at(-1)!.sound).toBe(true);
+    // One language only: nothing to choose.
+    expect(tracks(page.filter((x) => x.language !== "ar"))).toEqual([]);
   });
 
   it("keeps each height once, the one with a size", () => {

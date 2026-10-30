@@ -11,7 +11,7 @@
   import { locale } from "../lib/i18n.svelte";
   import { size } from "../lib/format";
   import { startWindow } from "../lib/windowStart";
-  import { fileName, notForQuickTime, options, picked, type Option } from "../lib/videoChoices";
+  import { fileName, notForQuickTime, options, picked, tracks, type Option, type Track } from "../lib/videoChoices";
   import { onMac } from "../lib/keys";
   import QueuePick from "../lib/components/QueuePick.svelte";
   import { errorDetails, errorKey } from "../lib/videoErrors";
@@ -47,6 +47,10 @@
   // FileName draws it (as in «Download file info»).
   let editing = $state(false);
   let pick = $state(0);
+  // The page's sounds in several languages, the video's own first, and the
+  // one chosen (owner's request, 2026-10-31: the dub one hears, if wanted).
+  let sounds = $state<Track[]>([]);
+  let sound = $state(0);
   // The name and folder the user changed (else they follow the download's).
   let nameTouched = false;
   let folderTouched = false;
@@ -160,10 +164,10 @@
       duration: 1830,
       best: { kind: "merge" as const, video: "137", audio: "140" },
       formats: [
-        { id: "137", ext: "mp4", width: 1920, height: 1080, fps: 30, size: 412 * MIB, kind: "video", hls: false, codec: "H.264", original: false },
-        { id: "136", ext: "mp4", width: 1280, height: 720, fps: 30, size: 218 * MIB, kind: "video", hls: false, codec: "H.264", original: false },
-        { id: "18", ext: "mp4", width: 640, height: 360, fps: 30, size: 64 * MIB, kind: "both", hls: false, codec: "H.264", original: false },
-        { id: "140", ext: "m4a", width: null, height: null, fps: null, size: 28 * MIB, kind: "audio", hls: false, codec: null, original: true },
+        { id: "137", ext: "mp4", width: 1920, height: 1080, fps: 30, size: 412 * MIB, kind: "video", hls: false, codec: "H.264", original: false, language: null },
+        { id: "136", ext: "mp4", width: 1280, height: 720, fps: 30, size: 218 * MIB, kind: "video", hls: false, codec: "H.264", original: false, language: null },
+        { id: "18", ext: "mp4", width: 640, height: 360, fps: 30, size: 64 * MIB, kind: "both", hls: false, codec: "H.264", original: false, language: null },
+        { id: "140", ext: "m4a", width: null, height: null, fps: null, size: 28 * MIB, kind: "audio", hls: false, codec: null, original: true, language: null },
       ],
     };
     const list = options(info.formats, info.best);
@@ -207,6 +211,8 @@
     try {
       const info = await (asked ?? api.videoProbe(url));
       if (info.kind === "video") {
+        sounds = tracks(info.formats);
+        sound = 0;
         const list = options(info.formats, info.best);
         pick = picked(list, info.best);
         name = fileName(info.title);
@@ -221,6 +227,29 @@
 
   /** One video joins the list, and its progress window takes over, as a
    * download in IDM does. */
+  /** Another sound: the same height picked again, if it is still there. */
+  function chooseSound(i: number) {
+    if (step.kind !== "video") return;
+    sound = i;
+    const was = step.list[pick];
+    const list = options(step.info.formats, step.info.best, sounds[i] ?? null);
+    const same = list.findIndex((o) => o.height === was?.height && o.ext === was?.ext && !!o.sound === !!was?.sound);
+    pick = same >= 0 ? same : picked(list, step.info.best);
+    step = { ...step, list };
+  }
+
+  /** A sound's name: its language in the reader's, and whether it is the
+   * video's own or a dub. */
+  function soundName(t: Track): string {
+    let lang = t.language;
+    try {
+      lang = new Intl.DisplayNames([locale.lang], { type: "language" }).of(t.language) ?? t.language;
+    } catch {
+      // A code the browser does not know: shown as it is.
+    }
+    return `${lang} · ${locale.t(t.original ? "video-sound-original" : "video-sound-dubbed")}`;
+  }
+
   async function downloadOne(choice: Option["choice"], file: string) {
     step = { kind: "downloading", label: file, done: 0, total: null, speed: null, id: null };
     try {
@@ -270,7 +299,7 @@
   }
 
   const quality = (o: Option) =>
-    o.choice.kind === "audio_only" ? locale.t("video-audio-only", { format: "m4a" }) : `${o.height}p${o.fps && o.fps > 30 ? ` ${Math.round(o.fps)}fps` : ""} · ${o.ext.toUpperCase()}${o.codec ? ` · ${o.codec}` : ""}`;
+    o.sound || o.choice.kind === "audio_only" ? locale.t("video-audio-only", { format: o.ext }) : `${o.height}p${o.fps && o.fps > 30 ? ` ${Math.round(o.fps)}fps` : ""} · ${o.ext.toUpperCase()}${o.codec ? ` · ${o.codec}` : ""}`;
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && void close()} />
@@ -335,6 +364,14 @@
         {/each}
       </fieldset>
       <div class="grid">
+        {#if sounds.length > 1}
+          <label class="label" for="video-sound">{locale.t("video-sound")}</label>
+          <div class="box qpick">
+            <select id="video-sound" value={sound} onchange={(e) => chooseSound(Number((e.currentTarget as HTMLSelectElement).value))}>
+              {#each sounds as t, i (i)}<option value={i}>{soundName(t)}</option>{/each}
+            </select>
+          </div>
+        {/if}
         <label class="label" for="video-name">{locale.t("add-file-name")}</label>
         <div class="namebox">
           <input

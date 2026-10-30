@@ -1401,6 +1401,10 @@ pub struct FormatView {
     /// A sound that is the video's own (not a dubbed one), when the page
     /// offers several (users' reports, 2026-10-31).
     pub original: bool,
+    /// A sound's language (`en`, `ar-EG`…), if the site says it: «Video
+    /// quality» lets the user take a dubbed one (owner's request,
+    /// 2026-10-31).
+    pub language: Option<String>,
 }
 
 /// A picture codec's name as people know it, from yt-dlp's `vcodec`.
@@ -1597,6 +1601,11 @@ pub fn format_view(f: &Format) -> FormatView {
         hls: f.is_hls(),
         codec: f.vcodec.as_deref().and_then(codec_name).map(Into::into),
         original: false,
+        language: f.language.clone().filter(|l| {
+            !l.is_empty()
+                && l.len() <= 35
+                && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        }),
     }
 }
 

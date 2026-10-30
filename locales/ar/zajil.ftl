@@ -701,6 +701,9 @@ video-waits = فيديو ينتظر أن تختار جودته في «جودة �
 video-waits-show = اعرضه
 video-quality = الجودة
 video-audio-only = صوت فقط ({ $format })
+video-sound = الصوت
+video-sound-original = الأصلي
+video-sound-dubbed = مدبلج
 video-playlist =
     { PLURAL($count) ->
         [zero] قائمة تشغيل فارغة.

@@ -635,6 +635,9 @@ video-waits = A video is waiting for you to choose its quality in “Video quali
 video-waits-show = Show it
 video-quality = Quality
 video-audio-only = Sound only ({ $format })
+video-sound = Sound
+video-sound-original = original
+video-sound-dubbed = dubbed
 video-playlist =
     { PLURAL($count) ->
         [one] A playlist with { $count } video.

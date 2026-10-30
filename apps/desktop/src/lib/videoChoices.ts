@@ -16,24 +16,51 @@ export type Option = {
   fps: number | null;
   /** Bytes, or nothing if the site gives no size. */
   size: number | null;
+  /** «Sound only». */
+  sound?: boolean;
 };
 
-/** The sound merged with each picture: the engine's, else the largest m4a,
- * among the video's own sounds when the page marks them (a dubbed one
- * only when there is nothing else; users' reports, 2026-10-31). */
-function bestAudio(formats: FormatView[], best: ChoiceView | null): FormatView | undefined {
+/** One of the sounds a page offers in several languages: the video's own,
+ * or a dubbed one (owner's request, 2026-10-31: «what if I want the dub I
+ * hear?»). */
+export type Track = { language: string; original: boolean };
+
+const ofTrack = (f: FormatView, t: Track) => f.kind === "audio" && (f.language ?? "") === t.language && f.original === t.original;
+
+/** The sounds to choose from, the video's own first; none when there is
+ * only one. */
+export function tracks(formats: FormatView[]): Track[] {
+  const found: Track[] = [];
+  for (const f of formats) {
+    if (f.kind !== "audio" || !f.language) continue;
+    const t = { language: f.language, original: f.original };
+    if (!found.some((o) => o.language === t.language && o.original === t.original)) found.push(t);
+  }
+  found.sort((a, b) => Number(b.original) - Number(a.original));
+  return found.length > 1 ? found : [];
+}
+
+/** The sound merged with each picture: of the chosen track if any, else
+ * the engine's, else the largest m4a, among the video's own sounds when
+ * the page marks them (a dubbed one only when there is nothing else;
+ * users' reports, 2026-10-31). */
+function bestAudio(formats: FormatView[], best: ChoiceView | null, track: Track | null): FormatView | undefined {
   const sounds = formats.filter((f) => f.kind === "audio");
+  const chosen = track ? sounds.filter((f) => ofTrack(f, track)) : [];
   const own = sounds.filter((f) => f.original);
-  const audio = own.length > 0 ? own : sounds;
+  const audio = chosen.length > 0 ? chosen : own.length > 0 ? own : sounds;
   const largest = (list: FormatView[]) => list.reduce<FormatView | undefined>((a, f) => (!a || (f.size ?? 0) > (a.size ?? 0) ? f : a), undefined);
   return audio.find((f) => best?.kind === "merge" && f.id === best.audio) ?? largest(audio.filter((f) => f.ext === "m4a")) ?? largest(audio);
 }
 
-export function options(formats: FormatView[], best: ChoiceView | null = null): Option[] {
-  const audio = bestAudio(formats, best);
+export function options(formats: FormatView[], best: ChoiceView | null = null, track: Track | null = null): Option[] {
+  const audio = bestAudio(formats, best, track);
+  // A dubbed sound: a picture with its sound in one format has the video's
+  // own, so only merges are offered, and «sound only» is that sound.
+  const dubbed = track !== null && !track.original && audio !== undefined && ofTrack(audio, track);
   const list: Option[] = [];
   for (const f of formats) {
-    if (f.kind === "both") list.push({ choice: { kind: "format", id: f.id }, height: f.height ?? 0, ext: f.ext, codec: f.codec ?? null, fps: f.fps, size: f.size });
+    if (f.kind === "both" && !dubbed) list.push({ choice: { kind: "format", id: f.id }, height: f.height ?? 0, ext: f.ext, codec: f.codec ?? null, fps: f.fps, size: f.size });
     else if (f.kind === "video" && audio)
       list.push({
         choice: { kind: "merge", video: f.id, audio: audio.id },
@@ -55,7 +82,15 @@ export function options(formats: FormatView[], best: ChoiceView | null = null): 
   }
   const sorted = [...seen.values()].sort((a, b) => b.height - a.height || (b.size ?? 0) - (a.size ?? 0));
   if (formats.some((f) => f.kind === "audio" || f.kind === "both"))
-    sorted.push({ choice: { kind: "audio_only" }, height: 0, ext: "m4a", codec: null, fps: null, size: audio?.size ?? null });
+    sorted.push({
+      choice: dubbed && audio ? { kind: "format", id: audio.id } : { kind: "audio_only" },
+      height: 0,
+      ext: dubbed && audio ? audio.ext : "m4a",
+      codec: null,
+      fps: null,
+      size: audio?.size ?? null,
+      sound: true,
+    });
   return sorted;
 }
 
