@@ -36,6 +36,14 @@ CPU varies by a point or two between runs of the same build. Not measured on Win
 - **The title bar's logo now sits opposite the window's buttons on every system** (owner's choice, 2026-11-01): on Windows and Linux in English the buttons are on the right, and the logo, kept on the right in both languages, crowded them. It takes the start of the reading direction on Windows and Linux (right in Arabic, left in English), and on a Mac the side the coloured buttons are not on.
 - **A file saved with a UTF-8 byte order mark read as damaged** (old Notepad, Windows PowerShell 5.1's `Set-Content -Encoding UTF8`; JSON does not allow the mark): the mark is now skipped before the settings, queues, categories and import files are read. Tested for the settings file and an imported queues export; the queues and categories files go through the same function, not tested on their own.
 
+### Security
+
+From a security review of the code. Each is checked by a test that failed before the fix.
+
+- **`zajil grab` printed its resume command with the path as it is**, and the path holds a name the server chose. It is now quoted for each shell, as `zajil get`'s, through one function both use; the test runs the printed commands in the real shells.
+- **Headers along a chain of redirects:** after a redirect to another site, a second redirect within that site received the browser's cookies for the link, or a user name and password given in a link to `zajil`; and the whole address of the page a link came from went to the other site. Zajil now follows redirects itself, and each hop gets the headers for its own address, as in a browser. The limits stay (at most 10 redirects, http and https only, never from https to http); a refused redirect is no longer tried again.
+- **The OK for a browser download is for the name you saw:** a server could name a file one way when Zajil checked it and another way at the download itself, and have a program saved after «Start download» on what was shown as a document. Such a download now waits for you under the name it would get, and a download you start is saved under the name you saw.
+
 ### Tests
 
 - The main window freed in the tray and made again, in the real app (`close_resume.rs`, macOS and Windows; Linux's CI desktop has no tray, where closing quits): the download goes on, one that finishes meanwhile is told with no page, and the new page reads the list again. On Windows, the session end with the window freed saves everything.
