@@ -16,9 +16,13 @@ The first release of the 1.2.x stability period (ROADMAP): what helps find probl
 - **Zajil says when the browser extension is too old** (owner's request, 2026-10-31: an extension loaded unpacked never updates itself): zajil-host's answer to a ping now says Zajil's version and the oldest extension it works fully with (`MIN_EXTENSION`, raised only when an extension change must come with the app). An older extension that knows it tells Zajil (`extension_old`, once an hour, never starting Zajil), and the main window shows a bar with «How to update it». It works from extension 1.2.1 on: older ones do not say their version.
 - **«Copy problem info»** in Help › About Zajil (owner's decision, 2026-10-31: copied, never sent by Zajil): Zajil's version, the system, the language, the video tools, an extension that said it is old, and the log's last 100 lines, with any link replaced by `(link)` and the home folder by `~`, on the clipboard to paste wherever one asks for help. The bug report form asks for it.
 
+### Fixed
+
+- **Downloads with a speed limit were slower since 1.2.0** (the nightly real-clock test of 2026-10-31: 0.83 × the limit on macOS and Linux, 0.96–1.0 before): 1.2.0's fix for the broken state file took a stalled segment with nothing written whole, and its connection then always started again. The segment is split as before 1.2.0 again, and the empty one it leaves is no longer written to the state file, which was the actual fault. A segment at byte 0, which could not be left empty (its end went past the file: «a segment goes past the end of the file»), still changes hands whole. Measured locally, alternately: 0.97 × the limit, 0.99 before 1.2.0, 0.91 with 1.2.0.
+
 ### Tests
 
-- **The download's segments under any order of events:** a random test drives the board's connections through 400 downloads (taking, writing, failing, letting go, splitting and taking over, in any order), and after every step checks that the state file could be resumed from; a finished one has every byte written exactly once. It finds the take-over bug fixed in 1.2.0 when that fix is taken out.
+- **The download's segments under any order of events:** a random test drives the board's connections through 400 downloads (taking, writing, failing, letting go, splitting and taking over, in any order), and after every step checks that the state as saved could be resumed from; a finished one has every byte written exactly once. It finds the take-over bug fixed in 1.2.0 when that fix is taken out.
 
 ## [1.2.0] - 2026-10-31
 

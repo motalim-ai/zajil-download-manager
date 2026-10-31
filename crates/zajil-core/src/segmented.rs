@@ -480,11 +480,24 @@ async fn checkpoint(
     state_file: &std::path::Path,
     cleanup: Option<&EmptyDownloadCleanup>,
 ) -> Result<(), Error> {
-    let mut snapshot = ctx.board().state.clone();
+    let mut snapshot = saved(&ctx.board().state);
     let file = ctx.file.clone();
     blocking(move || file.sync_data()).await?;
     let watch = cleanup.and_then(EmptyDownloadCleanup::watch);
     save_state(&mut snapshot, state_file, watch).await
+}
+
+/// `state` as its file holds it: without the empty segments a take-over
+/// of a segment with nothing written leaves on the board (owner's report,
+/// 2026-10-30: one made the state file unusable, «a segment ends before
+/// it starts», and a paused video began again). They hold no byte, so the
+/// others still cover the file.
+fn saved(state: &DownloadState) -> DownloadState {
+    let mut state = state.clone();
+    state
+        .segments
+        .retain(|s| s.end.is_none_or(|end| end >= s.start));
+    state
 }
 
 /// What workers share.
@@ -852,12 +865,14 @@ impl Board {
         // small to halve is taken whole, from where its connection is.
         let take_over = remaining / 2 < self.min_segment;
         let start = end + 1 - if take_over { remaining } else { remaining / 2 };
-        if start == segment.start {
-            // Nothing of it written or reserved: the whole segment changes
-            // hands, as it is. Split, it left an empty segment that ends
-            // before it starts, and the state file could not be used for a
-            // resume (owner's report, 2026-10-30: a paused YouTube video
-            // began again). Its connection lets go when it next writes.
+        // Nothing of it written or reserved: the old segment is left empty
+        // (it ends just before it starts), as before 1.2.0. Taking it whole
+        // instead kept 0.90 × the limit, not 0.98, on the nightly
+        // real-clock test of 2026-10-31. The state file never holds the
+        // empty segment ([`saved`]). Only one at byte 0 cannot end before
+        // it starts (it ended past the file instead): it changes hands
+        // whole.
+        if start == 0 {
             let take_overs = self.live[index].take_overs + 1;
             self.live[index] = Live::default();
             self.live[index].take(id, now);
@@ -1001,7 +1016,7 @@ async fn find_work(ctx: &Arc<Ctx>, id: usize) -> Work {
                     Some(at) => Err(at),
                     None => match board.split_slowest(id, now) {
                         Steal::Split { from, start, end } => {
-                            // Not split when taken over whole.
+                            // Not split when taken over whole (at byte 0).
                             if start != from {
                                 let _ = ctx.events.send(Message::Split {
                                     segment: from,
@@ -1515,8 +1530,8 @@ mod tests {
     /// The board's bookkeeping under any order of what its connections do
     /// (owner's report, 2026-10-30: a take-over left a segment ending
     /// before it started, and the download could not be resumed): after
-    /// every step the state is one a resume can use, and once complete
-    /// every byte was written exactly once.
+    /// every step the state as saved is one a resume can use, and once
+    /// complete every byte was written exactly once.
     #[test]
     fn the_state_stays_usable_whatever_the_connections_do() {
         let mut completed = 0;
@@ -1589,7 +1604,7 @@ mod tests {
                         }
                     },
                 }
-                if let Err(e) = board.state.check_consistency() {
+                if let Err(e) = saved(&board.state).check_consistency() {
                     panic!("seed {seed}: {e}: {:?}", board.state.segments);
                 }
             }
@@ -1605,10 +1620,13 @@ mod tests {
         assert!(completed > 300, "only {completed} of 400 completed");
     }
 
-    /// A stalled segment with nothing written is taken over as it is, not
-    /// split into an empty one the state file could not hold.
+    /// A stalled segment with nothing written, taken over, leaves an
+    /// empty one on the board, as before 1.2.0 (the nightly real-clock test
+    /// of 2026-10-31: taking it whole lost a tenth of the limit's speed);
+    /// the state as saved drops it, and can be resumed. One at byte 0
+    /// changes hands whole: it cannot end before it starts.
     #[test]
-    fn a_stalled_segment_with_nothing_written_changes_hands_whole() {
+    fn a_stalled_segment_taken_over_is_saved_without_its_empty_part() {
         let now = Instant::now();
         let mut board = board(&[100 * SECOND, 100 * SECOND], &[1000, 0], now);
         board.state.segments[1].end = Some(1149);
@@ -1621,14 +1639,30 @@ mod tests {
                 end: 1149
             }
         );
+        assert_eq!(board.state.segments.len(), 3);
+        assert!(board.state.check_consistency().is_err());
+        let state = saved(&board.state);
+        assert_eq!(state.segments.len(), 2);
+        state.check_consistency().unwrap();
+        assert_eq!(board.live[2].owner, Some(9));
+
+        // At byte 0: whole.
+        let mut board = super::tests::board(&[100 * SECOND, 100 * SECOND], &[0, 1000], now);
+        board.state.segments[0].end = Some(149);
+        board.state.segments[1].start = 150;
+        board.state.segments[1].end = Some(1149);
+        board.state.content_length = Some(1150);
+        assert_eq!(
+            board.split_slowest(9, now),
+            Steal::Split {
+                from: 0,
+                start: 0,
+                end: 149
+            }
+        );
         assert_eq!(board.state.segments.len(), 2);
-        assert_eq!(board.live.len(), 2);
-        assert_eq!(board.live[1].owner, Some(9));
-        assert_eq!(board.live[1].take_overs, 1);
+        assert_eq!(board.live[0].owner, Some(9));
         board.state.check_consistency().unwrap();
-        // Its first connection may no longer write there.
-        assert_eq!(board.reserve(1, 1000, 1000, 10), 0);
-        assert_eq!(board.reserve(9, 1000, 1000, 10), 10);
     }
 
     #[test]
