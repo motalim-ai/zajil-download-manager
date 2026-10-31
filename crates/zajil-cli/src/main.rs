@@ -401,8 +401,14 @@ fn stop_on_ctrl_c(stop: zajil_core::Stop) {
 
 fn stopped(reason: &str, state_file: &Path) -> ExitCode {
     eprintln!("zajil: the download stopped: {reason}");
-    // The file name comes from the server: quote it for each shell so the
-    // printed command is safe to copy and run.
+    print_resume_commands(state_file);
+    ExitCode::from(EXIT_RESUMABLE)
+}
+
+/// The `zajil resume` command for `state_file`, for each shell: the only
+/// way a subcommand prints one. The file name comes from the server: it is
+/// quoted for each shell so the printed command is safe to copy and run.
+pub(crate) fn print_resume_commands(state_file: &Path) {
     let arg = state_file.to_string_lossy();
     for ShellCommand { shell, command } in shell::commands("zajil resume", &arg) {
         match command {
@@ -415,7 +421,6 @@ fn stopped(reason: &str, state_file: &Path) -> ExitCode {
             }
         }
     }
-    ExitCode::from(EXIT_RESUMABLE)
 }
 
 /// A resume the server refused with 401: the state file never keeps a user

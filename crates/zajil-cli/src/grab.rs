@@ -175,7 +175,7 @@ pub async fn run(engine: Engine, args: GrabArgs) -> ExitCode {
     };
     summary(&report, dry_run);
     for state_file in &resumable {
-        eprintln!("zajil: resume with: zajil resume {}", state_file.display());
+        crate::print_resume_commands(state_file);
     }
     if report.stopped {
         eprintln!("zajil: stopped");
