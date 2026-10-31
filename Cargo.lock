@@ -1167,6 +1167,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "minisign-verify"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "871285dc19d8d0ebe0eef3d0e99a205f2a71363b122632cbbfa4a6c370a960ce"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2655,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-cli"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "clap",
  "jiff",
@@ -2669,13 +2675,15 @@ dependencies = [
 
 [[package]]
 name = "zajil-core"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
+ "base64",
  "dunce",
  "flate2",
  "getrandom 0.4.3",
  "icu_properties",
  "jiff",
+ "minisign-verify",
  "percent-encoding",
  "reqwest",
  "rustls",
@@ -2693,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-grab"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "html5ever",
  "jiff",
@@ -2706,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-host"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -2718,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -2729,7 +2737,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-jsbox"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "getrandom 0.4.3",
  "sha2",
@@ -2739,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "arboard",
  "dirs",
@@ -2755,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-testserver"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "bytes",
  "http-body-util",

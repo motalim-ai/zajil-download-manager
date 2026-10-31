@@ -179,6 +179,27 @@ pub fn check_at_start(handle: &tauri::AppHandle) {
             .ok()
             .and_then(Result::ok)
             .unwrap_or(true);
+        // The video tools' signed list (ADR-0011, section 2): asked with
+        // the update, kept when signed and newer; the tools then update
+        // the next time a video needs them.
+        if on {
+            let (engine, data) = {
+                let app = handle.state::<App>();
+                (app.engine.clone(), app.data_dir.clone())
+            };
+            tauri::async_runtime::spawn(async move {
+                let stop = zajil_core::Stop::new();
+                match zajil_core::tools_list::fetch_and_keep(&engine, &data, &stop).await {
+                    Ok(Some(list)) => eprintln!(
+                        "zajil: the video tools list {} is kept: yt-dlp {}",
+                        list.sequence,
+                        list.pins(zajil_core::tools::Tool::YtDlp).version
+                    ),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("zajil: the video tools list: {e}"),
+                }
+            });
+        }
         let current = handle.package_info().version.to_string();
         let stop = zajil_core::Stop::new();
         let found = found(on, || {

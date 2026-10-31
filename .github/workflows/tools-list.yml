@@ -1,0 +1,91 @@
+# The video tools' signed list (ADR-0011, section 2; owner's request,
+# 2026-10-31: yt-dlp updated without a whole release of Zajil).
+#
+# Run by hand from main once a PR that changes tools/*/pins*.txt (and raises
+# tools/sequence.txt) is merged, with the tools' CI tests green. It writes
+# tools.json from those files, signs it in the `release` environment (the
+# owner approves each run; its secrets are the update key and its
+# password), checks the signature against the key built into Zajil, and
+# puts it on the `tools-list` pre-release, which Zajil reads at start
+# (crates/zajil-core/src/tools_list.rs). Its number must be higher than the
+# list published before: Zajil refuses anything older.
+
+name: Tools list
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tools-list
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Sign and publish tools.json
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Only from main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run it from main only"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Write tools.json
+        run: |
+          set -euo pipefail
+          sequence="$(grep -v '^#' tools/sequence.txt | grep -m1 -E '^[0-9]+$')"
+          jq -n --argjson sequence "$sequence" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile ytdlp tools/yt-dlp/pins.txt \
+            --rawfile quickjs tools/quickjs/pins.txt \
+            --rawfile ffmpeg tools/ffmpeg/pins-ffmpeg.txt \
+            --rawfile ffprobe tools/ffmpeg/pins-ffprobe.txt \
+            '{format: "zajil-tools-1", sequence: $sequence, issued_at: $issued,
+              tools: {"yt-dlp": $ytdlp, quickjs: $quickjs, ffmpeg: $ffmpeg, ffprobe: $ffprobe}}' > tools.json
+          jq '{sequence, issued_at, versions: (.tools | map_values([splits("\n") | select(startswith("version ")) | ltrimstr("version ")][0]))}' tools.json
+      - name: Newer than the published list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ours="$(jq .sequence tools.json)"
+          if gh release download tools-list -p tools.json -O published.json 2>/dev/null; then
+            theirs="$(jq .sequence published.json)"
+            [ "$ours" -gt "$theirs" ] || { echo "::error::tools/sequence.txt ($ours) is not higher than the published list ($theirs)"; exit 1; }
+          fi
+      - name: Sign and check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          sudo apt-get install -y -q --no-install-recommends minisign
+          (cd apps/desktop && npx tauri signer sign "$GITHUB_WORKSPACE/tools.json" >/dev/null)
+          base64 -d tools.json.sig > tools.json.minisig
+          rm tools.json.sig
+          minisign -Vm tools.json -x tools.json.minisig \
+            -P "$(base64 -d apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+      - name: Publish on the tools-list pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view tools-list >/dev/null 2>&1; then
+            gh release create tools-list --prerelease --target main \
+              --title "Zajil video tools list" \
+              --notes "The signed list of the video tools Zajil downloads (ADR-0011, section 2). Read by Zajil 1.2.2 and later; not a release of Zajil."
+          fi
+          gh release upload tools-list tools.json tools.json.minisig --clobber
+          gh release view tools-list --json assets --jq '.assets[] | "\(.name) \(.size)"'

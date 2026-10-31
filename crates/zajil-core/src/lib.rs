@@ -22,6 +22,7 @@ pub mod settings;
 pub mod sites;
 pub mod state;
 pub mod tools;
+pub mod tools_list;
 pub mod update;
 pub mod video;
 

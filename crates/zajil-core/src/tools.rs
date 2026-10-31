@@ -322,11 +322,23 @@ pub type Pins = dyn Fn(Tool, Target) -> Option<Pinned> + Send + Sync;
 
 /// The files pinned in this build of Zajil.
 pub fn pinned(tool: Tool, target: Target) -> Option<Pinned> {
+    let pins = match tool {
+        Tool::YtDlp => yt_dlp_pins(),
+        Tool::QuickJs => quickjs_pins(),
+        Tool::Ffmpeg => ffmpeg_pins(),
+        Tool::Ffprobe => ffprobe_pins(),
+    };
+    of_tool(tool, pins, target)
+}
+
+/// The file `pins` name for `tool` and `target`, from that tool's own
+/// releases: the only places a tool comes from, whatever names its version
+/// (this build, or a signed tools list, `tools_list`).
+pub fn of_tool(tool: Tool, pins: &PinsFile, target: Target) -> Option<Pinned> {
     match tool {
-        Tool::YtDlp => from_pins(yt_dlp_pins(), "yt-dlp/yt-dlp", "", target),
-        Tool::QuickJs => from_pins(quickjs_pins(), "quickjs-ng/quickjs", "", target),
-        Tool::Ffmpeg => from_pins(ffmpeg_pins(), FFMPEG_REPOSITORY, "tools-ffmpeg-", target),
-        Tool::Ffprobe => from_pins(ffprobe_pins(), FFMPEG_REPOSITORY, "tools-ffmpeg-", target),
+        Tool::YtDlp => from_pins(pins, "yt-dlp/yt-dlp", "", target),
+        Tool::QuickJs => from_pins(pins, "quickjs-ng/quickjs", "", target),
+        Tool::Ffmpeg | Tool::Ffprobe => from_pins(pins, FFMPEG_REPOSITORY, "tools-ffmpeg-", target),
     }
 }
 
@@ -371,13 +383,26 @@ pub struct Toolbox {
 }
 
 impl Toolbox {
-    /// The tools of this build, in `root`.
+    /// The tools in `root` (`<data dir>/tools`): those of the signed
+    /// tools list kept in the data folder, when it is newer than this
+    /// build's (`tools_list::kept`, checked again here), else this build's.
+    /// Blocking: it reads and checks that list.
     pub fn new(root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let pins: Box<Pins> = match root.parent().and_then(crate::tools_list::kept) {
+            Some(list) => Box::new(move |tool, target| of_tool(tool, list.pins(tool), target)),
+            None => Box::new(pinned),
+        };
         Toolbox {
-            root: root.into(),
+            root,
             target: zajil_platform::target::current(),
-            pins: Box::new(pinned),
+            pins,
         }
+    }
+
+    /// The file `tool` comes from on this system, as this toolbox pins it.
+    pub fn pinned(&self, tool: Tool) -> Option<Pinned> {
+        self.pin(tool).ok().map(|(pin, _)| pin)
     }
 
     /// With other pinned files: tests serve their own.

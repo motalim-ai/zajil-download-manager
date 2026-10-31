@@ -39,7 +39,7 @@
 
 الاسم من **الحمام الزاجل** الذي كان يوصل الرسائل مهما بعدت المسافة. وهذا ما نريده من البرنامج: أن يوصل ملفك كاملًا وسليمًا، حتى لو انقطع الاتصال في الطريق.
 
-**[زاجِل 1.2.1](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.1) منشور،** وفيه التحديث التلقائي الموقّع بمفتاح المشروع (بموافقتك دائمًا)، واستكمال كل فيديو مهما كانت طريقة تنزيله، و«جودة الفيديو» لرابط يوتيوب تضيفه بيدك. وفي 1.1: جودات يوتيوب فورًا في زر الإضافة، يحمّلها محرّك زاجِل نفسه ويستكملها، والفيديو وقوائم التشغيل في الطوابير، وBrave وOpera وVivaldi، وشكل جديد بأيقونات ملونة. وما بعده في [ROADMAP](docs/ROADMAP.md).
+**[زاجِل 1.2.2](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.2) منشور،** وفيه التحديث التلقائي الموقّع بمفتاح المشروع (بموافقتك دائمًا)، واستكمال كل فيديو مهما كانت طريقة تنزيله، و«جودة الفيديو» لرابط يوتيوب تضيفه بيدك. وفي 1.1: جودات يوتيوب فورًا في زر الإضافة، يحمّلها محرّك زاجِل نفسه ويستكملها، والفيديو وقوائم التشغيل في الطوابير، وBrave وOpera وVivaldi، وشكل جديد بأيقونات ملونة. وما بعده في [ROADMAP](docs/ROADMAP.md).
 
 ## ما يفعله زاجِل
 
@@ -156,7 +156,7 @@ This software uses code of [FFmpeg](https://ffmpeg.org) licensed under the [LGPL
 
 Zajil is Arabic for the **homing pigeon**, which carried messages however far they had to go. That is what we want from the program: your file gets to you whole and sound, even if the connection breaks on the way.
 
-**[Zajil 1.2.1](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.1) is out,** with signed automatic updates (always with your OK), every video resuming whichever way it downloads, and «Video quality» for a YouTube link you add by hand. From 1.1: YouTube's qualities at once in the extension's button, downloaded and resumed by Zajil's own engine; videos and playlists in queues; Brave, Opera and Vivaldi; and a new look with coloured icons. What comes next is in the [ROADMAP](docs/ROADMAP.md).
+**[Zajil 1.2.2](https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.2) is out,** with signed automatic updates (always with your OK), every video resuming whichever way it downloads, and «Video quality» for a YouTube link you add by hand. From 1.1: YouTube's qualities at once in the extension's button, downloaded and resumed by Zajil's own engine; videos and playlists in queues; Brave, Opera and Vivaldi; and a new look with coloured icons. What comes next is in the [ROADMAP](docs/ROADMAP.md).
 
 ## What Zajil does
 
