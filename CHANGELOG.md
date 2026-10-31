@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-31
+
+The video tools update without a release of Zajil. Checked by its tests and CI; the first real list comes with the next yt-dlp.
+
+### Added
+
+- **The video tools' signed list** (ADR-0011, section 2; owner's request, 2026-10-31: yt-dlp updated without a whole release of Zajil). `tools.json` holds `tools/*/pins*.txt` as they are and a sequence number (`tools/sequence.txt`), and never a link: each tool's releases are fixed in the code. It is published on a `tools-list` pre-release by `.github/workflows/tools-list.yml`, run from main in the `release` environment the owner approves, which signs it and checks the signature with minisign. Zajil asks for it with the update at start, keeps it in its data folder when it is signed by one of the project's two keys and its number is higher than its own and than the kept one (never back to an older tool), and checks it again at every read; the `zajil` command uses the kept list too. The tools then update the next time a video needs them, as an earlier version does today, and each file's SHA-256 is checked before every run as before. CI refuses a change of a pins file without a higher `tools/sequence.txt`.
+
 ## [1.2.1] - 2026-10-31
 
 The first release of the 1.2.x stability period (ROADMAP): what helps find problems before users do, and the first update to arrive by Zajil's own signed update. Tried on macOS; Windows and Linux checked by CI.

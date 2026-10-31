@@ -6397,13 +6397,15 @@ dependencies = [
 
 [[package]]
 name = "zajil-core"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
+ "base64 0.23.1",
  "dunce",
  "flate2",
  "getrandom 0.4.3",
  "icu_properties",
  "jiff",
+ "minisign-verify",
  "percent-encoding",
  "reqwest",
  "rustls",
@@ -6448,7 +6450,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-grab"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "html5ever 0.40.1",
  "tokio",
@@ -6457,7 +6459,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-host"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6468,7 +6470,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "fluent-bundle",
  "icu_locale_core",
@@ -6478,7 +6480,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "arboard",
  "dirs 7.0.0",
@@ -6493,7 +6495,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-testserver"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "bytes",
  "http-body-util",

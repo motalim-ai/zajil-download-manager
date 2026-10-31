@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "1.2.1"
+version = "1.2.2"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/motalim-ai/zajil-download-manager"
@@ -41,6 +41,11 @@ libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
+# The signed list of the video tools (ADR-0011, section 2): minisign
+# signatures by the project's update keys, as Tauri's signer writes them
+# (base64 of minisign's text).
+minisign-verify = "0.3.0"
+base64 = "0.23.1"
 # The official zip (onedir) builds of yt-dlp for macOS and Windows (owner's
 # decision, 2026-10-27: a one-file build unpacks itself at every start).
 # Reading only, and only stored or deflated entries, through flate2's Rust

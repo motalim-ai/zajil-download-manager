@@ -1,1 +1,3 @@
 tools/ffmpeg/** text eol=lf
+# Signed test fixtures: the bytes must stay exactly as signed.
+crates/zajil-core/tests/fixtures/tools-list/** -text

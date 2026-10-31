@@ -1254,7 +1254,7 @@ fn tools_status(toolbox: &Toolbox) -> Vec<ToolView> {
     TOOLS
         .iter()
         .map(|&tool| {
-            let pin = target.and_then(|t| zajil_core::tools::pinned(tool, t));
+            let pin = target.and_then(|_| toolbox.pinned(tool));
             let why = checked_twice(toolbox, tool);
             if let Some(why) = &why {
                 eprintln!("zajil: {} is not ready: {why}", name(tool));
