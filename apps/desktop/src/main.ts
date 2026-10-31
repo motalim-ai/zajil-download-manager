@@ -1,16 +1,5 @@
-import { mount } from "svelte";
+import { mount, type Component } from "svelte";
 import "./styles/app.css";
-import App from "./App.svelte";
-import LinkWindow from "./windows/LinkWindow.svelte";
-import InfoWindow from "./windows/InfoWindow.svelte";
-import ProgressWindow from "./windows/ProgressWindow.svelte";
-import ScheduleWindow from "./windows/ScheduleWindow.svelte";
-import CompleteWindow from "./windows/CompleteWindow.svelte";
-import DropBox from "./windows/DropBox.svelte";
-import VideoWindow from "./windows/VideoWindow.svelte";
-import BatchWindow from "./windows/BatchWindow.svelte";
-import GrabWindow from "./windows/GrabWindow.svelte";
-import SettingsWindow from "./windows/SettingsWindow.svelte";
 import { completeApi, loadShow } from "./lib/completeApi";
 import { api } from "./lib/api";
 import { loadSettings, startWindow } from "./lib/windowStart";
@@ -22,8 +11,23 @@ const target = document.getElementById("app");
 if (!target) throw new Error("no #app element");
 const asked = new URLSearchParams(location.search).get("win");
 
+// Each window loads its own code only (the owner's choice, after
+// measuring: every window, the spare one too, loaded all of them).
+type Page = () => Promise<{ default: Component<any> }>;
+const pages: Record<string, Page> = {
+  "add-link": () => import("./windows/LinkWindow.svelte"),
+  "add-info": () => import("./windows/InfoWindow.svelte"),
+  schedule: () => import("./windows/ScheduleWindow.svelte"),
+  complete: () => import("./windows/CompleteWindow.svelte"),
+  drop: () => import("./windows/DropBox.svelte"),
+  video: () => import("./windows/VideoWindow.svelte"),
+  batch: () => import("./windows/BatchWindow.svelte"),
+  grab: () => import("./windows/GrabWindow.svelte"),
+  settings: () => import("./windows/SettingsWindow.svelte"),
+};
+
 /** Draws window `win` (`null`: the main one). */
-function draw(win: string | null) {
+async function draw(win: string | null) {
   // Rust learns at each start whether «Download complete» shows (the user's
   // choice is kept by the page).
   if (win === null) void completeApi.setShow(loadShow()).catch(() => {});
@@ -34,12 +38,14 @@ function draw(win: string | null) {
   // ui-test builds only: the test that opens every window
   // (`src/uitest/windows.ts`); a release build has none of it.
   if (__UI_TEST__) void import("./uitest/windows").then((test) => test.run(win));
-  if (progress) mount(ProgressWindow, { target: target!, props: { id: Number(progress[1]) } });
-  else
-    mount(
-      win === "add-link" ? LinkWindow : win === "add-info" ? InfoWindow : win === "schedule" ? ScheduleWindow : win === "complete" ? CompleteWindow : win === "drop" ? DropBox : win === "video" ? VideoWindow : win === "batch" ? BatchWindow : win === "grab" ? GrabWindow : win === "settings" ? SettingsWindow : App,
-      { target: target! },
-    );
+  if (progress) {
+    const { default: ProgressWindow } = await import("./windows/ProgressWindow.svelte");
+    mount(ProgressWindow, { target: target!, props: { id: Number(progress[1]) } });
+  } else {
+    const page = (win !== null && pages[win]) || (() => import("./App.svelte"));
+    const { default: Window } = await page();
+    mount(Window, { target: target! });
+  }
   // Drawn (timed with `ZAJIL_MEASURE=1`): at once, not at the next frame,
   // which a window behind another app may never get. The main page says
   // it itself once its list is drawn and it listens (`App.svelte`): what
@@ -56,12 +62,15 @@ if (asked === "sound") {
   if (sound === "done" || sound === "failed" || sound === "queue") play(sound as Sound);
 } else if (asked === "spare") {
   void startWindow();
+  // The one spare is «Download file info» (`windows.rs`): its code loads
+  // now, not once it takes its role.
+  void pages["add-info"]?.().catch(() => {});
   let drawn = false;
   const take = (role: Role | null) => {
     if (drawn || !role) return;
     drawn = true;
     void loadSettings();
-    draw(role.page);
+    void draw(role.page);
   };
   void api.onWindowRole(take).then(() => api.windowRole().then(take));
-} else draw(asked);
+} else void draw(asked);
