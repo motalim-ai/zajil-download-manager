@@ -101,6 +101,18 @@ fn exported(q: &QueuesFile) -> (tempfile::TempDir, PathBuf) {
     (tmp, path)
 }
 
+/// An export edited and saved by an editor that starts it with a UTF-8
+/// byte order mark (old Notepad, Windows PowerShell 5.1) still imports.
+#[test]
+fn an_export_saved_with_a_byte_order_mark_is_read() {
+    let original = sample();
+    let (_tmp, path) = exported(&original);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend(fs::read(&path).unwrap());
+    fs::write(&path, bytes).unwrap();
+    assert!(read_export(&path).is_ok());
+}
+
 /// M4 success criterion: export, then import into an empty data folder
 /// elsewhere: exactly the same queues, settings and downloads, in order.
 #[test]

@@ -393,7 +393,7 @@ pub fn read_export(path: &Path) -> Result<ExportFile, TransferError> {
     }
     // serde_json limits nesting (128 levels), so a deeply nested file is
     // an error here, not a stack overflow.
-    let value: serde_json::Value = serde_json::from_slice(&bytes)
+    let value: serde_json::Value = serde_json::from_slice(crate::without_bom(&bytes))
         .map_err(|e| refused(format!("it is not valid JSON ({e})")))?;
     if value.get("format").and_then(|v| v.as_str()) != Some(EXPORT_FORMAT) {
         return Err(TransferError::NotAnExport(path.to_owned()));
