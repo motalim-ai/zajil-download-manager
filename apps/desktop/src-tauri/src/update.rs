@@ -183,12 +183,12 @@ pub fn check_at_start(handle: &tauri::AppHandle) {
         // the update, kept when signed and newer; the tools then update
         // the next time a video needs them.
         if on {
-            let (engine, data) = {
+            // The program's own stop: quitting ends the fetch at once.
+            let (engine, data, stop) = {
                 let app = handle.state::<App>();
-                (app.engine.clone(), app.data_dir.clone())
+                (app.engine.clone(), app.data_dir.clone(), app.stop.clone())
             };
             tauri::async_runtime::spawn(async move {
-                let stop = zajil_core::Stop::new();
                 match zajil_core::tools_list::fetch_and_keep(&engine, &data, &stop).await {
                     Ok(Some(list)) => eprintln!(
                         "zajil: the video tools list {} is kept: yt-dlp {}",
