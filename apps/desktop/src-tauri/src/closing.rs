@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, State};
 
 /// What `window.json` holds.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +246,33 @@ fn show_notice<R: tauri::Runtime>(app: &tauri::AppHandle<R>, closing: &Closing) 
         .body(notice.body)
         .show()
         .is_ok()
+}
+
+/// Whether closing the main window quits Zajil (the settings), and whether
+/// this desktop has a system tray to go on in.
+#[tauri::command]
+pub(crate) fn close_quits(closing: State<'_, Closing>) -> (bool, bool) {
+    (closing.prefs().close_quits, closing.tray())
+}
+
+/// The page heard «quit» from closing the window (`closing.rs`).
+#[tauri::command]
+pub(crate) fn quit_heard(closing: State<'_, Closing>) {
+    closing.heard();
+}
+
+#[tauri::command]
+pub(crate) fn set_close_quits(closing: State<'_, Closing>, quits: bool) -> Result<(), String> {
+    closing
+        .change(|p| p.close_quits = quits)
+        .map_err(|e| e.to_string())
+}
+
+/// «Quit» from the menus: the same way as the tray's (the downloads record
+/// their progress and stop first).
+#[tauri::command]
+pub(crate) fn quit_app<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    handle.exit(0);
 }
 
 #[cfg(test)]

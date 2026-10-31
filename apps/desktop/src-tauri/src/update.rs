@@ -362,7 +362,7 @@ pub async fn update_install<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> R
         let app = handle.state::<App>();
         app.exiting.store(true, std::sync::atomic::Ordering::SeqCst);
         app.stop.request();
-        crate::wait_for_queues(app.stopped.subscribe(), crate::STOP_WAIT).await;
+        crate::shutdown::wait_for_queues(app.stopped.subscribe(), crate::shutdown::STOP_WAIT).await;
     }
     if let Err(e) = update.install(&bytes) {
         // Opened again as it was: the bar comes back at its start.

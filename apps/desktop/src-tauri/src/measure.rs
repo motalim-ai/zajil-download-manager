@@ -141,7 +141,7 @@ pub fn drive<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
                 (app.store.clone(), app.categories.clone(), app.live.clone());
             for _ in 0..5 {
                 let at = Instant::now();
-                let read = crate::read_snapshot(&store, &categories, &live);
+                let read = crate::downloads::read_snapshot(&store, &categories, &live);
                 eprintln!(
                     "zajil-measure: list of {} read in {:.1} ms",
                     read.map(|s| s.downloads.len()).unwrap_or(0),

@@ -10,7 +10,9 @@
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+
+use crate::closing;
 
 const ID: &str = "zajil";
 
@@ -120,6 +122,24 @@ pub fn set_texts<R: Runtime>(
         tray.set_menu(Some(menu(app, show, drop_box, quit)?))?;
     }
     Ok(())
+}
+
+/// The tray menu's texts in the interface's language.
+#[tauri::command]
+pub(crate) fn set_tray_texts<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    closing: State<'_, closing::Closing>,
+    show: String,
+    drop_box: String,
+    quit: String,
+    notice_title: String,
+    notice: String,
+) -> Result<(), String> {
+    closing.set_notice(closing::Notice {
+        title: notice_title,
+        body: notice,
+    });
+    set_texts(&handle, &show, &drop_box, &quit).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

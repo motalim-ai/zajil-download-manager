@@ -139,7 +139,10 @@ async fn place(
         .await;
     }
     let folder = match folder {
-        Some(folder) => Some(crate::chosen_folder(Some(&folder), Path::new(""))?),
+        Some(folder) => Some(crate::downloads::chosen_folder(
+            Some(&folder),
+            Path::new(""),
+        )?),
         None => None,
     };
     let store = store.clone();

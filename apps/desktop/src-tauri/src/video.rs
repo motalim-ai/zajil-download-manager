@@ -786,7 +786,7 @@ pub fn receive<R: tauri::Runtime>(
             url,
             // The page's title, once read (`start`).
             name: String::new(),
-            folder: crate::download_dir(&app.settings, &app.system_download_dir)
+            folder: crate::downloads::download_dir(&app.settings, &app.system_download_dir)
                 .display()
                 .to_string(),
             choice,
@@ -1164,7 +1164,7 @@ pub async fn open_video<R: tauri::Runtime>(
 /// Where a video goes at first: the downloads folder.
 #[tauri::command]
 pub fn video_folder(app: State<'_, crate::App>) -> String {
-    crate::download_dir(&app.settings, &app.system_download_dir)
+    crate::downloads::download_dir(&app.settings, &app.system_download_dir)
         .display()
         .to_string()
 }
