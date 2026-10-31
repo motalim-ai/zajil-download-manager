@@ -726,6 +726,7 @@ batch-clipboard-empty = The clipboard has no link.
 batch-folder-category = By category
 batch-error-at = At character { $at } of the link.
 batch-error-too_many = More links than the most allowed ({ $max }).
+batch-error-video_page = { $count } of the links are video pages, and video is not loaded in a batch: paste the playlist's link in «Add link», and «Video quality» reads it.
 drop-menu-hide = Hide the box
 batch-error-not_http = The link must start with { $http } or { $https }.
 batch-error-too_long = The link is too long.

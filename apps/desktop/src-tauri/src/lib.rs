@@ -28,6 +28,7 @@ mod tray;
 mod ui_test;
 mod update;
 mod video;
+mod video_page;
 pub mod view;
 mod windows;
 

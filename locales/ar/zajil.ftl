@@ -800,6 +800,7 @@ batch-clipboard-empty = لا يوجد رابط في الحافظة.
 batch-folder-category = حسب الفئة
 batch-error-at = عند الحرف { $at } من الرابط.
 batch-error-too_many = عدد الروابط أكبر من الحد الأقصى ({ $max }).
+batch-error-video_page = { $count } من الروابط صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرؤه «جودة الفيديو».
 drop-menu-hide = إخفاء السلة
 batch-error-not_http = الرابط يجب أن يبدأ بـ { $http } أو { $https }.
 batch-error-too_long = الرابط أطول من اللازم.

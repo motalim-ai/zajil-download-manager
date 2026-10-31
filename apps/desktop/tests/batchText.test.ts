@@ -7,7 +7,7 @@ import { format, LANGS } from "../src/lib/i18n.svelte";
 const KINDS = [
   "not_http", "too_long", "hidden", "no_host", "in_host", "in_fragment", "backslash", "unclosed", "unopened", "nested", "empty",
   "bad_range", "mixed", "descending", "zero_step", "width", "too_large", "bad_counter", "star_needs_range", "second_star", "no_star",
-  "no_pattern", "too_many", "bad_url",
+  "no_pattern", "too_many", "bad_url", "video_page",
 ];
 
 describe("a refused pattern", () => {
@@ -25,6 +25,14 @@ describe("a refused pattern", () => {
       expect(lines).toHaveLength(2);
       expect(lines[1]).toContain("18");
       expect(problemText(say, { kind: "too_many", at: null, text: null, count: 5000, max: 1000 })[0]).toMatch(/1[,٬]?000/);
+    });
+    it(`says how many pages were video pages, in ${lang}`, () => {
+      // The batch of a playlist's links came out `watch (12).html` files,
+      // so the refusal says how many of the links the batch made are
+      // video pages, and where they are read instead.
+      const [what] = problemText(say, { kind: "video_page", at: null, text: null, count: 12, max: null });
+      expect(what).not.toBe("batch-error-video_page");
+      expect(what).toContain("12");
     });
   }
   it("keeps the schemes in their own isolates", () => {

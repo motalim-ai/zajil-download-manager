@@ -6292,6 +6292,7 @@ version = "0.0.0"
 dependencies = [
  "drag",
  "jiff",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

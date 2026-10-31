@@ -64,7 +64,7 @@ pub struct BatchProblem {
     /// `in_fragment`, `backslash`, `unclosed`, `unopened`, `nested`,
     /// `empty`, `bad_range`, `mixed`, `descending`, `zero_step`, `width`,
     /// `too_large`, `bad_counter`, `star_needs_range`, `second_star`,
-    /// `no_star`, `no_pattern`, `too_many`, `bad_url`.
+    /// `no_star`, `no_pattern`, `too_many`, `bad_url`, `video_page`.
     pub kind: String,
     pub at: Option<usize>,
     pub text: Option<String>,
@@ -136,6 +136,24 @@ fn links(request: &BatchRequest) -> Result<Vec<String>, PatternError> {
 #[tauri::command]
 pub fn batch_preview(request: BatchRequest) -> Result<BatchPreview, BatchProblem> {
     let links = links(&request)?;
+    // A video site's page never comes out of the engine as a file (the
+    // something that lands is the site's HTML page, as the owner's
+    // playlist attempt came out `watch (12).html`): the batch is stopped
+    // here, and «Video quality» reads the video. The page's own list says
+    // the same (`videoPage.ts`).
+    let pages = links
+        .iter()
+        .filter(|link| crate::video_page::known_video_page(link))
+        .count();
+    if pages > 0 {
+        return Err(BatchProblem {
+            kind: "video_page".into(),
+            at: None,
+            text: None,
+            count: Some(pages as u64),
+            max: None,
+        });
+    }
     Ok(BatchPreview {
         count: links.len() as u64,
         shown: links.into_iter().take(SHOWN).collect(),
@@ -337,6 +355,48 @@ mod tests {
         .unwrap();
         assert_eq!(many.count, 900);
         assert_eq!(many.shown.len(), SHOWN);
+    }
+
+    /// A batch of a video site's pages is refused with how many of its
+    /// links are video pages (the owner's playlist attempt: its links
+    /// landed as `watch (12).html` files, because a video site's page is
+    /// not a file): «Video quality» reads them, not the batch.
+    #[test]
+    fn a_batch_of_video_pages_is_refused() {
+        let refused = batch_preview(request(
+            "https://www.youtube.com/watch?v=abc&index=*",
+            Some("1"),
+            Some("3"),
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            (refused.kind.as_str(), refused.count),
+            ("video_page", Some(3))
+        );
+        // A playlist's page, too.
+        assert_eq!(
+            batch_preview(request(
+                "https://youtube.com/playlist?list=PL1a2b3c&p=*",
+                Some("1"),
+                Some("2"),
+                None
+            ))
+            .unwrap_err()
+            .kind,
+            "video_page"
+        );
+        // The batch of files beside a video site's page stays: only what
+        // the pattern makes is asked.
+        assert!(
+            batch_preview(request(
+                "https://site.com/img*.jpg",
+                Some("8"),
+                Some("11"),
+                Some(3)
+            ))
+            .is_ok()
+        );
     }
 
     /// A wrong pattern is refused, with what the page needs to say why.
