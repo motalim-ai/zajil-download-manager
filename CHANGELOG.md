@@ -18,6 +18,7 @@ The first release of the 1.2.x stability period (ROADMAP): what helps find probl
 
 ### Fixed
 
+- **On Windows, Zajil installed where other users may change files registered with no browser** (a user's report on Brave, #334: «Another user could change zajil-host or its folder»): a second drive gives every user that right by default. The browsers now get a copy of zajil-host in Zajil's own folder, which only this user can change, kept the same as the installed one (as an AppImage's on Linux); the log says who could change the folder. The settings also name Brave, Opera and Vivaldi among the browsers.
 - **Downloads with a speed limit were slower since 1.2.0** (the nightly real-clock test of 2026-10-31: 0.83 × the limit on macOS and Linux, 0.96–1.0 before): 1.2.0's fix for the broken state file took a stalled segment with nothing written whole, and its connection then always started again. The segment is split as before 1.2.0 again, and the empty one it leaves is no longer written to the state file, which was the actual fault. A segment at byte 0, which could not be left empty (its end went past the file: «a segment goes past the end of the file»), still changes hands whole. Measured locally, alternately: 0.97 × the limit, 0.99 before 1.2.0, 0.91 with 1.2.0.
 
 ### Tests

@@ -1566,7 +1566,9 @@ fn watch_clipboard<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
 /// `appimage`: `APPIMAGE` is set), the host beside it is copied to `fixed`
 /// in Zajil's data folder, and that copy is the one given to browsers,
 /// kept the same as the AppImage's (#129, `native_host::fixed_copy`).
-/// macOS's App Translocation is still refused: the user moves the app.
+/// macOS's App Translocation is still refused: the user moves the app. On
+/// Windows, a folder other users may change (a second drive, #334) gets
+/// the same copy; on macOS and Linux it is refused.
 fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view::HostProblemView> {
     use view::HostProblemView as Problem;
     // Links resolved on macOS and Linux (a CLI or Homebrew link). Not on
@@ -1618,6 +1620,23 @@ fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view
     let safe =
         |path: &Path| zajil_platform::fs::only_user_or_root_can_change(path).unwrap_or(false);
     if !safe(&host) || !safe(dir) {
+        // Windows: Zajil installed where other users may change files (a
+        // second drive gives them that by default; a user's report on
+        // Brave, #334). The browsers are given a copy in Zajil's own
+        // folder, which only this user can change, kept the same as the
+        // installed one, as for an AppImage.
+        #[cfg(windows)]
+        {
+            eprintln!(
+                "zajil: other users may change {}: the browsers get a copy of zajil-host",
+                dir.display()
+            );
+            return zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
+                eprintln!("zajil: the browsers' copy of zajil-host: {err}");
+                Problem::Unsafe
+            });
+        }
+        #[cfg(not(windows))]
         return Err(Problem::Unsafe);
     }
     Ok(host)

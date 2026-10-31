@@ -1030,6 +1030,22 @@ mod imp {
     const TRUSTED_INSTALLER: &str =
         "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 
+    /// A SID as text (`S-1-5-11`).
+    fn sid_text(sid: PSID) -> io::Result<String> {
+        let mut text: *mut u16 = std::ptr::null_mut();
+        // SAFETY: `sid` is valid; `text` receives a LocalAlloc'ed string.
+        if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _text = LocalMemory(text.cast());
+        // SAFETY: a NUL-terminated UTF-16 string, alive until `_text` drops.
+        let len = (0..).take_while(|&i| unsafe { *text.add(i) } != 0).count();
+        // SAFETY: `len` UTF-16 units precede the NUL.
+        Ok(String::from_utf16_lossy(unsafe {
+            std::slice::from_raw_parts(text, len)
+        }))
+    }
+
     /// The current user, SYSTEM, the Administrators or TrustedInstaller.
     fn trusted(sid: PSID, user: &UserSid) -> io::Result<bool> {
         // SAFETY: `sid` is a valid SID inside a live descriptor.
@@ -1126,6 +1142,12 @@ mod imp {
                     let (mask, sid) =
                         unsafe { ((*ace).Mask, std::ptr::addr_of!((*ace).SidStart) as PSID) };
                     if mask & CHANGE != 0 && !trusted(sid, &user)? {
+                        // Who, for the log: a report says why (#334).
+                        eprintln!(
+                            "zajil: {} can be changed by {} ({mask:#x})",
+                            path.display(),
+                            sid_text(sid).unwrap_or_else(|_| "?".into())
+                        );
                         return Ok(false);
                     }
                 }
