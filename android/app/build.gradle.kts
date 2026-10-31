@@ -27,7 +27,13 @@ fun pin(tool: String, target: String? = null): List<String> {
 
 // Zajil for Android has its own version (ADR-0012, owner's decision 4):
 // tags android-vX.Y.Z. The version code only ever grows.
-val zajilVersion = "0.1.0"
+// The version is android/version.txt (the release workflow checks the tag
+// against it). zajil.testVersion builds another one, for the emulator test
+// of the update only (android/README.md).
+val zajilVersion = providers.gradleProperty("zajil.testVersion").orNull
+    ?: rootProject.file("version.txt").readText().trim()
+val androidToolsSequence = rootProject.file("../tools/sequence-android.txt").readLines()
+    .map(String::trim).first { it.isNotEmpty() && !it.startsWith("#") }.toLong()
 val zajilVersionCode = zajilVersion.split('.').map(String::toInt).let { (major, minor, patch) ->
     major * 1_000_000 + minor * 1_000 + patch
 }
@@ -45,6 +51,9 @@ android {
         // The engine is built for arm64-v8a only for now (ADR-0012,
         // section 9; armeabi-v7a comes before A5).
         ndk { abiFilters += listOf("arm64-v8a") }
+        // The signed yt-dlp list this APK's own yt-dlp counts as
+        // (tools/sequence-android.txt): only a higher one is offered.
+        buildConfigField("long", "TOOLS_SEQUENCE", "${androidToolsSequence}L")
     }
 
     packaging {
@@ -60,9 +69,20 @@ android {
             // Lives beside an installed Zajil instead of replacing it.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // The emulator test of the update (android/README.md): another
+            // address for the update file, and a key made for the test
+            // besides the project's two. Empty unless given; a debug build only.
+            buildConfigField("String", "UPDATE_BASE", "\"${providers.gradleProperty("zajil.updateBase").getOrElse("")}\"")
+            buildConfigField("String", "UPDATE_TEST_KEY", "\"${providers.gradleProperty("zajil.updateTestKey").getOrElse("")}\"")
         }
         release {
-            // Signed in CI only (A4); a local release build is unsigned.
+            // Unsigned here, always: the release workflow signs it with
+            // apksigner in the protected `release` environment (ADR-0012,
+            // section 8; android/RELEASING.md). No build ever sees the key.
+            // Always empty in a release build, whatever is passed: the
+            // project's own address and keys only.
+            buildConfigField("String", "UPDATE_BASE", "\"\"")
+            buildConfigField("String", "UPDATE_TEST_KEY", "\"\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -78,6 +98,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -246,6 +267,8 @@ androidComponents {
                 "android.permission.WRITE_EXTERNAL_STORAGE",
                 // Asked only for a link on the local network (Android 17).
                 "android.permission.ACCESS_LOCAL_NETWORK",
+                // Installing Zajil's own update, after the user agrees (A4).
+                "android.permission.REQUEST_INSTALL_PACKAGES",
                 // AndroidX's own signature permission for receivers it
                 // registers unexported (core-ktx): no other app gets it.
                 "${variant.applicationId.get()}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",

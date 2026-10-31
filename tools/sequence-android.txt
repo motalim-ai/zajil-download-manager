@@ -1,0 +1,5 @@
+# The number of Zajil for Android's signed yt-dlp list (tools-android.json,
+# ADR-0012, section 8). The APK built from this tree counts its own yt-dlp
+# as this list: it takes only a published list with a higher number. Raise
+# it with every change to tools/yt-dlp/pins-android.txt that is published.
+0

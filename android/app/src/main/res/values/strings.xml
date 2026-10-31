@@ -51,6 +51,19 @@
     <string name="video_nothing">لم يجد زاجِل في الصفحة صيغة يستطيع تحميلها.</string>
     <string name="video_bot_check">طلب يوتيوب التأكد من أنك لست برنامجًا آليًا. جرّب بعد قليل.</string>
     <string name="video_unreadable">تعذّرت قراءة صفحة الفيديو.</string>
+    <string name="update_version">زاجِل %1$s</string>
+    <string name="update_auto">البحث عن نسخة جديدة عند فتح زاجِل (مرة في اليوم على الأكثر)</string>
+    <string name="update_check">البحث عن نسخة جديدة</string>
+    <string name="update_latest">هذه أحدث نسخة.</string>
+    <string name="update_failed">تعذّر البحث عن التحديث أو تنزيله.</string>
+    <string name="update_unverified">رُفض التحديث: لم يُتحقق من توقيعه أو بصمته، فلم يُثبَّت شيء.</string>
+    <string name="update_not_installed">لم يُثبَّت التحديث.</string>
+    <!-- %1$s النسخة، و%2$s حجمها. -->
+    <string name="update_offered">زاجِل %1$s متاحة (%2$s)</string>
+    <string name="update_download">تنزيل التحديث</string>
+    <string name="update_downloading">ينزّل زاجِل %1$s… %2$d٪</string>
+    <string name="update_ready">نزلت زاجِل %1$s وتُحقق منها.</string>
+    <string name="update_install">تثبيت</string>
     <string name="ytdlp_version">yt-dlp: %1$s</string>
     <string name="ytdlp_check">فحص تحديث yt-dlp</string>
     <string name="ytdlp_checking">يفحص…</string>

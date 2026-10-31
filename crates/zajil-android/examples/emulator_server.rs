@@ -15,11 +15,16 @@
 //! - An HTTPS port with a self-signed certificate, printed at start with its
 //!   own `adb reverse` line: the app must refuse it.
 //!
+//! With ZAJIL_SERVE_DIR, every file under that folder too, at its path
+//! (the update test, A4), and the base address is printed.
+//!
 //! Every request (its range and the bytes sent) is written to the log file
 //! every second, to check that a resume asks only for what is missing.
 
+use std::collections::HashMap;
 use std::io::Write;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 use zajil_testserver::{FileSpec, TestServer};
@@ -46,8 +51,19 @@ fn main() {
     println!("http  {}", server.url("/file.bin"));
     println!("https {}", tls.url("/file.bin"));
     println!("adb reverse tcp:{0} tcp:{0}", tls.addr().port());
+    // The update test (A4): every file under ZAJIL_SERVE_DIR, at its path,
+    // served again when it changes (to swap a good APK for a changed one).
+    let serve = std::env::var_os("ZAJIL_SERVE_DIR").map(PathBuf::from);
+    let mut served = HashMap::new();
+    if let Some(dir) = &serve {
+        serve_dir(&server, dir, dir, &mut served);
+        println!("base  {}", server.url("").trim_end_matches('/'));
+    }
     loop {
         std::thread::sleep(Duration::from_secs(1));
+        if let Some(dir) = &serve {
+            serve_dir(&server, dir, dir, &mut served);
+        }
         let mut out = std::fs::File::create(&log).unwrap();
         for request in server.requests() {
             writeln!(
@@ -61,6 +77,36 @@ fn main() {
             )
             .unwrap();
         }
+    }
+}
+
+/// Serves the files under `dir` that are new or changed since `served`.
+fn serve_dir(
+    server: &TestServer,
+    root: &Path,
+    dir: &Path,
+    served: &mut HashMap<PathBuf, SystemTime>,
+) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            serve_dir(server, root, &path, served);
+            continue;
+        }
+        let changed = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap();
+        if served.get(&path) == Some(&changed) {
+            continue;
+        }
+        served.insert(path.clone(), changed);
+        let at = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        server.put(
+            &format!("/{at}"),
+            FileSpec::new(std::fs::read(&path).unwrap()),
+        );
     }
 }
 

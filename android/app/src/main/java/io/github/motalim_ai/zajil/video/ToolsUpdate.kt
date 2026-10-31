@@ -1,13 +1,12 @@
 package io.github.motalim_ai.zajil.video
 
 import android.content.Context
+import io.github.motalim_ai.zajil.BuildConfig
 import io.github.motalim_ai.zajil.engine.AndroidTools
 import io.github.motalim_ai.zajil.engine.checkAndroidTools
+import io.github.motalim_ai.zajil.update.Https
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -23,8 +22,8 @@ object ToolsUpdate {
     private const val LIST =
         "https://github.com/motalim-ai/zajil-download-manager/releases/download/android-channel/tools-android.json"
 
-    /** The list this APK's yt-dlp counts as: every published list is newer. */
-    private const val BUILT_IN_SEQUENCE = 0uL
+    /** The list this APK's yt-dlp counts as (tools/sequence-android.txt): only newer ones count. */
+    private val BUILT_IN_SEQUENCE = BuildConfig.TOOLS_SEQUENCE.toULong()
 
     /** yt-dlp's pure-Python release file, which runs in the app's Python. */
     private fun ytDlpUrl(version: String) = "https://github.com/yt-dlp/yt-dlp/releases/download/$version/yt-dlp"
@@ -87,30 +86,7 @@ object ToolsUpdate {
         }
     }
 
-    /** At most [max] bytes over HTTPS (TLS checked as always); null if there is no such file. */
-    private fun fetch(url: String, max: Int): ByteArray? {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 30_000
-            if (connection.responseCode == HttpURLConnection.HTTP_NOT_FOUND) return null
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) throw IOException("HTTP ${connection.responseCode}")
-            connection.inputStream.use { input ->
-                val out = java.io.ByteArrayOutputStream()
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    out.write(buffer, 0, n)
-                    if (out.size() > max) throw IOException("too long")
-                }
-                return out.toByteArray()
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun fetch(url: String, max: Int) = Https.bytes(url, max)
 
-    private fun sha256(bytes: ByteArray) =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray) = Https.sha256(bytes)
 }

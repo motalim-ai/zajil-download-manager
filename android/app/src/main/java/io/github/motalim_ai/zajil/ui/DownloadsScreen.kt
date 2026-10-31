@@ -125,6 +125,7 @@ fun DownloadsScreen(actions: DownloadActions, offer: Offer?, onOfferDone: () -> 
                     Text(stringResource(R.string.paste))
                 }
             }
+            UpdateCard()
             if (rules.scheduled) {
                 Text(
                     stringResource(

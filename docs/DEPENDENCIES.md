@@ -100,6 +100,8 @@
 | msys2/setup-msys2 (v2.33.0) | MIT | بيئة بناء FFmpeg في ويندوز (M6) |
 | GnuPG | GPL-3.0 أو أحدث | التحقق من توقيع مصدر FFmpeg في الـ CI (موجود على أجهزة الـ CI) |
 | مُترجما FFmpeg في ويندوز (MSYS2: gcc لـ x64، وclang لـ arm64) | GPL-3.0 مع استثناء مكتبات التشغيل (libgcc)، وApache-2.0 مع استثناء LLVM (compiler-rt)، والملكية العامة/ZPL لكود بدء التشغيل في MinGW-w64 | الربط الثابت يضع في `ffmpeg.exe` كود بدء التشغيل وlibgcc (x64) أو compiler-rt (arm64). والاستثناءات تعفي الملف الناتج من شروط تلك التراخيص ومن إلزام نشر إشعاراتها. أما winpthreads (ترخيصها يطلب إشعارًا) فلا تدخل: `build.sh` يفرض خيوط ويندوز (`HAVE_W32THREADS 1` و`HAVE_PTHREADS 0`) |
+| actions/setup-java (v6.1.0) وactions/setup-python (v7.1.0) | MIT | JDK 17 وPython 3.13 لبناء تطبيق أندرويد (`android.yml`، لم يُشغَّل بعد) |
+| zipalign وapksigner (Android build-tools 37.0.0) | Apache-2.0 | توقيع الـ APK في workflow الإصدار |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>

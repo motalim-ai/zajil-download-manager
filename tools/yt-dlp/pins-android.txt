@@ -1,0 +1,16 @@
+# The yt-dlp of Zajil for Android (ADR-0012, sections 8 and 14): yt-dlp's
+# pure-Python release file `yt-dlp`, which runs in the app's own Python.
+# The APK ships the same version from PyPI (android/app/build.gradle.kts
+# reads tools/yt-dlp/pins.txt); this file is what the signed
+# tools-android.json names for an update without a new APK (the
+# "Android tools list" workflow writes it from here).
+#
+# Kept apart from pins.txt: the desktop reads that file strictly, and its
+# list format has no room for an Android target (Zajil 1.2.2 would refuse
+# the whole list).
+#
+# The SHA-256 is the one in the release's SHA2-256SUMS, and matched the
+# file as downloaded over HTTPS when the version was pinned. SHA2-256SUMS's
+# GPG signature was not checked for this line (to do in the workflow).
+version 2026.10.21
+python yt-dlp b7af77f686e95f7845ce8d09d21957718febb8b48b30555adb9dd2292ad7bf14

@@ -23,6 +23,8 @@ import io.github.motalim_ai.zajil.downloads.Notifications
 import io.github.motalim_ai.zajil.ui.DownloadActions
 import io.github.motalim_ai.zajil.ui.DownloadsScreen
 import io.github.motalim_ai.zajil.ui.Offer
+import io.github.motalim_ai.zajil.ui.UpdatePrefs
+import io.github.motalim_ai.zajil.update.AppUpdate
 import io.github.motalim_ai.zajil.ui.VideoSheet
 import io.github.motalim_ai.zajil.ui.VideoSheetView
 import io.github.motalim_ai.zajil.ui.ZajilTheme
@@ -79,6 +81,11 @@ class MainActivity : ComponentActivity(), DownloadActions {
             }
         }
         if (savedInstanceState == null) handle(intent)
+        // Zajil's own update, at most once a day if the user leaves it on:
+        // only the signed update file is asked for; the card offers it.
+        if (savedInstanceState == null && UpdatePrefs.due(this)) {
+            lifecycleScope.launch { AppUpdate.check(quiet = true) }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

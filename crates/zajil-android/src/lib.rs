@@ -13,6 +13,7 @@ use zajil_core::{Engine, Error, Event, Options, Stop};
 #[cfg(target_os = "android")]
 mod tls;
 pub mod tools;
+pub mod update;
 
 uniffi::setup_scaffolding!();
 

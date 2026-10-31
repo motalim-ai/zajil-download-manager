@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: plain HTTP to this phone's own 127.0.0.1, where the
+  emulator test serves the update files through `adb reverse`
+  (android/README.md). It replaces rustls-platform-verifier's file, which a
+  release build keeps (plain HTTP only to certificate revocation lists).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:networkSecurityConfig="@xml/debug_network"
+        tools:replace="android:networkSecurityConfig" />
+</manifest>

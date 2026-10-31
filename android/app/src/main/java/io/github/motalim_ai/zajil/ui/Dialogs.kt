@@ -158,6 +158,7 @@ fun QueueSettingsDialog(onDismiss: () -> Unit) {
                         onCheckedChange = { on -> settings.update { it.copy(scheduled = on, open = false) } },
                     )
                 }
+                AppUpdateSection()
                 YtDlpUpdate()
                 if (rules.scheduled) {
                     OutlinedButton(

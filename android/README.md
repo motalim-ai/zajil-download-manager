@@ -101,6 +101,19 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradl
 
 وقت قراءة الصفحة يُكتب في السجل (`adb logcat -s ZajilVideo`)، بلا الرابط.
 
+**تجربة التحديث (A4) على المحاكي، بلا مفتاح المشروع:**
+
+1. نسخة أحدث: `./gradlew assembleDebug -Pzajil.testVersion=0.1.1`، وانسخ الـ APK إلى `serve/android-v0.1.1/zajil-android-0.1.1-arm64-v8a.apk`.
+2. ملف التحديث لها في `serve/android-channel/latest-android.json` (بصيغة ADR-0012 القسم 15)، ووقّعه بمفتاح الاختبار: `cargo run -p zajil-android --example sign_for_test -- serve/android-channel/latest-android.json` (يطبع المفتاح العام).
+3. `ZAJIL_SERVE_DIR=serve cargo run -p zajil-android --example emulator_server -- /tmp/log`، ويطبع `base`.
+4. النسخة الأقدم: `./gradlew assembleDebug -Pzajil.updateBase=<base> -Pzajil.updateTestKey=<المفتاح>`، وثبّتها، و`adb reverse tcp:8099 tcp:8099`.
+
+| الحالة | النتيجة |
+|---|---|
+| فتح زاجِل | بطاقة «زاجِل 0.1.1 متاحة (٣٤ م.ب)» بملاحظاتها |
+| APK معدّل بايتًا واحدًا | «رُفض التحديث: لم يُتحقق من توقيعه أو بصمته، فلم يُثبَّت شيء.» والملف محذوف |
+| الـ APK السليم | «نزلت زاجِل 0.1.1 وتُحقق منها.»، ثم «تثبيت» يفتح صفحة «تثبيت التطبيقات غير المعروفة»، ثم نافذة أندرويد «هل المطلوب تحديث هذا التطبيق؟»، وبعدها النسخة 0.1.1 |
+
 **لم يُجرَّب بعد:** أندرويد 8 إلى 14 (لا صورة محاكي لها على الجهاز)، وأي اختبار آلي على المحاكي (كلها يدوية الآن)، ونجاح HTTPS على الجهاز نفسه (النجاح بجهة الاختبار في اختبارات Rust فقط: `crates/zajil-android/tests/downloads.rs`).
 
 </div>

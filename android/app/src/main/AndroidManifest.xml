@@ -18,6 +18,8 @@
       Asked only when such a link is added, never at start (ADR-0012, 12).
     -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- Installing Zajil's own update, when the user agrees (A4). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- The public Download folder on Android 8 and 9 only. -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -70,6 +72,11 @@
             android:name=".downloads.QueueJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- The result of installing Zajil's update; only the installer's PendingIntent reaches it. -->
+        <receiver
+            android:name=".update.UpdateReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".downloads.BootReceiver"
