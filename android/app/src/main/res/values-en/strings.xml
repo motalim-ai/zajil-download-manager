@@ -11,6 +11,8 @@
     <string name="delete">Delete</string>
     <string name="open">Open</string>
     <string name="remove_from_list">Remove from list</string>
+    <string name="allow">Allow</string>
+    <string name="status_needs_local_network">The link is on a device in your local network, and Zajil needs the Local network permission to download it. Tap Allow.</string>
     <string name="status_running">Downloading</string>
     <string name="status_interrupted">Stopped with the app; resumes when it opens</string>
     <string name="status_paused">Paused</string>

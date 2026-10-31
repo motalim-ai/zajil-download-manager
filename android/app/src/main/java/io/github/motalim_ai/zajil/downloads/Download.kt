@@ -14,6 +14,12 @@ enum class Status {
     /** Paused by the user. */
     Paused,
 
+    /**
+     * Its link is on the local network, and Android 17 lets Zajil there only
+     * with the user's permission, which it does not have (yet).
+     */
+    NeedsLocalNetwork,
+
     /** Stopped by a problem; resumable if it has a state file. */
     Failed,
 
@@ -45,6 +51,8 @@ data class Download(
     val uri: String? = null,
     /** The finished file's name there, which may differ from [file]'s. */
     val shownName: String? = null,
+    /** Its link points to the local network ([LocalNetwork]). */
+    val local: Boolean = false,
 ) {
     /**
      * Before the engine knows the file's name: the link's host and path,
@@ -65,6 +73,7 @@ data class Download(
         put("detail", detail)
         put("uri", uri)
         put("shown_name", shownName)
+        put("local", local)
     }
 
     companion object {
@@ -82,6 +91,7 @@ data class Download(
             detail = json.optStringOrNull("detail"),
             uri = json.optStringOrNull("uri"),
             shownName = json.optStringOrNull("shown_name"),
+            local = json.optBoolean("local"),
         )
 
         fun listToJson(downloads: List<Download>): String =

@@ -12,6 +12,8 @@
     <string name="delete">حذف</string>
     <string name="open">فتح</string>
     <string name="remove_from_list">إزالة من القائمة</string>
+    <string name="allow">السماح</string>
+    <string name="status_needs_local_network">الرابط لجهاز في شبكتك المحلية، ويحتاج زاجِل إذن «الشبكة المحلية» ليحمّله. اضغط «السماح».</string>
     <string name="status_running">يُحمَّل</string>
     <string name="status_interrupted">توقف مع البرنامج، يُستكمل عند فتحه</string>
     <string name="status_paused">متوقف مؤقتًا</string>

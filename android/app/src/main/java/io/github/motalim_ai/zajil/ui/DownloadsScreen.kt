@@ -147,6 +147,10 @@ private fun DownloadCard(
                         TextButton(onClick = { onPause(download.id) }) { Text(stringResource(R.string.pause)) }
                         TextButton(onClick = { onRemove(download.id) }) { Text(stringResource(R.string.cancel)) }
                     }
+                    Status.NeedsLocalNetwork -> {
+                        TextButton(onClick = { onResume(download.id) }) { Text(stringResource(R.string.allow)) }
+                        TextButton(onClick = { onRemove(download.id) }) { Text(stringResource(R.string.delete)) }
+                    }
                     Status.Paused, Status.Interrupted, Status.Failed -> {
                         TextButton(onClick = { onResume(download.id) }) { Text(stringResource(R.string.resume)) }
                         TextButton(onClick = { onRemove(download.id) }) { Text(stringResource(R.string.delete)) }
@@ -167,6 +171,7 @@ private fun statusText(download: Download): String = when (download.status) {
     Status.Running -> stringResource(R.string.status_running)
     Status.Interrupted -> stringResource(R.string.status_interrupted)
     Status.Paused -> stringResource(R.string.status_paused)
+    Status.NeedsLocalNetwork -> stringResource(R.string.status_needs_local_network)
     Status.Publishing -> stringResource(R.string.status_publishing)
     Status.Done -> stringResource(R.string.status_done)
     Status.Failed -> stringResource(

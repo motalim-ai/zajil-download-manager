@@ -52,13 +52,19 @@ class DownloadCenter(private val context: Context) {
         _list.value.filter { it.status == Status.Publishing }.forEach(::publish)
     }
 
-    fun add(url: String): Long {
+    /**
+     * Adds [url] and starts it, unless it is on the local network ([local])
+     * and Zajil may not go there yet: then it waits for the permission.
+     */
+    fun add(url: String, local: Boolean): Long {
+        val blocked = local && !LocalNetwork.isGranted(context)
         var id = 0L
         change { list ->
             id = (list.maxOfOrNull { it.id } ?: 0) + 1
-            list + Download(id = id, url = url, status = Status.Running)
+            val status = if (blocked) Status.NeedsLocalNetwork else Status.Running
+            list + Download(id = id, url = url, status = status, local = local)
         }
-        engine.start(id, url, workDir.path)
+        if (!blocked) engine.start(id, url, workDir.path)
         return id
     }
 
@@ -69,6 +75,12 @@ class DownloadCenter(private val context: Context) {
     fun resume(id: Long) {
         val download = find(id) ?: return
         if (download.status !in resumable || engine.isRunning(id)) return
+        if (download.local && !LocalNetwork.isGranted(context)) {
+            // Revoked since, or never given: never a connection that would
+            // only time out. Also in the background (after a restart).
+            edit(id) { it.copy(status = Status.NeedsLocalNetwork) }
+            return
+        }
         edit(id) { it.copy(status = Status.Running, problem = null, detail = null) }
         val stateFile = download.stateFile
         if (stateFile != null && File(stateFile).exists()) {
@@ -207,6 +219,6 @@ class DownloadCenter(private val context: Context) {
     }
 
     private companion object {
-        val resumable = setOf(Status.Interrupted, Status.Paused, Status.Failed)
+        val resumable = setOf(Status.Interrupted, Status.Paused, Status.Failed, Status.NeedsLocalNetwork)
     }
 }

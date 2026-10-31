@@ -157,6 +157,8 @@ androidComponents {
                 "android.permission.POST_NOTIFICATIONS",
                 "android.permission.RECEIVE_BOOT_COMPLETED",
                 "android.permission.WRITE_EXTERNAL_STORAGE",
+                // Asked only for a link on the local network (Android 17).
+                "android.permission.ACCESS_LOCAL_NETWORK",
                 // AndroidX's own signature permission for receivers it
                 // registers unexported (core-ktx): no other app gets it.
                 "${variant.applicationId.get()}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
