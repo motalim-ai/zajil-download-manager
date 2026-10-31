@@ -23,7 +23,12 @@ import io.github.motalim_ai.zajil.downloads.Notifications
 import io.github.motalim_ai.zajil.ui.DownloadActions
 import io.github.motalim_ai.zajil.ui.DownloadsScreen
 import io.github.motalim_ai.zajil.ui.Offer
+import io.github.motalim_ai.zajil.ui.VideoSheet
+import io.github.motalim_ai.zajil.ui.VideoSheetView
 import io.github.motalim_ai.zajil.ui.ZajilTheme
+import io.github.motalim_ai.zajil.video.VideoChoice
+import io.github.motalim_ai.zajil.video.VideoPages
+import io.github.motalim_ai.zajil.video.YtDlp
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity(), DownloadActions {
@@ -50,6 +55,9 @@ class MainActivity : ComponentActivity(), DownloadActions {
     /** A link offered from a share or the clipboard, until the user answers. */
     private val offer = mutableStateOf<Offer?>(null)
 
+    /** A video link's format sheet, while it is open (A3). */
+    private val videoSheet = mutableStateOf<VideoSheet?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         waitingForLocal = savedInstanceState?.getLong(WAITING_FOR_LOCAL) ?: 0
@@ -57,6 +65,17 @@ class MainActivity : ComponentActivity(), DownloadActions {
         setContent {
             ZajilTheme {
                 DownloadsScreen(actions = this, offer = offer.value, onOfferDone = { offer.value = null })
+                videoSheet.value?.let { sheet ->
+                    VideoSheetView(
+                        sheet,
+                        onDownload = { url, info, picked, choice ->
+                            videoSheet.value = null
+                            downloads.addVideo(url, info, picked, choice)
+                            askMissingPermissions()
+                        },
+                        onDismiss = { videoSheet.value = null },
+                    )
+                }
             }
         }
         if (savedInstanceState == null) handle(intent)
@@ -129,6 +148,10 @@ class MainActivity : ComponentActivity(), DownloadActions {
     }
 
     override fun add(url: String) {
+        if (VideoPages.isVideoPage(url)) {
+            readVideo(url)
+            return
+        }
         lifecycleScope.launch {
             val local = LocalNetwork.isLocal(url)
             val id = downloads.add(url, local)
@@ -137,6 +160,38 @@ class MainActivity : ComponentActivity(), DownloadActions {
             } else {
                 askMissingPermissions()
             }
+        }
+    }
+
+    /**
+     * A video page: yt-dlp reads it on the phone, and the sheet offers its
+     * qualities and sounds. Nothing downloads until the user chooses.
+     */
+    private fun readVideo(url: String) {
+        videoSheet.value = VideoSheet.Reading(url)
+        lifecycleScope.launch {
+            val read = YtDlp.read(this@MainActivity, url)
+            if (videoSheet.value?.url != url) return@launch
+            videoSheet.value = read.fold(
+                onSuccess = { info ->
+                    when {
+                        info.live -> VideoSheet.Refused(url, R.string.video_live, null)
+                        VideoChoice.sounds(info).isEmpty() && info.formats.any { it.hasDrm } ->
+                            VideoSheet.Refused(url, R.string.video_drm, null)
+                        VideoChoice.sounds(info).isEmpty() -> VideoSheet.Refused(url, R.string.video_nothing, null)
+                        else -> VideoSheet.Ready(url, info)
+                    }
+                },
+                onFailure = { e ->
+                    val detail = e.message.orEmpty()
+                    val message = when {
+                        "confirm you" in detail && "bot" in detail -> R.string.video_bot_check
+                        "DRM" in detail -> R.string.video_drm
+                        else -> R.string.video_unreadable
+                    }
+                    VideoSheet.Refused(url, message, detail.takeIf { message == R.string.video_unreadable })
+                },
+            )
         }
     }
 

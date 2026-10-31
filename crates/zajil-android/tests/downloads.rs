@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use zajil_android::{Downloads, Listener, Problem};
+use zajil_android::{Downloads, Listener, Problem, Tuning};
 use zajil_core::{Engine, Options};
 use zajil_testserver::{FileSpec, TestServer, Tls, test_ca_der};
 
@@ -242,4 +242,70 @@ fn a_link_zajil_cannot_download_is_a_bad_link() {
     downloads.start(1, "ftp://example.invalid/x".to_owned(), dir_text(&dir));
 
     assert_eq!(failed(&rx, 1), Problem::BadLink);
+}
+
+#[test]
+fn a_tuned_start_takes_the_name_it_is_given() {
+    let body = random_body(512 * 1024);
+    let server = TestServer::http();
+    server.put("/videoplayback", FileSpec::new(body.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+    let tuning = Tuning {
+        name: Some("video.mp4".to_owned()),
+        user_agent: Some("Zajil-test".to_owned()),
+        connections: Some(4),
+        request_size: Some(64 * 1024),
+    };
+
+    downloads.start_tuned(1, server.url("/videoplayback"), dir_text(&dir), tuning);
+    let (file, _) = finished(&rx, 1);
+
+    assert!(file.ends_with("video.mp4"), "{file}");
+    assert_eq!(sha256(&std::fs::read(file).unwrap()), sha256(&body));
+}
+
+#[test]
+fn a_new_link_to_the_same_file_keeps_what_was_downloaded() {
+    let size = 8 * 1024 * 1024;
+    let body = random_body(size);
+    let server = TestServer::http();
+    server.put(
+        "/old",
+        FileSpec::new(body.clone())
+            .throttle(1024 * 1024)
+            .etag(Some("\"same\"")),
+    );
+    server.put("/new", FileSpec::new(body.clone()).etag(Some("\"same\"")));
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    downloads.start(5, server.url("/old"), dir_text(&dir));
+    wait_for(&rx, |_, heard| match heard {
+        Heard::Progress { done } if *done >= size as u64 / 4 => Some(()),
+        _ => None,
+    });
+    downloads.pause(5);
+    let state_file = wait_for(&rx, |_, heard| match heard {
+        Heard::Paused { state_file } => state_file.clone(),
+        _ => None,
+    });
+
+    downloads
+        .refresh_link(state_file.clone(), server.url("/new"))
+        .unwrap();
+    downloads.resume(5, state_file);
+    let (file, _) = finished(&rx, 5);
+
+    assert_eq!(sha256(&std::fs::read(file).unwrap()), sha256(&body));
+    // The rest came from the new link only.
+    let new_bytes: u64 = server
+        .requests()
+        .iter()
+        .filter(|r| r.path.ends_with("/new"))
+        .map(|r| r.bytes_sent)
+        .sum();
+    assert!(new_bytes < size as u64, "the new link sent the whole file");
 }

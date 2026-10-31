@@ -19,6 +19,8 @@ required-features = ["bindgen"]
 
 [dependencies]
 rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uniffi.workspace = true
@@ -35,6 +37,10 @@ rustls-platform-verifier = "0.7.1"
 bindgen = ["uniffi/cli"]
 
 [dev-dependencies]
+# Signing a tools list with a throwaway key, to test the good one too.
+base64.workspace = true
+blake2 = "0.10.6"
+ed25519-dalek = "2.2.0"
 getrandom.workspace = true
 sha2.workspace = true
 tempfile.workspace = true

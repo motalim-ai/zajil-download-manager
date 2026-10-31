@@ -12,6 +12,7 @@ use zajil_core::{Engine, Error, Event, Options, Stop};
 
 #[cfg(target_os = "android")]
 mod tls;
+pub mod tools;
 
 uniffi::setup_scaffolding!();
 
@@ -54,6 +55,19 @@ pub trait Listener: Send + Sync {
     fn failed(&self, id: i64, problem: Problem, detail: String, state_file: Option<String>);
 }
 
+/// How one download is made, beyond the engine's defaults. A video's
+/// streams take YouTube's own (as `zajil-core`'s video_fast does on the
+/// desktop): yt-dlp's User-Agent, more connections, and requests of at most
+/// 10 MiB, since YouTube slows a request for more.
+#[derive(Debug, Clone, Default, uniffi::Record)]
+pub struct Tuning {
+    /// The file's name, instead of the server's.
+    pub name: Option<String>,
+    pub user_agent: Option<String>,
+    pub connections: Option<u32>,
+    pub request_size: Option<u64>,
+}
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum EngineError {
     #[error("{detail}")]
@@ -74,6 +88,19 @@ enum Job {
     Resume { state_file: PathBuf },
 }
 
+impl Tuning {
+    fn apply(&self, engine: &Engine) -> Engine {
+        let mut engine = engine
+            .named(self.name.as_deref())
+            .with_user_agent(self.user_agent.as_deref())
+            .with_request_size(self.request_size);
+        if let Some(connections) = self.connections {
+            engine = engine.with_connections(usize::try_from(connections).unwrap_or(usize::MAX));
+        }
+        engine
+    }
+}
+
 #[uniffi::export]
 impl Downloads {
     #[uniffi::constructor]
@@ -84,24 +111,49 @@ impl Downloads {
     /// Starts downloading `url` into the folder `dir`. Nothing happens if
     /// download `id` is already running.
     pub fn start(&self, id: i64, url: String, dir: String) {
+        self.start_tuned(id, url, dir, Tuning::default());
+    }
+
+    /// Like [`Downloads::start`], made as [`Tuning`] says.
+    pub fn start_tuned(&self, id: i64, url: String, dir: String, tuning: Tuning) {
         self.run(
             id,
             Job::New {
                 url,
                 dir: dir.into(),
             },
+            &tuning,
         );
     }
 
     /// Resumes download `id` from its state file. Nothing happens if it is
     /// already running.
     pub fn resume(&self, id: i64, state_file: String) {
+        self.resume_tuned(id, state_file, Tuning::default());
+    }
+
+    /// Like [`Downloads::resume`], made as [`Tuning`] says (its name is
+    /// the state file's).
+    pub fn resume_tuned(&self, id: i64, state_file: String, tuning: Tuning) {
         self.run(
             id,
             Job::Resume {
                 state_file: state_file.into(),
             },
+            &tuning,
         );
+    }
+
+    /// Gives a stopped download a new link to the same file (a video
+    /// server's links expire after some hours): the engine checks that it is
+    /// the same file, and what is on disk is kept. Blocks until done; call
+    /// it off the main thread, and never while the download runs.
+    pub fn refresh_link(&self, state_file: String, url: String) -> Result<(), EngineError> {
+        self.runtime
+            .block_on(self.engine.refresh_link(Path::new(&state_file), &url))
+            .map_err(|err| EngineError::Setup {
+                detail: err.to_string(),
+            })
     }
 
     /// Asks download `id` to stop; [`Listener::paused`] follows once
@@ -151,7 +203,7 @@ impl Downloads {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn run(&self, id: i64, job: Job) {
+    fn run(&self, id: i64, job: Job, tuning: &Tuning) {
         let stop = Stop::new();
         {
             let mut running = self.lock();
@@ -160,7 +212,7 @@ impl Downloads {
             }
             running.insert(id, stop.clone());
         }
-        let engine = self.engine.clone();
+        let engine = tuning.apply(&self.engine);
         let listener = self.listener.clone();
         let running = self.running.clone();
         self.runtime.spawn(async move {

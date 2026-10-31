@@ -186,6 +186,9 @@ private fun DownloadCard(download: Download, place: Int, rules: QueueRules, acti
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 )
             }
+            download.video?.let {
+                Text(it.choice, style = MaterialTheme.typography.bodySmall)
+            }
             Text(
                 "${Notifications.sizeText(context, download.done, total)} · ${statusText(download, place, rules)}",
                 style = MaterialTheme.typography.bodySmall,
@@ -213,7 +216,7 @@ private fun DownloadCard(download: Download, place: Int, rules: QueueRules, acti
                         TextButton(onClick = { actions.resume(id) }) { Text(stringResource(R.string.resume)) }
                         TextButton(onClick = { actions.remove(id) }) { Text(stringResource(R.string.delete)) }
                     }
-                    Status.Publishing -> {}
+                    Status.Merging, Status.Publishing -> {}
                     Status.Done -> {
                         TextButton(onClick = { open(context, download) }) { Text(stringResource(R.string.open)) }
                         TextButton(onClick = { actions.remove(id) }) { Text(stringResource(R.string.remove_from_list)) }
@@ -236,6 +239,7 @@ private fun statusText(download: Download, place: Int, rules: QueueRules): Strin
     Status.Interrupted -> stringResource(R.string.status_interrupted)
     Status.Paused -> stringResource(R.string.status_paused)
     Status.NeedsLocalNetwork -> stringResource(R.string.status_needs_local_network)
+    Status.Merging -> stringResource(R.string.status_merging)
     Status.Publishing -> stringResource(R.string.status_publishing)
     Status.Done -> stringResource(R.string.status_done)
     Status.Failed -> stringResource(

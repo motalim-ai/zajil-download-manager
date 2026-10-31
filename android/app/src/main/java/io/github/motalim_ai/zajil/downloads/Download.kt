@@ -26,6 +26,9 @@ enum class Status {
     /** Stopped by a problem; resumable if it has a state file. */
     Failed,
 
+    /** A video's streams are complete; MediaMuxer joins them (A3). */
+    Merging,
+
     /** Complete; being moved to the public Download folder. */
     Publishing,
 
@@ -58,13 +61,15 @@ data class Download(
     val local: Boolean = false,
     /** Its place in the queue: the smaller, the sooner. */
     val order: Long = id,
+    /** A video read by yt-dlp: its streams (A3). [url] is then the page's link. */
+    val video: VideoJob? = null,
 ) {
     /**
      * Before the engine knows the file's name: the link's host and path,
      * never its query, which may hold a token (AGENTS.md, section 10.3).
      */
     val name: String
-        get() = shownName ?: file?.substringAfterLast('/') ?: shortLink(url)
+        get() = shownName ?: video?.title ?: file?.substringAfterLast('/') ?: shortLink(url)
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -80,6 +85,7 @@ data class Download(
         put("shown_name", shownName)
         put("local", local)
         put("order", order)
+        put("video", video?.toJson())
     }
 
     companion object {
@@ -99,6 +105,7 @@ data class Download(
             shownName = json.optStringOrNull("shown_name"),
             local = json.optBoolean("local"),
             order = json.optLong("order", json.getLong("id")),
+            video = json.optJSONObject("video")?.let(VideoJob::fromJson),
         )
 
         fun listToJson(downloads: List<Download>): String =

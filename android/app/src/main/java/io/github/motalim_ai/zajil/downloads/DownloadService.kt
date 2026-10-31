@@ -43,6 +43,7 @@ class DownloadService : LifecycleService() {
             stopSelf()
             return START_NOT_STICKY
         }
+        foreground = true
         val id = intent?.getLongExtra(EXTRA_ID, 0) ?: 0
         when (intent?.action) {
             ACTION_PAUSE -> {
@@ -59,8 +60,13 @@ class DownloadService : LifecycleService() {
             // or after the phone started.
             else -> downloads.resumeInterrupted()
         }
-        if (watching == null) {
-            watching = lifecycleScope.launch { downloads.list.collect(::show) }
+        // Watched only once the queue has had its turn: otherwise the
+        // service could see nothing running yet and stop, and Android would
+        // not let it start again from the background (after a kill).
+        downloads.pump {
+            lifecycleScope.launch {
+                if (watching == null) watching = launch { downloads.list.collect(::show) }
+            }
         }
         return START_STICKY
     }
@@ -86,6 +92,7 @@ class DownloadService : LifecycleService() {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             val waiting = list.count { it.status == Status.Paused || it.status == Status.Interrupted }
             if (stoppedOutsideApp && waiting > 0) Notifications.showStopped(this, waiting)
+            foreground = false
             stopSelf()
             return
         }
@@ -102,6 +109,11 @@ class DownloadService : LifecycleService() {
         }
     }
 
+    override fun onDestroy() {
+        foreground = false
+        super.onDestroy()
+    }
+
     /** Android 15 and later: data transfers get six hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
         stoppedOutsideApp = true
@@ -116,12 +128,17 @@ class DownloadService : LifecycleService() {
         const val ACTION_RESUME_INTERRUPTED = "io.github.motalim_ai.zajil.RESUME_INTERRUPTED"
         const val EXTRA_ID = "id"
 
+        /** In the foreground, and not stopping. */
+        @Volatile
+        private var foreground = false
+
         /**
          * The service in the foreground (asked again even if it runs: it may
          * be stopping); false if Android does not allow starting it now (the
          * app is in the background, without the user's action).
          */
         fun ensure(context: Context): Boolean {
+            if (foreground) return true
             return try {
                 start(context, ACTION_SHOW)
                 true

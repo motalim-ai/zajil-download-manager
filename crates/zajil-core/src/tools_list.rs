@@ -123,8 +123,17 @@ pub fn parse(json: &[u8]) -> Result<ToolsList, String> {
     })
 }
 
-/// Whether `signature` (minisign's text) is of `json` by one of `keys`.
-fn signed_by_any(json: &[u8], signature: &str, keys: &[&str]) -> bool {
+/// Whether `signature` (minisign's text) is of `json` by one of the
+/// project's two update keys. Also for the Android app's own signed list of
+/// yt-dlp (ADR-0012, section 8), which the desktop's list cannot carry.
+pub fn signed_by_project(json: &[u8], signature: &str) -> bool {
+    signed_by_any(json, signature, &KEYS)
+}
+
+/// Whether `signature` (minisign's text) is of `json` by one of `keys`
+/// (each base64 of minisign's public key file, as Tauri's signer writes
+/// it). Public for tests that sign with a key of their own.
+pub fn signed_by_any(json: &[u8], signature: &str, keys: &[&str]) -> bool {
     let Ok(signature) = minisign_verify::Signature::decode(signature) else {
         return false;
     };

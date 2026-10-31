@@ -1,4 +1,6 @@
 import com.android.build.api.artifact.SingleArtifact
+import java.net.URI
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -6,6 +8,21 @@ import org.w3c.dom.Element
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.chaquopy)
+}
+
+/**
+ * A tool's pin from tools/<tool>/pins.txt, the desktop's own (ADR-0009):
+ * its version, and for [target] its release file and SHA-256. One place for
+ * both apps' versions.
+ */
+fun pin(tool: String, target: String? = null): List<String> {
+    val lines = rootProject.file("../tools/$tool/pins.txt").readLines()
+        .map(String::trim).filter { it.isNotEmpty() && !it.startsWith("#") }
+    val version = lines.first { it.startsWith("version ") }.substringAfter(' ')
+    if (target == null) return listOf(version)
+    val (_, file, sha256) = lines.first { it.startsWith("$target ") }.split(Regex("\\s+"))
+    return listOf(version, file, sha256)
 }
 
 // Zajil for Android has its own version (ADR-0012, owner's decision 4):
@@ -28,6 +45,14 @@ android {
         // The engine is built for arm64-v8a only for now (ADR-0012,
         // section 9; armeabi-v7a comes before A5).
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+
+    packaging {
+        // The tools run as programs (QuickJS-NG for yt-dlp), which Android
+        // allows only from the folder it unpacks native libraries into.
+        jniLibs.useLegacyPackaging = true
+        // QuickJS-NG exactly as pinned: its SHA-256 can be checked in the APK.
+        jniLibs.keepDebugSymbols += "**/libqjs.so"
     }
 
     buildTypes {
@@ -89,6 +114,67 @@ abstract class BuildEngine @Inject constructor(private val exec: ExecOperations)
     }
 }
 
+/**
+ * The QuickJS-NG that yt-dlp needs for YouTube's JavaScript challenges
+ * (ADR-0009, ADR-0012): the desktop's pinned linux-aarch64 release, a
+ * static program that runs on Android as it is. Downloaded once over HTTPS
+ * (checked as always), its SHA-256 checked against the pin, and shipped as
+ * libqjs.so so that Android unpacks it where a program may run.
+ */
+abstract class FetchQuickJs : DefaultTask() {
+    @get:Input
+    abstract val url: Property<String>
+
+    @get:Input
+    abstract val sha256: Property<String>
+
+    @get:Internal
+    abstract val cache: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val jniLibs: DirectoryProperty
+
+    @TaskAction
+    fun fetch() {
+        val cached = cache.get().file("qjs-${sha256.get()}").asFile
+        if (!cached.isFile || digest(cached.readBytes()) != sha256.get()) {
+            cached.parentFile.mkdirs()
+            val bytes = URI(url.get()).toURL().openStream().use { it.readBytes() }
+            val got = digest(bytes)
+            if (got != sha256.get()) throw GradleException("QuickJS-NG: SHA-256 $got, not the pinned ${sha256.get()}")
+            cached.writeBytes(bytes)
+        }
+        val out = jniLibs.get().dir("arm64-v8a").asFile.apply { mkdirs() }
+        cached.copyTo(File(out, "libqjs.so"), overwrite = true)
+    }
+
+    private fun digest(bytes: ByteArray) =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+val fetchQuickJs = tasks.register<FetchQuickJs>("fetchQuickJs") {
+    val (version, file, sha) = pin("quickjs", "linux-aarch64")
+    url = "https://github.com/quickjs-ng/quickjs/releases/download/$version/$file"
+    sha256 = sha
+    cache = rootProject.layout.projectDirectory.dir(".gradle/zajil-tools")
+    jniLibs = layout.buildDirectory.dir("quickjs/jniLibs")
+}
+
+// yt-dlp on the device (ADR-0012, section 6): the desktop's pinned version,
+// with the scripts it runs in QuickJS for YouTube, and certifi so that it
+// checks TLS certificates.
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        providers.gradleProperty("zajil.buildPython").orNull?.let { buildPython(it) }
+        pip {
+            install("yt-dlp==${pin("yt-dlp")[0]}")
+            install("yt-dlp-ejs==0.8.0")
+            install("certifi==2026.10.23")
+        }
+    }
+}
+
 val workspace = rootProject.layout.projectDirectory.dir("..")
 val buildEngine = tasks.register<BuildEngine>("buildEngine") {
     sources.from(
@@ -145,6 +231,7 @@ androidComponents {
     onVariants { variant ->
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildEngine, BuildEngine::jniLibs)
         variant.sources.kotlin?.addGeneratedSourceDirectory(buildEngine, BuildEngine::kotlin)
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(fetchQuickJs, FetchQuickJs::jniLibs)
 
         val name = variant.name.replaceFirstChar(Char::uppercase)
         val check = tasks.register<CheckManifest>("check${name}Permissions") {

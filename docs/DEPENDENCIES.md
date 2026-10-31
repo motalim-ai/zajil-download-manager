@@ -56,6 +56,7 @@
 | `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
 | `uniffi` | 0.32.2 | MPL-2.0 | `zajil-android` | واجهة Kotlin لمحرّك تطبيق أندرويد (ADR-0012): الأنواع والأخطاء والـ callbacks تتولد من Rust، بلا JNI مكتوب باليد. ومعه `uniffi_core` و`uniffi_macros` وما معهما (MPL-2.0، وMIT أو Apache-2.0). **وميزة `bindgen`** (أداة `uniffi-bindgen` التي تكتب ملف Kotlin وقت البناء، ولا تدخل التطبيق) تجلب `askama` و`basic-toml` (MIT أو Apache-2.0)؛ و`basic-toml` «غير مصونة» (RUSTSEC-2026-0374، ليست ثغرة)، فهي مستثناة في `deny.toml` بسببها | A1 |
+| `ed25519-dalek` و`blake2` | 2.2.0 و0.10.6 | BSD-3-Clause، وMIT أو Apache-2.0 | `zajil-android` (اختبارات فقط) | توقيع قائمة أدوات أندرويد بمفتاح مؤقت في الاختبار، بصيغة minisign، ليُختبر القبول لا الرفض فقط | A3 |
 | `jni` | 0.22.4 | MIT أو Apache-2.0 | `zajil-android` (أندرويد فقط) | نقطة JNI الوحيدة: تعطي `Context` التطبيق لـ `rustls-platform-verifier` ليفحص الشهادات بمخزن أندرويد (ADR-0012، القسم 2). وهي أصلًا تحت `rustls-platform-verifier` في أندرويد، بنفس الإصدار | A1 |
 
 ## مكتبات الواجهة والإضافة (npm)
@@ -160,6 +161,12 @@
 | `org.rustls:rustls-platform-verifier` (Android AAR) | من `Cargo.lock` (اليوم 0.2.0) | MIT أو Apache-2.0 | نعم | جزء Kotlin من `rustls-platform-verifier`، الذي يفحص به المحرّك الشهادات بمخزن أندرويد. ينشره أصحابه فقط في مستودع Maven على GitHub (`maven-archive`)، فهو المستودع الوحيد غير google() وmavenCentral()، ومقصور على المجموعة `org.rustls`. وإصداره يُقرأ من `Cargo.lock` فيطابق جزء Rust دائمًا |
 | Android Gradle Plugin وKotlin وGradle (wrapper) | 9.4.1 و2.4.21 و9.8.2 | Apache-2.0 | لا (بناء) | البناء. والـ wrapper نفس ما في مشروع المالك الآخر |
 | `cargo-ndk` | 4.1.2 | MIT أو Apache-2.0 | لا (بناء) | بناء المحرّك لأندرويد بمترجم الـ NDK (`android/build-engine.sh`) |
+| Chaquopy (Gradle plugin وما يضعه في التطبيق) | 17.2.0 | MIT | نعم | Python داخل التطبيق لـ yt-dlp (ADR-0012، القسم 14) |
+| Python (من Chaquopy) | 3.13 | PSF-2.0 | نعم | تشغيل yt-dlp. ومعه OpenSSL (Apache-2.0) وSQLite (ملكية عامة) وliblzma وما يأتي مع Python نفسه |
+| yt-dlp (pip) | 2026.10.21 (من `tools/yt-dlp/pins.txt`) | Unlicense | نعم | يقرأ صفحة الفيديو ويعطي صيغها فقط؛ التحميل بمحرّك زاجِل |
+| yt-dlp-ejs (pip) | 0.8.0 | Unlicense وMIT وISC | نعم | سكربتات تحديات يوتيوب التي يشغّلها QuickJS-NG، داخل التطبيق فلا يُنزَّل شيء منها |
+| certifi (pip) | 2026.10.23 | MPL-2.0 | نعم | شهادات الجهات الموثوقة لـ TLS في Python، فلا يُعطَّل الفحص |
+| QuickJS-NG (`libqjs.so`) | v0.17.0 (من `tools/quickjs/pins.txt`) | MIT | نعم (برنامج منفصل) | ملف الكمبيوتر نفسه `qjs-linux-aarch64` ببصمته المثبّتة، لتحديات يوتيوب |
 | JUnit 4 (`junit:junit`) | 4.13.2 | EPL-1.0 | لا (اختبار فقط) | اختبارات منطق التطبيق على JVM (`android/app/src/test`). لا يدخل التطبيق أبدًا، فلا يمس ترخيصه GPL-3.0 |
 | Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
 

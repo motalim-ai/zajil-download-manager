@@ -8,6 +8,8 @@ lifecycle = "2.11.0"
 coroutines = "1.11.0"
 # UniFFI's Kotlin bindings call the engine through JNA (Apache-2.0).
 jna = "5.19.1"
+# Python inside the app, for yt-dlp (ADR-0012, section 6; MIT).
+chaquopy = "17.2.0"
 # Unit tests of the app's pure logic, on the JVM (EPL-1.0; tests only, never in the app).
 junit = "4.13.2"
 
@@ -29,3 +31,4 @@ rustls-platform-verifier = { module = "org.rustls:rustls-platform-verifier" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+chaquopy = { id = "com.chaquo.python", version.ref = "chaquopy" }
