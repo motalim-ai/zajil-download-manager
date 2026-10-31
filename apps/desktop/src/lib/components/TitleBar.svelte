@@ -7,9 +7,10 @@
   import { onMac } from "../keys";
 
   // The main window's title bar (the design of #83): the logo and «زاجِل
-  // لإدارة التحميل» at the start of the reading direction (right in
-  // Arabic, left in English). The window is dragged by it and a
-  // double-click maximizes it (`data-tauri-drag-region`).
+  // لإدارة التحميل» on the right in both languages (the owner's choice,
+  // 2026-10-31: the logo keeps its place when the language changes). The
+  // window is dragged by it and a double-click maximizes it
+  // (`data-tauri-drag-region`).
   // - macOS: the system's bar is hidden under the page (`Overlay`); its
   //   coloured buttons are on the left, or on the right on a Mac in
   //   Arabic, so the bar leaves room for them on both sides.
@@ -18,6 +19,9 @@
   //   maximize and close buttons are here, at the end of the reading
   //   direction. Close goes the way the system's does (into the tray, #109).
   const mac = onMac();
+  // The Mac's coloured buttons follow the system's first language, not
+  // Zajil's: on the right when it reads right to left.
+  const buttonsRight = mac && /^(ar|he|fa|ur|ps|sd|ug|yi|dv|ckb)(-|$)/i.test(navigator.language);
   const win = getCurrentWindow();
   let maximized = $state(false);
 
@@ -32,8 +36,10 @@
 </script>
 
 <!-- "deep": the logo and the name drag too; the buttons do not. -->
-<div class="titlebar" class:mac data-tauri-drag-region="deep">
-  <span class="brand">
+<!-- Laid out left to right whatever the language, so the brand stays on
+     the right; the brand reads in the language's own direction. -->
+<div class="titlebar" class:mac class:buttons-right={buttonsRight} class:rtl={locale.dir === "rtl"} dir="ltr" data-tauri-drag-region="deep">
+  <span class="brand" dir={locale.dir}>
     <Mark size={18} />
     <span class="name">{locale.t("app-title")}</span>
   </span>
@@ -62,22 +68,26 @@
     display: flex;
     align-items: center;
     height: 34px;
-    padding-inline-start: 12px;
+    padding-right: 12px;
     background: var(--frame, var(--sunken));
     border-bottom: 1px solid var(--line);
     user-select: none;
     -webkit-user-select: none;
     flex: none;
   }
-  /* macOS: the coloured buttons sit on the left, or on the right on a
-     Mac in Arabic (a user's report, 2026-10-30: they covered the logo):
-     room for them on both sides. */
+  /* macOS: room for the coloured buttons on their side: the left, or the
+     right on a Mac in Arabic (a user's report, 2026-10-30: they covered
+     the logo). */
   .titlebar.mac {
     height: 30px;
     padding-left: 80px;
+  }
+  .titlebar.mac.buttons-right {
+    padding-left: 12px;
     padding-right: 80px;
   }
   .brand {
+    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -85,10 +95,19 @@
     font-weight: 600;
     color: var(--ink);
   }
+  /* Windows and Linux: the window's buttons stay at the end of the
+     reading direction, on the right in English (after the brand) and on
+     the left in Arabic. */
   .controls {
-    margin-inline-start: auto;
     display: flex;
     height: 100%;
+    margin-left: 8px;
+    margin-right: -12px;
+  }
+  .rtl .controls {
+    order: -1;
+    margin-left: 0;
+    margin-right: 0;
   }
   .ctl {
     width: 46px;
