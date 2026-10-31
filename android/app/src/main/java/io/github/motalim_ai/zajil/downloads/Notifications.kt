@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import io.github.motalim_ai.zajil.MainActivity
 import io.github.motalim_ai.zajil.R
+import io.github.motalim_ai.zajil.downloads
 
 /** The notifications Zajil posts: only about its downloads. */
 object Notifications {
@@ -50,7 +51,12 @@ object Notifications {
             .setContentIntent(openApp(context))
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (first == null) {
-            return builder.setContentTitle(context.getString(R.string.app_name)).build()
+            // Started downloads that wait for the network to come back.
+            val waiting = list.count { it.status == Status.Queued }
+            val wifi = context.downloads.waitOf() == Wait.Wifi
+            return builder.setContentTitle(context.resources.getQuantityString(R.plurals.waiting, waiting, waiting))
+                .setContentText(context.getString(if (wifi) R.string.wait_wifi else R.string.wait_network))
+                .build()
         }
         val total = first.total
         builder.setContentTitle(first.name)
@@ -82,6 +88,28 @@ object Notifications {
             .setContentText(context.getString(R.string.tap_to_resume))
             .setContentIntent(openApp(context, resume = true))
             .addAction(0, context.getString(R.string.resume), service(context, DownloadService.ACTION_RESUME_ALL, 0))
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(STOPPED_ID, notification)
+        } catch (_: SecurityException) {
+            // Notifications not allowed: the app's list still shows them.
+        }
+    }
+
+    /**
+     * The queue's time has come while Zajil is in the background, and
+     * Android does not let it start a download by itself: one tap does.
+     */
+    fun showScheduleDue(context: Context, count: Int) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+        createChannels(context)
+        val notification = NotificationCompat.Builder(context, STOPPED_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_zajil)
+            .setContentTitle(context.getString(R.string.schedule_due))
+            .setContentText(context.resources.getQuantityString(R.plurals.tap_to_start, count, count))
+            .setContentIntent(openApp(context, resume = true))
+            .addAction(0, context.getString(R.string.start_now), service(context, DownloadService.ACTION_RESUME_ALL, 0))
             .setAutoCancel(true)
             .build()
         try {

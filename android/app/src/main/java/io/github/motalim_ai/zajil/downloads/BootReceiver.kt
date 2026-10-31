@@ -18,13 +18,11 @@ class BootReceiver : BroadcastReceiver() {
         if (!center.hasInterrupted()) return
         Notifications.createChannels(context)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            try {
-                DownloadService.start(context, DownloadService.ACTION_RESUME_INTERRUPTED)
-                return
-            } catch (_: IllegalStateException) {
-                // Not allowed after all: ask the user below.
-            }
+            // Back into the queue; if the service may not start, the queue
+            // itself asks the user with a notification.
+            center.resumeInterrupted()
+        } else {
+            Notifications.showStopped(context, center.list.value.count { it.status == Status.Interrupted })
         }
-        Notifications.showStopped(context, center.list.value.count { it.status == Status.Interrupted })
     }
 }

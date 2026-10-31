@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Zajil" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Zajil's blues (assets/icon), also for the system's own dialogs (the time picker). -->
+    <style name="Theme.Zajil" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#FF1747C9</item>
+        <item name="android:colorPrimaryDark">#FF1747C9</item>
+        <item name="android:colorAccent">#FF1747C9</item>
+    </style>
 </resources>

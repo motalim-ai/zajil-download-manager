@@ -1,0 +1,83 @@
+package io.github.motalim_ai.zajil.downloads
+
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
+
+/** The queue's settings (A2), kept in the app's preferences ([QueueSettings]). */
+data class QueueRules(
+    /** How many downloads run at once, at least 1. */
+    val maxRunning: Int = 3,
+    /** Only on an unmetered network (Wi-Fi). */
+    val wifiOnly: Boolean = false,
+    /** The queue starts at [startAt] every day. */
+    val scheduled: Boolean = false,
+    val startAt: LocalTime = LocalTime.of(2, 0),
+    /**
+     * With [scheduled]: the queue has reached its time and runs until it is
+     * empty; then it waits for the next [startAt].
+     */
+    val open: Boolean = false,
+)
+
+/** The network as the queue needs it. */
+data class NetworkState(val connected: Boolean, val unmetered: Boolean) {
+    fun allows(rules: QueueRules) = connected && (unmetered || !rules.wifiOnly)
+}
+
+/** Why a queued download has not started yet, for the screen. */
+enum class Wait { Turn, Schedule, Network, Wifi }
+
+object QueuePlan {
+    /**
+     * Which queued downloads start now, in queue order: as many as there is
+     * room for under [QueueRules.maxRunning], when the network and the
+     * schedule allow.
+     */
+    fun toStart(list: List<Download>, rules: QueueRules, network: NetworkState): List<Long> {
+        if (!network.allows(rules)) return emptyList()
+        if (rules.scheduled && !rules.open) return emptyList()
+        val room = rules.maxRunning.coerceAtLeast(1) - list.count { it.status == Status.Running }
+        if (room <= 0) return emptyList()
+        return queued(list).take(room).map { it.id }
+    }
+
+    /** The queued downloads in the order they start. */
+    fun queued(list: List<Download>): List<Download> =
+        list.filter { it.status == Status.Queued }.sortedWith(compareBy(Download::order, Download::id))
+
+    fun waitOf(rules: QueueRules, network: NetworkState): Wait = when {
+        rules.scheduled && !rules.open -> Wait.Schedule
+        !network.connected -> Wait.Network
+        rules.wifiOnly && !network.unmetered -> Wait.Wifi
+        else -> Wait.Turn
+    }
+
+    /**
+     * The next time the clock shows [at] in [zone], strictly after [now]
+     * (a time that a clock change skips is moved forward, as java.time does).
+     */
+    fun nextStart(now: ZonedDateTime, at: LocalTime, zone: ZoneId = now.zone): ZonedDateTime {
+        val today = ZonedDateTime.of(LocalDateTime.of(now.toLocalDate(), at), zone)
+        return if (today.isAfter(now)) today else today.plusDays(1)
+    }
+
+    /**
+     * The queue order after moving [id] one place earlier among the queued
+     * downloads: it swaps places with the one before it.
+     */
+    fun movedUp(list: List<Download>, id: Long): List<Download> {
+        val queue = queued(list)
+        val at = queue.indexOfFirst { it.id == id }
+        if (at <= 0) return list
+        val (before, mine) = queue[at - 1] to queue[at]
+        return list.map {
+            when (it.id) {
+                mine.id -> it.copy(order = before.order)
+                before.id -> it.copy(order = mine.order)
+                else -> it
+            }
+        }
+    }
+}

@@ -160,6 +160,7 @@
 | `org.rustls:rustls-platform-verifier` (Android AAR) | من `Cargo.lock` (اليوم 0.2.0) | MIT أو Apache-2.0 | نعم | جزء Kotlin من `rustls-platform-verifier`، الذي يفحص به المحرّك الشهادات بمخزن أندرويد. ينشره أصحابه فقط في مستودع Maven على GitHub (`maven-archive`)، فهو المستودع الوحيد غير google() وmavenCentral()، ومقصور على المجموعة `org.rustls`. وإصداره يُقرأ من `Cargo.lock` فيطابق جزء Rust دائمًا |
 | Android Gradle Plugin وKotlin وGradle (wrapper) | 9.4.1 و2.4.21 و9.8.2 | Apache-2.0 | لا (بناء) | البناء. والـ wrapper نفس ما في مشروع المالك الآخر |
 | `cargo-ndk` | 4.1.2 | MIT أو Apache-2.0 | لا (بناء) | بناء المحرّك لأندرويد بمترجم الـ NDK (`android/build-engine.sh`) |
+| JUnit 4 (`junit:junit`) | 4.13.2 | EPL-1.0 | لا (اختبار فقط) | اختبارات منطق التطبيق على JVM (`android/app/src/test`). لا يدخل التطبيق أبدًا، فلا يمس ترخيصه GPL-3.0 |
 | Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
 
 </div>

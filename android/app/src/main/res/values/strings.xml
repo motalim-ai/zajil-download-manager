@@ -13,6 +13,46 @@
     <string name="open">فتح</string>
     <string name="remove_from_list">إزالة من القائمة</string>
     <string name="allow">السماح</string>
+    <string name="settings">الإعدادات</string>
+    <string name="ok">حسنًا</string>
+    <string name="not_now">ليس الآن</string>
+    <string name="share_label">تحميل بزاجِل</string>
+    <string name="offer_shared_title">تحميل هذا الرابط؟</string>
+    <string name="offer_clipboard_title">في الحافظة رابط. تحميله؟</string>
+    <string name="no_link_title">لا يوجد رابط</string>
+    <string name="no_link_text">النص المشارَك ليس فيه رابط يبدأ بـ http أو https.</string>
+    <string name="start_now">ابدأ الآن</string>
+    <string name="move_up">تقديم</string>
+    <!-- %1$d مكانه في الطابور. -->
+    <string name="wait_turn">في الطابور (%1$d)</string>
+    <string name="wait_schedule">ينتظر موعد القائمة (%1$s)</string>
+    <string name="wait_network">ينتظر عودة الشبكة</string>
+    <string name="wait_wifi">ينتظر الواي فاي</string>
+    <string name="max_running">التحميلات في نفس الوقت</string>
+    <string name="wifi_only">واي فاي فقط</string>
+    <string name="wifi_only_hint">لا تحميل على بيانات الهاتف.</string>
+    <string name="schedule">ابدأ القائمة في وقت محدد</string>
+    <string name="schedule_hint">تنتظر التحميلات الجديدة هذا الوقت كل يوم، ثم تعمل القائمة حتى تفرغ.</string>
+    <string name="schedule_at">وقت البدء: %1$s</string>
+    <string name="schedule_waiting">القائمة تبدأ الساعة %1$s.</string>
+    <string name="schedule_due">حان موعد القائمة</string>
+    <plurals name="tap_to_start">
+        <item quantity="zero">لا تحميلات تنتظر</item>
+        <item quantity="one">اضغط ليبدأ التحميل المنتظر</item>
+        <item quantity="two">اضغط ليبدأ التحميلان المنتظران</item>
+        <item quantity="few">اضغط لتبدأ %d تحميلات تنتظر</item>
+        <item quantity="many">اضغط ليبدأ %d تحميلًا ينتظر</item>
+        <item quantity="other">اضغط ليبدأ %d تحميل ينتظر</item>
+    </plurals>
+    <plurals name="waiting">
+        <item quantity="zero">لا تحميلات تنتظر</item>
+        <item quantity="one">تحميل ينتظر</item>
+        <item quantity="two">تحميلان ينتظران</item>
+        <item quantity="few">%d تحميلات تنتظر</item>
+        <item quantity="many">%d تحميلًا ينتظر</item>
+        <item quantity="other">%d تحميل ينتظر</item>
+    </plurals>
+    <string name="schedule_open">بدأت القائمة (موعدها %1$s)، وتعمل حتى تفرغ.</string>
     <string name="status_needs_local_network">الرابط لجهاز في شبكتك المحلية، ويحتاج زاجِل إذن «الشبكة المحلية» ليحمّله. اضغط «السماح».</string>
     <string name="status_running">يُحمَّل</string>
     <string name="status_interrupted">توقف مع البرنامج، يُستكمل عند فتحه</string>

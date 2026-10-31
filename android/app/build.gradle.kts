@@ -198,4 +198,5 @@ dependencies {
     implementation(libs.compose.material3)
     implementation("${libs.jna.get()}@aar")
     implementation(libs.rustls.platform.verifier)
+    testImplementation(libs.junit)
 }

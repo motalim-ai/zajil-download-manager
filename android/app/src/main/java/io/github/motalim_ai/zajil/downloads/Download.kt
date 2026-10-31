@@ -5,6 +5,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 enum class Status {
+    /** Waits in the queue: for its turn, the schedule, or the network (A2). */
+    Queued,
+
     /** The engine is downloading it. */
     Running,
 
@@ -53,6 +56,8 @@ data class Download(
     val shownName: String? = null,
     /** Its link points to the local network ([LocalNetwork]). */
     val local: Boolean = false,
+    /** Its place in the queue: the smaller, the sooner. */
+    val order: Long = id,
 ) {
     /**
      * Before the engine knows the file's name: the link's host and path,
@@ -74,6 +79,7 @@ data class Download(
         put("uri", uri)
         put("shown_name", shownName)
         put("local", local)
+        put("order", order)
     }
 
     companion object {
@@ -92,6 +98,7 @@ data class Download(
             uri = json.optStringOrNull("uri"),
             shownName = json.optStringOrNull("shown_name"),
             local = json.optBoolean("local"),
+            order = json.optLong("order", json.getLong("id")),
         )
 
         fun listToJson(downloads: List<Download>): String =

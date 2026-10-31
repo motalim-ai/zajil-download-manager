@@ -10,7 +10,8 @@
 //!
 //! - `http://127.0.0.1:8099/<random folder>/file.bin` (printed at start): 50
 //!   MB of random bytes, each connection slowed to 256 KiB/s, so that a
-//!   pause or a kill lands in the middle.
+//!   pause or a kill lands in the middle. And `small.bin`, 8 MB, for the
+//!   queue.
 //! - An HTTPS port with a self-signed certificate, printed at start with its
 //!   own `adb reverse` line: the app must refuse it.
 //!
@@ -33,6 +34,10 @@ fn main() {
 
     let server = TestServer::http_on(([127, 0, 0, 1], 8099).into()).expect("port 8099");
     server.put("/file.bin", FileSpec::new(body).throttle(256 * 1024));
+    // Smaller, for the queue: several of them one after another.
+    let mut small = vec![0u8; 8 * 1024 * 1024];
+    getrandom::fill(&mut small).unwrap();
+    server.put("/small.bin", FileSpec::new(small).throttle(256 * 1024));
     let tls = TestServer::https_self_signed(&["127.0.0.1"], "127.0.0.1");
     tls.put("/file.bin", FileSpec::new(vec![7u8; 1024]));
 

@@ -25,6 +25,9 @@ class DownloadService : LifecycleService() {
     /** When the notification last changed: Android drops faster updates. */
     private var shownAt = 0L
 
+    /** What the notification last showed, apart from progress. */
+    private var shownStates: List<Pair<Long, Status>> = emptyList()
+
     /** Paused from the notification, or stopped by Android's time limit. */
     private var stoppedOutsideApp = false
 
@@ -33,8 +36,10 @@ class DownloadService : LifecycleService() {
         Notifications.createChannels(this)
         if (!goForeground()) {
             // Android refused (after a restart of the phone, from Android
-            // 15): the user resumes them from a notification instead.
-            Notifications.showStopped(this, downloads.list.value.count { it.status == Status.Interrupted })
+            // 15): what started stops, and the user resumes it from a
+            // notification instead.
+            downloads.stopWithoutService()
+            Notifications.showStopped(this, downloads.list.value.count { it.status != Status.Done })
             stopSelf()
             return START_NOT_STICKY
         }
@@ -77,16 +82,19 @@ class DownloadService : LifecycleService() {
     }
 
     private fun show(list: List<Download>) {
-        if (list.none { it.status == Status.Running }) {
+        if (!downloads.keepsService(list)) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             val waiting = list.count { it.status == Status.Paused || it.status == Status.Interrupted }
             if (stoppedOutsideApp && waiting > 0) Notifications.showStopped(this, waiting)
             stopSelf()
             return
         }
+        // Progress may wait half a second; a change of state never does.
+        val states = list.map { it.id to it.status }
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - shownAt < 500) return
+        if (states == shownStates && now - shownAt < 500) return
         shownAt = now
+        shownStates = states
         try {
             NotificationManagerCompat.from(this).notify(Notifications.PROGRESS_ID, Notifications.progress(this, list))
         } catch (_: SecurityException) {
@@ -107,6 +115,21 @@ class DownloadService : LifecycleService() {
         const val ACTION_RESUME_ALL = "io.github.motalim_ai.zajil.RESUME_ALL"
         const val ACTION_RESUME_INTERRUPTED = "io.github.motalim_ai.zajil.RESUME_INTERRUPTED"
         const val EXTRA_ID = "id"
+
+        /**
+         * The service in the foreground (asked again even if it runs: it may
+         * be stopping); false if Android does not allow starting it now (the
+         * app is in the background, without the user's action).
+         */
+        fun ensure(context: Context): Boolean {
+            return try {
+                start(context, ACTION_SHOW)
+                true
+            } catch (_: IllegalStateException) {
+                // ForegroundServiceStartNotAllowedException, from Android 12.
+                false
+            }
+        }
 
         fun start(context: Context, action: String) {
             ContextCompat.startForegroundService(
