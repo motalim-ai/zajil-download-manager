@@ -7,9 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-01
+
 Lighter: the owner's request after two YouTube comments (Zajil's window took most of its memory, and the window felt heavier than before). Measured on macOS only (release builds, the main window in front, 30 s once settled; memory is the physical footprint of Zajil with every WebKit process it started, as Activity Monitor shows it; downloads from a local server):
 
-| Case | 1.0.0 | 1.2.2 | Now |
+| Case | 1.0.0 | 1.2.2 | 1.2.3 |
 |---|---|---|---|
 | Idle, empty list | 118 MB, 0.1 % CPU | 195 MB, 0.1 % | 132 MB, 0.0 % |
 | Idle, 200 finished downloads | 178 MB, 0.2 % | 262 MB, 1.1 % | 200 MB, 0.2 % |
@@ -27,6 +29,12 @@ CPU varies by a point or two between runs of the same build. Not measured on Win
 - **One window made beforehand**, «Download file info», the one opened most (every download from the browser and from «Add a link»), instead of three (56 MB together). «Add a link» and the progress windows are made when they open, in about 0.1 s.
 - **Each window loads its own code only**: 177 KB shared, the main window 85 KB more, «Download file info» about 45 KB; every window loaded all 429 KB before.
 - **The progress window's moving stripes** move on a layer of their own, with no repaint of the bar sixty times a second. Not measured.
+- **Internal, no change in behaviour:** the desktop app's `lib.rs` and `video.rs`, zajil-platform's `fs.rs`, and zajil-core's `engine.rs` and `video.rs` are each split into a folder with a module per part (2,000 to 5,100 lines each). The code is moved, not rewritten, and the public paths stay the same; the tests are the same tests, next to what they test, and all pass as before.
+
+### Fixed
+
+- **The title bar's logo now sits opposite the window's buttons on every system** (owner's choice, 2026-11-01): on Windows and Linux in English the buttons are on the right, and the logo, kept on the right in both languages, crowded them. It takes the start of the reading direction on Windows and Linux (right in Arabic, left in English), and on a Mac the side the coloured buttons are not on.
+- **A file saved with a UTF-8 byte order mark read as damaged** (old Notepad, Windows PowerShell 5.1's `Set-Content -Encoding UTF8`; JSON does not allow the mark): the mark is now skipped before the settings, queues, categories and import files are read. Tested for the settings file and an imported queues export; the queues and categories files go through the same function, not tested on their own.
 
 ### Tests
 
