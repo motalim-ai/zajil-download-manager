@@ -655,9 +655,13 @@ impl Runner {
                 // held, by the names the download itself gets (review of
                 // #90: the probe's name could differ): from a page, by the
                 // name it is saved under; renamed by the user (#103), when
-                // that name can run code and the server's could not.
+                // that name can run code and the server's could not. The
+                // user's OK is for a name (security review for 1.2.3): it
+                // is saved under it, so without one there is none to keep
+                // and the hold stays.
                 let from_page = item.from_page;
-                if !item.ok_given && (from_page || item.name.is_some()) {
+                let ok_for_its_name = item.ok_given && item.name.is_some();
+                if !ok_for_its_name && (from_page || item.name.is_some()) {
                     let hold: crate::HoldCheck = Arc::new(move |server: &str, saved: &str, _| {
                         use crate::category::runs_code;
                         runs_code(saved) && (from_page || !runs_code(server))
@@ -938,11 +942,14 @@ impl Runner {
                         // gone; the name may soon be another download's.
                         item.state_file = state_file;
                     }
-                    // Held for the user: nothing was made.
-                    Err(Error::Held(_)) => {
+                    // Held for the user: nothing was made. Its name is the
+                    // one it was held by, so that the user's OK is for that
+                    // name and not another the server gives next.
+                    Err(Error::Held(name)) => {
                         item.status = Status::Paused;
                         item.needs_ok = true;
                         item.error = None;
+                        item.name.get_or_insert(name);
                     }
                     Err(err) => {
                         match &err {
