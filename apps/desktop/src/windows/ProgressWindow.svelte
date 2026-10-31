@@ -483,24 +483,35 @@
   }
   .bar b {
     display: block;
+    position: relative;
+    overflow: hidden;
     height: 100%;
     border-radius: 3px;
     background: linear-gradient(#4fd977, #1f9e44);
   }
-  .bar.going b {
-    background:
-      repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.18) 0 8px, transparent 8px 16px),
-      linear-gradient(#4fd977, #1f9e44);
-    background-size: 22.6px 100%, auto;
+  /* The stripes on a layer of their own, moved by `transform`: the
+     compositor moves them, with no repaint of the bar each frame (moving
+     `background-position` repainted it sixty times a second while a
+     download ran). One stripe wider than the bar, so the loop is seamless. */
+  .bar.going b::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -22.6px;
+    right: 0;
+    background: repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.18) 0 8px, transparent 8px 16px);
+    background-size: 22.6px 100%;
     animation: stripes 1s linear infinite;
+    will-change: transform;
   }
   @keyframes stripes {
     to {
-      background-position: 22.6px 0, 0 0;
+      transform: translateX(22.6px);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .bar.going b {
+    .bar.going b::after {
       animation: none;
     }
   }
