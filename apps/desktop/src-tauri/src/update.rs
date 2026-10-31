@@ -226,6 +226,38 @@ where
     }
 }
 
+/// The browser extension's version, when it said it is older than this
+/// Zajil needs (`zajil_host::MIN_EXTENSION`, owner's request, 2026-10-31:
+/// it does not update itself, and an old one misses what Zajil asks of it).
+#[derive(Default)]
+pub struct ExtensionOld(Mutex<Option<String>>);
+
+/// An old extension said its version: kept, and the main window told.
+pub fn extension_old<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, version: &str) {
+    *handle.state::<ExtensionOld>().0.lock().unwrap() = Some(version.to_owned());
+    let _ = handle.emit_to("main", "extension-old", version.to_owned());
+}
+
+/// The old extension's version, for a page that opens later.
+#[tauri::command]
+pub fn extension_old_notice(old: State<'_, ExtensionOld>) -> Option<String> {
+    old.0.lock().unwrap().clone()
+}
+
+/// «How to update it»: the newest release's page, with the extension's
+/// files and the steps to install them, in the default browser.
+#[tauri::command]
+pub fn open_extension_help<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    handle
+        .opener()
+        .open_url(
+            "https://github.com/motalim-ai/zajil-download-manager/releases/latest",
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())
+}
+
 /// The newer release found at this start, for a page that opens later.
 #[tauri::command]
 pub fn update_notice(notice: State<'_, Notice>) -> Option<UpdateView> {

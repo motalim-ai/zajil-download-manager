@@ -421,6 +421,7 @@ async function zajilLanguage() {
     try {
       const answer = await api.runtime.sendNativeMessage(HOST, { type: "ping", protocol_version: PROTOCOL_VERSION });
       if (answer?.language === "ar" || answer?.language === "en") lang = answer.language;
+      await sayIfOld(answer);
     } catch {
       // Zajil is not there: the browser's language.
     }
@@ -431,6 +432,38 @@ async function zajilLanguage() {
     askingLanguage = null;
   });
   return askingLanguage;
+}
+
+/** A version's numbers (`1.2.1`), or null when it is not one. @param {unknown} v */
+const versionOf = (v) => (typeof v === "string" && /^\d{1,4}(\.\d{1,4}){0,3}$/.test(v) ? v.split(".").map(Number) : null);
+
+/** Whether version `a` is older than `b`. @param {number[]} a @param {number[]} b */
+export function older(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d < 0;
+  }
+  return false;
+}
+
+/**
+ * When Zajil's answer to a ping says the oldest extension it works fully
+ * with, and this one is older: Zajil is told, and asks the user to update
+ * it (owner's request, 2026-10-31: an extension loaded unpacked never
+ * updates itself). Only a Zajil that says it gets the message (an older
+ * one refuses an unknown message), and once an hour at most.
+ * @param {any} answer
+ */
+async function sayIfOld(answer) {
+  const wanted = versionOf(answer?.min_extension);
+  const own = versionOf(api.runtime.getManifest().version);
+  if (!wanted || !own || !older(own, wanted)) return;
+  const { saidOld } = await api.storage.session.get("saidOld").catch(() => ({}));
+  if (typeof saidOld === "number" && Date.now() - saidOld < 60 * 60 * 1000) return;
+  await api.storage.session.set({ saidOld: Date.now() }).catch(() => {});
+  await api.runtime
+    .sendNativeMessage(HOST, { type: "extension_old", protocol_version: PROTOCOL_VERSION, version: api.runtime.getManifest().version })
+    .catch(() => {});
 }
 
 /** Each language's texts, read once from the extension's own files. */

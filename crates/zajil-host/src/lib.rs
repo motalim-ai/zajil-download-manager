@@ -34,6 +34,11 @@ use serde::{Deserialize, Serialize};
 /// The protocol's version: an extension and an app of different versions
 /// say so clearly instead of misreading each other.
 pub const PROTOCOL_VERSION: u32 = 1;
+/// The oldest extension this Zajil works fully with: raised only when an
+/// extension change must come with the app (owner's decision, 2026-10-31:
+/// not at every release, which numbers both alike). An older extension
+/// that knows it says so ([`Request::ExtensionOld`]), and Zajil shows it.
+pub const MIN_EXTENSION: &str = "1.2.0";
 /// How long one side waits for the other on the private channel.
 pub const CHANNEL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many connections the app serves at once; more wait their turn by
@@ -151,6 +156,15 @@ pub enum Request {
         media: Option<String>,
         #[serde(default)]
         cookies: Option<String>,
+    },
+    /// The extension is older than [`MIN_EXTENSION`], which the host's
+    /// answer to a ping said: Zajil asks the user to update it. Sent only
+    /// to a host that said it (an older one refuses an unknown message),
+    /// and it never starts Zajil.
+    ExtensionOld {
+        protocol_version: u32,
+        /// The extension's own version (`1.2.1`).
+        version: String,
     },
     /// The last private window closed (review of #91): Zajil takes every
     /// private window's download out of its queues and deletes their part
@@ -299,6 +313,12 @@ pub struct Response {
     /// extension's video button speaks it (owner's decision, 2026-10-27).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// In the answer to a ping: Zajil's version, and the oldest extension
+    /// it works fully with ([`MIN_EXTENSION`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zajil_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_extension: Option<String>,
     /// When the host itself could not hand the message to Zajil: why, as a
     /// [`HostProblem`] code the extension says in Zajil's language (owner's
     /// decision on #264). `error` then says it in English, with no path or
@@ -351,6 +371,8 @@ impl Response {
             ok: true,
             error: None,
             language: None,
+            zajil_version: None,
+            min_extension: None,
             code: None,
         }
     }
@@ -361,6 +383,8 @@ impl Response {
             ok: false,
             error: Some(why.into()),
             language: None,
+            zajil_version: None,
+            min_extension: None,
             code: None,
         }
     }
@@ -378,6 +402,8 @@ impl Response {
     pub fn pong(language: Option<&str>) -> Self {
         Response {
             language: language.map(str::to_owned),
+            zajil_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            min_extension: Some(MIN_EXTENSION.to_owned()),
             ..Response::ok()
         }
     }
@@ -453,6 +479,16 @@ fn check_version(version: u32) -> Result<(), String> {
 }
 
 /// An instance or cookie store id: ASCII letters, digits, `-` and `_`.
+/// A version as the extension's manifest writes it: 1 to 4 numbers of up
+/// to 4 digits, with dots (`1.2.1`).
+fn is_version(version: &str) -> bool {
+    let parts: Vec<&str> = version.split('.').collect();
+    (1..=4).contains(&parts.len())
+        && parts
+            .iter()
+            .all(|p| (1..=4).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// A sound's language as yt-dlp names it: 2 or 3 letters, then a dash and
 /// up to 8 letters or digits (`ar`, `en-US`).
 fn is_language(language: &str) -> bool {
@@ -505,7 +541,10 @@ fn check_video(page: &str, media: Option<&str>, cookies: Option<&str>) -> Result
 /// for a video read ahead, which only the pointer passing over a video
 /// asked for.
 pub fn starts_zajil(request: &Request) -> bool {
-    !matches!(request, Request::PeekVideo { .. })
+    !matches!(
+        request,
+        Request::PeekVideo { .. } | Request::ExtensionOld { .. }
+    )
 }
 
 fn check(request: &Request) -> Result<(), String> {
@@ -526,6 +565,9 @@ fn check(request: &Request) -> Result<(), String> {
             protocol_version, ..
         }
         | Request::PeekVideo {
+            protocol_version, ..
+        }
+        | Request::ExtensionOld {
             protocol_version, ..
         } => *protocol_version,
     };
@@ -586,6 +628,9 @@ fn check(request: &Request) -> Result<(), String> {
             cookies,
             ..
         } => check_video(page, media.as_deref(), cookies.as_deref())?,
+        Request::ExtensionOld { version, .. } if !is_version(version) => {
+            return Err("not an extension version".into());
+        }
         _ => {}
     }
     if let Request::Download {
@@ -1016,6 +1061,33 @@ mod tests {
 
     /// A video read ahead is checked as a video, has no private window's
     /// flag (none is ever sent), and never starts Zajil.
+    #[test]
+    fn an_old_extension_says_its_version_and_never_starts_zajil() {
+        // The ping's answer says what the extension compares.
+        let pong = Response::pong(Some("ar"));
+        assert_eq!(
+            pong.zajil_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(pong.min_extension.as_deref(), Some(MIN_EXTENSION));
+        assert!(is_version(MIN_EXTENSION));
+        let old =
+            parse(br#"{"type":"extension_old","protocol_version":1,"version":"1.2.1"}"#).unwrap();
+        assert_eq!(
+            old,
+            Request::ExtensionOld {
+                protocol_version: 1,
+                version: "1.2.1".into()
+            }
+        );
+        assert!(!starts_zajil(&old));
+        for bad in ["", "1..2", "v1.2", "1.2.3.4.5", "12345", "1.2-beta", "../1"] {
+            let message =
+                format!(r#"{{"type":"extension_old","protocol_version":1,"version":"{bad}"}}"#);
+            assert!(parse(message.as_bytes()).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn a_video_read_ahead_is_checked_and_never_starts_zajil() {
         let peek = parse(

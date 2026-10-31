@@ -256,7 +256,8 @@ pub fn run() {
         ))
         .manage(schedule::SharedAfter::default())
         .manage(complete::Show::default())
-        .manage(update::Notice::default());
+        .manage(update::Notice::default())
+        .manage(update::ExtensionOld::default());
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -540,6 +541,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::open_release_page,
         update::update_skip,
         update::update_install,
+        update::extension_old_notice,
+        update::open_extension_help,
         complete::drag_out
     ]
 }
@@ -659,6 +662,8 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::open_release_page,
         update::update_skip,
         update::update_install,
+        update::extension_old_notice,
+        update::open_extension_help,
         complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report,
@@ -1215,6 +1220,12 @@ fn serve_extension<R: tauri::Runtime>(handle: tauri::AppHandle<R>, data: PathBuf
                 } = &request
                 {
                     video::read_ahead(&handle, page.clone(), media.clone(), cookies.clone());
+                    return zajil_host::Response::ok();
+                }
+                // The extension is older than this Zajil needs: the main
+                // window asks the user to update it.
+                if let zajil_host::Request::ExtensionOld { version, .. } = &request {
+                    update::extension_old(&handle, version);
                     return zajil_host::Response::ok();
                 }
                 // The last private window closed: its videos leave the list
@@ -2032,6 +2043,8 @@ fn from_extension_with(
         zajil_host::Request::Video { .. } | zajil_host::Request::PeekVideo { .. } => {
             zajil_host::Response::refused(video_soon(lang))
         }
+        // Served before it reaches here.
+        zajil_host::Request::ExtensionOld { .. } => zajil_host::Response::ok(),
         zajil_host::Request::PrivateClosed { .. } => match discard_private(store) {
             Ok(()) => zajil_host::Response::ok(),
             Err(err) => zajil_host::Response::refused(err.to_string()),

@@ -18,6 +18,7 @@ function fakeChrome({ granted, video = false, buttons = true, answer, jar = () =
     runtime: {
       id: "zajil",
       getURL: (path) => `chrome-extension://zajil/${path}`,
+      getManifest: () => ({ version: "1.2.0" }),
       onInstalled: on("installed"),
       onStartup: on("startup"),
       // The link to Zajil (M5): its port, recorded.
@@ -683,6 +684,39 @@ describe("the background", () => {
       fake.session.zajilLanguage.at -= 61_000;
       await ask(fake, { type: "video-button-texts" });
       expect(pings(fake)).toHaveLength(2);
+    });
+
+    // An extension loaded unpacked never updates itself (owner's request,
+    // 2026-10-31): one older than Zajil needs tells it, once an hour, and
+    // only a Zajil that said what it needs.
+    it("an extension older than Zajil needs tells Zajil, once an hour", async () => {
+      let min = "1.2.1";
+      const fake = fakeChrome({ granted: false, video: true, answer: (m) => (m.type === "ping" ? { ok: true, language: "en", min_extension: min } : { ok: true }) });
+      await load(fake);
+      await flush();
+      const old = () => fake.done.sent.filter((m) => m.type === "extension_old");
+      await ask(fake, { type: "video-button-texts" });
+      expect(old()).toEqual([{ type: "extension_old", protocol_version: 1, version: "1.2.0" }]);
+      // Asked again a minute later: not said again within the hour.
+      fake.session.zajilLanguage.at -= 61_000;
+      await ask(fake, { type: "video-button-texts" });
+      expect(old()).toHaveLength(1);
+      fake.session.saidOld -= 61 * 60 * 1000;
+      fake.session.zajilLanguage.at -= 61_000;
+      await ask(fake, { type: "video-button-texts" });
+      expect(old()).toHaveLength(2);
+      // Not older, or a Zajil that does not say: nothing.
+      for (const said of ["1.2.0", "1.1.9", undefined, "x"]) {
+        min = /** @type {any} */ (said);
+        fake.session.saidOld = 0;
+        fake.session.zajilLanguage.at -= 61_000;
+        await ask(fake, { type: "video-button-texts" });
+      }
+      expect(old()).toHaveLength(2);
+      const { older } = await import("../src/background.js");
+      expect(older([1, 2], [1, 2, 1])).toBe(true);
+      expect(older([1, 10], [1, 9, 9])).toBe(false);
+      expect(older([2], [1, 99])).toBe(false);
     });
 
     it("without Zajil, the browser's language", async () => {

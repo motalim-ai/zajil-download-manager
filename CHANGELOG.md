@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Zajil says when the browser extension is too old** (owner's request, 2026-10-31: an extension loaded unpacked never updates itself): zajil-host's answer to a ping now says Zajil's version and the oldest extension it works fully with (`MIN_EXTENSION`, raised only when an extension change must come with the app). An older extension that knows it tells Zajil (`extension_old`, once an hour, never starting Zajil), and the main window shows a bar with «How to update it». It works from extension 1.2.1 on: older ones do not say their version.
+
 ## [1.2.0] - 2026-10-31
 
 Zajil updates itself, signed with the project's keys, and every video resumes. Tried by hand on macOS by the owner, apart from the update itself, whose first real run is from 1.2.0 to the next version; on Windows and Linux, checked by CI only.

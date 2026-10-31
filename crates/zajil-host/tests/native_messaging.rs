@@ -111,7 +111,7 @@ fn a_correct_message_reaches_the_app_and_wrong_ones_never_do() {
     // browser's), and the host goes on.
     std::fs::write(data.path().join("settings.json"), b"{ not json").unwrap();
     send(&mut host, br#"{"type":"ping","protocol_version":1}"#);
-    assert_eq!(answer(&mut host), Response::ok());
+    assert_eq!(answer(&mut host), Response::pong(None));
 
     for wrong in [
         "{not json",
