@@ -5,6 +5,7 @@
 
 export class Unseen<T> {
   private kept: T | null = null;
+  private missed = false;
 
   /** What the table draws now: `next`, or nothing while `hidden` (it is
    * kept for when the window shows). */
@@ -14,11 +15,18 @@ export class Unseen<T> {
       return null;
     }
     this.kept = null;
+    this.missed = false;
     return next;
+  }
+
+  /** A change came while hidden that was not read (a progress tick): the
+   * list is read again once the window shows. */
+  miss(): void {
+    this.missed = true;
   }
 
   /** Whether a list read while hidden waits to be drawn. */
   get waiting(): boolean {
-    return this.kept !== null;
+    return this.kept !== null || this.missed;
   }
 }

@@ -2,7 +2,7 @@
 //! and its progress told to the list.
 
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
@@ -470,8 +470,9 @@ pub(super) fn start<R: tauri::Runtime>(handle: tauri::AppHandle<R>, id: u64, ask
     });
 }
 
-/// A running video's progress: to «Video quality» each time, and to the
-/// list at most four times a second.
+/// A running video's progress: to «Video quality» and to the list, at most
+/// twice a second (as the queues' downloads, `live.rs`), and its end at
+/// once.
 fn progressed<R: tauri::Runtime>(
     handle: &tauri::AppHandle<R>,
     id: u64,
@@ -479,15 +480,6 @@ fn progressed<R: tauri::Runtime>(
     total: Option<u64>,
     speed: Option<u64>,
 ) {
-    let _ = handle.emit(
-        "video-progress",
-        Progress {
-            id,
-            done,
-            total,
-            speed,
-        },
-    );
     let state = handle.state::<VideoState>();
     with_row(&state, id, |row| {
         row.done = done;
@@ -496,12 +488,24 @@ fn progressed<R: tauri::Runtime>(
     });
     let now = Instant::now();
     let mut told = state.told.lock().unwrap();
-    if told
-        .get(&id)
-        .is_none_or(|at| now.duration_since(*at) >= Duration::from_millis(250))
+    let end = total.is_some_and(|total| done >= total);
+    if end
+        || told
+            .get(&id)
+            .is_none_or(|at| now.duration_since(*at) >= crate::live::NOTIFY_EVERY)
     {
         told.insert(id, now);
-        let _ = handle.emit("downloads-changed", ());
+        drop(told);
+        let _ = handle.emit(
+            "video-progress",
+            Progress {
+                id,
+                done,
+                total,
+                speed,
+            },
+        );
+        crate::downloads::tell_progress(handle);
     }
 }
 

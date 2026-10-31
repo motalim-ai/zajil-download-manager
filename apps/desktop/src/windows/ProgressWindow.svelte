@@ -143,6 +143,7 @@
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
     void (async () => {
       await startWindow();
       const finish = await api.finishSetting().catch(() => null);
@@ -152,11 +153,16 @@
         closeWhenDone = finish.close_window;
       }
       unlisten = await api.onChange(() => void load());
+      // Its own download's progress ticks, twice a second.
+      unlistenProgress = await api.onProgress((rows) => rows.some((d) => d.id === id) && void load());
       await load();
       await tick();
       document.getElementById("progress-pause")?.focus();
     })();
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      unlistenProgress?.();
+    };
   });
 
   async function finished() {

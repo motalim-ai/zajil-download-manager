@@ -4,7 +4,8 @@
 //! sends the user's commands to the queues file, and shows what happens.
 //!
 //! The page asks for a [`view::Snapshot`] when told that something changed
-//! (event `downloads-changed`, at most four times a second).
+//! (event `downloads-changed`), and the running rows at each progress
+//! tick (`downloads-progress`, at most twice a second).
 
 #![forbid(unsafe_code)]
 

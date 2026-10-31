@@ -13,4 +13,12 @@ describe("the list while the window is hidden", () => {
     expect(unseen.take(4, false)).toBe(4);
     expect(unseen.waiting).toBe(false);
   });
+
+  it("reads the list again for a progress tick missed while hidden", () => {
+    const unseen = new Unseen<number>();
+    unseen.miss();
+    expect(unseen.waiting).toBe(true);
+    expect(unseen.take(5, false)).toBe(5);
+    expect(unseen.waiting).toBe(false);
+  });
 });

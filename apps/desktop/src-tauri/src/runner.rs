@@ -18,18 +18,27 @@ use crate::{App, background, complete, schedule};
 /// allows, so the last change of a burst is never lost.
 pub(crate) fn notify(handle: &tauri::AppHandle, live: &Arc<Live>) {
     match live.notify_at(Instant::now()) {
-        Notify::Now => {
-            let _ = handle.emit("downloads-changed", ());
-        }
+        Notify::Now => tell(handle, live),
         Notify::Later(wait) => {
             let (handle, live) = (handle.clone(), live.clone());
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(wait.min(NOTIFY_EVERY)).await;
                 live.notified_later(Instant::now());
-                let _ = handle.emit("downloads-changed", ());
+                tell(&handle, &live);
             });
         }
         Notify::Scheduled => {}
+    }
+}
+
+/// The notification itself: the whole list changed, or only the running
+/// downloads' progress (then only their rows go: the owner's choice, after
+/// measuring the list's cost).
+fn tell(handle: &tauri::AppHandle, live: &Live) {
+    if live.take_changed() {
+        let _ = handle.emit("downloads-changed", ());
+    } else {
+        crate::downloads::tell_progress(handle);
     }
 }
 

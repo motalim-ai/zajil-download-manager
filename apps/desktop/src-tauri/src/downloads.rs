@@ -49,6 +49,24 @@ pub(crate) async fn snapshot<R: tauri::Runtime>(
     listed(&app, &handle).await
 }
 
+/// A progress tick (`live.rs`): the running downloads' rows, as the list
+/// shows them, to the list and the progress windows; the rest of the list
+/// did not change.
+pub(crate) fn tell_progress<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let app = handle.state::<App>();
+        if let Ok(snapshot) = listed(&app, &handle).await {
+            let running: Vec<view::DownloadView> = snapshot
+                .downloads
+                .into_iter()
+                .filter(|d| d.status == view::StatusView::Active)
+                .collect();
+            let _ = handle.emit("downloads-progress", running);
+        }
+    });
+}
+
 /// What the list shows: the queues' downloads, then the videos, without
 /// those a window still asks about. The page's, and Zajil's own while the
 /// main window is freed in the tray (`in_tray.rs`).

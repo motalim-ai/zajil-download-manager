@@ -38,6 +38,7 @@
   import { scheduleApi } from "./lib/scheduleApi";
   import { showTrayTip, trayTip } from "./lib/trayTip";
 import { Unseen } from "./lib/unseen";
+import { patchRows } from "./lib/progressRows";
   import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
@@ -316,6 +317,26 @@ import { Unseen } from "./lib/unseen";
       const back = ["details-refresh", "details-resume", "details-pause", "details-back"].map((id) => document.getElementById(id)).find((b) => b);
       back?.focus();
     });
+  }
+
+  // A progress tick: only the running rows change (`lib/progressRows.ts`);
+  // the whole list is read when one of them is new to it.
+  function progressed(rows: Snapshot["downloads"]) {
+    showTrayTip(trayTip(rows, locale.lang, locale.digits, locale.t));
+    if (document.visibilityState === "hidden") {
+      unseen.miss();
+      return;
+    }
+    if (!patchRows(snapshot.downloads, rows)) {
+      void refresh();
+      return;
+    }
+    const id = details?.download.id;
+    if (id !== undefined && rows.some((d) => d.id === id)) {
+      void api.details(id).then((fresh) => {
+        if (details?.download.id === id) details = fresh;
+      }, () => {});
+    }
   }
 
   async function refreshLink(url: string) {
@@ -932,6 +953,7 @@ import { Unseen } from "./lib/unseen";
   onMount(() => {
     locale.set("ar");
     let unlisten: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
     let unlistenClipboard: (() => void) | undefined;
     let unlistenMenu: (() => void) | undefined;
     let unlistenView: (() => void) | undefined;
@@ -945,6 +967,7 @@ import { Unseen } from "./lib/unseen";
       });
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
+      unlistenProgress = await api.onProgress(progressed);
       const first = refresh();
       // A copied download link waits in the paste bar, and the window
       // shows; nothing asks the server before the user presses "Download"
@@ -975,6 +998,7 @@ import { Unseen } from "./lib/unseen";
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       unlisten?.();
+      unlistenProgress?.();
       unlistenClipboard?.();
       unlistenMenu?.();
       unlistenView?.();
