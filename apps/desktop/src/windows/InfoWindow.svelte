@@ -6,6 +6,7 @@
   import { startWindow } from "../lib/windowStart";
   import { showFitted } from "../lib/fitWindow";
   import { locale } from "../lib/i18n.svelte";
+  import { looksLikeAVideoPage } from "../lib/videoPage";
   import type { ProbeView } from "../lib/bindings/ProbeView";
   import type { AddRequest } from "../lib/bindings/AddRequest";
   import type { QueueView } from "../lib/bindings/QueueView";
@@ -87,6 +88,16 @@
       // The user added it before the server answered: it is not started
       // a second time.
       if (busy || added) return;
+      // A video site's page answers the engine's probe with the site's
+      // page itself (a web page), never a video (`videoPage.ts` says
+      // which sites): «Video quality» (M6) reads it the engine cannot,
+      // with its formats or its playlist. A link of the user's own, not
+      // one the browser was downloading (that is a file's address).
+      if (offer === null && probe.page && looksLikeAVideoPage(url)) {
+        await api.openVideo(url).catch(() => {});
+        await api.closeWindow();
+        return;
+      }
       const prefs = await api.addPrefs().catch(() => null);
       if (busy || added) return;
       if ((prefs?.start_at_once ?? true) && !probe.page && !runsCode) {

@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- feat(desktop): رابط صفحة فيديو في «إضافة رابط» يفتح «جودة الفيديو» لنفسه بدل تحذير «صفحة ويب» (اختبار المالك برابط youtu.be)
+
 ## [1.1.3] - 2026-10-30
 
 What the owner and users asked for after 1.1.2. Tried by hand on macOS by the owner; on Windows and Linux, checked by CI only.
