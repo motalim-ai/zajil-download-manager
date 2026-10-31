@@ -6426,6 +6426,7 @@ dependencies = [
  "drag",
  "jiff",
  "minisign-verify",
+ "regex",
  "serde",
  "serde_json",
  "tauri",
