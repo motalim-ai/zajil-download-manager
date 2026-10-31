@@ -37,6 +37,7 @@
   import type { DownloadView } from "./lib/bindings/DownloadView";
   import { scheduleApi } from "./lib/scheduleApi";
   import { showTrayTip, trayTip } from "./lib/trayTip";
+import { Unseen } from "./lib/unseen";
   import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
@@ -250,14 +251,18 @@
   // Snapshots can come back out of order: only the latest asked counts
   // (review of #45: an older one could win and stay).
   let asked = 0;
+  // Not drawn while the window is hidden or minimized (`lib/unseen.ts`).
+  const unseen = new Unseen<Snapshot>();
   async function refresh() {
     const mine = ++asked;
     try {
       const next = await api.snapshot();
       if (mine !== asked) return;
-      snapshot = next;
-      announce(snapshot.downloads);
+      announce(next.downloads);
       showTrayTip(trayTip(next.downloads, locale.lang, locale.digits, locale.t));
+      const drawn = unseen.take(next, document.visibilityState === "hidden");
+      if (!drawn) return;
+      snapshot = drawn;
       error = snapshot.problem;
       // The details follow the list: closed when their download is gone
       // (review of #48: they stayed, stale, and every refresh failed), and
@@ -962,7 +967,13 @@
       // The list is drawn (timed with `ZAJIL_MEASURE=1`).
       void api.windowPainted().catch(() => {});
     })();
+    // Shown again: the list as it is now.
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && unseen.waiting) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
       unlisten?.();
       unlistenClipboard?.();
       unlistenMenu?.();
