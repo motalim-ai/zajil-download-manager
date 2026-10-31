@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- العربية هي لغة زاجِل الأولى (ADR-0012): هذه النصوص الافتراضية، والإنجليزية في values-en. -->
+<resources>
+    <string name="app_name">زاجِل</string>
+    <string name="link">رابط التحميل</string>
+    <string name="download">تحميل</string>
+    <string name="paste">لصق</string>
+    <string name="empty">الصق رابط ملف واضغط «تحميل».</string>
+    <string name="pause">إيقاف مؤقت</string>
+    <string name="resume">استكمال</string>
+    <string name="cancel">إلغاء التحميل</string>
+    <string name="delete">حذف</string>
+    <string name="open">فتح</string>
+    <string name="remove_from_list">إزالة من القائمة</string>
+    <string name="status_running">يُحمَّل</string>
+    <string name="status_interrupted">توقف مع البرنامج، يُستكمل عند فتحه</string>
+    <string name="status_paused">متوقف مؤقتًا</string>
+    <string name="status_publishing">يُنقل إلى مجلد التحميلات</string>
+    <string name="status_done">اكتمل، في Download/Zajil</string>
+    <string name="problem_network">انقطع الاتصال، ويمكن استكماله</string>
+    <string name="problem_server">رفض السيرفر الطلب</string>
+    <string name="problem_space">لا توجد مساحة كافية</string>
+    <string name="problem_certificate">شهادة الموقع غير صالحة، فلم يُحمَّل شيء</string>
+    <string name="problem_link">هذا الرابط لا يمكن تحميله</string>
+    <string name="problem_other">فشل التحميل</string>
+    <!-- %1$s ما نزل، و%2$s الحجم كله، و%3$d النسبة. -->
+    <string name="size_of_total">%1$s من %2$s (%3$d٪)</string>
+    <string name="channel_progress">التحميلات الجارية</string>
+    <string name="channel_stopped">التحميلات المتوقفة</string>
+    <string name="tap_to_resume">اضغط للاستكمال من حيث توقف</string>
+    <plurals name="running">
+        <item quantity="zero">لا تحميلات</item>
+        <item quantity="one">تحميل واحد</item>
+        <item quantity="two">تحميلان</item>
+        <item quantity="few">%d تحميلات</item>
+        <item quantity="many">%d تحميلًا</item>
+        <item quantity="other">%d تحميل</item>
+    </plurals>
+    <plurals name="stopped">
+        <item quantity="zero">لا تحميلات متوقفة</item>
+        <item quantity="one">تحميل متوقف</item>
+        <item quantity="two">تحميلان متوقفان</item>
+        <item quantity="few">%d تحميلات متوقفة</item>
+        <item quantity="many">%d تحميلًا متوقفًا</item>
+        <item quantity="other">%d تحميل متوقف</item>
+    </plurals>
+</resources>

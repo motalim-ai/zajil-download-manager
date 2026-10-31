@@ -325,13 +325,14 @@ mod imp {
         Ok(pid_of(&info) != 0)
     }
 
-    #[cfg(target_os = "linux")]
+    // Android's libc lays out `siginfo_t` as Linux does.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     fn pid_of(info: &libc::siginfo_t) -> libc::pid_t {
         // SAFETY: waitid filled the SIGCHLD fields, or left them zeroed.
         unsafe { info.si_pid() }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     fn pid_of(info: &libc::siginfo_t) -> libc::pid_t {
         info.si_pid
     }

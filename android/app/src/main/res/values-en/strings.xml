@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zajil</string>
+    <string name="link">Download link</string>
+    <string name="download">Download</string>
+    <string name="paste">Paste</string>
+    <string name="empty">Paste a file\'s link and tap Download.</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="cancel">Cancel download</string>
+    <string name="delete">Delete</string>
+    <string name="open">Open</string>
+    <string name="remove_from_list">Remove from list</string>
+    <string name="status_running">Downloading</string>
+    <string name="status_interrupted">Stopped with the app; resumes when it opens</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_publishing">Moving to the Download folder</string>
+    <string name="status_done">Done, in Download/Zajil</string>
+    <string name="problem_network">The connection was lost; it can be resumed</string>
+    <string name="problem_server">The server refused the request</string>
+    <string name="problem_space">Not enough space</string>
+    <string name="problem_certificate">The site\'s certificate is not valid; nothing was downloaded</string>
+    <string name="problem_link">This link cannot be downloaded</string>
+    <string name="problem_other">The download failed</string>
+    <string name="size_of_total">%1$s of %2$s (%3$d%%)</string>
+    <string name="channel_progress">Running downloads</string>
+    <string name="channel_stopped">Stopped downloads</string>
+    <string name="tap_to_resume">Tap to resume from where it stopped</string>
+    <plurals name="running">
+        <item quantity="one">%d download</item>
+        <item quantity="other">%d downloads</item>
+    </plurals>
+    <plurals name="stopped">
+        <item quantity="one">%d stopped download</item>
+        <item quantity="other">%d stopped downloads</item>
+    </plurals>
+</resources>

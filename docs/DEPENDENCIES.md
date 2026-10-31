@@ -55,6 +55,8 @@
 | `tauri-plugin-single-instance` | 2.5.4 | Apache-2.0 أو MIT | `zajil-desktop` | نسخة واحدة من زاجِل للمستخدم: حين تكون النافذة مخفية في شريط النظام، فتح زاجِل مرة أخرى يُظهرها بدل أن يبدأ برنامجًا ثانيًا على الطوابير نفسها (في ويندوز ولينكس فقط؛ وفي ماك قناة زاجِل الخاصة في مجلد بياناته، لأن الإضافة هناك تستمع في مسار ثابت في `/tmp`، #60). لا يُستعمل مع `--data-dir` (الاختبارات والصور). لا يجلب حزمًا أخرى | M5.5 |
 | `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
+| `uniffi` | 0.32.2 | MPL-2.0 | `zajil-android` | واجهة Kotlin لمحرّك تطبيق أندرويد (ADR-0012): الأنواع والأخطاء والـ callbacks تتولد من Rust، بلا JNI مكتوب باليد. ومعه `uniffi_core` و`uniffi_macros` وما معهما (MPL-2.0، وMIT أو Apache-2.0). **وميزة `bindgen`** (أداة `uniffi-bindgen` التي تكتب ملف Kotlin وقت البناء، ولا تدخل التطبيق) تجلب `askama` و`basic-toml` (MIT أو Apache-2.0)؛ و`basic-toml` «غير مصونة» (RUSTSEC-2026-0374، ليست ثغرة)، فهي مستثناة في `deny.toml` بسببها | A1 |
+| `jni` | 0.22.4 | MIT أو Apache-2.0 | `zajil-android` (أندرويد فقط) | نقطة JNI الوحيدة: تعطي `Context` التطبيق لـ `rustls-platform-verifier` ليفحص الشهادات بمخزن أندرويد (ADR-0012، القسم 2). وهي أصلًا تحت `rustls-platform-verifier` في أندرويد، بنفس الإصدار | A1 |
 
 ## مكتبات الواجهة والإضافة (npm)
 
@@ -140,5 +142,24 @@
 |---|---|---|
 | خط Alexandria (500 إلى 900، عربي ولاتيني) | OFL-1.1 | خط العناوين في الموقع |
 | خط IBM Plex Sans Arabic (400 و500 و600 و700، عربي ولاتيني) | OFL-1.1 | خط النص في الموقع، وهو خط واجهة البرنامج نفسه |
+
+</div>
+
+<div dir="rtl">
+
+## تطبيق أندرويد (`android/`، ADR-0012)
+
+الإصدارات في `android/gradle/libs.versions.toml`. **لا مكتبة إعلانات ولا تحليلات ولا تقارير أعطال، ولا Google Play Services**، وفحص الـ manifest في البناء يرفض أي صلاحية أو مكوّن مصدَّر تضيفه مكتبة دون أن يكون في ADR-0012.
+
+| المكتبة | الإصدار | الترخيص | تدخل التطبيق؟ | السبب |
+|---|---|---|---|---|
+| AndroidX: `core-ktx` و`activity-compose` و`lifecycle-runtime-compose` و`lifecycle-service` | 1.19.1 و1.13.0 و2.11.0 و2.11.0 | Apache-2.0 | نعم | الإشعارات والخدمة الأمامية والواجهة |
+| Jetpack Compose (`compose-bom`) و Material 3 | 2026.09.00 | Apache-2.0 | نعم | الواجهة. وأُزيلت أدوات المعاينة (`ui-tooling`) لأنها تضيف نشاطًا مصدَّرًا في نسخة التطوير |
+| `kotlinx-coroutines-android` | 1.11.0 | Apache-2.0 | نعم | نقل الملف المكتمل إلى مجلد التحميلات خارج الخيط الرئيسي |
+| JNA (`net.java.dev.jna:jna`) | 5.19.1 | Apache-2.0 أو LGPL-2.1 أو أحدث (نستعمله بـ Apache-2.0) | نعم | ما تستدعي به ملفات UniFFI المولَّدة المحرّك. ومعه `libjnidispatch.so` |
+| `org.rustls:rustls-platform-verifier` (Android AAR) | من `Cargo.lock` (اليوم 0.2.0) | MIT أو Apache-2.0 | نعم | جزء Kotlin من `rustls-platform-verifier`، الذي يفحص به المحرّك الشهادات بمخزن أندرويد. ينشره أصحابه فقط في مستودع Maven على GitHub (`maven-archive`)، فهو المستودع الوحيد غير google() وmavenCentral()، ومقصور على المجموعة `org.rustls`. وإصداره يُقرأ من `Cargo.lock` فيطابق جزء Rust دائمًا |
+| Android Gradle Plugin وKotlin وGradle (wrapper) | 9.4.1 و2.4.21 و9.8.2 | Apache-2.0 | لا (بناء) | البناء. والـ wrapper نفس ما في مشروع المالك الآخر |
+| `cargo-ndk` | 4.1.2 | MIT أو Apache-2.0 | لا (بناء) | بناء المحرّك لأندرويد بمترجم الـ NDK (`android/build-engine.sh`) |
+| Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
 
 </div>

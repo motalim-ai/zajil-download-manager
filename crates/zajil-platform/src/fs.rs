@@ -672,7 +672,35 @@ mod imp {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    /// Android: bionic has `renameat2` only from API 30, so the system
+    /// call itself (Linux 3.15, older than any kernel Android 8 runs).
+    #[cfg(target_os = "android")]
+    #[allow(unsafe_code)]
+    pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+        let (from_c, to_c) = (c_path(from)?, c_path(to)?);
+        // SAFETY: both pointers are valid NUL-terminated strings that live
+        // until the call returns; AT_FDCWD resolves them like `rename`.
+        let rc = unsafe {
+            libc::syscall(
+                libc::SYS_renameat2,
+                libc::AT_FDCWD,
+                from_c.as_ptr(),
+                libc::AT_FDCWD,
+                to_c.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::EINVAL) | Some(libc::ENOSYS) => link_then_unlink(from, to),
+            _ => Err(err),
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[allow(unsafe_code)]
     // The field types are 32 bits on some targets.
     #[allow(clippy::useless_conversion)]
@@ -721,12 +749,12 @@ mod imp {
         Ok(stats.f_bavail.saturating_mul(u64::from(stats.f_bsize)))
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "android")))]
     pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
         link_then_unlink(from, to)
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "android")))]
     pub fn available_space(_dir: &Path) -> io::Result<u64> {
         Err(io::ErrorKind::Unsupported.into())
     }

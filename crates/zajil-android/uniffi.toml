@@ -1,0 +1,4 @@
+# The Kotlin bindings (ADR-0012): in the app's own package.
+[bindings.kotlin]
+package_name = "io.github.motalim_ai.zajil.engine"
+cdylib_name = "zajil_android"
