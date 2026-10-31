@@ -7,21 +7,24 @@
   import { onMac } from "../keys";
 
   // The main window's title bar (the design of #83): the logo and «زاجِل
-  // لإدارة التحميل» on the right in both languages (the owner's choice,
-  // 2026-10-31: the logo keeps its place when the language changes). The
-  // window is dragged by it and a double-click maximizes it
+  // لإدارة التحميل» always on the side away from the window's buttons
+  // (the owner's choice, 2026-11-01), so the two never crowd each other.
+  // The window is dragged by it and a double-click maximizes it
   // (`data-tauri-drag-region`).
   // - macOS: the system's bar is hidden under the page (`Overlay`); its
-  //   coloured buttons are on the left, or on the right on a Mac in
-  //   Arabic, so the bar leaves room for them on both sides.
+  //   coloured buttons are on the left, or on the right on a Mac whose
+  //   first language reads right to left. The logo takes the other side.
   // - Windows and Linux: the window has no system frame
   //   (`tauri.windows.conf.json`, `tauri.linux.conf.json`): the minimize,
   //   maximize and close buttons are here, at the end of the reading
-  //   direction. Close goes the way the system's does (into the tray, #109).
+  //   direction, and the logo at its start. Close goes the way the
+  //   system's does (into the tray, #109).
   const mac = onMac();
   // The Mac's coloured buttons follow the system's first language, not
   // Zajil's: on the right when it reads right to left.
   const buttonsRight = mac && /^(ar|he|fa|ur|ps|sd|ug|yi|dv|ckb)(-|$)/i.test(navigator.language);
+  // Where the logo goes: opposite the buttons.
+  const brandRight = $derived(mac ? !buttonsRight : locale.dir === "rtl");
   const win = getCurrentWindow();
   let maximized = $state(false);
 
@@ -36,9 +39,9 @@
 </script>
 
 <!-- "deep": the logo and the name drag too; the buttons do not. -->
-<!-- Laid out left to right whatever the language, so the brand stays on
-     the right; the brand reads in the language's own direction. -->
-<div class="titlebar" class:mac class:buttons-right={buttonsRight} class:rtl={locale.dir === "rtl"} dir="ltr" data-tauri-drag-region="deep">
+<!-- Laid out left to right, the sides chosen above; the brand reads in
+     the language's own direction. -->
+<div class="titlebar" class:mac class:buttons-right={buttonsRight} class:brand-right={brandRight} dir="ltr" data-tauri-drag-region="deep">
   <span class="brand" dir={locale.dir}>
     <Mark size={18} />
     <span class="name">{locale.t("app-title")}</span>
@@ -68,7 +71,7 @@
     display: flex;
     align-items: center;
     height: 34px;
-    padding-right: 12px;
+    padding: 0 12px;
     background: var(--frame, var(--sunken));
     border-bottom: 1px solid var(--line);
     user-select: none;
@@ -86,8 +89,10 @@
     padding-left: 12px;
     padding-right: 80px;
   }
-  .brand {
+  .brand-right .brand {
     margin-left: auto;
+  }
+  .brand {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -95,18 +100,18 @@
     font-weight: 600;
     color: var(--ink);
   }
-  /* Windows and Linux: the window's buttons stay at the end of the
-     reading direction, on the right in English (after the brand) and on
+  /* Windows and Linux: the window's buttons at the end of the reading
+     direction, flush with the window's edge: on the right in English, on
      the left in Arabic. */
   .controls {
     display: flex;
     height: 100%;
-    margin-left: 8px;
+    margin-left: auto;
     margin-right: -12px;
   }
-  .rtl .controls {
+  .brand-right .controls {
     order: -1;
-    margin-left: 0;
+    margin-left: -12px;
     margin-right: 0;
   }
   .ctl {
