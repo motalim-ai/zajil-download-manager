@@ -40,8 +40,10 @@ mod resume;
 mod transfer;
 
 pub(crate) use files::{blocking, save_state};
-use http::{Redirects, build_client, error_chain};
-pub(crate) use http::{changed_from, http_error, if_range_value, parse_content_range, parse_url};
+use http::{build_client, error_chain};
+pub(crate) use http::{
+    changed_from, get_following, http_error, if_range_value, parse_content_range, parse_url,
+};
 pub use probe::{FetchedPage, Probe, is_page_type};
 pub(crate) use transfer::{EmptyDownloadCleanup, NewDownload, finish_download};
 
@@ -270,6 +272,10 @@ pub enum Error {
     Http(#[source] reqwest::Error),
     #[error("the server answered {0}")]
     Status(StatusCode),
+    /// A redirect Zajil does not follow: one too many, to a scheme other
+    /// than http and https, or from https to http.
+    #[error("{0}")]
+    Redirect(String),
     #[error(
         "the server asks to wait {} s before more requests; try again later",
         .wait.as_secs()
@@ -354,10 +360,10 @@ pub enum Error {
 /// The download engine. Cheap to share; one client is reused.
 #[derive(Debug, Clone)]
 pub struct Engine {
+    /// It follows no redirect itself ([`get_following`] does):
+    /// [`Engine::fetch_page`] returns the redirect, whose caller checks
+    /// each target first.
     client: Client,
-    /// The same client, but it never follows a redirect: for
-    /// [`Engine::fetch_page`], whose caller checks each target first.
-    page_client: Client,
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
@@ -408,11 +414,9 @@ pub mod engine_test_hooks {
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
-        let client = build_client(&options, &[], Redirects::Follow)?;
-        let page_client = build_client(&options, &[], Redirects::Never)?;
+        let client = build_client(&options, &[])?;
         Ok(Engine {
             client,
-            page_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),
@@ -431,11 +435,9 @@ impl Engine {
     /// trusted root, and CI checks that its release build lacks the feature.
     #[cfg(feature = "test-support")]
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
-        let client = build_client(&options, &[ca_der.to_vec()], Redirects::Follow)?;
-        let page_client = build_client(&options, &[ca_der.to_vec()], Redirects::Never)?;
+        let client = build_client(&options, &[ca_der.to_vec()])?;
         Ok(Engine {
             client,
-            page_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),

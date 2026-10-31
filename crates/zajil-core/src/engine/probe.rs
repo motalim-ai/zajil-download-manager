@@ -245,7 +245,7 @@ impl Engine {
         read: ReadBody,
     ) -> Result<FetchedPage, Error> {
         let url = parse_url(url)?;
-        let request = self.browser.apply(&url, self.page_client.get(url.clone()));
+        let request = self.browser.apply(&url, self.client.get(url.clone()));
         let mut response = tokio::select! {
             result = request.send() => result.map_err(|err| Error::Http(without_secrets(err)))?,
             () = stop.requested() => return Err(Error::Stopped { state_file: None }),

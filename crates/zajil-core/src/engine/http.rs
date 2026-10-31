@@ -32,41 +32,14 @@ pub(super) enum ReadBody {
     Any,
 }
 
-/// Whether a client follows redirects ([`build_client`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Redirects {
-    /// Up to [`Options::max_redirects`], never from https to http: every
-    /// download, probe and refresh.
-    Follow,
-    /// Never: [`Engine::fetch_page`] returns the redirect itself.
-    Never,
-}
-
-pub(super) fn build_client(
-    options: &Options,
-    extra_roots: &[Vec<u8>],
-    redirects: Redirects,
-) -> Result<Client, Error> {
+/// The engine's client. It follows no redirect itself: [`get_following`]
+/// does, so that each hop gets the headers for its own address.
+pub(super) fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Error> {
     // rustls with the `ring` provider, and reqwest's built-in use of the
     // operating system's certificate store and checks
     // (`rustls-platform-verifier`). Nothing here can turn verification off.
     // Installing fails harmlessly if a provider is already installed.
     let _ = rustls::crypto::ring::default_provider().install_default();
-
-    let max_redirects = options.max_redirects;
-    let follow = redirect::Policy::custom(move |attempt| {
-        let downgrade = attempt.url().scheme() != "https"
-            && attempt.previous().iter().any(|url| url.scheme() == "https");
-        if attempt.previous().len() > max_redirects {
-            attempt.error(format!("more than {max_redirects} redirects"))
-        } else if !matches!(attempt.url().scheme(), "http" | "https") {
-            attempt.error("redirect to an unsupported scheme")
-        } else if downgrade {
-            attempt.error("refusing a redirect from https to http")
-        } else {
-            attempt.follow()
-        }
-    });
 
     let mut builder = Client::builder().tls_backend_rustls();
     for der in extra_roots {
@@ -75,13 +48,10 @@ pub(super) fn build_client(
             builder.tls_certs_merge([reqwest::Certificate::from_der(der).map_err(Error::Http)?]);
     }
     let builder = builder
-        .redirect(match redirects {
-            Redirects::Follow => follow,
-            Redirects::Never => redirect::Policy::none(),
-        })
-        // No `Referer` of our own: after a redirect reqwest would send the
-        // redirecting link, with its `?sig=…` token, to the target (review
-        // of #74). The browser's page is sent by `FromBrowser` instead.
+        .redirect(redirect::Policy::none())
+        // No `Referer` of our own: it would send the redirecting link, with
+        // its `?sig=…` token, to the target (review of #74). The browser's
+        // page is sent by `FromBrowser` instead.
         .referer(false)
         .connect_timeout(options.connect_timeout)
         .read_timeout(options.idle_timeout)
@@ -493,23 +463,85 @@ impl Engine {
         })
     }
 
-    /// One GET of `url`, as it is.
+    /// One GET of `url`, as it is, following its redirects.
     async fn send(
         &self,
         url: Url,
         range: Option<(u64, Option<u64>, String)>,
     ) -> Result<Response, Error> {
-        let mut request = self.browser.apply(&url, self.client.get(url.clone()));
-        if let Some((from, to, if_range)) = range {
-            let to = to.map(|to| to.to_string()).unwrap_or_default();
-            request = request
-                .header(header::RANGE, format!("bytes={from}-{to}"))
-                .header(header::IF_RANGE, if_range);
-        }
-        request
+        get_following(
+            &self.client,
+            &self.browser,
+            self.options.max_redirects,
+            url,
+            |request| match &range {
+                Some((from, to, if_range)) => {
+                    let to = to.map(|to| to.to_string()).unwrap_or_default();
+                    request
+                        .header(header::RANGE, format!("bytes={from}-{to}"))
+                        .header(header::IF_RANGE, if_range)
+                }
+                None => request,
+            },
+        )
+        .await
+    }
+}
+
+/// A GET of `url` with `client`, `more` added to it, and of each address
+/// it redirects to, up to `max_redirects`, never from https to http.
+///
+/// Each hop's headers are worked out for its own address, as a browser
+/// does: the browser's cookies only on their origin, the page (`Referer`)
+/// whole only to its own origin, and a user name and password in `url`
+/// only to `url`'s origin. reqwest, following redirects itself, sent the
+/// first request's headers again on every hop after the first that changed
+/// origin (security review for 1.2.3).
+pub(crate) async fn get_following(
+    client: &Client,
+    browser: &crate::browser::FromBrowser,
+    max_redirects: usize,
+    url: Url,
+    more: impl Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+) -> Result<Response, Error> {
+    let first = url.origin();
+    let (user, password) = (url.username().to_owned(), url.password().map(str::to_owned));
+    let mut url = url;
+    let mut was_https = false;
+    let mut hops = 0;
+    loop {
+        let response = more(browser.apply(&url, client.get(url.clone())))
             .send()
             .await
-            .map_err(|err| Error::Http(without_secrets(err)))
+            .map_err(|err| Error::Http(without_secrets(err)))?;
+        let followed = matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308);
+        let Some(mut next) = followed
+            .then(|| header_str(response.headers(), header::LOCATION))
+            .flatten()
+            .and_then(|to| url.join(to).ok())
+        else {
+            return Ok(response);
+        };
+        was_https |= url.scheme() == "https";
+        hops += 1;
+        if hops > max_redirects {
+            return Err(Error::Redirect(format!(
+                "more than {max_redirects} redirects"
+            )));
+        }
+        if !matches!(next.scheme(), "http" | "https") {
+            return Err(Error::Redirect("redirect to an unsupported scheme".into()));
+        }
+        if was_https && next.scheme() != "https" {
+            return Err(Error::Redirect(
+                "refusing a redirect from https to http".into(),
+            ));
+        }
+        if next.origin() == first && next.username().is_empty() && next.password().is_none() {
+            let _ = next.set_username(&user);
+            let _ = next.set_password(password.as_deref());
+        }
+        url = next;
     }
 }
 

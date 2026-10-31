@@ -358,6 +358,7 @@ impl Engine {
                 let job = Job {
                     client: self.client.clone(),
                     browser: self.browser.clone(),
+                    max_redirects: self.options.max_redirects,
                     connections: self.options.connections,
                     min_segment: self.options.min_segment_size,
                     request_size: self.options.request_size,
