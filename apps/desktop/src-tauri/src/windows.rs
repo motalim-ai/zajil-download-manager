@@ -241,8 +241,8 @@ pub struct Role {
     pub page: String,
 }
 
-/// The kinds of window made beforehand: the ones that open most, and that
-/// the user waits for.
+/// The kinds of window that can be made beforehand: the ones that open
+/// most, and that the user waits for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Kind {
     Link,
@@ -251,7 +251,12 @@ enum Kind {
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Info, Kind::Link, Kind::Progress];
+    /// The ones made beforehand: «Download file info» alone, the window
+    /// opened most (every download from the browser, and from «Add a
+    /// link»). Each spare is a page of its own, about 20 MB on macOS; the
+    /// others open in about 0.1 s without one (the owner's choice, after
+    /// measuring three: 56 MB).
+    const SPARE: [Kind; 1] = [Kind::Info];
 
     /// The kind of the window in role `label`.
     fn of(label: &str) -> Option<Kind> {
@@ -396,7 +401,7 @@ pub fn warm<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     if crate::in_scene(handle) || !crate::measure::pool_on() {
         return;
     }
-    for kind in Kind::ALL {
+    for kind in Kind::SPARE {
         refill(handle, kind, std::time::Duration::from_millis(300));
     }
 }
@@ -721,6 +726,15 @@ pub fn drop_spares<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One window made beforehand, «Download file info»; the others are
+    /// made when they open (the owner's choice).
+    #[test]
+    fn only_download_file_info_is_made_beforehand() {
+        assert_eq!(Kind::SPARE, [Kind::Info]);
+        assert_eq!(Kind::of(INFO), Some(Kind::Info));
+        assert_eq!(Kind::of(&format!("{INFO}-3")), Some(Kind::Info));
+    }
 
     #[test]
     fn a_window_starts_with_nothing_waiting() {
