@@ -13,15 +13,15 @@ import kotlinx.coroutines.withContext
 
 /**
  * A newer yt-dlp than the one in the APK, from Android's own signed list
- * (ADR-0012, section 8): `tools-android.json` in the project's latest
- * release, signed by one of the project's two update keys, checked in
+ * (ADR-0012, section 8): `tools-android.json` on the `android-channel`
+ * pre-release, signed by one of the project's two update keys, checked in
  * Rust. Only when the user asks (Settings), never by itself. The file comes
  * from yt-dlp's own release of that version and is checked against the
  * list's SHA-256 when it arrives, and again every time Zajil starts.
  */
 object ToolsUpdate {
     private const val LIST =
-        "https://github.com/motalim-ai/zajil-download-manager/releases/latest/download/tools-android.json"
+        "https://github.com/motalim-ai/zajil-download-manager/releases/download/android-channel/tools-android.json"
 
     /** The list this APK's yt-dlp counts as: every published list is newer. */
     private const val BUILT_IN_SEQUENCE = 0uL
