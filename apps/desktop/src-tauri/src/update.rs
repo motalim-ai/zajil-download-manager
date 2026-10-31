@@ -232,6 +232,13 @@ where
 #[derive(Default)]
 pub struct ExtensionOld(Mutex<Option<String>>);
 
+impl ExtensionOld {
+    /// The version it said, if it did.
+    pub fn version(&self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// An old extension said its version: kept, and the main window told.
 pub fn extension_old<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, version: &str) {
     *handle.state::<ExtensionOld>().0.lock().unwrap() = Some(version.to_owned());

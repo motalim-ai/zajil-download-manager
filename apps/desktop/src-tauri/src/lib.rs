@@ -19,6 +19,7 @@ mod live;
 mod measure;
 mod menu;
 mod offers;
+mod problem;
 mod removal;
 mod saving;
 mod schedule;
@@ -543,6 +544,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::update_install,
         update::extension_old_notice,
         update::open_extension_help,
+        problem::copy_problem_info,
         complete::drag_out
     ]
 }
@@ -664,6 +666,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         update::update_install,
         update::extension_old_notice,
         update::open_extension_help,
+        problem::copy_problem_info,
         complete::drag_out,
         ui_test::ui_test_scenario,
         ui_test::ui_test_report,
@@ -2775,7 +2778,13 @@ async fn copy_links<R: tauri::Runtime>(
     if links.is_empty() || in_scene(&handle) {
         return Ok(links.len());
     }
-    let text = links.join("\n");
+    copy_text(&app, links.join("\n")).await?;
+    Ok(links.len())
+}
+
+/// `text` on the clipboard, kept so the clipboard monitoring does not
+/// offer it back.
+async fn copy_text(app: &App, text: String) -> Result<(), String> {
     if let Ok(mut copied) = app.copied.lock() {
         copied.clone_from(&text);
     }
@@ -2791,8 +2800,7 @@ async fn copy_links<R: tauri::Runtime>(
     })
     .await
     .map_err(blocking_err)?
-    .map_err(|e| e.to_string())?;
-    Ok(links.len())
+    .map_err(|e| e.to_string())
 }
 
 /// Takes downloads off the list and deletes their unfinished files (the

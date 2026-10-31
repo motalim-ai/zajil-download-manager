@@ -683,13 +683,26 @@
     await api.quitApp();
   }
 
-  // «About»: the version, and the video tools (`lib/about.ts`).
+  // «About»: the version, and the video tools (`lib/about.ts`); and «Copy
+  // problem info» for a report (owner's decision, 2026-10-31: copied, never
+  // sent by Zajil).
   async function about() {
     const version = await api.appVersion().catch(() => "");
     const tools = await api.videoToolsStatus().catch(() => []);
     const more = toolLines((key, args) => locale.t(key, args), tools);
     const text = [locale.t("about-text", { version }), ...(more.length ? ["", ...more] : [])].join("\n");
-    await message(text, { title: locale.t("app-name"), kind: "info" }).catch(() => {});
+    const copy = await ask(text, {
+      title: locale.t("app-name"),
+      kind: "info",
+      okLabel: locale.t("about-copy-problem"),
+      cancelLabel: locale.t("win-close"),
+    }).catch(() => false);
+    if (!copy) return;
+    const done = await api.copyProblemInfo().then(
+      () => true,
+      () => false,
+    );
+    await message(locale.t(done ? "about-copied-problem" : "about-copy-failed"), { title: locale.t("app-name"), kind: done ? "info" : "error" }).catch(() => {});
   }
 
   // Copy (Ctrl+C, or the system's Copy on macOS) on the table is «Copy

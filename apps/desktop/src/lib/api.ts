@@ -92,6 +92,8 @@ export const api = {
     listen<string>("menu-command", (event) => handler(event.payload)),
   quitApp: () => invoke<void>("quit_app"),
   appVersion: () => invoke<string>("app_version"),
+  /** «Copy problem info»: what a report needs, on the clipboard. */
+  copyProblemInfo: () => invoke<void>("copy_problem_info"),
   /** Opens a finished download (`folder` false) or shows its folder. */
   /** `false`: the file can run code, and opens only once the user is
    * `sure`. */
