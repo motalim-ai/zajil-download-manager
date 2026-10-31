@@ -973,7 +973,7 @@ describe("the background", () => {
   it("A: the desktop app's answer for a web page is the one the extension knows", async () => {
     const { readFileSync } = await import("node:fs");
     const { isPageRefusal } = await import("../src/capture.js");
-    const rust = readFileSync(new URL("../../desktop/src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const rust = readFileSync(new URL("../../desktop/src-tauri/src/extension.rs", import.meta.url), "utf8");
     const why = rust.match(/"(the server sent a web page[^"]*)"/)?.[1];
     expect(why).toBeTruthy();
     expect(isPageRefusal({ outcome: "refused", error: `Zajil cannot download it: ${why}` })).toBe(true);
