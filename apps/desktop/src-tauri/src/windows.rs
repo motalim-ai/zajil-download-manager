@@ -606,8 +606,10 @@ pub(crate) fn open_beside_main<R: tauri::Runtime>(
     title: &str,
     size: (f64, f64),
 ) -> tauri::Result<()> {
+    // Freed in the tray (`main_window.rs`), it is still there for this.
     let main_is_up = |h: &tauri::AppHandle<R>| {
-        h.get_webview_window("main").is_some()
+        (h.get_webview_window("main").is_some()
+            || h.state::<crate::main_window::MainWindow>().freed())
             && !h
                 .state::<App>()
                 .exiting
@@ -617,6 +619,9 @@ pub(crate) fn open_beside_main<R: tauri::Runtime>(
         return Ok(());
     }
     open_page(handle, label, page, title, size, true)?;
+    if let Some(window) = find(handle, label) {
+        crate::main_window::owns(handle, &window);
+    }
     if !main_is_up(handle)
         && let Some(window) = find(handle, label)
     {
@@ -633,7 +638,10 @@ pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     };
     let app = handle.clone();
     main.on_window_event(move |event| {
-        if let tauri::WindowEvent::Destroyed = event {
+        // Freed in the tray, it is no end (`main_window.rs`).
+        if let tauri::WindowEvent::Destroyed = event
+            && !app.state::<crate::main_window::MainWindow>().freed()
+        {
             for (label, window) in app.webview_windows() {
                 if label != "main" {
                     let _ = window.close();
@@ -689,8 +697,25 @@ pub async fn open_settings<R: tauri::Runtime>(
 /// category»).
 #[tauri::command]
 pub fn show_main_view<R: tauri::Runtime>(view: String, handle: tauri::AppHandle<R>) {
-    crate::tray::show_window(&handle);
-    let _ = handle.emit_to("main", "main-view", view);
+    crate::main_window::send(&handle, "main-view", view);
+}
+
+/// Destroys the spare windows (`main_window.rs`: freed with the main one;
+/// the next main page makes them again).
+pub fn drop_spares<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let spares: Vec<String> = handle
+        .state::<Pool>()
+        .spares
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, label)| label)
+        .collect();
+    for label in spares {
+        if let Some(window) = handle.get_webview_window(&label) {
+            let _ = window.destroy();
+        }
+    }
 }
 
 #[cfg(test)]

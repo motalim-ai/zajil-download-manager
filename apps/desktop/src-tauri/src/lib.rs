@@ -20,9 +20,11 @@ mod dropbox;
 mod extension;
 mod files;
 mod grab;
+mod in_tray;
 mod instance;
 mod integration;
 mod live;
+mod main_window;
 mod measure;
 mod menu;
 mod offers;
@@ -47,7 +49,7 @@ mod windows;
 /// windows against them.
 pub use windows::{INFO_SIZE, LINK_SIZE};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -130,6 +132,85 @@ fn start_line(process: u32) -> String {
     )
 }
 
+/// What the commands share, for data folder `data`, with the settings as
+/// they are now.
+fn new_app(data: &Path, system_download_dir: PathBuf) -> App {
+    let settings = SettingsStore::new(data);
+    // A damaged settings file is shown when the page asks for it; the
+    // downloads run with the defaults meanwhile.
+    let loaded = settings.load();
+    let connections = loaded
+        .as_ref()
+        .map(|s| s.connections as usize)
+        .unwrap_or(zajil_core::DEFAULT_CONNECTIONS);
+    // Off with a damaged settings file, as by default.
+    let clipboard = loaded.as_ref().is_ok_and(|s| s.clipboard);
+    // The per-site connection limits of the settings (#165): none with a
+    // damaged file, as by default.
+    let sites = loaded
+        .as_ref()
+        .map(zajil_core::sites::SiteLimits::from_settings)
+        .unwrap_or_default();
+    // The user's proxy, read at the start (a change applies at the next).
+    let proxy = loaded.as_ref().ok().and_then(|s| s.proxy.clone());
+    App {
+        engine: Engine::new(Options {
+            proxy: proxy.clone(),
+            ..Options::default()
+        })
+        // A proxy the engine cannot use: straight to the servers, as
+        // before it was set (the settings say it).
+        .or_else(|_| Engine::new(Options::default()))
+        .expect("the engine starts")
+        .with_site_limits(sites),
+        store: QueueStore::new(data),
+        categories: CategoryStore::new(data),
+        settings,
+        system_download_dir,
+        connections: Arc::new(AtomicUsize::new(connections)),
+        clipboard: Arc::new(AtomicBool::new(clipboard)),
+        copied: Arc::default(),
+        copier: Arc::default(),
+        data_dir: data.to_path_buf(),
+        from_browser: Arc::default(),
+        links: zajil_host::Links::default(),
+        asks: Arc::default(),
+        integration: Arc::default(),
+        live: Arc::new(Live::default()),
+        stop: Stop::new(),
+        stopped: tokio::sync::watch::Sender::new(false),
+        exiting: AtomicBool::new(false),
+        page_ready: AtomicBool::new(false),
+        probing: std::sync::Mutex::new(None),
+        refreshing: refresh::Refreshing::default(),
+    }
+}
+
+/// `builder` with the state of Zajil's parts: `app`, and each one's own.
+fn managed<R: tauri::Runtime>(
+    builder: tauri::Builder<R>,
+    app: App,
+    data: &Path,
+    close_quits: bool,
+) -> tauri::Builder<R> {
+    builder
+        .manage(app)
+        .manage(windows::Shared::default())
+        .manage(windows::Pool::default())
+        .manage(background::Held::default())
+        .manage(offers::Offers::default())
+        .manage(video::VideoState::default())
+        .manage(batch::Pending::default())
+        .manage(grab::GrabState::default())
+        .manage(closing::Closing::new(data, close_quits))
+        .manage(schedule::SharedAfter::default())
+        .manage(complete::Show::default())
+        .manage(update::Notice::default())
+        .manage(update::ExtensionOld::default())
+        .manage(main_window::MainWindow::default())
+        .manage(in_tray::InTray::default())
+}
+
 pub fn run() {
     measure::start();
     // Started from the Finder, the Start menu or a desktop file, what Zajil
@@ -148,55 +229,7 @@ pub fn run() {
     let system_download_dir = SystemPaths::new()
         .map(|p| p.download_dir().to_path_buf())
         .unwrap_or_else(|_| data.join("Downloads"));
-    let settings = SettingsStore::new(&data);
-    // A damaged settings file is shown when the page asks for it; the
-    // downloads run with the defaults meanwhile.
-    let loaded = settings.load();
-    let connections = loaded
-        .as_ref()
-        .map(|s| s.connections as usize)
-        .unwrap_or(zajil_core::DEFAULT_CONNECTIONS);
-    // Off with a damaged settings file, as by default.
-    let clipboard = loaded.as_ref().is_ok_and(|s| s.clipboard);
-    // The per-site connection limits of the settings (#165): none with a
-    // damaged file, as by default.
-    let sites = loaded
-        .as_ref()
-        .map(zajil_core::sites::SiteLimits::from_settings)
-        .unwrap_or_default();
-    // The user's proxy, read at the start (a change applies at the next).
-    let proxy = loaded.as_ref().ok().and_then(|s| s.proxy.clone());
-    let app = App {
-        engine: Engine::new(Options {
-            proxy: proxy.clone(),
-            ..Options::default()
-        })
-        // A proxy the engine cannot use: straight to the servers, as
-        // before it was set (the settings say it).
-        .or_else(|_| Engine::new(Options::default()))
-        .expect("the engine starts")
-        .with_site_limits(sites),
-        store: QueueStore::new(&data),
-        categories: CategoryStore::new(&data),
-        settings,
-        system_download_dir,
-        connections: Arc::new(AtomicUsize::new(connections)),
-        clipboard: Arc::new(AtomicBool::new(clipboard)),
-        copied: Arc::default(),
-        copier: Arc::default(),
-        data_dir: data.clone(),
-        from_browser: Arc::default(),
-        links: zajil_host::Links::default(),
-        asks: Arc::default(),
-        integration: Arc::default(),
-        live: Arc::new(Live::default()),
-        stop: Stop::new(),
-        stopped: tokio::sync::watch::Sender::new(false),
-        exiting: AtomicBool::new(false),
-        page_ready: AtomicBool::new(false),
-        probing: std::sync::Mutex::new(None),
-        refreshing: refresh::Refreshing::default(),
-    };
+    let app = new_app(&data, system_download_dir);
     #[cfg(unix)]
     let signals = shutdown::stop_signals();
     // One Zajil per user: with its window hidden in the tray, opening Zajil
@@ -232,23 +265,13 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
-        ))
-        .manage(app)
-        .manage(windows::Shared::default())
-        .manage(windows::Pool::default())
-        .manage(background::Held::default())
-        .manage(offers::Offers::default())
-        .manage(video::VideoState::default())
-        .manage(batch::Pending::default())
-        .manage(grab::GrabState::default())
-        .manage(closing::Closing::new(
-            &data,
-            args.iter().any(|a| a == "--close-quits"),
-        ))
-        .manage(schedule::SharedAfter::default())
-        .manage(complete::Show::default())
-        .manage(update::Notice::default())
-        .manage(update::ExtensionOld::default());
+        ));
+    let builder = managed(
+        builder,
+        app,
+        &data,
+        args.iter().any(|a| a == "--close-quits"),
+    );
     #[cfg(feature = "ui-test")]
     let builder = builder.manage(ui_test::UiTest::from_args(&args));
     builder
@@ -264,10 +287,13 @@ pub fn run() {
                 // A command of the main window, chosen while another is in
                 // front: the main window comes forward to do it (#98: the
                 // others ignored everything but Select all).
-                if to == "main" && front != "main" {
-                    tray::show_window(handle);
+                // Through `main_window`: a main window freed in the tray
+                // is made again, and the command waits for its page.
+                if to == "main" {
+                    main_window::send(handle, "menu-command", command.to_owned());
+                } else {
+                    let _ = handle.emit_to(to, "menu-command", command.to_owned());
                 }
-                let _ = handle.emit_to(to, "menu-command", command.to_owned());
             }
         })
         .invoke_handler(handlers())
@@ -377,6 +403,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("the window opens")
         .run(|handle, event| match event {
+            // The last window went because the main one was freed in the
+            // tray (`main_window.rs`): Zajil goes on. A quit has a code.
+            tauri::RunEvent::ExitRequested {
+                api, code: None, ..
+            } if handle.state::<main_window::MainWindow>().freed() => {
+                api.prevent_exit();
+            }
             tauri::RunEvent::ExitRequested { api, .. } => {
                 let app = handle.state::<App>();
                 // The second request is ours, below: let it exit.
@@ -722,6 +755,66 @@ fn in_scene<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> bool {
         let _ = handle;
         false
     }
+}
+
+/// The app on Tauri's mock runtime, for the tests: Zajil's own state and
+/// commands on data folder `data`, and its main window, made from the
+/// configuration as at the start.
+#[cfg(test)]
+pub(crate) fn mock_app(data: &Path) -> tauri::App<tauri::test::MockRuntime> {
+    let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+    context.config_mut().app.windows = vec![tauri::utils::config::WindowConfig {
+        label: main_window::LABEL.into(),
+        ..Default::default()
+    }];
+    let app = managed(
+        tauri::test::mock_builder(),
+        new_app(data, data.join("Downloads")),
+        data,
+        false,
+    )
+    .invoke_handler(handlers())
+    .build(context)
+    .unwrap();
+    #[cfg(feature = "ui-test")]
+    app.manage(ui_test::UiTest::from_args(&[]));
+    let config = app.config().app.windows[0].clone();
+    tauri::WebviewWindowBuilder::from_config(&app, &config)
+        .unwrap()
+        .build()
+        .unwrap();
+    closing::watch(app.handle());
+    windows::close_with_main(app.handle());
+    app
+}
+
+/// Command `cmd` with `body`, called from `window`'s page, for the tests.
+#[cfg(test)]
+pub(crate) fn invoke_for_test(
+    window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+    cmd: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, serde_json::Value> {
+    tauri::test::get_ipc_response(
+        window,
+        tauri::webview::InvokeRequest {
+            cmd: cmd.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            // The page's own origin: anything else is refused.
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
+            body: tauri::ipc::InvokeBody::Json(body),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        },
+    )
+    .map(|answer| answer.deserialize().unwrap())
 }
 
 #[cfg(test)]

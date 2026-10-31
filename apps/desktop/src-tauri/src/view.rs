@@ -90,6 +90,35 @@ pub struct DownloadView {
     pub video: bool,
 }
 
+#[cfg(test)]
+impl DownloadView {
+    /// A paused download with nothing set, for the tests to fill in.
+    pub fn empty_for_test() -> Self {
+        DownloadView {
+            id: 0,
+            name: String::new(),
+            host: None,
+            size: None,
+            done: 0,
+            speed: 0.0,
+            status: StatusView::Paused,
+            queue: String::new(),
+            category: None,
+            folder: String::new(),
+            parts: Vec::new(),
+            segments: 0,
+            error: None,
+            waits_for_browser: false,
+            waits_for_site: false,
+            description: None,
+            last_try: None,
+            added: None,
+            needs_ok: false,
+            video: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct QueueView {

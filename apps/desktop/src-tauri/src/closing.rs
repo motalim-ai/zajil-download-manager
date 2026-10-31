@@ -223,6 +223,7 @@ pub fn watch<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
             }
             OnClose::Hide { notice } => {
                 let _ = window.hide();
+                crate::main_window::closed(&app);
                 // Kept as said only once it was (review of #109: before
                 // the page gave the texts, it was lost for good).
                 if notice && show_notice(&app, &closing) {

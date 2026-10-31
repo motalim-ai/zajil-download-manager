@@ -14,6 +14,7 @@ import SettingsWindow from "./windows/SettingsWindow.svelte";
 import { completeApi, loadShow } from "./lib/completeApi";
 import { api } from "./lib/api";
 import { loadSettings, startWindow } from "./lib/windowStart";
+import { play, type Sound } from "./lib/sounds";
 import type { Role } from "./lib/bindings/Role";
 
 // One page for every window (M5.5): `?win=` says which one this is.
@@ -40,13 +41,20 @@ function draw(win: string | null) {
       { target: target! },
     );
   // Drawn (timed with `ZAJIL_MEASURE=1`): at once, not at the next frame,
-  // which a window behind another app may never get.
-  void api.windowPainted().catch(() => {});
+  // which a window behind another app may never get. The main page says
+  // it itself once its list is drawn and it listens (`App.svelte`): what
+  // waited for it then goes (`main_window.rs`).
+  if (win !== null) void api.windowPainted().catch(() => {});
 }
 
 // A window made beforehand, hidden (`windows.rs`): its page loads and its
 // settings are read now; it is drawn when it takes a role and shows.
-if (asked === "spare") {
+if (asked === "sound") {
+  // A sound while the main window is freed in the tray (`sounds.rs`): only
+  // the tones, in a window never shown, which Zajil closes.
+  const sound = new URLSearchParams(location.search).get("sound");
+  if (sound === "done" || sound === "failed" || sound === "queue") play(sound as Sound);
+} else if (asked === "spare") {
   void startWindow();
   let drawn = false;
   const take = (role: Role | null) => {

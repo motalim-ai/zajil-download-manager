@@ -28,6 +28,16 @@ pub fn show() -> Option<String> {
         .filter(|v| v == "settings" || v == "add-info")
 }
 
+/// `ZAJIL_MEASURE=tray`: once the main window is up, Zajil closes it into
+/// the tray as the close button does, then shows it again, saying when
+/// (`zajil-measure: tray …` lines, with the seconds since the start), so
+/// its memory and CPU can be read in each state. `ZAJIL_MEASURE_TRAY=a,b`:
+/// closed `a` seconds after its page is up, shown `b` seconds later (40
+/// and 60 by default; the tests use less).
+pub fn tray() -> bool {
+    std::env::var_os("ZAJIL_MEASURE").is_some_and(|v| v == "tray")
+}
+
 /// Whether the windows are made beforehand (`ZAJIL_POOL=0`: no).
 pub fn pool_on() -> bool {
     std::env::var_os("ZAJIL_POOL").is_none_or(|v| v != "0")
@@ -50,6 +60,11 @@ pub fn asked(role: &str) {
 /// The page of the window that asks drew its first frame.
 #[tauri::command]
 pub fn window_painted<R: tauri::Runtime>(window: tauri::WebviewWindow<R>) {
+    // The main page listens now: what waited for it goes.
+    if window.label() == crate::main_window::LABEL {
+        use tauri::Manager;
+        crate::main_window::painted(window.app_handle());
+    }
     if !on() {
         return;
     }
@@ -103,6 +118,38 @@ pub fn resized<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, from: f64, t
 pub fn drive<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     const ROUNDS: usize = 6;
     let handle = handle.clone();
+    if tray() {
+        // Once: the main window that comes back asks again.
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            tauri::async_runtime::spawn(async move {
+                let say = |what: &str| {
+                    eprintln!(
+                        "zajil-measure: tray {what} at {:.0} s",
+                        STARTED.elapsed().as_secs_f64()
+                    );
+                };
+                let (close, show) = std::env::var("ZAJIL_MEASURE_TRAY")
+                    .ok()
+                    .and_then(|v| {
+                        let (a, b) = v.split_once(',')?;
+                        Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+                    })
+                    .unwrap_or((40, 60));
+                say("open");
+                tokio::time::sleep(Duration::from_secs(close)).await;
+                use tauri::Manager;
+                if let Some(main) = handle.get_webview_window("main") {
+                    let _ = main.close();
+                }
+                say("closed");
+                tokio::time::sleep(Duration::from_secs(show)).await;
+                crate::tray::show_window(&handle);
+                say("shown");
+            });
+        });
+        return;
+    }
     if let Some(window) = show() {
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;

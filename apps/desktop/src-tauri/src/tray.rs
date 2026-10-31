@@ -10,11 +10,11 @@
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::closing;
 
-const ID: &str = "zajil";
+pub const ID: &str = "zajil";
 
 fn menu<R: Runtime, M: Manager<R>>(
     app: &M,
@@ -42,13 +42,15 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             // The page's Quit, which asks first while downloads run (owner's
             // decision on #83), its window shown for the question; without
             // the window, the same path as closing it.
-            "quit" => match app.get_webview_window("main") {
-                Some(_) => {
-                    show_window(app);
-                    let _ = app.emit_to("main", "menu-command", "quit");
+            "quit" => {
+                if app.get_webview_window("main").is_some()
+                    || app.state::<crate::main_window::MainWindow>().freed()
+                {
+                    crate::main_window::send(app, "menu-command", "quit");
+                } else {
+                    app.exit(0);
                 }
-                None => app.exit(0),
-            },
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -76,13 +78,10 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Shows the window and brings it to the front.
+/// Shows the window and brings it to the front, made again if it was
+/// freed in the tray (`main_window.rs`).
 pub fn show_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    crate::main_window::show(app);
 }
 
 /// The longest tooltip Windows shows (`NOTIFYICONDATAW::szTip` holds 128
@@ -101,7 +100,7 @@ pub fn set_tray_tooltip<R: Runtime>(handle: AppHandle<R>, text: String) -> Resul
 }
 
 /// `text` cut to [`TIP_UNITS`] UTF-16 units, at a character's edge.
-fn fit(text: &str) -> String {
+pub(crate) fn fit(text: &str) -> String {
     let mut units = 0;
     text.chars()
         .take_while(|c| {

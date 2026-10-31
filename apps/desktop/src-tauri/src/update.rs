@@ -228,6 +228,26 @@ pub fn check_at_start(handle: &tauri::AppHandle) {
     });
 }
 
+/// A newer release found, as the check at the start records it, for the
+/// tests.
+#[cfg(test)]
+pub fn found_for_test<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, version: &str) {
+    *handle.state::<Notice>().0.lock().unwrap() = Some(NewRelease {
+        version: version.to_owned(),
+        page: format!(
+            "https://github.com/motalim-ai/zajil-download-manager/releases/tag/v{version}"
+        ),
+    });
+    let _ = handle.emit_to(
+        "main",
+        "update-available",
+        UpdateView {
+            version: version.to_owned(),
+            can_install: false,
+        },
+    );
+}
+
 /// The newer release `check` finds, when the check is `on`; nothing is
 /// asked when it is off, and a failure is only logged.
 async fn found<F, Fut>(on: bool, check: F) -> Option<NewRelease>

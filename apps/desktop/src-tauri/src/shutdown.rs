@@ -2,7 +2,7 @@
 //! request to exit, a stop signal, or the end of a Windows session.
 
 #[cfg(windows)]
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[cfg(windows)]
@@ -108,40 +108,87 @@ pub(crate) async fn exit_on_signal(handle: tauri::AppHandle, mut signals: StopSi
 /// when the window is closed; then, once nothing is being written, the
 /// process is ended at once: its usual exit waited seconds for WebView2
 /// (#81). Only here: the other ways of quitting exit as before.
+///
+/// Heard on a hidden window of Zajil's own, with no page
+/// (`zajil_platform::session::watch_session_end`), so it is heard while the
+/// main window is freed in the tray (`main_window.rs`) and Zajil shows none;
+/// and on the main window too while there is one, as before (Windows may
+/// ask it first).
 #[cfg(windows)]
 pub(crate) fn on_windows_session_end(tauri_app: &tauri::App) -> tauri::Result<()> {
-    let Some(window) = tauri_app.get_webview_window("main") else {
+    let handle = tauri_app.handle().clone();
+    zajil_platform::session::watch_session_end(session_end(handle.clone()))
+        .map_err(tauri::Error::Io)?;
+    hook_window(&handle)
+}
+
+/// The main window hears the session end: at the start, and once made
+/// again (`main_window.rs`). On the main thread, which owns the window.
+#[cfg(windows)]
+fn hook_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    let Some(window) = handle.get_webview_window("main") else {
         return Ok(());
     };
-    let handle = tauri_app.handle().clone();
     let hwnd = window.hwnd()?.0 as isize;
-    zajil_platform::session::on_session_end(
-        hwnd,
-        Box::new(move || {
-            eprintln!("zajil: asked to stop (the Windows session is ending)");
-            let app = handle.state::<App>();
-            if !app.exiting.swap(true, Ordering::SeqCst) {
-                app.stop.request();
-            }
-            let asked = std::time::Instant::now();
-            let stopped = tauri::async_runtime::block_on(wait_for_queues(
-                app.stopped.subscribe(),
-                SESSION_END_WAIT,
-            ));
-            // Kept until the end: no write starts after.
-            let (_held, late) = saving::hold(&app.data_dir, asked + SESSION_END_WAIT);
-            let still: Vec<_> = (!stopped).then_some("downloads").into_iter().chain(late).collect();
-            if still.is_empty() {
-                eprintln!("zajil: saved; terminating to finish the session end");
-            } else {
+    zajil_platform::session::on_session_end(hwnd, session_end(handle.clone()))
+        .map_err(tauri::Error::Io)
+}
+
+/// The main window, made again, hears the session end as the first one
+/// did; elsewhere, nothing.
+pub(crate) fn hook_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    #[cfg(windows)]
+    {
+        let main = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if let Err(err) = hook_window(&main) {
                 eprintln!(
-                    "zajil: not everything saved within {} s (still writing: {}); terminating to finish the session end",
-                    SESSION_END_WAIT.as_secs(),
-                    still.join(", ")
+                    "zajil: the main window cannot watch for the end of the Windows session: {err}"
                 );
             }
-            zajil_platform::session::terminate();
-        }),
-    )
-    .map_err(tauri::Error::Io)
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = handle;
+}
+
+/// What the session end does, on whichever window hears it first; the
+/// others wait for the end (the first one ends the process).
+#[cfg(windows)]
+fn session_end<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Box<dyn Fn() + Send + 'static> {
+    Box::new(move || {
+        static ENDING: AtomicBool = AtomicBool::new(false);
+        if ENDING.swap(true, Ordering::SeqCst) {
+            loop {
+                std::thread::park();
+            }
+        }
+        eprintln!("zajil: asked to stop (the Windows session is ending)");
+        let app = handle.state::<App>();
+        if !app.exiting.swap(true, Ordering::SeqCst) {
+            app.stop.request();
+        }
+        let asked = std::time::Instant::now();
+        let stopped = tauri::async_runtime::block_on(wait_for_queues(
+            app.stopped.subscribe(),
+            SESSION_END_WAIT,
+        ));
+        // Kept until the end: no write starts after.
+        let (_held, late) = saving::hold(&app.data_dir, asked + SESSION_END_WAIT);
+        let still: Vec<_> = (!stopped)
+            .then_some("downloads")
+            .into_iter()
+            .chain(late)
+            .collect();
+        if still.is_empty() {
+            eprintln!("zajil: saved; terminating to finish the session end");
+        } else {
+            eprintln!(
+                "zajil: not everything saved within {} s (still writing: {}); terminating to finish the session end",
+                SESSION_END_WAIT.as_secs(),
+                still.join(", ")
+            );
+        }
+        zajil_platform::session::terminate();
+    })
 }

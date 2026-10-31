@@ -22,21 +22,40 @@ use crate::{App, background, blocking_err, measure, removal, video, windows};
 pub(crate) async fn snapshot<R: tauri::Runtime>(
     app: State<'_, App>,
     handle: tauri::AppHandle<R>,
+    window: tauri::WebviewWindow<R>,
 ) -> Result<Snapshot, String> {
-    if !app.page_ready.swap(true, Ordering::SeqCst) {
+    // The main page's first look: other windows read the list too (the
+    // schedule's, «Download file info»), and are not it.
+    let main = window.label() == crate::main_window::LABEL;
+    if main && !app.page_ready.swap(true, Ordering::SeqCst) {
         // The page is up and talking to the program (the open-and-close
         // check of CI waits for this line).
         eprintln!("zajil: the window is ready");
         // The windows the user waits for are made now, hidden.
         windows::warm(&handle);
-        if measure::on() || measure::show().is_some() {
+        if measure::on() || measure::show().is_some() || measure::tray() {
             measure::drive(&handle);
         }
+    }
+    // The first look of a main page made again: what Zajil said in the
+    // tray while there was none, it says from now (`in_tray.rs`).
+    if main {
+        crate::in_tray::hand_over(&handle).await;
     }
     #[cfg(feature = "ui-test")]
     if let Some(snapshot) = handle.state::<ui_test::UiTest>().demo() {
         return Ok(snapshot);
     }
+    listed(&app, &handle).await
+}
+
+/// What the list shows: the queues' downloads, then the videos, without
+/// those a window still asks about. The page's, and Zajil's own while the
+/// main window is freed in the tray (`in_tray.rs`).
+pub(crate) async fn listed<R: tauri::Runtime>(
+    app: &App,
+    handle: &tauri::AppHandle<R>,
+) -> Result<Snapshot, String> {
     let (store, categories, live) = (app.store.clone(), app.categories.clone(), app.live.clone());
     let mut snapshot =
         tokio::task::spawn_blocking(move || read_snapshot(&store, &categories, &live))
