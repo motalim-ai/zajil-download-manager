@@ -1,0 +1,3 @@
+# SHA-256 of the certificate that signs Zajil for Android (public; the owner's key, RSA 4096, alias zajil, made 2026-11-01).
+# The release workflow refuses an APK whose certificate is not this one; users check it with «apksigner verify --print-certs».
+22:09:58:0E:C2:9E:F4:9A:F1:E0:81:82:22:9F:10:0B:E2:18:16:0D:AD:7C:D9:38:84:BB:D7:0C:D9:E1:C9:E0
