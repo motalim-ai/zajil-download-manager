@@ -326,6 +326,10 @@ private fun DownloadCard(
     val context = LocalContext.current
     val c = Z.colors
     var menu by remember { mutableStateOf(false) }
+    var moving by remember { mutableStateOf(false) }
+    val queues by context.downloads.settings.queues.collectAsStateWithLifecycle()
+    // Another queue to move it to: only while it is not done or being made.
+    val movable = queues.size > 1 && download.status !in setOf(Status.Done, Status.Merging, Status.Publishing)
     val shape = RoundedCornerShape(16.dp)
     val id = download.id
     val look = statusLook(download.status)
@@ -411,7 +415,17 @@ private fun DownloadCard(
                     item(R.string.remove_from_list) { actions.remove(id) }
                 }
             }
+            if (movable) item(R.string.move_to_queue) { moving = true }
         }
+    }
+    if (moving) {
+        ChoiceSheet(
+            stringResource(R.string.move_to_queue),
+            queues.map { it.id to queueName(it) },
+            chosen = queue.id,
+            onChoose = { to -> context.downloads.moveToQueue(id, to) },
+            onDismiss = { moving = false },
+        )
     }
 }
 

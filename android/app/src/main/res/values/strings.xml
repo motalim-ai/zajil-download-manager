@@ -19,6 +19,7 @@
     <string name="no_link_text">النص المشارَك ليس فيه رابط يبدأ بـ http أو https.</string>
     <string name="start_now">ابدأ الآن</string>
     <string name="move_up">تقديم</string>
+    <string name="move_to_queue">نقل إلى طابور</string>
     <string name="wait_schedule">ينتظر موعد القائمة (%1$s)</string>
     <string name="wait_network">ينتظر عودة الشبكة</string>
     <string name="wait_wifi">ينتظر الواي فاي</string>

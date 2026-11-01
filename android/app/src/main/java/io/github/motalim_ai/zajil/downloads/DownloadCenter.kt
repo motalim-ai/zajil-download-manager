@@ -307,6 +307,23 @@ class DownloadCenter(private val context: Context) {
         _list.value.filter { inQueue(it, queue) && it.status == Status.Running }.forEach(::stopEngine)
     }
 
+    /**
+     * Moves [id] to [queue], at the end of its turn there: from now on
+     * that queue's rules apply (a running download stops if they forbid it).
+     */
+    fun moveToQueue(id: Long, queue: Long) {
+        val to = settings.queue(queue).id
+        change { list ->
+            val last = list.filter { QueuePlan.queueOf(it, settings.queues.value) == to }.maxOfOrNull { it.order } ?: 0
+            list.map { if (it.id == id && it.queue != to) it.copy(queue = to, order = last + 1) else it }
+        }
+        find(id)?.takeIf { it.status == Status.Running && !network.state.value.allows(rulesOf(it)) }?.let {
+            requeued += it.id
+            stopEngine(it)
+        }
+        pump()
+    }
+
     /** «Pause all»: every queue stops, as «Stop» on each. */
     fun stopAllQueues() = settings.queues.value.forEach { stopQueue(it.id) }
 
