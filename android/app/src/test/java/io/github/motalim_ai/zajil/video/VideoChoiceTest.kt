@@ -167,6 +167,24 @@ class VideoChoiceTest {
     }
 
     @Test
+    fun a_silent_video_is_offered_by_its_pictures_instagram_as_read_on_the_mac() {
+        // Instagram says has_audio false: yt-dlp gives every format acodec «none».
+        val i = info(
+            Format("0", "mp4", null, "none", null, null, null, null, null, null, null, "https://i/0", null, false),
+            video("dash-840v", 840, "avc1.64001F", "mp4"),
+            video("dash-1280v", 1280, "avc1.64001F", "mp4"),
+        )
+        assertEquals(listOf(1280, 840), VideoChoice.qualities(i))
+        assertEquals(listOf(Sound(null, original = true)), VideoChoice.sounds(i))
+        val picked = VideoChoice.pick(i, 1280, Sound(null, original = true))!!
+        assertEquals("dash-1280v", picked.video!!.id)
+        assertNull(picked.audio)
+        assertTrue(picked.whole)
+        // One sound anywhere, and a picture alone is again only for joining.
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(info(whole("sd", null), video("dash-840v", 840, "vp09", "mp4"))))
+    }
+
+    @Test
     fun hls_is_one_stream_saved_as_mp4_never_joined() {
         val playlist = Format("hls-720", "mp4", "avc1", "mp4a", 720, null, 2000.0, null, null, null, null, "https://l/720.m3u8", null, false, hls = true)
         val i = info(playlist)

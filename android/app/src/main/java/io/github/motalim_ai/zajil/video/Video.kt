@@ -36,6 +36,9 @@ data class Format(
      */
     val isWhole get() = !hasDrm && ((hasVideo && hasAudio) || (vcodec == null && acodec == null))
 
+    /** A picture the site says has no sound (codec said or not), as one file. */
+    val isSilentPicture get() = !hasDrm && !hls && acodec == "none" && vcodec != "none"
+
     /**
      * How much its sound is the video's own, as on the desktop
      * (`zajil-core` video.rs, `sound_rank`): yt-dlp marks the original
@@ -164,8 +167,15 @@ object VideoChoice {
         else -> f.acodec!!.startsWith("mp4a")
     }
 
-    /** Whole files (picture and sound in one), not HLS. */
-    private fun wholes(info: VideoInfo) = info.formats.filter { !it.hls && it.isWhole }
+    /**
+     * Whole files (picture and sound in one), not HLS. A video with no
+     * sound at all (every format says so: Instagram's silent reels) has its
+     * pictures for whole files.
+     */
+    private fun wholes(info: VideoInfo) =
+        if (silent(info)) info.formats.filter { it.isSilentPicture } else info.formats.filter { !it.hls && it.isWhole }
+
+    private fun silent(info: VideoInfo) = info.formats.isNotEmpty() && info.formats.all { it.acodec == "none" }
 
     private fun playlists(info: VideoInfo) = info.formats.filter { it.hls && !it.hasDrm }
 
