@@ -11,6 +11,7 @@ import io.github.motalim_ai.zajil.engine.LinkInfo
 import io.github.motalim_ai.zajil.engine.Listener
 import io.github.motalim_ai.zajil.engine.Problem
 import io.github.motalim_ai.zajil.engine.Tuning
+import io.github.motalim_ai.zajil.protection
 import io.github.motalim_ai.zajil.video.Muxer
 import io.github.motalim_ai.zajil.video.Picked
 import io.github.motalim_ai.zajil.video.PlaylistEntry
@@ -64,7 +65,8 @@ class DownloadCenter(private val context: Context) {
 
     private val _list = MutableStateFlow(load())
     val list: StateFlow<List<Download>> = _list.asStateFlow()
-    private val engine = Downloads(EngineListener())
+    // No download, nor a redirect of one, goes to a harmful site (0.3.0).
+    private val engine = Downloads(EngineListener()).also { it.setHostCheck(context.protection.hostCheck) }
     val settings = QueueSettings(context)
     val prefs = AppPrefs(context)
 

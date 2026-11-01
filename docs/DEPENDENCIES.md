@@ -175,4 +175,17 @@
 | JUnit 4 (`junit:junit`) | 4.13.2 | EPL-1.0 | لا (اختبار فقط) | اختبارات منطق التطبيق على JVM (`android/app/src/test`). لا يدخل التطبيق أبدًا، فلا يمس ترخيصه GPL-3.0 |
 | Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
 
+### قوائم الحماية في تطبيق أندرويد (`android/app/src/main/assets/blocklists`، ADR-0012 القسم 17)
+
+بيانات لا كود: تُجمع إلى أسماء مواقع بـ `tools/blocklists/compile.py`، وكل ملف يبدأ بأسماء مصادره وتراخيصها. المصادر في `tools/blocklists/sources.txt`، وتُحدَّث فقط من ملف موقّع.
+
+| القائمة | المصدر | الترخيص | تدخل التطبيق؟ | ملاحظة |
+|---|---|---|---|---|
+| EasyList | easylist.to | GPL-3.0 أو أحدث، أو CC BY-SA 3.0 (نستعمله بـ GPL-3.0) | نعم (بيانات) | الإعلانات |
+| AdGuard Mobile Ads (11) | filters.adtidy.org | GPL-3.0 | نعم (بيانات) | إعلانات الهاتف |
+| EasyPrivacy | easylist.to | GPL-3.0 أو أحدث، أو CC BY-SA 3.0 (نستعمله بـ GPL-3.0) | نعم (بيانات) | المتتبعات |
+| urlhaus-filter (hosts) | malware-filter.gitlab.io | CC0-1.0 وMIT، وبياناته من URLhaus بـ CC0 | نعم (بيانات) | المواقع الضارة |
+| phishing-filter (hosts) | malware-filter.gitlab.io | CC BY-SA 4.0، وبياناته من OpenPhish وIPThreat وPhishTank | نعم (بيانات) | الاحتيال. **ينتظر قرار المالك** في شروط OpenPhish وPhishTank (ADR-0012 القسم 17) |
+| ~~Liste AR~~ | — | CC BY-NC-SA | **لا** | استُبعدت: «غير تجاري» لا يتوافق مع GPL-3.0 |
+
 </div>

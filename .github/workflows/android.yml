@@ -28,11 +28,11 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "build, channel (after publishing a release) or tools-android"
+        description: "build, channel (after publishing a release), tools-android or lists-android"
         required: true
         default: build
         type: choice
-        options: [build, channel, tools-android]
+        options: [build, channel, tools-android, lists-android]
       version:
         description: "For channel: the published version, X.Y.Z"
         required: false
@@ -304,3 +304,79 @@ jobs:
               --notes "Signed files that Zajil for Android reads to find its update and yt-dlp's (ADR-0012, section 8). Not a release."
           fi
           gh release upload android-channel tools-android.json tools-android.json.minisig --clobber
+
+  lists-android:
+    name: Compile, sign and publish the protection lists
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'lists-android'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Only from main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run it from main only"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Compile the lists from tools/blocklists/sources.txt
+        run: |
+          set -euo pipefail
+          sequence="$(date -u +%s)"
+          mkdir -p work out
+          entries=()
+          for list in ads trackers malware phishing; do
+            n=0
+            while read -r name url _; do
+              [ "$name" = "$list" ] || continue
+              n=$((n + 1))
+              curl -fsSL --max-time 120 -o "work/$list-$n" "$url"
+            done < <(grep -v '^#' tools/blocklists/sources.txt)
+            python3 -I tools/blocklists/compile.py "$list" "work/$list.txt" work/"$list"-*
+            file="zajil-lists-$list-$sequence.txt.gz"
+            gzip -9n < "work/$list.txt" > "out/$file"
+            entries+=("$(jq -n --arg name "$list" --arg file "$file" \
+              --arg sha "$(sha256sum "out/$file" | cut -d' ' -f1)" --argjson size "$(stat -c %s "out/$file")" \
+              '{name: $name, file: $file, sha256: $sha, size: $size}')")
+          done
+          printf '%s\n' "${entries[@]}" | jq -s --argjson sequence "$sequence" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{format: "zajil-android-lists-1", sequence: $sequence, issued_at: $issued, lists: .}' > out/lists-android.json
+          cat out/lists-android.json
+      - name: Sign and check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          sudo apt-get install -y -q --no-install-recommends minisign
+          (cd apps/desktop && npx tauri signer sign "$GITHUB_WORKSPACE/out/lists-android.json" >/dev/null)
+          base64 -d out/lists-android.json.sig > out/lists-android.json.minisig
+          rm out/lists-android.json.sig
+          minisign -Vm out/lists-android.json -x out/lists-android.json.minisig \
+            -P "$(base64 -d apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+      - name: Publish on android-channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view android-channel >/dev/null 2>&1; then
+            gh release create android-channel --prerelease --target main \
+              --title "Zajil for Android: update channel" \
+              --notes "Signed files that Zajil for Android reads to find its update, yt-dlp's and its protection lists (ADR-0012, sections 8 and 17). Not a release."
+          fi
+          # The lists first, then the signed file that names them.
+          gh release upload android-channel out/zajil-lists-*.txt.gz --clobber
+          gh release upload android-channel out/lists-android.json out/lists-android.json.minisig --clobber
+          # Older lists' files: no longer named by any signed file.
+          keep="$(jq -r '.lists[].file' out/lists-android.json)"
+          gh release view android-channel --json assets --jq '.assets[].name' | grep '^zajil-lists-' | while read -r old; do
+            grep -qxF "$old" <<< "$keep" || gh release delete-asset android-channel "$old" --yes
+          done
+

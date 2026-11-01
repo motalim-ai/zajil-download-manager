@@ -543,6 +543,7 @@ fun problemText(problem: Problem?): Int = when (problem) {
     Problem.NOT_ENOUGH_SPACE -> R.string.problem_space
     Problem.CERTIFICATE -> R.string.problem_certificate
     Problem.BAD_LINK -> R.string.problem_link
+    Problem.REFUSED -> R.string.problem_refused
     Problem.OTHER, null -> R.string.problem_other
 }
 

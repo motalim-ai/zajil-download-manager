@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use zajil_android::{Downloads, Listener, Problem, Tuning};
+use zajil_android::{Downloads, EngineError, HostCheck, Listener, Problem, Tuning};
 use zajil_core::{Engine, Options};
 use zajil_testserver::{FileSpec, TestServer, Tls, test_ca_der};
 
@@ -499,4 +499,57 @@ fn a_tuned_probe_sends_the_browsers_cookies() {
     downloads.probe_tuned(url, tuning).unwrap();
 
     assert_eq!(server.requests()[0].cookie.as_deref(), Some("session=abc"));
+}
+
+/// The app's lists of harmful sites, in a test: these hosts.
+struct Refuse(Vec<&'static str>);
+
+impl HostCheck for Refuse {
+    fn refused(&self, host: String) -> bool {
+        self.0.contains(&host.as_str())
+    }
+}
+
+#[test]
+fn a_harmful_host_is_never_asked_nor_followed_to() {
+    let server = TestServer::http();
+    server.put("/cdn/clip.mp4", FileSpec::new(random_body(4096)));
+    // A redirect to another host of the same server: «localhost».
+    let elsewhere = server
+        .url("/cdn/clip.mp4")
+        .replace("127.0.0.1", "localhost");
+    server.redirect("/go", &elsewhere, 302);
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+    downloads.set_host_check(Some(Arc::new(Refuse(vec!["localhost"]))));
+
+    // Through a redirect: the first host answers, the harmful one is never asked.
+    downloads.start(1, server.url("/go"), dir_text(&dir));
+    assert_eq!(failed(&rx, 1), Problem::Refused);
+    assert!(
+        server
+            .requests()
+            .iter()
+            .all(|r| !r.path.ends_with("clip.mp4")),
+        "{:?}",
+        server.requests()
+    );
+    // Directly, and in a probe: nothing is asked at all.
+    downloads.start(2, elsewhere.clone(), dir_text(&dir));
+    assert_eq!(failed(&rx, 2), Problem::Refused);
+    assert!(matches!(
+        downloads.probe(elsewhere.clone()),
+        Err(EngineError::Probe { .. })
+    ));
+    assert_eq!(
+        server.requests().len(),
+        1,
+        "only /go was asked: {:?}",
+        server.requests()
+    );
+    // No list: it downloads.
+    downloads.set_host_check(None);
+    downloads.start(3, elsewhere, dir_text(&dir));
+    finished(&rx, 3);
 }

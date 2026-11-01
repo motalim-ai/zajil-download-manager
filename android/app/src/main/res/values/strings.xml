@@ -349,6 +349,34 @@
     <string name="forget_all">حذف الكل</string>
     <string name="group_browser">المتصفح</string>
     <string name="clear_visited">مسح السجل</string>
+    <string name="group_protection">الحماية</string>
+    <string name="protection_here">الحماية في هذا الموقع</string>
+    <string name="guard_ads">الإعلانات والمتتبعات</string>
+    <string name="guard_ads_hint">لا تُطلب من مواقع الإعلانات والتتبع المعروفة</string>
+    <string name="guard_malware">المواقع الضارة</string>
+    <string name="guard_malware_hint">تحذير قبل فتحها، ولا يُحمَّل منها شيء</string>
+    <string name="guard_phishing">الاحتيال وسرقة البيانات</string>
+    <string name="guard_phishing_hint">تحذير قبل فتح المواقع التي تنتحل غيرها</string>
+    <string name="guard_off_everywhere">مطفأ في كل المواقع من الإعدادات</string>
+    <string name="protection_note">ليس برنامج مكافحة فيروسات: يحمي التصفح والتحميل داخل زاجِل فقط. القوائم مفتوحة المصدر وعلى جهازك، ولا يُرسل أي عنوان تزوره إلى أحد. وفحص «التصفح الآمن» في أندرويد يعمل أيضًا، وهو من Google ويرسل بصمات مختصرة للعناوين لا العناوين نفسها.</string>
+    <string name="protection_exceptions">المواقع المستثناة</string>
+    <string name="protection_exceptions_hint">مواقع أطفأت فيها حماية ما</string>
+    <string name="no_exceptions">لا مواقع مستثناة.</string>
+    <string name="remove_exception">إعادة الحماية فيه</string>
+    <string name="protection_lists">قوائم الحماية</string>
+    <string name="protection_lists_date">آخر تحديث: %1$s</string>
+    <string name="protection_checking">يبحث عن قوائم أحدث…</string>
+    <string name="protection_updated">حُدِّثت القوائم.</string>
+    <string name="protection_latest">القوائم هي الأحدث.</string>
+    <string name="protection_update_failed">تعذّر التحديث، والقوائم الحالية تعمل.</string>
+    <string name="warning_malware_title">موقع ينشر برامج ضارة</string>
+    <string name="warning_malware_body">هذا الموقع في قائمة المواقع التي تنشر برامج ضارة. وقد يحاول تثبيت برنامج يسرق بياناتك أو يضر جهازك، فلم يفتحه زاجِل.</string>
+    <string name="warning_phishing_title">موقع احتيال</string>
+    <string name="warning_phishing_body">هذا الموقع في قائمة مواقع الاحتيال وسرقة البيانات. وقد ينتحل موقعًا تعرفه ليأخذ كلمة مرورك أو بطاقتك، فلم يفتحه زاجِل.</string>
+    <string name="warning_back">رجوع</string>
+    <string name="warning_proceed">المتابعة على مسؤوليتي</string>
+    <string name="problem_refused">موقع ضار، فلم يُحمَّل شيء</string>
+    <string name="video_harmful">هذا الموقع في قائمة المواقع الضارة، فلم يقرأه زاجِل.</string>
     <string name="tabs">التبويبات</string>
     <string name="tabs_open">التبويبات المفتوحة: %1$d</string>
     <string name="no_tabs">لا تبويبات مفتوحة.</string>
@@ -420,5 +448,13 @@
         <item quantity="few">تحميل %d فيديوهات</item>
         <item quantity="many">تحميل %d فيديو</item>
         <item quantity="other">تحميل %d فيديو</item>
+    </plurals>
+    <plurals name="blocked_here">
+        <item quantity="zero">لم يُحجب شيء في هذه الصفحة</item>
+        <item quantity="one">حُجب في هذه الصفحة: طلب واحد</item>
+        <item quantity="two">حُجب في هذه الصفحة: طلبان</item>
+        <item quantity="few">حُجب في هذه الصفحة: %d طلبات</item>
+        <item quantity="many">حُجب في هذه الصفحة: %d طلبًا</item>
+        <item quantity="other">حُجب في هذه الصفحة: %d طلب</item>
     </plurals>
 </resources>

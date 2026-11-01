@@ -138,6 +138,7 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
                     onClick = if (recent.isEmpty() && history.isEmpty()) null else ({ browser.store.clearRecent() }),
                 )
             }
+            Group(stringResource(R.string.group_protection)) { ProtectionGroup() }
             Group(stringResource(R.string.group_update)) { AppUpdateRows() }
             PromiseNote()
         }

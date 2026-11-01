@@ -276,6 +276,10 @@ pub enum Error {
     /// than http and https, or from https to http.
     #[error("{0}")]
     Redirect(String),
+    /// The link, or a redirect, leads to a host the program refuses
+    /// ([`crate::browser::HostGuard`]).
+    #[error("{host} is on the list of harmful sites: nothing was downloaded")]
+    Refused { host: String },
     #[error(
         "the server asks to wait {} s before more requests; try again later",
         .wait.as_secs()

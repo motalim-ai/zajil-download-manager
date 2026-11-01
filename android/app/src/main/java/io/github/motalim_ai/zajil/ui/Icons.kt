@@ -191,7 +191,7 @@ private fun draw(icon: ColorIcon, surface: Color): ImageVector = Drawing().apply
  * tinted by `Icon`.
  */
 enum class LineIcon {
-    Search, More, Downloads, Queues, Settings, Shared, Folder, Check, ChevronDown, Shield, Play,
+    Search, More, Downloads, Queues, Settings, Shared, Folder, Check, ChevronDown, Shield, ShieldAlert, Play,
     Globe, Lock, LockOpen, Back, Reload, Private, Clock, Plus, Close, Star, StarFilled, History,
 }
 
@@ -215,6 +215,11 @@ fun lineIcon(icon: LineIcon): ImageVector = synchronized(lineCache) {
                 LineIcon.Check -> stroke("M5 12.5l4.5 4.5L19 7.5", ink, 2.6f)
                 LineIcon.ChevronDown -> stroke("M6 9l6 6 6-6", ink, 2.4f)
                 LineIcon.Shield -> stroke("M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6zM9 12l2.2 2.2L15.5 10", ink, 2.2f)
+                // A harmful site: the shield with «!» in place of the tick.
+                LineIcon.ShieldAlert -> {
+                    stroke("M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6zM12 8.5v4.5", ink, 2.2f)
+                    fill(circle(12f, 16.2f, 1.25f), ink)
+                }
                 LineIcon.Play -> {
                     fill(circle(12f, 12f, 11f), SolidColor(Color.White), alpha = 0.25f)
                     fill("M10 8v8l6-4z", SolidColor(Color.White))

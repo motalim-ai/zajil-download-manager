@@ -185,6 +185,12 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
             videoSheet.value = VideoSheet.AskList(url, list)
             return
         }
+        // A harmful site: yt-dlp does not read it either.
+        val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase()
+        if (host != null && protection.harm(host, io.github.motalim_ai.zajil.browser.Finds.site(host)) != null) {
+            videoSheet.value = VideoSheet.Refused(url, R.string.video_harmful)
+            return
+        }
         videoSheet.value = VideoSheet.Reading(url)
         lifecycleScope.launch {
             val page = YtDlp.readPage(this@ZajilActivity, url, browser?.cookies, browser?.page)

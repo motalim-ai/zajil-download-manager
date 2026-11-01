@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use zajil_core::limit::SpeedLimit;
 use zajil_core::{Engine, Error, Event, FromBrowser, Options, Stop};
 
+pub mod lists;
 #[cfg(target_os = "android")]
 mod tls;
 pub mod tools;
@@ -39,7 +40,19 @@ pub enum Problem {
     Certificate,
     /// The link is not one Zajil can download.
     BadLink,
+    /// The link, or a redirect, leads to a site on Zajil's list of
+    /// harmful sites ([`HostCheck`]): nothing was asked of it.
+    Refused,
     Other,
+}
+
+/// The app's lists of harmful sites (malware, phishing), asked for each
+/// host a download goes to: the link's and every redirect's. Called on the
+/// engine's threads; it must answer at once, from memory.
+#[uniffi::export(with_foreign)]
+pub trait HostCheck: Send + Sync {
+    /// Whether `host` (lower case) is refused.
+    fn refused(&self, host: String) -> bool;
 }
 
 /// What a running download reports. Called on the engine's threads.
@@ -120,6 +133,8 @@ pub struct Downloads {
     running: Arc<Mutex<HashMap<i64, Stop>>>,
     /// The app's speed limit, shared by all its downloads.
     limit: SpeedLimit,
+    /// The app's lists of harmful sites, if it has set them.
+    guard: Arc<Mutex<Option<zajil_core::browser::HostGuard>>>,
 }
 
 enum Job {
@@ -128,13 +143,13 @@ enum Job {
 }
 
 impl Tuning {
-    fn apply(&self, engine: &Engine) -> Engine {
+    fn apply(&self, engine: &Engine, guard: Option<zajil_core::browser::HostGuard>) -> Engine {
         let mut engine = engine
             .named(self.name.as_deref())
             .with_user_agent(self.user_agent.as_deref())
             .with_request_size(self.request_size);
-        if self.cookies.is_some() || self.referrer.is_some() {
-            engine = engine.with_browser(self.browser());
+        if self.cookies.is_some() || self.referrer.is_some() || guard.is_some() {
+            engine = engine.with_browser(self.browser().with_host_guard(guard));
         }
         if let Some(connections) = self.connections {
             engine = engine.with_connections(usize::try_from(connections).unwrap_or(usize::MAX));
@@ -235,6 +250,16 @@ impl Downloads {
     /// What `url` leads to, without downloading it: the first response's
     /// headers only. Blocks for at most 20 seconds; call it off the main
     /// thread.
+    /// The app's lists of harmful sites: from now on no download, nor
+    /// probe, asks a host `check` refuses, nor follows a redirect to one.
+    /// `None` checks nothing.
+    pub fn set_host_check(&self, check: Option<Arc<dyn HostCheck>>) {
+        let guard = check.map(|check| -> zajil_core::browser::HostGuard {
+            Arc::new(move |host: &str| check.refused(host.to_owned()))
+        });
+        *self.guard.lock().unwrap_or_else(PoisonError::into_inner) = guard;
+    }
+
     pub fn probe(&self, url: String) -> Result<LinkInfo, EngineError> {
         self.probe_tuned(url, Tuning::default())
     }
@@ -242,7 +267,7 @@ impl Downloads {
     /// Like [`Downloads::probe`], made as [`Tuning`] says (the in-app
     /// browser's cookies and page).
     pub fn probe_tuned(&self, url: String, tuning: Tuning) -> Result<LinkInfo, EngineError> {
-        let engine = tuning.apply(&self.engine);
+        let engine = tuning.apply(&self.engine, self.guard());
         let found = self
             .runtime
             .block_on(async { tokio::time::timeout(PROBE_FOR, engine.probe(&url)).await });
@@ -291,7 +316,15 @@ impl Downloads {
             listener,
             running: Arc::default(),
             limit,
+            guard: Arc::default(),
         }))
+    }
+
+    fn guard(&self) -> Option<zajil_core::browser::HostGuard> {
+        self.guard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Stop>> {
@@ -307,7 +340,7 @@ impl Downloads {
             }
             running.insert(id, stop.clone());
         }
-        let engine = tuning.apply(&self.engine);
+        let engine = tuning.apply(&self.engine, self.guard());
         let listener = self.listener.clone();
         let running = self.running.clone();
         self.runtime.spawn(async move {
@@ -366,6 +399,7 @@ fn describe(err: &Error) -> (Problem, Option<&Path>) {
         Error::Status(_) | Error::ServerBusy { .. } => (Problem::Server, None),
         Error::NotEnoughSpace { .. } => (Problem::NotEnoughSpace, None),
         Error::InvalidUrl { .. } | Error::UnsupportedScheme(_) => (Problem::BadLink, None),
+        Error::Refused { .. } => (Problem::Refused, None),
         _ => (Problem::Other, None),
     }
 }

@@ -3,8 +3,14 @@
 //! on. **Kept in memory only**, never in the state file (owner's decision
 //! on #7): after a restart Zajil asks the extension again.
 
+use std::sync::Arc;
+
 use reqwest::header::{self, HeaderValue};
 use reqwest::{RequestBuilder, Url};
+
+/// A host the program refuses to download from (Zajil for Android's lists
+/// of harmful sites): checked before the first request and every redirect.
+pub type HostGuard = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// The browser's request headers for one download.
 ///
@@ -25,6 +31,8 @@ pub struct FromBrowser {
     /// The program a link was made for (YouTube's links of some of its
     /// apps are refused to another one: 403), in place of Zajil's own.
     user_agent: Option<HeaderValue>,
+    /// Hosts never asked for, nor followed to ([`HostGuard`]).
+    guard: Option<HostGuard>,
 }
 
 /// A URL's scheme, host and port (the port the scheme implies, if none).
@@ -58,7 +66,22 @@ impl FromBrowser {
             cookies,
             referer,
             user_agent: None,
+            guard: None,
         }
+    }
+
+    /// These headers, and no request to a host `guard` refuses: not the
+    /// first, nor one a redirect leads to.
+    pub fn with_host_guard(mut self, guard: Option<HostGuard>) -> Self {
+        self.guard = guard;
+        self
+    }
+
+    /// The host of `url` if the guard refuses it.
+    pub(crate) fn refuses(&self, url: &Url) -> Option<String> {
+        let guard = self.guard.as_ref()?;
+        let host = url.host_str()?.to_ascii_lowercase();
+        guard(&host).then_some(host)
     }
 
     /// These headers, sent as `agent` (a `User-Agent`) instead of Zajil;

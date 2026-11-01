@@ -382,6 +382,8 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     val bookmarks by browser.store.bookmarks.collectAsStateWithLifecycle()
     var listing by rememberSaveable { mutableStateOf(false) }
     var showingTabs by rememberSaveable { mutableStateOf(false) }
+    var protecting by rememberSaveable { mutableStateOf(false) }
+    val warning by browser.warning.collectAsStateWithLifecycle()
     val state = page ?: return
     BackHandler { browser.back() }
     Column(Modifier.fillMaxSize().background(c.surface).padding(bottom = bottomPadding.calculateBottomPadding())) {
@@ -396,7 +398,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                 Box(Modifier.graphicsLayer { scaleX = if (mirror) -1f else 1f }) {
                     BarIconButton(LineIcon.Back, stringResource(R.string.back)) { browser.back() }
                 }
-                AddressBox(state.url, private, Modifier.weight(1f))
+                AddressBox(state.url, private, Modifier.weight(1f)) { protecting = true }
                 BarIconButton(LineIcon.Reload, stringResource(R.string.reload)) { browser.reload() }
                 val marked = bookmarks.any { it.url == state.url }
                 BarIconButton(
@@ -430,13 +432,15 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                     )
                 }
             }
+            warning?.let { w -> WarningScreen(w, onBack = browser::leaveWarning, onProceed = browser::proceedAnyway) }
             val downloadable = found.count { !(it is Found.Element && it.protected) }
-            if (found.isNotEmpty()) {
+            if (found.isNotEmpty() && warning == null) {
                 FoundButton(downloadable.coerceAtLeast(0), Modifier.align(Alignment.BottomStart).padding(16.dp)) { listing = true }
             }
         }
     }
     if (showingTabs) TabsSheet(browser, onDismiss = { showingTabs = false })
+    if (protecting) ProtectionSheet(browser, hostOf(state.url), onDismiss = { protecting = false })
     if (listing) {
         FoundSheet(
             found,
@@ -455,7 +459,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
 }
 
 @Composable
-private fun AddressBox(url: String, private: Boolean, modifier: Modifier) {
+private fun AddressBox(url: String, private: Boolean, modifier: Modifier, onProtection: () -> Unit) {
     val c = Z.colors
     val secure = url.startsWith("https://")
     val shape = RoundedCornerShape(14.dp)
@@ -464,12 +468,18 @@ private fun AddressBox(url: String, private: Boolean, modifier: Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(
-            lineIcon(if (secure) LineIcon.Lock else LineIcon.LockOpen),
-            contentDescription = stringResource(if (secure) R.string.secure else R.string.not_secure),
-            tint = if (secure) c.green else c.red,
-            modifier = Modifier.size(15.dp),
-        )
+        // The lock opens «Protection on this site».
+        Box(
+            Modifier.size(30.dp).clip(CircleShape).clickable(onClickLabel = stringResource(R.string.protection_here), role = Role.Button, onClick = onProtection),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                lineIcon(if (secure) LineIcon.Lock else LineIcon.LockOpen),
+                contentDescription = stringResource(if (secure) R.string.secure else R.string.not_secure),
+                tint = if (secure) c.green else c.red,
+                modifier = Modifier.size(15.dp),
+            )
+        }
         ZText(
             url.removePrefix("https://").removePrefix("http://").removePrefix("www."),
             Modifier.weight(1f),
@@ -624,7 +634,7 @@ private fun clock(seconds: Int): String =
 
 /** A short note on a coloured ground, as the design's. */
 @Composable
-private fun Note(text: String, background: Color, color: Color, icon: LineIcon) {
+internal fun Note(text: String, background: Color, color: Color, icon: LineIcon) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(background).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

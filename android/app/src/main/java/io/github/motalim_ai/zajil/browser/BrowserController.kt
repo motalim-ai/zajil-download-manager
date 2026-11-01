@@ -26,8 +26,11 @@ import io.github.motalim_ai.zajil.BuildConfig
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.CookieSource
+import io.github.motalim_ai.zajil.protection
 import io.github.motalim_ai.zajil.video.VideoPages
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -48,6 +51,9 @@ data class PageState(
 /** A tab, as the switcher lists it. */
 data class TabInfo(val id: Long, val title: String, val url: String)
 
+/** A harmful page the browser stopped before it loaded: [url], and why. */
+data class Warning(val url: String, val host: String, val guard: Guard)
+
 /**
  * Zajil's in-app browser (A6; tabs from 0.3.0): a WebView for each tab,
  * with the settings the owner set as hard rules. It finds videos in three
@@ -59,6 +65,17 @@ data class TabInfo(val id: Long, val title: String, val url: String)
 @SuppressLint("SetJavaScriptEnabled")
 class BrowserController(private val context: Context) {
     val store = BrowserStore(context)
+    private val protection = context.protection
+
+    private val _blocked = MutableStateFlow(0)
+
+    /** Ads, trackers and harmful requests not made on the current tab's page (in memory only). */
+    val blocked: StateFlow<Int> = _blocked.asStateFlow()
+
+    private val _warning = MutableStateFlow<Warning?>(null)
+
+    /** The current tab's harmful page, stopped before it loaded. */
+    val warning: StateFlow<Warning?> = _warning.asStateFlow()
 
     private val _page = MutableStateFlow<PageState?>(null)
     val page: StateFlow<PageState?> = _page.asStateFlow()
@@ -89,6 +106,17 @@ class BrowserController(private val context: Context) {
         var sitePage: Found.SitePage? = null
         val media = LinkedHashMap<String, Found.Media>()
         val elements = HashMap<String, List<PageVideo>>()
+
+        /** The page's site, for the requests' thread. */
+        @Volatile var site: String? = null
+
+        /** A page's request was seen since the last page started: its count started there. */
+        @Volatile var requested = false
+        val blocked = AtomicInteger()
+        var warning: Warning? = null
+
+        /** Harmful hosts the user chose to open anyway, in this tab only. */
+        val bypass: MutableSet<String> = ConcurrentHashMap.newKeySet()
     }
 
     private val tabList = mutableListOf<Tab>()
@@ -119,13 +147,15 @@ class BrowserController(private val context: Context) {
         current = null
         _page.value = null
         _found.value = emptyList()
+        _blocked.value = 0
+        _warning.value = null
     }
 
     /** At most [MAX_TABS]: the oldest goes first. */
     private fun newTab(): Tab {
         if (tabList.size >= MAX_TABS) closeTab(tabList.first().id)
         val tab = Tab(nextId++, create())
-        tabList += tab
+        synchronized(tabList) { tabList += tab }
         current = tab
         listTabs()
         return tab
@@ -139,12 +169,35 @@ class BrowserController(private val context: Context) {
         tab.view.onResume()
         _page.value = tab.page
         _found.value = tab.found
+        _blocked.value = tab.blocked.get()
+        _warning.value = tab.warning
     }
+
+    /** The harmful page anyway, in this tab only: the user's choice («on my own responsibility»). */
+    fun proceedAnyway() {
+        val tab = current ?: return
+        val warning = tab.warning ?: return
+        tab.bypass += warning.host
+        tab.warning = null
+        _warning.value = null
+        tab.view.loadUrl(warning.url)
+    }
+
+    /** Away from the harmful page: back, or the tab closes. */
+    fun leaveWarning() {
+        val tab = current ?: return
+        tab.warning = null
+        _warning.value = null
+        back()
+    }
+
+    /** The current page's site, for the protection sheet. */
+    val site: String? get() = current?.site
 
     /** Closes tab [id]; the current one gives way to the last other tab, or the home. */
     fun closeTab(id: Long) {
         val tab = tabList.firstOrNull { it.id == id } ?: return
-        tabList -= tab
+        synchronized(tabList) { tabList -= tab }
         tab.view.stopLoading()
         tab.view.destroy()
         listTabs()
@@ -153,6 +206,8 @@ class BrowserController(private val context: Context) {
             tabList.lastOrNull()?.let { switchTo(it.id) } ?: run {
                 _page.value = null
                 _found.value = emptyList()
+                _blocked.value = 0
+                _warning.value = null
             }
         }
     }
@@ -178,6 +233,7 @@ class BrowserController(private val context: Context) {
     private fun setPage(tab: Tab, page: PageState?) {
         val before = tab.page
         tab.page = page
+        tab.site = page?.url?.let { runCatching { java.net.URI(it).host }.getOrNull() }?.lowercase()?.let(Finds::site)
         if (tab == current) _page.value = page
         if (before?.title != page?.title || before?.url != page?.url) listTabs()
     }
@@ -308,6 +364,17 @@ class BrowserController(private val context: Context) {
 
     private fun tabOf(view: WebView): Tab? = tabList.firstOrNull { it.view == view }
 
+    /** One more request not made on [tab]'s page. */
+    private fun count(tab: Tab) {
+        val n = tab.blocked.incrementAndGet()
+        main.post { if (tab == current) _blocked.value = n }
+    }
+
+    private fun warn(tab: Tab, warning: Warning) {
+        tab.warning = warning
+        if (tab == current) _warning.value = warning
+    }
+
     /** The page's address changed: layer 1 again, and what it asks for from now on. */
     private fun moved(tab: Tab, url: String) {
         tab.sitePage = if (VideoPages.isVideoPage(url)) Found.SitePage(url, tab.page?.title.orEmpty()) else null
@@ -365,6 +432,12 @@ class BrowserController(private val context: Context) {
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             val tab = tabOf(view) ?: return
             tab.elements.clear()
+            // A page from the cache (back, forward) has no request: its count starts here.
+            if (!tab.requested) {
+                tab.blocked.set(0)
+                if (tab == current) _blocked.value = 0
+            }
+            tab.requested = false
             setPage(tab, PageState(url, loading = true, canGoBack = view.canGoBack()))
             moved(tab, url)
         }
@@ -387,9 +460,40 @@ class BrowserController(private val context: Context) {
             if (!CookieManager.getInstance().getCookie(url).isNullOrEmpty()) store.keepsCookies(url)
         }
 
-        /** Layer 2: a media file or playlist the page asks for. Only looked at, never changed or fetched. */
+        /**
+         * The protection (0.3.0), then layer 2: a media file or playlist the
+         * page asks for, only looked at, never changed or fetched. Called on
+         * WebView's threads: the lists answer from memory.
+         */
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            val host = request.url.host?.lowercase() ?: return null
+            val tab = synchronized(tabList) { tabList.firstOrNull { it.view == view } } ?: return null
+            if (request.isForMainFrame) {
+                // A new page: its site and count are set here, on the requests' thread, as its
+                // parts may be asked for before onPageStarted reaches the main thread.
+                tab.site = Finds.site(host)
+                tab.requested = true
+                tab.blocked.set(0)
+                main.post { if (tab == current) _blocked.value = 0 }
+            }
+            if (host !in tab.bypass) {
+                // A harmful site: a page is stopped and warned about; a part of one is not made.
+                protection.harm(host, Finds.site(host))?.let { guard ->
+                    if (request.isForMainFrame) {
+                        main.post { warn(tab, Warning(request.url.toString(), host, guard)) }
+                    } else {
+                        count(tab)
+                    }
+                    return EMPTY()
+                }
+            }
             if (request.isForMainFrame) return null
+            // Ads and trackers of another site than the page's, where they are not let through.
+            val site = tab.site
+            if (site != null && Finds.site(host) != site && protection.settings.value.active(Guard.Ads, site) && protection.listed(Guard.Ads, host)) {
+                count(tab)
+                return EMPTY()
+            }
             val url = request.url.toString()
             val kind = Finds.kindOf(url) ?: return null
             main.post {
@@ -455,6 +559,9 @@ class BrowserController(private val context: Context) {
 
         /** The most tabs open: each is a WebView, and a phone's memory is short. */
         const val MAX_TABS = 10
+
+        /** What a request that is not made gets: nothing. */
+        fun EMPTY() = WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
 
         fun random(): String {
             val bytes = ByteArray(16)
