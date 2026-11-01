@@ -227,6 +227,28 @@ class VideoChoiceTest {
     }
 
     @Test
+    fun a_playlist_plan_takes_the_nearest_height_and_falls_back_to_the_own_sound() {
+        val i = info(
+            video("137", 1080, "avc1.640028", "mp4"),
+            video("136", 720, "avc1.64001f", "mp4"),
+            video("135", 480, "avc1.4d401e", "mp4"),
+            own,
+        )
+        // Up to 720: 720. Up to 360: none that low, so the lowest above it.
+        assertEquals("136", VideoChoice.forPlan(i, 720, null)!!.video!!.id)
+        assertEquals("135", VideoChoice.forPlan(i, 360, null)!!.video!!.id)
+        // The sound alone.
+        assertNull(VideoChoice.forPlan(i, null, null)!!.video)
+        // An Arabic dub where there is one, the video's own where there is none.
+        assertEquals("140-ar", VideoChoice.forPlan(info(video("137", 1080, "avc1", "mp4"), arabic, own), 1080, "ar")!!.audio!!.id)
+        assertEquals("140", VideoChoice.forPlan(i, 1080, "ar")!!.audio!!.id)
+        // Whole files only (X): the one up to the height.
+        assertEquals("http-832", VideoChoice.forPlan(info(whole("http-320", 180), whole("http-832", 360), whole("http-2176", 720)), 480, null)!!.video!!.id)
+        // Nothing at all: null, and that video alone is skipped.
+        assertNull(VideoChoice.forPlan(info(), 720, null))
+    }
+
+    @Test
     fun hls_is_one_stream_saved_as_mp4_never_joined() {
         val playlist = Format("hls-720", "mp4", "avc1", "mp4a", 720, null, 2000.0, null, null, null, null, "https://l/720.m3u8", null, false, hls = true)
         val i = info(playlist)

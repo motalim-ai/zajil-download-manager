@@ -33,9 +33,11 @@ object Publisher {
      * that can no longer be written (its permission gone) gives way to
      * Download/Zajil: the file is never lost.
      */
-    suspend fun publish(context: Context, file: File, prefs: Prefs): Published? {
+    suspend fun publish(context: Context, file: File, prefs: Prefs, folder: String? = null): Published? {
         if (!file.isFile) return null
-        val sub = if (prefs.folderPerType) SaveCategory.of(file.name)?.let { folderName(context, it) } else null
+        // Its type's folder, then its own (a playlist's): «فيديوهات/<the playlist>».
+        val type = if (prefs.folderPerType) SaveCategory.of(file.name)?.let { folderName(context, it) } else null
+        val sub = listOfNotNull(type, folder?.let(FileNames::folder)?.takeIf { it.isNotEmpty() }).joinToString("/").ifEmpty { null }
         prefs.saveTree?.let { tree -> runCatching { throughTree(context, file, Uri.parse(tree), sub) }.getOrNull()?.let { return it } }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             throughMediaStore(context, file, sub)
@@ -71,7 +73,7 @@ object Publisher {
     private fun throughTree(context: Context, file: File, tree: Uri, sub: String?): Published? {
         val resolver = context.contentResolver
         var dir = DocumentsContract.getTreeDocumentId(tree)
-        if (sub != null) dir = childFolder(context, tree, dir, sub) ?: return null
+        for (part in sub?.split('/').orEmpty()) dir = childFolder(context, tree, dir, part) ?: return null
         val dirUri = DocumentsContract.buildDocumentUriUsingTree(tree, dir)
         val uri = DocumentsContract.createDocument(resolver, dirUri, mimeType(file), file.name) ?: return null
         return try {

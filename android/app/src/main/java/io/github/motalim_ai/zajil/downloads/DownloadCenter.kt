@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import android.webkit.CookieManager
+import io.github.motalim_ai.zajil.browser.Finds
 import io.github.motalim_ai.zajil.engine.Downloads
 import io.github.motalim_ai.zajil.engine.EngineException
 import io.github.motalim_ai.zajil.engine.LinkInfo
@@ -12,8 +13,12 @@ import io.github.motalim_ai.zajil.engine.Problem
 import io.github.motalim_ai.zajil.engine.Tuning
 import io.github.motalim_ai.zajil.video.Muxer
 import io.github.motalim_ai.zajil.video.Picked
+import io.github.motalim_ai.zajil.video.PlaylistEntry
+import io.github.motalim_ai.zajil.video.VideoChoice
 import io.github.motalim_ai.zajil.video.VideoInfo
 import io.github.motalim_ai.zajil.video.VideoPages
+import io.github.motalim_ai.zajil.video.VideoProblem
+import io.github.motalim_ai.zajil.video.VideoProblems
 import io.github.motalim_ai.zajil.video.YtDlp
 import java.io.File
 import java.io.FileNotFoundException
@@ -197,19 +202,8 @@ class DownloadCenter(private val context: Context) {
      * its sound, each downloaded by the engine as on the desktop.
      */
     fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String, browser: BrowserLink? = null, queue: Long = Queue.MAIN): Long {
-        val hls = picked.video?.hls == true
         val formats = listOfNotNull(picked.video, picked.audio)
-        val dash = !hls && formats.any { it.dash }
-        val streams = formats.map {
-            val name = when {
-                hls -> "stream"
-                dash && it == picked.video -> "video"
-                dash -> "audio"
-                it == picked.video -> "video.${it.ext}"
-                else -> "audio.${it.ext}"
-            }
-            Stream(it.id, it.url, name, it.userAgent, video = it == picked.video, total = it.size)
-        }
+        val (hls, dash, streams) = streamsOf(picked)
         return insert { id, order ->
             browser?.cookies?.let { linkCookies[id] = it }
             formats.forEachIndexed { i, f -> f.cookieHeader?.let { streamCookies[engineId(id, i)] = it } }
@@ -225,6 +219,96 @@ class DownloadCenter(private val context: Context) {
                 cookieSource = browser?.source ?: CookieSource.None,
                 browserAgent = browser?.userAgent,
             )
+        }
+    }
+
+    /** [picked]'s streams, as the engine or yt-dlp downloads them: (HLS, DASH, streams). */
+    private fun streamsOf(picked: Picked): Triple<Boolean, Boolean, List<Stream>> {
+        val hls = picked.video?.hls == true
+        val formats = listOfNotNull(picked.video, picked.audio)
+        val dash = !hls && formats.any { it.dash }
+        val streams = formats.map {
+            val name = when {
+                hls -> "stream"
+                dash && it == picked.video -> "video"
+                dash -> "audio"
+                it == picked.video -> "video.${it.ext}"
+                else -> "audio.${it.ext}"
+            }
+            Stream(it.id, it.url, name, it.userAgent, video = it == picked.video, total = it.size)
+        }
+        return Triple(hls, dash, streams)
+    }
+
+    /**
+     * A playlist's chosen videos join the queue at once (0.3.0, as the
+     * desktop's `video_add_many`): each is read when its turn comes and
+     * picked by [height] and [dub] then; saved in [folder] (the
+     * playlist's). Those on the playlist's own site take the browser's
+     * cookies, if it sent any. Returns their ids.
+     */
+    fun addPlaylist(
+        page: String,
+        entries: List<PlaylistEntry>,
+        height: Int?,
+        dub: String?,
+        folder: String,
+        browser: BrowserLink? = null,
+        queue: Long = Queue.MAIN,
+    ): List<Long> = entries.filter { it.downloadable }.map { entry ->
+        insert { id, order ->
+            browser?.cookies?.takeIf { Finds.sameSite(page, entry.url!!) }?.let { linkCookies[id] = it }
+            Download(
+                id = id,
+                url = entry.url!!,
+                status = Status.Queued,
+                order = order,
+                queue = settings.queue(queue).id,
+                plan = PlaylistPlan(entry.title.orEmpty(), height, dub),
+                folder = folder,
+                page = browser?.page ?: page,
+                cookieSource = browser?.source ?: CookieSource.None,
+                browserAgent = browser?.userAgent,
+            )
+        }
+    }
+
+    /**
+     * A playlist's video when its turn comes: its page read now, the
+     * quality and sound picked by its plan, then downloaded as any video.
+     * One that cannot be read fails alone, saying why; the others go on.
+     */
+    private fun readPlanned(download: Download) {
+        val plan = download.plan ?: return
+        val id = download.id
+        scope.launch {
+            val read = YtDlp.read(context, download.url, cookiesFor(download), download.page)
+            // Paused or removed while the page was read: nothing starts.
+            if (find(id)?.status != Status.Running) return@launch
+            val info = read.getOrElse { e ->
+                val problem = VideoProblems.of(e.message.orEmpty(), download.url)
+                edit(id) { it.copy(status = Status.Failed, videoProblem = problem.name, detail = null) }
+                pump()
+                return@launch
+            }
+            val picked = VideoChoice.forPlan(info, plan.height, plan.dub)
+            if (picked == null || info.live) {
+                val problem = if (info.live) VideoProblem.Live else VideoProblem.NoFormats
+                edit(id) { it.copy(status = Status.Failed, videoProblem = problem.name, detail = null) }
+                pump()
+                return@launch
+            }
+            val (hls, dash, streams) = streamsOf(picked)
+            listOfNotNull(picked.video, picked.audio).forEachIndexed { i, f -> f.cookieHeader?.let { streamCookies[engineId(id, i)] = it } }
+            val choice = picked.video?.height?.takeIf { it > 0 }?.let { "${it}p" } ?: picked.container.ext
+            edit(id) {
+                it.copy(
+                    video = VideoJob(info.title.ifBlank { plan.title }, picked.container, streams, choice, hls = hls, dash = dash),
+                    total = picked.size,
+                    videoProblem = null,
+                )
+            }
+            find(id)?.takeIf { it.status == Status.Running }?.let(::startStreams)
         }
     }
 
@@ -447,7 +531,7 @@ class DownloadCenter(private val context: Context) {
      */
     private fun startAll(ids: List<Long>): Boolean {
         heldForNetwork -= ids.toSet()
-        change { list -> list.map { if (it.id in ids) it.copy(status = Status.Running, problem = null, detail = null) else it } }
+        change { list -> list.map { if (it.id in ids) it.copy(status = Status.Running, problem = null, detail = null, videoProblem = null) else it } }
         if (!DownloadService.ensure(context)) {
             change { list -> list.map { if (it.id in ids) it.copy(status = Status.Queued) else it } }
             val waiting = QueuePlan.queued(_list.value).size
@@ -463,6 +547,7 @@ class DownloadCenter(private val context: Context) {
         ids.mapNotNull(::find).forEach { download ->
             val video = download.video
             when {
+                video == null && download.plan != null -> readPlanned(download)
                 video == null -> {
                     val stateFile = download.stateFile
                     val tuning = Tuning(
@@ -644,7 +729,7 @@ class DownloadCenter(private val context: Context) {
     private fun publish(download: Download) {
         scope.launch {
             val file = download.file?.let(::File)
-            val published = file?.let { Publisher.publish(context, it, prefs.prefs.value) }
+            val published = file?.let { Publisher.publish(context, it, prefs.prefs.value, download.folder) }
             if (published != null) folderOf(download.id).delete()
             edit(download.id) {
                 if (published != null) {

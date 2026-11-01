@@ -34,6 +34,8 @@ enum class Kind(val icon: ColorIcon) {
         fun of(download: Download): Kind = when {
             download.video?.container == Container.M4a -> Music
             download.video != null -> Video
+            // A playlist's video not read yet: the sound alone, or a video.
+            download.plan != null -> if (download.plan.height == null) Music else Video
             else -> ofName(download.name)
         }
     }

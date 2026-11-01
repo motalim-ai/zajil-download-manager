@@ -17,6 +17,10 @@ FORMAT_FIELDS = (
     "format_note", "url", "http_headers", "protocol", "has_drm", "dynamic_range",
 )
 
+# The most entries of a playlist that are listed, as the desktop's
+# (zajil-core video/output.rs, MAX_PLAYLIST_ENTRIES).
+MAX_PLAYLIST_ENTRIES = 1000
+
 INFO_FIELDS = (
     "id", "title", "duration", "webpage_url", "extractor_key", "is_live", "live_status",
     "thumbnail", "channel", "uploader",
@@ -47,6 +51,10 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        # A playlist or a channel is listed, not opened: each video is read
+        # when its turn comes, as on the desktop (--flat-playlist).
+        "extract_flat": "in_playlist",
+        "playlistend": MAX_PLAYLIST_ENTRIES,
         # No plugins, nothing fetched from elsewhere: only the scripts in the
         # app (yt-dlp-ejs), run by the app's QuickJS-NG.
         "cachedir": cache_dir or False,
@@ -63,6 +71,8 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
             _add_cookies(ydl, url, cookies)
             url = _snapchat_spotlight(ydl, url)
             info = ydl.sanitize_info(ydl.extract_info(url, download=False))
+            if info.get("_type") == "playlist":
+                return json.dumps(_playlist(info, yt_dlp.version.__version__))
             found = []
             # A page of one file (Snapchat's Spotlight) has its address on
             # the video itself, no list of formats.
@@ -90,6 +100,38 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
     result["formats"] = found
     result["version"] = yt_dlp.version.__version__
     return json.dumps(result)
+
+
+def _playlist(info, version):
+    """A playlist yt-dlp listed: its title, and for each entry its page,
+    title, length and smallest https thumbnail of at least 120 pixels.
+    An entry that is itself a playlist (a channel's tab) says so."""
+    entries = []
+    for e in (info.get("entries") or [])[:MAX_PLAYLIST_ENTRIES]:
+        if not isinstance(e, dict):
+            continue
+        url = e.get("url") or e.get("webpage_url")
+        if e.get("ie_key") == "Youtube" and e.get("id") and not str(url or "").startswith("http"):
+            url = "https://www.youtube.com/watch?v=" + e["id"]
+        thumbs = [t for t in (e.get("thumbnails") or []) if str(t.get("url", "")).startswith("https://")]
+        thumbs.sort(key=lambda t: t.get("width") or 0)
+        thumb = next((t["url"] for t in thumbs if (t.get("width") or 0) >= 120), thumbs[-1]["url"] if thumbs else None)
+        entries.append({
+            "url": url if str(url or "").startswith(("https://", "http://")) else None,
+            "title": e.get("title"),
+            "duration": e.get("duration"),
+            "thumbnail": thumb,
+            "playlist": e.get("_type") == "playlist" or e.get("ie_key") == "YoutubeTab",
+            "available": e.get("availability") not in ("private", "needs_auth", "subscriber_only", "premium_only")
+            and (e.get("title") or "") not in ("[Private video]", "[Deleted video]"),
+        })
+    return {
+        "playlist": True,
+        "title": info.get("title") or info.get("id") or "",
+        "channel": info.get("channel") or info.get("uploader"),
+        "entries": entries,
+        "version": version,
+    }
 
 
 def version(updated_yt_dlp=None):

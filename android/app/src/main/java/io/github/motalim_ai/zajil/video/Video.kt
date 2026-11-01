@@ -261,6 +261,31 @@ object VideoChoice {
     /** The height of a page's whole file the site gives no height for. */
     const val WHOLE = 0
 
+    /**
+     * A playlist's video by its plan (0.3.0): the highest height up to
+     * [height] that downloads, else the lowest above it (the nearest the
+     * page has); [height] null: the sound alone, else the lowest picture.
+     * The [dub]'s sound if the page has it, else the video's own.
+     */
+    fun forPlan(info: VideoInfo, height: Int?, dub: String?): Picked? {
+        val sounds = sounds(info)
+        val sound = sounds.firstOrNull { !it.original && it.language == dub } ?: sounds.firstOrNull { it.original } ?: sounds.firstOrNull()
+            ?: return null
+        if (height == null) pick(info, null, sound)?.let { return it }
+        val heights = qualities(info)
+        val order = if (height == null) {
+            heights.sorted()
+        } else {
+            heights.filter { it <= height }.sortedDescending() + heights.filter { it > height }.sorted()
+        }
+        for (h in order) {
+            pick(info, h, sound)?.let { return it }
+            // The dub is not at this height: the video's own sound there.
+            if (!sound.original) sounds.firstOrNull { it.original }?.let { own -> pick(info, h, own)?.let { return it } }
+        }
+        return null
+    }
+
     private fun containerOf(ext: String) = when (ext) {
         "webm" -> Container.Webm
         "m4a" -> Container.M4a
@@ -286,7 +311,8 @@ object VideoChoice {
  */
 object VideoPages {
     private val pages: List<Pair<Regex, Regex>> = listOf(
-        Regex("^(www\\.|m\\.|music\\.)?youtube\\.com$") to Regex("^/(watch|shorts/|live/|embed/)"),
+        // A video, a playlist, or a channel's videos (0.3.0, as the desktop's since 1.1).
+        Regex("^(www\\.|m\\.|music\\.)?youtube\\.com$") to Regex("^/(watch|shorts/|live/|embed/|playlist|@[^/]+/?(videos|shorts|streams)?/?$|channel/|c/|user/)"),
         Regex("^(www\\.)?youtube-nocookie\\.com$") to Regex("^/embed/"),
         Regex("^youtu\\.be$") to Regex("^/[\\w-]+"),
         Regex("^(www\\.|mobile\\.)?(x|twitter)\\.com$") to Regex("^/[^/]+/status/\\d+"),

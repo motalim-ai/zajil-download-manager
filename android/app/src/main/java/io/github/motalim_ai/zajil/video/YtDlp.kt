@@ -20,13 +20,26 @@ object YtDlp {
     private const val TAG = "ZajilVideo"
     private val lock = Mutex()
 
-    /** The video at [url] and its formats; never logs the link. */
+    /** The video at [url] and its formats; a playlist is a failure here. Never logs the link. */
     suspend fun read(
         context: Context,
         url: String,
         cookies: String? = null,
         referer: String? = null,
-    ): Result<VideoInfo> = withContext(Dispatchers.IO) {
+    ): Result<VideoInfo> = readPage(context, url, cookies, referer).mapCatching { page ->
+        when (page) {
+            is Page.Video -> page.info
+            is Page.Playlist -> throw VideoError("a playlist, not a video")
+        }
+    }
+
+    /** What [url] holds: a video and its formats, or a playlist listed (not opened). */
+    suspend fun readPage(
+        context: Context,
+        url: String,
+        cookies: String? = null,
+        referer: String? = null,
+    ): Result<Page> = withContext(Dispatchers.IO) {
         lock.withLock {
             val started = SystemClock.elapsedRealtime()
             val python = python(context)
@@ -35,7 +48,7 @@ object YtDlp {
                 .callAttr("formats", url, quickJs(context), ToolsUpdate.ytDlpZip(context)?.path, cacheDir(context), cookies, referer)
                 .toString()
             Log.i(TAG, "Python ready in ${ready - started} ms, the page read in ${SystemClock.elapsedRealtime() - ready} ms")
-            VideoInfo.parse(json)
+            Page.parse(json)
         }
     }
 

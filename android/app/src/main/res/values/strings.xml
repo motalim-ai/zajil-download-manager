@@ -42,6 +42,25 @@
     <string name="video_nothing">لم يجد زاجِل في الصفحة صيغة يستطيع تحميلها.</string>
     <string name="video_bot_check">طلب يوتيوب التأكد من أنك لست برنامجًا آليًا. حاول بعد قليل.</string>
     <string name="video_unreadable">تعذّرت قراءة صفحة الفيديو.</string>
+    <string name="in_a_playlist">هذا الفيديو في قائمة تشغيل</string>
+    <string name="in_a_playlist_hint">حمّل هذا الفيديو وحده، أو اختر من فيديوهات القائمة كلها.</string>
+    <string name="this_video_only">هذا الفيديو فقط</string>
+    <string name="whole_playlist">القائمة كلها</string>
+    <string name="select_all">تحديد الكل</string>
+    <string name="select_none">إلغاء التحديد</string>
+    <string name="best_up_to">الأفضل حتى %1$s</string>
+    <string name="dub_arabic_if_any">مدبلج بالعربية إن وُجد</string>
+    <string name="open_playlist">قائمة تشغيل: افتحها لتختار فيديوهاتها</string>
+    <string name="playlists_only">هذه قوائم تشغيل: افتح كل واحدة منها لتختار فيديوهاتها.</string>
+    <string name="found_playlist">قائمة تشغيل يقرؤها زاجِل، وتختار فيديوهاتها بعدها</string>
+    <string name="video_short_private">فيديو خاص، تُخطّي</string>
+    <string name="video_short_sign_in">يحتاج تسجيل الدخول، تُخطّي</string>
+    <string name="video_short_gone">غير متاح، تُخطّي</string>
+    <string name="video_short_unavailable">غير متاح: خاص أو محذوف</string>
+    <string name="video_short_no_format">لا صيغة يستطيع زاجِل تحميلها</string>
+    <string name="video_short_live">بث مباشر، لا يُحمَّل</string>
+    <string name="video_short_drm">محمي من النسخ</string>
+    <string name="video_short_unreadable">تعذّرت قراءة صفحته</string>
     <string name="video_private">هذا الفيديو خاص. إن كان مسموحًا لك برؤيته، فسجّل دخولك في الموقع من «تصفّح» وافتحه من هناك.</string>
     <string name="video_sign_in">يطلب الموقع تسجيل الدخول لهذا الفيديو. سجّل دخولك فيه من «تصفّح»، ثم افتح الفيديو من هناك.</string>
     <string name="video_not_public">تعذّرت قراءة هذا الفيديو، وقد يكون غير عام أو يحتاج تسجيل الدخول. سجّل دخولك في الموقع من «تصفّح»، ثم افتح الفيديو من هناك.</string>
@@ -355,5 +374,37 @@
         <item quantity="few">%d مواقع</item>
         <item quantity="many">%d موقعًا</item>
         <item quantity="other">%d موقع</item>
+    </plurals>
+    <plurals name="playlist_videos">
+        <item quantity="zero">لا فيديوهات</item>
+        <item quantity="one">فيديو واحد</item>
+        <item quantity="two">فيديوهان</item>
+        <item quantity="few">%d فيديوهات</item>
+        <item quantity="many">%d فيديو</item>
+        <item quantity="other">%d فيديو</item>
+    </plurals>
+    <plurals name="playlist_chosen">
+        <item quantity="zero">لم يُحدَّد شيء</item>
+        <item quantity="one">حُدِّد فيديو واحد</item>
+        <item quantity="two">حُدِّد فيديوهان</item>
+        <item quantity="few">حُدِّدت %d فيديوهات</item>
+        <item quantity="many">حُدِّد %d فيديو</item>
+        <item quantity="other">حُدِّد %d فيديو</item>
+    </plurals>
+    <plurals name="playlist_unavailable">
+        <item quantity="zero">كل الفيديوهات متاحة</item>
+        <item quantity="one">فيديو واحد غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
+        <item quantity="two">فيديوهان غير متاحين (خاصان أو محذوفان)، ولن يُحمَّلا</item>
+        <item quantity="few">%d فيديوهات غير متاحة (خاصة أو محذوفة)، ولن تُحمَّل</item>
+        <item quantity="many">%d فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
+        <item quantity="other">%d فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
+    </plurals>
+    <plurals name="download_chosen">
+        <item quantity="zero">تحميل</item>
+        <item quantity="one">تحميل فيديو واحد</item>
+        <item quantity="two">تحميل فيديوهين</item>
+        <item quantity="few">تحميل %d فيديوهات</item>
+        <item quantity="many">تحميل %d فيديو</item>
+        <item quantity="other">تحميل %d فيديو</item>
     </plurals>
 </resources>

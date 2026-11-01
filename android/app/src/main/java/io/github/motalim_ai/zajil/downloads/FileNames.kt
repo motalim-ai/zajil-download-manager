@@ -16,6 +16,21 @@ object FileNames {
     const val RLI = '⁧'
     const val PDI = '⁩'
 
+    /**
+     * A folder's name from a title the site gave (a playlist's): no path
+     * separators, no characters Windows or Android refuse, no control or
+     * invisible direction marks, no leading dots; at most 80 characters.
+     * Empty if nothing is left.
+     */
+    fun folder(title: String): String = title
+        .filterNot { it.isISOControl() || it in "/\\:*?\"<>|" || it in '\u200E'..'\u200F' || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' }
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .trimStart('.')
+        .take(80)
+        .trim()
+        .trimEnd('.')
+
     /** The server's media types and their extensions. */
     private val extensions = mapOf(
         "video/mp4" to "mp4", "video/webm" to "webm", "video/quicktime" to "mov",

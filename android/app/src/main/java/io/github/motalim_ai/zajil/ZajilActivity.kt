@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.motalim_ai.zajil.downloads.BrowserLink
+import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
 import io.github.motalim_ai.zajil.ui.AddSheet
 import io.github.motalim_ai.zajil.ui.DownloadActions
@@ -23,6 +24,8 @@ import io.github.motalim_ai.zajil.ui.Offer
 import io.github.motalim_ai.zajil.ui.StartWhen
 import io.github.motalim_ai.zajil.ui.VideoSheet
 import io.github.motalim_ai.zajil.ui.VideoSheetView
+import io.github.motalim_ai.zajil.video.Page
+import io.github.motalim_ai.zajil.video.PlaylistLinks
 import io.github.motalim_ai.zajil.video.VideoChoice
 import io.github.motalim_ai.zajil.video.VideoPages
 import io.github.motalim_ai.zajil.video.VideoProblems
@@ -127,6 +130,16 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
                 } else {
                     null
                 },
+                // The video alone, the whole list, or a list inside the list.
+                onRead = { url -> readVideo(url, videoLink, ask = false) },
+                onPlaylist = { url, info, entries, height, dub, queue ->
+                    videoSheet.value = null
+                    val folder = FileNames.folder(info.title).ifEmpty { getString(R.string.whole_playlist) }
+                    downloads.addPlaylist(url, entries, height, dub, folder, videoLink, queue)
+                    added()
+                    askMissingPermissions()
+                    settledIfDone()
+                },
             )
         }
     }
@@ -164,12 +177,23 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
      * A video page: yt-dlp reads it on the phone, and the sheet offers its
      * qualities and sounds. Nothing downloads until the user chooses.
      */
-    protected fun readVideo(url: String, browser: BrowserLink? = null, pageTitle: String? = null) {
+    protected fun readVideo(url: String, browser: BrowserLink? = null, pageTitle: String? = null, ask: Boolean = true) {
         videoLink = browser
+        // A video in a list: the user says which first (0.3.0).
+        val list = PlaylistLinks.listOf(url)
+        if (ask && list != null) {
+            videoSheet.value = VideoSheet.AskList(url, list)
+            return
+        }
         videoSheet.value = VideoSheet.Reading(url)
         lifecycleScope.launch {
-            val read = YtDlp.read(this@ZajilActivity, url, browser?.cookies, browser?.page)
+            val page = YtDlp.readPage(this@ZajilActivity, url, browser?.cookies, browser?.page)
             if (videoSheet.value?.url != url) return@launch
+            (page.getOrNull() as? Page.Playlist)?.let {
+                videoSheet.value = VideoSheet.Playlist(url, it.info)
+                return@launch
+            }
+            val read = page.map { (it as Page.Video).info }
             videoSheet.value = read.map { info ->
                 // A playlist found in the browser has only its file's name
                 // («master»): the page's title says what it is.

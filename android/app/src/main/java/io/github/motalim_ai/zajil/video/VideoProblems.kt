@@ -11,6 +11,7 @@ import io.github.motalim_ai.zajil.R
  */
 enum class VideoProblem(val message: Int, val signIn: Boolean = false) {
     BotCheck(R.string.video_bot_check),
+    Live(R.string.video_live),
     Drm(R.string.video_drm),
     Private(R.string.video_private, signIn = true),
     SignIn(R.string.video_sign_in, signIn = true),

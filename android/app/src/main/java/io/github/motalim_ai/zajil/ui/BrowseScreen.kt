@@ -74,6 +74,7 @@ import io.github.motalim_ai.zajil.browser.Found
 import io.github.motalim_ai.zajil.browser.MediaKind
 import io.github.motalim_ai.zajil.browser.Shortcut
 import io.github.motalim_ai.zajil.browser.SiteIcons
+import io.github.motalim_ai.zajil.video.PlaylistLinks
 import java.net.URI
 import java.net.URLDecoder
 
@@ -556,7 +557,11 @@ private fun FoundRow(item: Found, page: io.github.motalim_ai.zajil.browser.PageS
 private fun describe(item: Found, page: io.github.motalim_ai.zajil.browser.PageState): Triple<String, String, Int> {
     val pageTitle = page.title.ifBlank { hostOf(page.url) }
     return when (item) {
-        is Found.SitePage -> Triple(item.title.ifBlank { pageTitle }, stringResource(R.string.found_site_page), 0)
+        is Found.SitePage -> Triple(
+            item.title.ifBlank { pageTitle },
+            stringResource(if (PlaylistLinks.isList(item.url)) R.string.found_playlist else R.string.found_site_page),
+            0,
+        )
         is Found.Media -> when (item.kind) {
             MediaKind.File -> Triple(nameOf(item.url), stringResource(R.string.found_file, extOf(item.url).uppercase(), hostOf(item.url)), item.duration)
             MediaKind.Hls -> Triple(pageTitle, stringResource(R.string.found_hls, hostOf(item.url)), item.duration)

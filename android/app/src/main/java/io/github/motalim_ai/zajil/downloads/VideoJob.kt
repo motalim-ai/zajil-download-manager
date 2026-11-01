@@ -89,3 +89,30 @@ data class VideoJob(
         )
     }
 }
+
+/**
+ * A playlist's video before its turn (0.3.0, as the desktop's playlist
+ * rows): its page is read when it starts, and the quality and sound are
+ * picked then, the nearest the page has to these.
+ */
+data class PlaylistPlan(
+    val title: String,
+    /** The highest picture wanted; null: the sound only. */
+    val height: Int?,
+    /** A dubbed sound's language, if the page has it; null: the video's own. */
+    val dub: String?,
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("title", title)
+        put("height", height)
+        put("dub", dub)
+    }
+
+    companion object {
+        fun fromJson(o: JSONObject) = PlaylistPlan(
+            title = o.optString("title"),
+            height = if (o.isNull("height")) null else o.optInt("height"),
+            dub = if (o.isNull("dub")) null else o.optString("dub"),
+        )
+    }
+}

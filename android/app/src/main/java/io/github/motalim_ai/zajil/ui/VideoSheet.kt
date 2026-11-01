@@ -48,6 +48,8 @@ import androidx.core.net.toUri
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.update.Https
 import io.github.motalim_ai.zajil.video.Picked
+import io.github.motalim_ai.zajil.video.PlaylistEntry
+import io.github.motalim_ai.zajil.video.PlaylistInfo
 import io.github.motalim_ai.zajil.video.Sound
 import io.github.motalim_ai.zajil.video.VideoChoice
 import io.github.motalim_ai.zajil.video.VideoInfo
@@ -62,6 +64,12 @@ sealed interface VideoSheet {
     data class Reading(override val url: String) : VideoSheet
 
     data class Ready(override val url: String, val info: VideoInfo) : VideoSheet
+
+    /** A video in a list ([listUrl]): this one only, or the list (0.3.0). */
+    data class AskList(override val url: String, val listUrl: String) : VideoSheet
+
+    /** A playlist or a channel's videos, listed (0.3.0). */
+    data class Playlist(override val url: String, val info: PlaylistInfo) : VideoSheet
 
     /**
      * [message] is said to the user (never yt-dlp's own words); [signIn]:
@@ -83,6 +91,8 @@ fun VideoSheetView(
     onDownload: (url: String, info: VideoInfo, picked: Picked, choice: String) -> Unit,
     onDismiss: () -> Unit,
     onBrowse: ((url: String) -> Unit)? = null,
+    onRead: (url: String) -> Unit = {},
+    onPlaylist: (url: String, info: PlaylistInfo, entries: List<PlaylistEntry>, height: Int?, dub: String?, queue: Long) -> Unit = { _, _, _, _, _, _ -> },
 ) {
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.video_quality)) {
         Column(
@@ -109,6 +119,14 @@ fun VideoSheetView(
                     QuietButton(stringResource(R.string.ok), onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                 }
                 is VideoSheet.Ready -> Choice(sheet, onDownload, onDismiss)
+                is VideoSheet.AskList -> AskListView(onVideo = { onRead(sheet.url) }, onList = { onRead(sheet.listUrl) })
+                is VideoSheet.Playlist -> PlaylistView(
+                    sheet.url,
+                    sheet.info,
+                    onDownload = { entries, height, dub, queue -> onPlaylist(sheet.url, sheet.info, entries, height, dub, queue) },
+                    onOpen = onRead,
+                    onDismiss = onDismiss,
+                )
             }
         }
     }
@@ -273,7 +291,7 @@ private fun qualityLabel(height: Int?): String = when (height) {
 }
 
 /** «25:14», «1:02:09». */
-private fun duration(seconds: Double): String {
+internal fun duration(seconds: Double): String {
     val s = seconds.toLong().coerceAtLeast(0)
     return if (s >= 3600) {
         "%d:%02d:%02d".format(Locale.ROOT, s / 3600, s % 3600 / 60, s % 60)

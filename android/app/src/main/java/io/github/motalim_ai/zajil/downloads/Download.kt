@@ -75,13 +75,19 @@ data class Download(
     val cookieSource: CookieSource = CookieSource.None,
     /** The in-app browser's User-Agent, when it came from there. */
     val browserAgent: String? = null,
+    /** A playlist's video not read yet (0.3.0): what to pick when its turn comes. */
+    val plan: PlaylistPlan? = null,
+    /** Its folder inside the save folder: its playlist's (0.3.0). */
+    val folder: String? = null,
+    /** Why yt-dlp could not read its page ([io.github.motalim_ai.zajil.video.VideoProblem]'s name), for the screen. */
+    val videoProblem: String? = null,
 ) {
     /**
      * Before the engine knows the file's name: the link's last path part,
      * never its query, which may hold a token (AGENTS.md, section 10.3).
      */
     val name: String
-        get() = shownName ?: video?.title ?: file?.substringAfterLast('/') ?: chosenName ?: shortLink(url)
+        get() = shownName ?: video?.title ?: plan?.title?.takeIf { it.isNotBlank() } ?: file?.substringAfterLast('/') ?: chosenName ?: shortLink(url)
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -104,6 +110,9 @@ data class Download(
         put("page", page)
         put("cookie_source", cookieSource.name)
         put("browser_agent", browserAgent)
+        put("plan", plan?.toJson())
+        put("folder", folder)
+        put("video_problem", videoProblem)
     }
 
     companion object {
@@ -130,6 +139,9 @@ data class Download(
             page = json.optStringOrNull("page"),
             cookieSource = CookieSource.entries.firstOrNull { it.name == json.optStringOrNull("cookie_source") } ?: CookieSource.None,
             browserAgent = json.optStringOrNull("browser_agent"),
+            plan = json.optJSONObject("plan")?.let(PlaylistPlan::fromJson),
+            folder = json.optStringOrNull("folder"),
+            videoProblem = json.optStringOrNull("video_problem"),
         )
 
         fun listToJson(downloads: List<Download>): String =

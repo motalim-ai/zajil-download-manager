@@ -70,6 +70,7 @@ import io.github.motalim_ai.zajil.downloads.QueueRules
 import io.github.motalim_ai.zajil.downloads.Status
 import io.github.motalim_ai.zajil.downloads.Wait
 import io.github.motalim_ai.zajil.engine.Problem
+import io.github.motalim_ai.zajil.video.VideoProblem
 
 /** When a new download starts: now, with the queue, or when the user says. */
 enum class StartWhen { Now, Queue, Later }
@@ -485,6 +486,8 @@ private fun detail(download: Download, place: Int, queue: Queue, network: Networ
     val progress = if (total != null) Units.progress(download.done, total, units, ofTotal) else done
     val choice = download.video?.choice
     val parts: List<String?> = when (download.status) {
+        // A playlist's video whose page is being read now.
+        Status.Running if download.video == null && download.plan != null -> listOf(stringResource(R.string.video_reading))
         Status.Running -> listOf(
             progress,
             speed.takeIf { it > 0 }?.let { stringResource(R.string.per_second, Units.size(it, units)) },
@@ -513,7 +516,11 @@ private fun detail(download: Download, place: Int, queue: Queue, network: Networ
                 Wait.Wifi -> stringResource(R.string.wait_wifi)
             },
         )
-        Status.Failed -> listOf(stringResource(problemText(download.problem)))
+        Status.Failed -> listOf(
+            download.videoProblem?.let { name -> VideoProblem.entries.firstOrNull { it.name == name } }
+                ?.let { stringResource(shortText(it)) }
+                ?: stringResource(problemText(download.problem)),
+        )
         Status.Done -> listOf(
             choice,
             Units.size(download.total ?: download.done, units),
@@ -550,3 +557,16 @@ private fun open(context: Context, download: Download) {
         // No app opens this kind of file.
     }
 }
+
+/** A playlist video's problem, in a card's few words. */
+private fun shortText(problem: VideoProblem): Int = when (problem) {
+    VideoProblem.Private -> R.string.video_short_private
+    VideoProblem.SignIn, VideoProblem.NotPublic -> R.string.video_short_sign_in
+    VideoProblem.Gone -> R.string.video_short_gone
+    VideoProblem.NoFormats -> R.string.video_short_no_format
+    VideoProblem.Live -> R.string.video_short_live
+    VideoProblem.Network -> R.string.problem_network
+    VideoProblem.Drm -> R.string.video_short_drm
+    VideoProblem.BotCheck, VideoProblem.Unsupported, VideoProblem.Unreadable -> R.string.video_short_unreadable
+}
+
