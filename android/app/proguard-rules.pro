@@ -5,5 +5,5 @@
 -keep class io.github.motalim_ai.zajil.engine.** { *; }
 -dontwarn java.awt.**
 
-# rustls-platform-verifier's Kotlin half is called from Rust through JNI only.
+# rustls-platform-verifier's Kotlin half (copied in org/rustls/platformverifier) is called from Rust through JNI only.
 -keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }

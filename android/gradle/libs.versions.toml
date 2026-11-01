@@ -30,7 +30,6 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 junit = { module = "junit:junit", version.ref = "junit" }
 # Unversioned: the version is the one in Cargo.lock (app/build.gradle.kts).
-rustls-platform-verifier = { module = "org.rustls:rustls-platform-verifier" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

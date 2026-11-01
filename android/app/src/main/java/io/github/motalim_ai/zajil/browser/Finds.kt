@@ -129,6 +129,19 @@ object Finds {
 
     private val SECOND_LEVELS = setOf("co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go", "gob", "nic")
 
+    /**
+     * [page] as it goes with a download, as a Referer: without its fragment,
+     * nor any user name and password before its host.
+     */
+    fun referrer(page: String): String {
+        val noFragment = page.substringBefore('#')
+        val scheme = noFragment.substringBefore("://", "")
+        if (scheme.isEmpty()) return noFragment
+        val rest = noFragment.substring(scheme.length + 3)
+        val end = rest.indexOfAny(charArrayOf('/', '?')).let { if (it < 0) rest.length else it }
+        return scheme + "://" + rest.substring(0, end).substringAfterLast('@') + rest.substring(end)
+    }
+
     fun sameSite(a: String, b: String): Boolean {
         val ha = runCatching { URI(a).host }.getOrNull() ?: return false
         val hb = runCatching { URI(b).host }.getOrNull() ?: return false

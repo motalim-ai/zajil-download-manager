@@ -1,7 +1,6 @@
 import com.android.build.api.artifact.SingleArtifact
 import java.net.URI
 import java.security.MessageDigest
-import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -258,28 +257,24 @@ abstract class CheckManifest : DefaultTask() {
     }
 }
 
-// rustls-platform-verifier's Kotlin half must be the version its Rust half
-// expects: the one in Cargo.lock, read at configuration time.
-val verifierVersion = providers.fileContents(workspace.file("Cargo.lock")).asText.map { lock ->
-    val lines = lock.lines()
-    val at = lines.indexOfFirst { it.trim() == "name = \"rustls-platform-verifier-android\"" }
-    check(at >= 0) { "rustls-platform-verifier-android is not in Cargo.lock" }
-    lines[at + 1].substringAfter('"').substringBefore('"')
-}
 /**
  * The app's network security config, for every build:
- * rustls-platform-verifier's own (plain HTTP only to certificate
- * revocation lists, which the engine's verifier fetches), with the OCSP
- * responders of `ocsp-hosts.txt` added, so that OCSP answers before a
- * list is downloaded (ADR-0012, section 17), and in a debug build plain
- * HTTP to this phone's 127.0.0.1 for the emulator tests (android/README.md).
- * Written from the AAR itself, under the library's resource name, so that
- * the list never falls behind it and the library's manifest entry points
- * to this file.
+ * rustls-platform-verifier's own (`network-security-base.xml`, copied
+ * from its commit 252e2516 and checked against its SHA-256: plain HTTP
+ * only to certificate revocation lists, which the engine's verifier
+ * fetches), with the OCSP responders of `ocsp-hosts.txt` added, so that
+ * OCSP answers before a list is downloaded (ADR-0012, section 17), and in
+ * a debug build plain HTTP to this phone's 127.0.0.1 for the emulator
+ * tests (android/README.md).
  */
 abstract class NetworkConfig : DefaultTask() {
-    @get:InputFiles
-    abstract val verifierAar: ConfigurableFileCollection
+    private companion object {
+        /** rustls-platform-verifier's network security config at commit 252e2516 (tag v/0.7.1). */
+        const val BASE_SHA256 = "a81434f9139f3780412c358d1cc782fe25339182d3dc141b35413f23d2b29f6a"
+    }
+
+    @get:InputFile
+    abstract val base: RegularFileProperty
 
     @get:InputFile
     abstract val ocspHosts: RegularFileProperty
@@ -292,14 +287,12 @@ abstract class NetworkConfig : DefaultTask() {
 
     @TaskAction
     fun write() {
-        val aar = verifierAar.singleFile
-        val config = ZipFile(aar).use { zip ->
-            val entry = zip.getEntry("res/xml/network_security_config.xml")
-                ?: throw GradleException("no network_security_config.xml in $aar")
-            zip.getInputStream(entry).readBytes().decodeToString()
-        }
+        val bytes = base.get().asFile.readBytes()
+        val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        if (sha != BASE_SHA256) throw GradleException("network-security-base.xml is not rustls-platform-verifier's (SHA-256 $sha)")
+        val config = bytes.decodeToString()
         val end = "</network-security-config>"
-        if (!config.contains(end)) throw GradleException("unexpected network_security_config.xml in $aar")
+        if (!config.contains(end)) throw GradleException("unexpected network-security-base.xml")
         val hosts = ocspHosts.get().asFile.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
         hosts.forEach { if (!Regex("^[a-z0-9.-]+$").matches(it)) throw GradleException("not a host: $it") }
         val ocsp = "  <domain-config cleartextTrafficPermitted=\"true\">\n" +
@@ -320,11 +313,7 @@ abstract class NetworkConfig : DefaultTask() {
 androidComponents {
     onVariants { variant ->
         val networkConfig = tasks.register<NetworkConfig>("${variant.name}NetworkConfig") {
-            verifierAar.from(
-                configurations.detachedConfiguration(
-                    dependencies.create("org.rustls:rustls-platform-verifier:${verifierVersion.get()}@aar"),
-                ),
-            )
+            base = rootProject.layout.projectDirectory.file("network-security-base.xml")
             ocspHosts = rootProject.layout.projectDirectory.file("ocsp-hosts.txt")
             localTests = variant.buildType == "debug"
             res = layout.buildDirectory.dir("generated/networkConfig/${variant.name}/res")
@@ -363,15 +352,6 @@ androidComponents {
     }
 }
 
-configurations.configureEach {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "org.rustls" && requested.name == "rustls-platform-verifier") {
-            useVersion(verifierVersion.get())
-            because("the version of rustls-platform-verifier-android in Cargo.lock")
-        }
-    }
-}
-
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.webkit)
@@ -384,7 +364,6 @@ dependencies {
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)
     implementation("${libs.jna.get()}@aar")
-    implementation(libs.rustls.platform.verifier)
     testImplementation(libs.junit)
     // Android's org.json is a stub on the JVM: the real one, for tests only.
     testImplementation(libs.org.json)

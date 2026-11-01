@@ -11,6 +11,8 @@ import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -20,6 +22,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.ProfileStore
+import androidx.webkit.ServiceWorkerClientCompat
+import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import io.github.motalim_ai.zajil.BuildConfig
@@ -91,8 +95,8 @@ class BrowserController(private val context: Context) {
     val tabs: StateFlow<List<TabInfo>> = _tabs.asStateFlow()
 
     /** A link the page wanted to download: offered in Zajil's sheet, never started. */
-    private val _requests = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val requests: SharedFlow<String> = _requests.asSharedFlow()
+    private val _requests = MutableSharedFlow<Pair<String, BrowserLink?>>(extraBufferCapacity = 4)
+    val requests: SharedFlow<Pair<String, BrowserLink?>> = _requests.asSharedFlow()
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -271,20 +275,77 @@ class BrowserController(private val context: Context) {
 
     /**
      * What goes with a download of [url] found on the page on screen: the
-     * page (sent as the browsers send a Referer), the browser's
-     * User-Agent, and its cookies for [url] only when [url] is the page's
-     * own site (never a cross-site frame's), as they are
-     * now; private mode's never outlive it.
+     * page (sent as the browsers send a Referer, without its fragment or
+     * user name), the browser's User-Agent, and its cookies for [url] only
+     * when [url] is the page's own site (never a cross-site frame's), as they are now; private mode's never outlive it.
      */
-    fun linkFor(url: String): BrowserLink? {
-        val pageUrl = _page.value?.url ?: return null
-        val cookies = if (Finds.sameSite(url, pageUrl)) cookieManager()?.getCookie(url) else null
+    fun linkFor(url: String): BrowserLink? = current?.let { linkFor(url, it) }
+
+    /** [linkFor] on [tab]'s page: the tab the link came from, not the one on screen. */
+    private fun linkFor(url: String, tab: Tab): BrowserLink? {
+        val pageUrl = tab.page?.url ?: return null
+        val same = Finds.sameSite(url, pageUrl)
         return BrowserLink(
-            page = pageUrl,
-            source = if (_private.value) CookieSource.Private else CookieSource.Browser,
-            userAgent = webView?.settings?.userAgentString,
-            cookies = cookies,
+            url = url,
+            page = Finds.referrer(pageUrl),
+            source = when {
+                !same -> CookieSource.None
+                _private.value -> CookieSource.Private
+                else -> CookieSource.Browser
+            },
+            userAgent = tab.view.settings.userAgentString,
+            cookies = if (same) cookieManager()?.getCookie(url) else null,
         )
+    }
+
+    /**
+     * A page's service worker asks for things without the page's
+     * WebViewClient: the same guards here. A harmful host is never asked;
+     * ads and trackers of another site than the worker's page (known by its
+     * Referer) are not, where they are not let through. And the worker gets
+     * no file or content access, as the pages; private mode's, no cache.
+     */
+    private fun guardWorkers(controller: ServiceWorkerControllerCompat, private: Boolean) {
+        controller.serviceWorkerWebSettings.apply {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_CONTENT_ACCESS)) allowContentAccess = false
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_FILE_ACCESS)) allowFileAccess = false
+            if (private && WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_CACHE_MODE)) cacheMode = WebSettings.LOAD_NO_CACHE
+        }
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)) return
+        controller.setServiceWorkerClient(object : ServiceWorkerClientCompat() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? = workerRequest(request)
+        })
+    }
+
+    /** [guardWorkers] for private mode's profile, whose controller is the platform's own. */
+    private fun guardWorkers(controller: ServiceWorkerController) {
+        controller.serviceWorkerWebSettings.apply {
+            allowContentAccess = false
+            allowFileAccess = false
+            cacheMode = WebSettings.LOAD_NO_CACHE
+        }
+        controller.setServiceWorkerClient(object : ServiceWorkerClient() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? = workerRequest(request)
+        })
+    }
+
+    /** A service worker's request: an empty answer if a guard stops it, else null (asked as it is). */
+    private fun workerRequest(request: WebResourceRequest): WebResourceResponse? {
+        val host = request.url.host?.lowercase() ?: return null
+        if (protection.harm(host, Finds.site(host)) != null) {
+            protection.blocked(ListKind.Malware)
+            return EMPTY()
+        }
+        val site = request.requestHeaders["Referer"]
+            ?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+            ?.lowercase()?.let(Finds::site) ?: return null
+        if (Finds.site(host) != site && protection.settings.value.active(Guard.Ads, site)) {
+            protection.adKind(host)?.let { kind ->
+                protection.blocked(kind)
+                return EMPTY()
+            }
+        }
+        return null
     }
 
     private fun cookieManager(): CookieManager? = if (_private.value) {
@@ -312,8 +373,11 @@ class BrowserController(private val context: Context) {
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         val view = WebView(context)
         if (_private.value) {
-            ProfileStore.getInstance().getOrCreateProfile(PRIVATE)
+            val profile = ProfileStore.getInstance().getOrCreateProfile(PRIVATE)
             WebViewCompat.setProfile(view, PRIVATE)
+            runCatching { guardWorkers(profile.serviceWorkerController) }
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)) {
+            guardWorkers(ServiceWorkerControllerCompat.getInstance(), private = false)
         }
         view.settings.apply {
             javaScriptEnabled = true
@@ -347,8 +411,13 @@ class BrowserController(private val context: Context) {
         view.webViewClient = Client()
         view.webChromeClient = Chrome()
         // A page's download: offered in Zajil's sheet, never started by the page.
+        // Only the tab on screen: a tab in the background cannot open the
+        // sheet over another, nor take the page on screen with it.
         view.setDownloadListener { url, _, _, _, _ ->
-            if (url.startsWith("https://") || url.startsWith("http://")) _requests.tryEmit(url)
+            val tab = tabOf(view)
+            if (tab != null && tab == current && (url.startsWith("https://") || url.startsWith("http://"))) {
+                _requests.tryEmit(url to linkFor(url, tab))
+            }
         }
         if (detectsElements) {
             val script = context.assets.open("browser/finder.js").bufferedReader().use { it.readText() }
@@ -432,7 +501,19 @@ class BrowserController(private val context: Context) {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             // Only http(s): no intent:, file:, content: or another app's links.
             val scheme = request.url.scheme?.lowercase()
-            return scheme != "http" && scheme != "https"
+            if (scheme != "http" && scheme != "https") return true
+            // A harmful page is warned about even if a service worker would answer it
+            // (its request would never reach shouldInterceptRequest).
+            val host = request.url.host?.lowercase()?.trimEnd('.') ?: return false
+            val tab = tabOf(view) ?: return false
+            if (request.isForMainFrame && host !in tab.bypass) {
+                protection.harm(host, Finds.site(host))?.let { guard ->
+                    protection.blocked(ListKind.Malware)
+                    warn(tab, Warning(request.url.toString(), host, guard))
+                    return true
+                }
+            }
+            return false
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {

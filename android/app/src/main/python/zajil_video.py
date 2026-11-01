@@ -4,10 +4,12 @@ yt-dlp only finds a video's formats here; Zajil's own engine downloads them,
 and Android's MediaMuxer joins the picture and the sound, as on the desktop.
 Nothing is downloaded or written by this module, apart from what yt-dlp
 keeps in memory, and it never runs a JavaScript runtime other than the
-QuickJS-NG that the app ships ([qjs]).
+QuickJS-NG that the app ships, and that only in the app's isolated process
+([jsbox], ADR-0009's rule on Android): never in the app's own process.
 """
 
 import json
+import socket
 import sys
 
 # Fields of a format that the app needs, and no other.
@@ -27,7 +29,100 @@ INFO_FIELDS = (
 )
 
 
-def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer=None):
+# QuickJS-NG's version in the app (tools/quickjs/pins.txt): yt-dlp is told it,
+# instead of running the program to ask.
+QJS_VERSION = (0, 17, 0)
+
+
+class _NoLog:
+    """yt-dlp's logger: nothing goes to stderr, and so nothing to logcat (its
+    messages may hold a link and its token). The app says what went wrong
+    from the error it gets back."""
+
+    def debug(self, msg):
+        pass
+
+    def info(self, msg):
+        pass
+
+    def warning(self, msg):
+        pass
+
+    def error(self, msg):
+        pass
+
+
+_host_check = None
+_getaddrinfo = socket.getaddrinfo
+
+
+def _guarded_getaddrinfo(host, *args, **kwargs):
+    """Every connection yt-dlp makes (a page, each redirect, a fragment, a
+    playlist's entry) resolves its host here first: a host on the app's
+    list of harmful sites is refused before anything is asked of it, as
+    the engine refuses it (Protection.hostCheck)."""
+    check = _host_check
+    if check is not None and isinstance(host, (str, bytes)):
+        name = (host.decode("ascii", "replace") if isinstance(host, bytes) else host).lower().rstrip(".")
+        if not name or check.refused(name):
+            raise socket.gaierror(socket.EAI_NONAME, "refused by Zajil's protection")
+    return _getaddrinfo(host, *args, **kwargs)
+
+
+def _guard_hosts(host_check):
+    """Installs [host_check] (the app's) for every connection from now on."""
+    global _host_check
+    _host_check = host_check
+    socket.getaddrinfo = _guarded_getaddrinfo
+
+
+def _origin_referer(referer):
+    """Only the page's origin, never its path, query or fragment (which may
+    hold a token): the Referer yt-dlp sends to every host it asks."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(referer or "")
+        host = parts.netloc.rpartition("@")[2].lower()
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host:
+        return None
+    return f"{parts.scheme}://{host}/"
+
+
+def _quickjs_in_box(jsbox):
+    """yt-dlp's QuickJS-NG runs in the app's isolated process ([jsbox]), never
+    as a program of the app's own: the challenge's script goes there, and
+    its output comes back. True if this yt-dlp could be set so; if not, no
+    JavaScript runtime is given to it at all."""
+    if jsbox is None:
+        return False
+    try:
+        from yt_dlp.extractor.youtube.jsc._builtin import quickjs
+        from yt_dlp.extractor.youtube.jsc.provider import JsChallengeProviderError
+        from yt_dlp.utils import _jsruntime
+    except ImportError:
+        return False
+    if not hasattr(quickjs.QuickJSJCP, "_run_js_runtime") or not hasattr(_jsruntime, "JsRuntimeInfo"):
+        return False
+
+    def run(self, stdin, /):
+        result = jsbox.run(stdin)
+        if result.code or result.stderr:
+            raise JsChallengeProviderError(f"QuickJS in the isolated process failed ({result.code}): {result.stderr[:300]}")
+        return result.stdout
+
+    def info(self):
+        return _jsruntime.JsRuntimeInfo(
+            name="quickjs-ng", path=self._path or "qjs",
+            version=".".join(map(str, QJS_VERSION)), version_tuple=QJS_VERSION)
+
+    quickjs.QuickJSJCP._run_js_runtime = run
+    _jsruntime.QuickJsRuntime._info = info
+    return True
+
+
+def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer=None, jsbox=None, host_check=None):
     """The video at [url] and its formats, as JSON: {"error": ...} on failure.
 
     [updated_yt_dlp] is a newer yt-dlp (its zip, checked by the app against
@@ -40,15 +135,20 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
     never written. A format that needs cookies (some sites set their own
     while the page is read) says so in its `cookie_header`, for the app's
     engine to send to that format's address only, also in memory.
-    [referer] is the page a playlist was found on, for its server.
+    [referer] is the page a playlist was found on: its origin only goes to
+    the server. [jsbox] runs QuickJS-NG in the app's isolated process, and
+    [host_check] refuses the hosts on the app's list of harmful sites.
     """
     if updated_yt_dlp and updated_yt_dlp not in sys.path and "yt_dlp" not in sys.modules:
         sys.path.insert(0, updated_yt_dlp)
     import yt_dlp
 
+    _guard_hosts(host_check)
+    boxed = _quickjs_in_box(jsbox)
     options = {
         "quiet": True,
         "no_warnings": True,
+        "logger": _NoLog(),
         "skip_download": True,
         "noplaylist": True,
         # A playlist or a channel is listed, not opened: each video is read
@@ -60,12 +160,13 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
         "cachedir": cache_dir or False,
         "plugin_dirs": [],
         "remote_components": [],
-        "js_runtimes": {"quickjs": {"path": qjs}},
+        "js_runtimes": {"quickjs": {"path": qjs}} if boxed else {},
         "socket_timeout": 20,
         "extractor_retries": 2,
     }
-    if referer:
-        options["http_headers"] = {"Referer": referer}
+    origin = _origin_referer(referer)
+    if origin:
+        options["http_headers"] = {"Referer": origin}
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             _add_cookies(ydl, url, cookies)
@@ -196,7 +297,7 @@ class _Stopped(Exception):
     pass
 
 
-def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies=None, referer=None, name="stream"):
+def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies=None, referer=None, name="stream", host_check=None):
     """Downloads the HLS or DASH format [format_id] of [url] into [out_dir]
     as [name].<ext>, with yt-dlp's own fragment downloader (no FFmpeg: HLS
     fragments are joined as MPEG-TS, which the app turns into MP4 with
@@ -210,6 +311,8 @@ def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies
     import os
     import yt_dlp
 
+    _guard_hosts(host_check)
+
     def hook(d):
         if listener.stopping():
             raise _Stopped()
@@ -220,6 +323,7 @@ def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies
     options = {
         "quiet": True,
         "no_warnings": True,
+        "logger": _NoLog(),
         "noprogress": True,
         "noplaylist": True,
         "cachedir": False,
@@ -235,9 +339,12 @@ def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies
         "socket_timeout": 20,
         "retries": 5,
         "fragment_retries": 5,
+        # No JavaScript runtime here, as before: never one outside the isolated process.
+        "js_runtimes": {},
     }
-    if referer:
-        options["http_headers"] = {"Referer": referer}
+    origin = _origin_referer(referer)
+    if origin:
+        options["http_headers"] = {"Referer": origin}
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             _add_cookies(ydl, url, cookies)

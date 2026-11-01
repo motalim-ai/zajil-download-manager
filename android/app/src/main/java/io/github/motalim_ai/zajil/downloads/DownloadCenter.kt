@@ -1,6 +1,7 @@
 package io.github.motalim_ai.zajil.downloads
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.util.AtomicFile
 import android.webkit.CookieManager
@@ -110,21 +111,45 @@ class DownloadCenter(private val context: Context) {
     private val hlsStops = ConcurrentHashMap<Long, AtomicBoolean>()
 
     /**
-     * Where unfinished downloads live: the app's own folder on the shared
-     * storage, which needs no permission (ADR-0012, section 4).
+     * Where unfinished downloads live, with their state files, which may
+     * hold a link's token (ADR-0012, section 4). From Android 11, the
+     * app's own folder on the shared storage, which no other app can read.
+     * Before 11 an app with the storage permission could read that folder:
+     * there, the app's private storage (the owner's decision, 2026-11-01).
      */
     private val workDir: File
-        get() = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(context.filesDir, "downloads")
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.noBackupFilesDir, "downloads")
+        } else {
+            File(context.noBackupFilesDir, "downloads")
+        }
+
+    /** Before Android 11: the shared folder downloads lived in before 0.4.0. */
+    private val legacyWorkDir: File?
+        get() = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) else null
 
     /**
      * Each download in a folder of its own, so that two at once from the same
      * link never make the engine rename one ("name (1)"): the only renaming
-     * is the public folder's, once.
+     * is the public folder's, once. One started before 0.4.0 on Android 8 to
+     * 10 stays where its files are until it ends.
      */
-    private fun folderOf(id: Long) = File(workDir, id.toString())
+    private fun folderOf(id: Long): File {
+        legacyWorkDir?.let { File(it, id.toString()) }?.takeIf { it.isDirectory }?.let { return it }
+        return File(workDir, id.toString())
+    }
 
     init {
+        // Before Android 11: what is left in the old shared folder of a download
+        // no longer in the list goes, so that its number never takes a new one there.
+        legacyWorkDir?.listFiles()?.let { folders ->
+            val ids = _list.value.map { it.id.toString() }.toSet()
+            // Its files only, one level, never following a link (AGENTS.md, section 10.1).
+            folders.filter { it.name !in ids }.forEach { folder ->
+                folder.listFiles()?.forEach { if (!it.isDirectory) it.delete() }
+                folder.delete()
+            }
+        }
         // A download complete before the app stopped, not yet published or joined.
         _list.value.filter { it.status == Status.Publishing }.forEach(::publish)
         _list.value.filter { it.status == Status.Merging }.forEach(::merge)
@@ -158,7 +183,7 @@ class DownloadCenter(private val context: Context) {
     fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false, browser: BrowserLink? = null, queue: Long = Queue.MAIN): Long {
         val blocked = local && !LocalNetwork.isGranted(context)
         return insert { id, order ->
-            browser?.cookies?.let { linkCookies[id] = it }
+            browser?.takeIf { it.url == url }?.cookies?.let { linkCookies[id] = it }
             Download(
                 id = id,
                 url = url,
@@ -207,7 +232,7 @@ class DownloadCenter(private val context: Context) {
         val formats = listOfNotNull(picked.video, picked.audio)
         val (hls, dash, streams) = streamsOf(picked)
         return insert { id, order ->
-            browser?.cookies?.let { linkCookies[id] = it }
+            browser?.takeIf { it.url == pageUrl }?.cookies?.let { linkCookies[id] = it }
             formats.forEachIndexed { i, f -> f.cookieHeader?.let { streamCookies[engineId(id, i)] = it } }
             Download(
                 id = id,
@@ -321,7 +346,9 @@ class DownloadCenter(private val context: Context) {
      */
     private fun cookiesFor(download: Download, url: String = download.url): String? =
         linkCookies[download.id] ?: when (download.cookieSource) {
-            CookieSource.Browser -> runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
+            // Only for the page's own site: never a cross-site link's.
+            CookieSource.Browser -> download.page?.takeIf { Finds.sameSite(url, it) }
+                ?.let { runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() }
             CookieSource.Private, CookieSource.None -> null
         }
 

@@ -512,4 +512,5 @@
         <item quantity="other">طلب</item>
     </plurals>
     <string name="lists_signed">%1$s، موقّعة ومتحقَّق منها</string>
+    <string name="apk_open_in_files">لا يثبّت زاجِل البرامج بإذنه. ثبّته من «التنزيلات» في هاتفك.</string>
 </resources>

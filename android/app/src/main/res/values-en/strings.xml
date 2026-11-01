@@ -431,4 +431,5 @@
         <item quantity="other">requests</item>
     </plurals>
     <string name="lists_signed">%1$s, signed and checked</string>
+    <string name="apk_open_in_files">Zajil does not install apps with its own permission. Install it from your phone\'s Downloads.</string>
 </resources>

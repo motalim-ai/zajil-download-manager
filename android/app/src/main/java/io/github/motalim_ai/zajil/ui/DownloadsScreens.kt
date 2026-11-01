@@ -1,9 +1,11 @@
 package io.github.motalim_ai.zajil.ui
 
+import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.text.format.DateUtils
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -272,11 +274,25 @@ fun filterName(f: Filter) = when (f) {
     Filter.Other -> R.string.filter_other
 }
 
-/** Opens a finished download in the app the user picks. */
+/**
+ * Opens a finished download in the app the user picks. An app package
+ * (APK) is not: handed to Android's installer by Zajil, it would install
+ * under Zajil's «install unknown apps» permission, which is for Zajil's
+ * own update only (ADR-0012, sections 8 and 11). The system's Downloads
+ * opens instead, where the user installs it with that app's permission.
+ */
 fun openFile(context: Context, download: Download) {
     val uri = download.uri?.toUri() ?: return
+    val type = context.contentResolver.getType(uri)
+    if (type == APK_TYPE || download.name.endsWith(".apk", ignoreCase = true)) {
+        Toast.makeText(context, R.string.apk_open_in_files, Toast.LENGTH_LONG).show()
+        runCatching {
+            context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        return
+    }
     val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, context.contentResolver.getType(uri))
+        .setDataAndType(uri, type)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
         context.startActivity(Intent.createChooser(intent, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -284,6 +300,8 @@ fun openFile(context: Context, download: Download) {
         // No app opens this kind of file.
     }
 }
+
+private const val APK_TYPE = "application/vnd.android.package-archive"
 
 /** A day's group in «All downloads»: today, yesterday, a date, or before Zajil kept the day. */
 private sealed interface Day {

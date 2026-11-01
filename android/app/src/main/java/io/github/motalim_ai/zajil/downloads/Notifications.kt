@@ -136,10 +136,13 @@ object Notifications {
         )
     }
 
+    /**
+     * Opens Zajil; with [resume], through [ResumeAllActivity] first, which
+     * no other app can start (the main window is exported, for sharing).
+     */
     private fun openApp(context: Context, resume: Boolean = false): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java)
+        val intent = Intent(context, if (resume) ResumeAllActivity::class.java else MainActivity::class.java)
             .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(MainActivity.EXTRA_RESUME_ALL, resume)
         return PendingIntent.getActivity(
             context,
             if (resume) 1 else 0,

@@ -110,4 +110,13 @@ class FindsTest {
         assertEquals(2, Finds.withVisit(listOf(Visit("", "https://a.com/1")), Visit("", "https://a.com/2"), 8).size)
         assertEquals(1, Finds.withVisit(list, Visit("New", "https://a.com/"), 1).size)
     }
+
+    @Test
+    fun a_referrer_has_no_fragment_and_no_user() {
+        assertEquals("https://example.com/watch?v=1&t=2", Finds.referrer("https://example.com/watch?v=1&t=2#token=abc"))
+        assertEquals("https://example.com/a?b", Finds.referrer("https://user:pass@example.com/a?b#c"))
+        assertEquals("https://example.com", Finds.referrer("https://u@example.com"))
+        assertEquals("https://example.com?q=a@b", Finds.referrer("https://example.com?q=a@b"))
+        assertEquals("http://h:8080/p", Finds.referrer("http://x:y@h:8080/p#f"))
+    }
 }

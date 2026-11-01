@@ -30,6 +30,17 @@ class HostListTest {
     }
 
     @Test
+    fun the_roots_dot_and_capitals_do_not_escape_the_list() {
+        val malware = list("02teste.cc")
+        assertTrue(malware.matches("02teste.cc."))
+        assertTrue(malware.matches("x.02teste.cc."))
+        assertTrue(malware.matches("X.02TESTE.CC"))
+        assertTrue(malware.matches("02teste.cc.."))
+        assertFalse(malware.matches("."))
+        assertFalse(malware.matches(""))
+    }
+
+    @Test
     fun an_empty_list_matches_nothing() {
         assertFalse(HostList.EMPTY.matches("doubleclick.net"))
         assertFalse(list().matches("anything.com"))

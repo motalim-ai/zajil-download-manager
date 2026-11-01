@@ -20,8 +20,14 @@ enum class ListKind(val file: String) {
 class HostList private constructor(private val blocked: LongArray, private val kept: LongArray) {
     val size get() = blocked.size
 
-    /** Whether [host] (lower case) is listed: it, or a domain it is under. */
-    fun matches(host: String): Boolean {
+    /**
+     * Whether [rawHost] is listed: it, or a domain it is under. Matched as
+     * DNS reads it: in lower case, and without the root's dot at its end
+     * («listed.host.» is «listed.host»); nothing left matches nothing.
+     */
+    fun matches(rawHost: String): Boolean {
+        val host = rawHost.lowercase().trimEnd('.')
+        if (host.isEmpty()) return false
         var at = 0
         var found = false
         while (true) {

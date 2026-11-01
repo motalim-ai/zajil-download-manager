@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -105,17 +106,21 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
     @Composable
     protected fun Sheets() {
         offer.value?.let { asked ->
+            // A new offer is a new sheet: nothing of the last one's stays.
+            key(asked) {
             AddSheet(
                 asked,
                 onStart = { url, name, start, queue ->
                     offer.value = null
-                    add(url, name, start, asked.link, queue)
+                    // The page's cookies go only with the link they were for.
+                    add(url, name, start, asked.link?.takeIf { it.url == url }, queue)
                 },
                 onDismiss = {
                     offer.value = null
                     settledIfDone()
                 },
             )
+            }
         }
         videoSheet.value?.let { sheet ->
             VideoSheetView(
@@ -202,7 +207,8 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
         }
         videoSheet.value = VideoSheet.Reading(url)
         lifecycleScope.launch {
-            val page = YtDlp.readPage(this@ZajilActivity, url, browser?.cookies, browser?.page)
+            // The page's cookies only for the link they were taken for.
+            val page = YtDlp.readPage(this@ZajilActivity, url, browser?.takeIf { it.url == url }?.cookies, browser?.page)
             if (videoSheet.value?.url != url) return@launch
             (page.getOrNull() as? Page.Playlist)?.let {
                 videoSheet.value = VideoSheet.Playlist(url, it.info)

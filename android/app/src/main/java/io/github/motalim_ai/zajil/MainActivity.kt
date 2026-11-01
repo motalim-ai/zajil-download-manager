@@ -45,7 +45,7 @@ class MainActivity : ZajilActivity() {
         super.onCreate(savedInstanceState)
         // A page's own download: offered in the sheet, never started by the page.
         lifecycleScope.launch {
-            browser.requests.collect { url -> offer.value = Offer(url, Source.Browser, browser.linkFor(url)) }
+            browser.requests.collect { (url, link) -> offer.value = Offer(url, Source.Browser, link) }
         }
         enableEdgeToEdge()
         setContent {
@@ -186,15 +186,6 @@ class MainActivity : ZajilActivity() {
                 }
                 setIntent(Intent(this, MainActivity::class.java))
             }
-            intent.getBooleanExtra(EXTRA_RESUME_ALL, false) -> {
-                intent.removeExtra(EXTRA_RESUME_ALL)
-                Notifications.hideStopped(this)
-                downloads.resumeAll()
-            }
         }
-    }
-
-    companion object {
-        const val EXTRA_RESUME_ALL = "resume_all"
     }
 }

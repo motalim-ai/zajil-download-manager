@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import io.github.motalim_ai.zajil.protection
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -45,7 +46,17 @@ object YtDlp {
             val python = python(context)
             val ready = SystemClock.elapsedRealtime()
             val json = python.getModule("zajil_video")
-                .callAttr("formats", url, quickJs(context), ToolsUpdate.ytDlpZip(context)?.path, cacheDir(context), cookies, referer)
+                .callAttr(
+                    "formats",
+                    url,
+                    quickJs(context),
+                    ToolsUpdate.ytDlpZip(context)?.path,
+                    cacheDir(context),
+                    cookies,
+                    referer,
+                    JsBox.Runner(context.applicationContext),
+                    context.protection.hostCheck,
+                )
                 .toString()
             Log.i(TAG, "Python ready in ${ready - started} ms, the page read in ${SystemClock.elapsedRealtime() - ready} ms")
             Page.parse(json)
@@ -88,7 +99,7 @@ object YtDlp {
         folder.mkdirs()
         val json = runCatching {
             python(context).getModule("zajil_video")
-                .callAttr("download_hls", url, formatId, folder.path, listener, ToolsUpdate.ytDlpZip(context)?.path, cookies, referer, name)
+                .callAttr("download_hls", url, formatId, folder.path, listener, ToolsUpdate.ytDlpZip(context)?.path, cookies, referer, name, context.protection.hostCheck)
                 .toString()
         }.getOrElse { return@withContext HlsEnd.Failed(it.message.orEmpty()) }
         val o = org.json.JSONObject(json)
@@ -118,7 +129,8 @@ object YtDlp {
     /**
      * QuickJS-NG, for YouTube's JavaScript challenges: shipped in the APK
      * as a native library, so that Android unpacks it where a program may
-     * run (it never runs from the app's data folder).
+     * run (it never runs from the app's data folder). It runs only in
+     * [JsBoxService]'s isolated process; yt-dlp is told its path, never runs it.
      */
     private fun quickJs(context: Context): String =
         File(context.applicationInfo.nativeLibraryDir, "libqjs.so").path
