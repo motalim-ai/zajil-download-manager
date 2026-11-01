@@ -11,7 +11,9 @@ export function problemText(say: Say, problem: BatchProblem): string[] {
       ? say("batch-error-too_many", { max: problem.max ?? 0 })
       : problem.kind === "not_http"
         ? say("batch-error-not_http", { http: "http://", https: "https://" })
-        : say(`batch-error-${problem.kind}`);
+        : problem.kind === "video_page"
+          ? say("batch-error-video_page", { count: problem.count ?? 0 })
+          : say(`batch-error-${problem.kind}`);
   return problem.at !== null ? [what, say("batch-error-at", { at: problem.at })] : [what];
 }
 

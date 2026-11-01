@@ -138,6 +138,17 @@ fn text(lang: Lang, key: &str, count: f64) -> String {
 /// or `$count` shown without `PLURAL`).
 const ARABIC: &[(&str, [&str; 6])] = &[
     (
+        "batch-error-video_page",
+        [
+            "لا رابط من بينها صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+            "واحد من الروابط صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+            "اثنان من الروابط صفحتان فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+            "3 من الروابط صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+            "11 من الروابط صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+            "100 من الروابط صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط قائمة التشغيل في «إضافة رابط» وسيقرأه «جودة الفيديو».",
+        ],
+    ),
+    (
         "batch-links-count",
         [
             "لا روابط",
@@ -338,6 +349,13 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 ];
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
+    (
+        "batch-error-video_page",
+        [
+            "One of the links is a video page, and video is not loaded in a batch: paste the playlist's link in «Add link», and «Video quality» reads it.",
+            "2 of the links are video pages, and video is not loaded in a batch: paste the playlist's link in «Add link», and «Video quality» reads it.",
+        ],
+    ),
     ("batch-links-count", ["1 link", "2 links"]),
     ("downloads-count", ["1 download", "2 downloads"]),
     (
@@ -851,6 +869,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("batch-shown", &["shown"]),
     ("batch-error-at", &["at"]),
     ("batch-error-too_many", &["max"]),
+    ("batch-error-video_page", &["count"]),
     ("batch-error-not_http", &["http", "https"]),
     ("delete-unfinished", &["count"]),
     ("delete-also-finished", &["count"]),

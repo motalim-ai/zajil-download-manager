@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 كل التغييرات المهمة تُسجَّل هنا.
 
 ## [Unreleased]
+- **The batch refuses a pattern whose links are video pages** (owner's report, 2026-10-31: a YouTube batch of 12 came out as `watch (1).html` to `watch (12).html`, no video): before opening, the batch preview checks every link the pattern makes against the video-page rules (`video_page.rs`, mirroring the frontend's `videoSites.ts`); when any of its links is a video page, the pattern is refused with a message that says how many of its links are video pages and points to the way out: paste the playlist's link in «Add a link», and «Video quality» adds its videos. Patterns whose links are files (`https://site.com/img*.jpg`) are untouched, and the `zajil` command's batch is as before (PARITY documents the difference). The message is in Arabic and English.
 
 ## [1.2.3] - 2026-11-01
 
@@ -54,44 +55,8 @@ The video tools update without a release of Zajil. Checked by its tests and CI; 
 
 ### Added
 
-- **The video tools' signed list** (ADR-0011, section 2; owner's request, 2026-10-31: yt-dlp updated without a whole release of Zajil). `tools.json` holds `tools/*/pins*.txt` as they are and a sequence number (`tools/sequence.txt`), and never a link: each tool's releases are fixed in the code. It is published on a `tools-list` pre-release by `.github/workflows/tools-list.yml`, run from main in the `release` environment the owner approves, which signs it and checks the signature with minisign. Zajil asks for it with the update at start, keeps it in its data folder when it is signed by one of the project's two keys and its number is higher than its own and than the kept one (never back to an older tool), and checks it again at every read; the `zajil` command uses the kept list too. The tools then update the next time a video needs them, as an earlier version does today, and each file's SHA-256 is checked before every run as before. CI refuses a change of a pins file without a higher `tools/sequence.txt`.
-
-## [1.2.1] - 2026-10-31
-
-The first release of the 1.2.x stability period (ROADMAP): what helps find problems before users do, and the first update to arrive by Zajil's own signed update. Tried on macOS; Windows and Linux checked by CI.
-
-### Added
-
-- **Zajil says when the browser extension is too old** (owner's request, 2026-10-31: an extension loaded unpacked never updates itself): zajil-host's answer to a ping now says Zajil's version and the oldest extension it works fully with (`MIN_EXTENSION`, raised only when an extension change must come with the app). An older extension that knows it tells Zajil (`extension_old`, once an hour, never starting Zajil), and the main window shows a bar with «How to update it». It works from extension 1.2.1 on: older ones do not say their version.
-- **«Copy problem info»** in Help › About Zajil (owner's decision, 2026-10-31: copied, never sent by Zajil): Zajil's version, the system, the language, the video tools, an extension that said it is old, and the log's last 100 lines, with any link replaced by `(link)` and the home folder by `~`, on the clipboard to paste wherever one asks for help. The bug report form asks for it.
-
-### Fixed
-
-- **On Windows, Zajil installed where other users may change files registered with no browser** (a user's report on Brave, #334: «Another user could change zajil-host or its folder»): a second drive gives every user that right by default. The browsers now get a copy of zajil-host in Zajil's own folder, which only this user can change, kept the same as the installed one (as an AppImage's on Linux); the log says who could change the folder. The settings also name Brave, Opera and Vivaldi among the browsers.
-- **Downloads with a speed limit were slower since 1.2.0** (the nightly real-clock test of 2026-10-31: 0.83 × the limit on macOS and Linux, 0.96–1.0 before): 1.2.0's fix for the broken state file took a stalled segment with nothing written whole, and its connection then always started again. The segment is split as before 1.2.0 again, and the empty one it leaves is no longer written to the state file, which was the actual fault. A segment at byte 0, which could not be left empty (its end went past the file: «a segment goes past the end of the file»), still changes hands whole. Measured locally, alternately: 0.97 × the limit, 0.99 before 1.2.0, 0.91 with 1.2.0.
-
-### Tests
-
-- **The download's segments under any order of events:** a random test drives the board's connections through 400 downloads (taking, writing, failing, letting go, splitting and taking over, in any order), and after every step checks that the state as saved could be resumed from; a finished one has every byte written exactly once. It finds the take-over bug fixed in 1.2.0 when that fix is taken out.
-
-## [1.2.0] - 2026-10-31
-
-Zajil updates itself, signed with the project's keys, and every video resumes. Tried by hand on macOS by the owner, apart from the update itself, whose first real run is from 1.2.0 to the next version; on Windows and Linux, checked by CI only.
-
-### Added
-
-- **Zajil updates itself, signed** (ADR-0011, owner's request, 2026-10-31): with a newer release, the bar offers «Update now», «Skip this version» and later. Only after «Update now» is the file downloaded; it is checked by Zajil's own code with one of the project's two public keys built into it (the signing key, and an offline emergency key), and again by Tauri's updater, which also checks the version it was signed for; the downloads save their progress and stop, Zajil is replaced and opens again, and they continue. TLS is always checked, and no update comes from outside the project's own release downloads. A `.deb` keeps the notice and the release page. The release workflow signs each system's update file and `SHA256SUMS` in a `release` environment the owner approves, checks the signatures against the key in Zajil, and adds `latest.json` and `SHA256SUMS.minisig` to the draft. The private-key check also refuses update signing keys, and CI refuses any `dangerous…` updater setting.
-- **Every video download resumes, yt-dlp's too** (owner, 2026-10-30: «the program is made to resume»): a video yt-dlp downloads (other sites, or YouTube when it refuses Zajil's own way) keeps its folder when paused or failed, and the next run continues its parts there. The folder goes once the video is out, or when it is deleted.
-- **A YouTube link added by hand stopped at «this link is a web page»** (owner's report, 2026-10-30): a video's page on the big sites (YouTube, X, Instagram, Facebook, TikTok, Vimeo, Dailymotion) now opens «Video quality», as from the browser's button; and any other link that turns out to be a page offers «Download the video from the page».
-
-### Fixed
-
-- **YouTube videos came with an AI-dubbed voice instead of their own** (users' reports, 2026-10-31): YouTube offers a video's own sound beside AI dubs in the same formats, and Zajil took the one with the highest rate. The video's own sound now comes first, as yt-dlp ranks it (its `language_preference`, and «original» in its note), in the engine's best, in «Video quality», in a quality chosen in the browser, and in sound only; the log says each sound's language and rank. And a dub can still be had (owner's request, 2026-10-31): «Video quality» has a «Sound» choice when a video has its sound in several languages, the video's own first; a dub is merged with each picture, and is «Sound only». The extension's quality list has the same «Sound» choice: it lists each language's sounds (they share YouTube's itags, so only one showed), and a dub chosen there goes to Zajil with its language (`language` in the host's `video` message, checked), which picks that language's sound. The list's first sound is «Original» (Zajil takes the video's own): YouTube marks the dub in the viewer's language as its default, so the list cannot tell which is the original.
-- **A paused YouTube video began again from nothing** (owner's report, 2026-10-30): once its sound had finished, the resume asked the page again and could hand the video to yt-dlp from the start. The finished sound is kept and the picture continues with its saved links; a part saved before is never handed to yt-dlp, and the log says why a part started over.
-- **A YouTube link added by hand could not be resumed** (owner's report, 2026-10-30): YouTube refused Zajil's own way (403) for links made for one of its apps, so yt-dlp downloaded the video, from the start on every resume. Each part is now asked for as the program its link was made for (the format's `User-Agent`, the only header kept), saved for the resume; and a saved link refused asks the page for new ones.
-- **A paused download's state file could not be used** (owner's report, 2026-10-30: «a segment ends before it starts», the video began again): a stalled segment with nothing written, taken over by a free connection, was split into an empty one. It now changes hands whole.
-- **YouTube refused Zajil's own way (403) and the video stopped**: yt-dlp downloads it then, as before a part was saved, and Zajil's parts are removed. The log says which of YouTube's clients each link is of and what YouTube answered, never the link.
-- **The site's download count lagged far behind** (owner's report, 2026-10-31: 389 shown, 826 counted): the page asks GitHub for it now, as `site/downloads.mjs` counts it, with that file as the answer when GitHub gives none; and the README badge's number is renewed every three hours, not once a day.
+- feat(desktop): «التحميل بالجملة» يرفض نمطًا تنشئ روابطه صفحات فيديو معروفة (يوتيوب وغيرهما)، ويقول كم رابطًا منها صفحة، لأن محرّك التحميل الخام يجيء منها بـ HTML لا بملف (`watch (12).html`)؛ روابط قائمة التشغيل تُقرأ في «جودة الفيديو» فتُضاف العناوين دفعة واحدة. قواعد المواقع موازية لـ `videoPage.ts` في وحدة `video_page.rs`
+- feat(desktop): رابط صفحة فيديو في «إضافة رابط» يفتح «جودة الفيديو» لنفسه بدل تحذير «صفحة ويب» (اختبار المالك برابط youtu.be)
 
 ## [1.1.3] - 2026-10-30
 
