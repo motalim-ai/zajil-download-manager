@@ -148,13 +148,18 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
      * A video page: yt-dlp reads it on the phone, and the sheet offers its
      * qualities and sounds. Nothing downloads until the user chooses.
      */
-    protected fun readVideo(url: String, browser: BrowserLink? = null) {
+    protected fun readVideo(url: String, browser: BrowserLink? = null, pageTitle: String? = null) {
         videoLink = browser
         videoSheet.value = VideoSheet.Reading(url)
         lifecycleScope.launch {
             val read = YtDlp.read(this@ZajilActivity, url, browser?.cookies, browser?.page)
             if (videoSheet.value?.url != url) return@launch
-            videoSheet.value = read.fold(
+            videoSheet.value = read.map { info ->
+                // A playlist found in the browser has only its file's name
+                // («master»): the page's title says what it is.
+                val bare = url.substringBefore('?').substringAfterLast('/').substringBeforeLast('.')
+                if (pageTitle.isNullOrBlank() || (info.title.isNotBlank() && info.title != bare)) info else info.copy(title = pageTitle)
+            }.fold(
                 onSuccess = { info ->
                     when {
                         info.live -> VideoSheet.Refused(url, R.string.video_live, null)

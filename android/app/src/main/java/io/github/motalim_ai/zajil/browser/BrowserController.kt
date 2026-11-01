@@ -249,9 +249,13 @@ class BrowserController(private val context: Context) {
         val playlists = media.values.filter { it.kind != MediaKind.File }
         val mains = playlists.filterNot { Finds.isRendition(it.url) }
         list += (mains.ifEmpty { playlists.take(1) })
-        list += media.values.filter { it.kind == MediaKind.File }
-        val known = list.map { (it as Found.Media).url.substringBefore('?') }.toSet()
         val videos = elements.values.flatten()
+        // A file the page's <video> plays: its length from there.
+        list += media.values.filter { it.kind == MediaKind.File }.map { file ->
+            val length = videos.firstOrNull { it.src.substringBefore('?') == file.url.substringBefore('?') }?.duration ?: 0
+            if (length > 0) file.copy(duration = length) else file
+        }
+        val known = list.map { (it as Found.Media).url.substringBefore('?') }.toSet()
         videos.filter { it.src.isNotEmpty() && !it.protected && it.src.substringBefore('?') !in known }
             .distinctBy { it.src }
             .forEach { list += Found.Element(it.src, it.width, it.height, it.duration, protected = false) }

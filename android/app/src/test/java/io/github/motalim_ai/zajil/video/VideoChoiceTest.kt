@@ -144,6 +144,21 @@ class VideoChoiceTest {
     }
 
     @Test
+    fun pictures_with_no_sound_to_join_are_not_offered_facebook_as_read_on_the_phone() {
+        val i = info(
+            video("1417507216490308v", 636, "vp09.00.21.08", "mp4"),
+            video("1417507223156974v", 848, "vp09.00.30.08", "mp4"),
+            whole("sd", null, size = 293785),
+            whole("hd", null, size = 622802),
+        )
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(i))
+        assertEquals("hd", VideoChoice.pick(i, VideoChoice.WHOLE, VideoChoice.sounds(i).first())!!.video!!.id)
+        // On the phone Facebook says no sizes: yt-dlp's order decides, best last.
+        val unsized = info(whole("sd", null, size = null), whole("hd", null, size = null))
+        assertEquals("hd", VideoChoice.pick(unsized, VideoChoice.WHOLE, Sound(null, original = true))!!.video!!.id)
+    }
+
+    @Test
     fun joined_streams_still_come_first_when_a_page_has_both() {
         val i = info(video("137", 1080, "avc1.640028", "mp4"), own, whole("22", 720, vcodec = "avc1", acodec = "mp4a.40.2"))
         assertEquals(listOf(1080, 720), VideoChoice.qualities(i))

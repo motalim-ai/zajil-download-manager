@@ -69,12 +69,14 @@ fn main() {
         for request in server.requests() {
             writeln!(
                 out,
-                "{} {} range={} sent={} status={}",
+                "{} {} range={} sent={} status={} cookie={} referer={}",
                 request.method,
                 request.path,
                 request.range.as_deref().unwrap_or("-"),
                 request.bytes_sent,
                 request.status,
+                request.cookie.as_deref().unwrap_or("-"),
+                request.referer.as_deref().unwrap_or("-"),
             )
             .unwrap();
         }
@@ -107,7 +109,22 @@ fn serve_dir(
         // A file under «slow/» comes at 256 KiB/s per connection, as
         // file.bin, to see a download run; a name in Arabic is asked for
         // percent-encoded.
-        let spec = FileSpec::new(std::fs::read(&path).unwrap());
+        let mut spec = FileSpec::new(std::fs::read(&path).unwrap());
+        // Its type by its extension: pages for the in-app browser (A6).
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default();
+        let kind = match ext {
+            "html" => Some("text/html; charset=utf-8"),
+            "m3u8" => Some("application/vnd.apple.mpegurl"),
+            "mp4" => Some("video/mp4"),
+            "ts" => Some("video/mp2t"),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            spec = spec.content_type(kind);
+        }
         let spec = if at.starts_with("slow/") {
             spec.throttle(256 * 1024)
         } else {

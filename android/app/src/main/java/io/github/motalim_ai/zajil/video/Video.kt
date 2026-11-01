@@ -175,7 +175,10 @@ object VideoChoice {
      * whole file whose height the site does not say (Facebook's «hd»).
      */
     fun qualities(info: VideoInfo): List<Int> {
-        val heights = (info.formats.filter { muxable(it) != null } + wholes(info) + playlists(info))
+        // A picture alone counts only with a sound to join it to (Facebook
+        // gives VP9 pictures with no sound beside its whole files).
+        val pictures = if (hasSoundOnly(info)) info.formats.filter { muxable(it) != null } else emptyList()
+        val heights = (pictures + wholes(info) + playlists(info))
             .mapNotNull { it.height }.filter { it > 0 }.distinct().sortedDescending()
         if (heights.isNotEmpty()) return heights
         return if (wholes(info).isNotEmpty() || playlists(info).isNotEmpty()) listOf(WHOLE) else emptyList()
@@ -222,11 +225,14 @@ object VideoChoice {
         // A whole file of that height (or the page's best one, [WHOLE]):
         // H.264 in MP4 first, then the larger.
         if (sound.original) {
+            // yt-dlp lists formats worst first: among equals, the last («hd» after «sd»).
             val whole = wholes(info).filter { if (height == WHOLE) true else it.height == height }
-                .maxWithOrNull(compareBy<Format> { if (it.ext == "mp4") 1 else 0 }.thenBy { it.height ?: 0 }.thenBy { it.size ?: 0 }.thenBy { it.tbr ?: 0.0 })
+                .sortedWith(compareBy<Format> { if (it.ext == "mp4") 1 else 0 }.thenBy { it.height ?: 0 }.thenBy { it.size ?: 0 }.thenBy { it.tbr ?: 0.0 })
+                .lastOrNull()
             if (whole != null) return Picked(whole, null, containerOf(whole.ext))
             val playlist = playlists(info).filter { if (height == WHOLE) true else it.height == height }
-                .maxWithOrNull(compareBy<Format> { it.height ?: 0 }.thenBy { it.tbr ?: 0.0 })
+                .sortedWith(compareBy<Format> { it.height ?: 0 }.thenBy { it.tbr ?: 0.0 })
+                .lastOrNull()
             // HLS is saved as MP4 (MediaMuxer, from its MPEG-TS).
             if (playlist != null) return Picked(playlist, null, Container.Mp4)
         }

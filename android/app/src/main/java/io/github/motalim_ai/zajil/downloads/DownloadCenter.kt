@@ -453,12 +453,17 @@ class DownloadCenter(private val context: Context) {
         }
         video.streams.forEachIndexed { i, stream ->
             if (stream.finished) return@forEachIndexed
+            // As the desktop gives a YouTube video's picture and sound. A
+            // whole file of another site (A6) is small, and its server is
+            // not YouTube's: 4 connections, in one piece each. (Each new
+            // connection's certificate check may download its CA's
+            // revocation list, 11 MB for Facebook's: ADR-0012, section 17.)
+            val whole = video.streams.size == 1
             val tuning = Tuning(
                 name = stream.name,
                 userAgent = stream.userAgent,
-                // As the desktop gives a YouTube video's picture and sound.
-                connections = if (stream.video) 16u else 8u,
-                requestSize = 10uL shl 20,
+                connections = if (whole) 4u else if (stream.video) 16u else 8u,
+                requestSize = if (whole) null else 10uL shl 20,
                 cookies = streamCookies[engineId(download.id, i)],
                 cookieUrl = stream.url,
                 referrer = download.page,
@@ -547,7 +552,8 @@ class DownloadCenter(private val context: Context) {
                     return@launch
                 }
                 inputs[0].delete()
-                edit(download.id) { it.copy(status = Status.Publishing, file = output.path) }
+                val size = output.length()
+                edit(download.id) { it.copy(status = Status.Publishing, file = output.path, done = size, total = size) }
                 find(download.id)?.let(::publish)
                 return@launch
             }

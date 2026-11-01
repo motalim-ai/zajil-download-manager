@@ -79,7 +79,7 @@ private val TILES = listOf(0xFFD42F2C, 0xFF1D63D8, 0xFFB0399B, 0xFF2A3A44, 0xFF1
 @Composable
 fun BrowseScreen(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit, bottomPadding: PaddingValues) {
     val page by browser.page.collectAsStateWithLifecycle()
-    if (page == null) BrowseHome(browser, bottomPadding) else BrowsePage(browser, onFound, onSignIns)
+    if (page == null) BrowseHome(browser, bottomPadding) else BrowsePage(browser, onFound, onSignIns, bottomPadding)
 }
 
 @Composable
@@ -327,7 +327,7 @@ private fun SheetField(value: String, onValue: (String) -> Unit, hint: String, t
 }
 
 @Composable
-private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit) {
+private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit, bottomPadding: PaddingValues) {
     val c = Z.colors
     val page by browser.page.collectAsStateWithLifecycle()
     val found by browser.found.collectAsStateWithLifecycle()
@@ -335,7 +335,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     var listing by rememberSaveable { mutableStateOf(false) }
     val state = page ?: return
     BackHandler { browser.back() }
-    Column(Modifier.fillMaxSize().background(c.surface)) {
+    Column(Modifier.fillMaxSize().background(c.surface).padding(bottom = bottomPadding.calculateBottomPadding())) {
         Column(Modifier.background(c.surface).windowInsetsPadding(WindowInsets.statusBars)) {
             Row(
                 Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
