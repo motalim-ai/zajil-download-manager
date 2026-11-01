@@ -228,6 +228,26 @@ pub fn check_at_start(handle: &tauri::AppHandle) {
     });
 }
 
+/// A newer release found, as the check at the start records it, for the
+/// tests.
+#[cfg(test)]
+pub fn found_for_test<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, version: &str) {
+    *handle.state::<Notice>().0.lock().unwrap() = Some(NewRelease {
+        version: version.to_owned(),
+        page: format!(
+            "https://github.com/motalim-ai/zajil-download-manager/releases/tag/v{version}"
+        ),
+    });
+    let _ = handle.emit_to(
+        "main",
+        "update-available",
+        UpdateView {
+            version: version.to_owned(),
+            can_install: false,
+        },
+    );
+}
+
 /// The newer release `check` finds, when the check is `on`; nothing is
 /// asked when it is off, and a failure is only logged.
 async fn found<F, Fut>(on: bool, check: F) -> Option<NewRelease>
@@ -362,7 +382,7 @@ pub async fn update_install<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> R
         let app = handle.state::<App>();
         app.exiting.store(true, std::sync::atomic::Ordering::SeqCst);
         app.stop.request();
-        crate::wait_for_queues(app.stopped.subscribe(), crate::STOP_WAIT).await;
+        crate::shutdown::wait_for_queues(app.stopped.subscribe(), crate::shutdown::STOP_WAIT).await;
     }
     if let Err(e) = update.install(&bytes) {
         // Opened again as it was: the bar comes back at its start.

@@ -1099,6 +1099,107 @@ async fn a_download_from_a_page_is_held_by_the_name_the_download_itself_gets() {
     assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
 }
 
+/// A server `/get` that names its file `first` once (the check the app
+/// makes), then `then`, then `last`.
+fn renaming(server: &TestServer, data: &[u8], first: &str, then: &str, last: &str) {
+    let named = |name: &str| {
+        FileSpec::new(data.to_vec())
+            .content_disposition(&format!("attachment; filename=\"{name}\""))
+    };
+    server.put(
+        "/get",
+        named(first).replaced_after(1, named(then).replaced_after(1, named(last))),
+    );
+}
+
+/// The user's OK is for the name they saw (security review for 1.2.3):
+/// «Start download» on a file that could not run code is no OK for one
+/// the server names otherwise at the download itself. It is held, by the
+/// name it would get; started then, it is saved under that name, whatever
+/// the server says next.
+#[tokio::test]
+async fn the_users_ok_is_for_the_name_they_saw() {
+    let server = TestServer::http();
+    let data = random_bytes(50_000, 99);
+    renaming(&server, &data, "a.zip", "setup.exe", "other.bat");
+    let engine = Engine::new(Options::default()).unwrap();
+    assert_eq!(
+        engine.probe(&server.url("/get")).await.unwrap().name,
+        "a.zip"
+    );
+    let data_dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, "main", &server.url("/get"), dir.path());
+    // As «Start download» adds it, with the name it showed kept.
+    store
+        .update(|q| {
+            let item = q.item_mut(id).unwrap();
+            item.from_page = true;
+            item.ok_given = true;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(
+        (item.status, item.needs_ok),
+        (Status::Paused, true),
+        "{item:?}"
+    );
+    assert_eq!(item.name.as_deref(), Some("setup.exe"));
+    assert_eq!(
+        fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a file was made"
+    );
+
+    store
+        .update(|q| {
+            q.item_mut(id).unwrap().status = Status::Waiting;
+            Ok(())
+        })
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(item.status, Status::Done, "{item:?}");
+    assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+    assert!(!dir.path().join("other.bat").exists());
+}
+
+/// «Start download» on a file that can run code is the OK for the name
+/// it showed: saved under that name, not one the server gives later.
+#[tokio::test]
+async fn a_file_that_runs_code_started_by_the_user_keeps_the_name_they_saw() {
+    let server = TestServer::http();
+    let data = random_bytes(50_000, 100);
+    renaming(&server, &data, "setup.exe", "other.bat", "other.bat");
+    let data_dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data_dir.path());
+    let id = add(&store, "main", &server.url("/get"), dir.path());
+    store
+        .update(|q| {
+            q.set_name(id, Some("setup.exe"))?;
+            let item = q.item_mut(id).unwrap();
+            item.from_page = true;
+            item.ok_given = true;
+            Ok(())
+        })
+        .unwrap();
+    // The check, as the app makes it.
+    Engine::new(Options::default())
+        .unwrap()
+        .probe(&server.url("/get"))
+        .await
+        .unwrap();
+    runner(&store).run(&Stop::new(), &mut |_| {}).await.unwrap();
+    let item = store.load().unwrap().item(id).unwrap().clone();
+    assert_eq!(item.status, Status::Done, "{item:?}");
+    assert_eq!(fs::read(dir.path().join("setup.exe")).unwrap(), data);
+    assert!(!dir.path().join("other.bat").exists());
+}
+
 /// Security review #84: a private window's download leaves nothing in the
 /// queues once it is done; only its file.
 #[tokio::test]

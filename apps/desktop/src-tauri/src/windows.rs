@@ -241,8 +241,8 @@ pub struct Role {
     pub page: String,
 }
 
-/// The kinds of window made beforehand: the ones that open most, and that
-/// the user waits for.
+/// The kinds of window that can be made beforehand: the ones that open
+/// most, and that the user waits for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Kind {
     Link,
@@ -251,7 +251,12 @@ enum Kind {
 }
 
 impl Kind {
-    const ALL: [Kind; 3] = [Kind::Info, Kind::Link, Kind::Progress];
+    /// The ones made beforehand: «Download file info» alone, the window
+    /// opened most (every download from the browser, and from «Add a
+    /// link»). Each spare is a page of its own, about 20 MB on macOS; the
+    /// others open in about 0.1 s without one (the owner's choice, after
+    /// measuring three: 56 MB).
+    const SPARE: [Kind; 1] = [Kind::Info];
 
     /// The kind of the window in role `label`.
     fn of(label: &str) -> Option<Kind> {
@@ -396,7 +401,7 @@ pub fn warm<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     if crate::in_scene(handle) || !crate::measure::pool_on() {
         return;
     }
-    for kind in Kind::ALL {
+    for kind in Kind::SPARE {
         refill(handle, kind, std::time::Duration::from_millis(300));
     }
 }
@@ -606,8 +611,10 @@ pub(crate) fn open_beside_main<R: tauri::Runtime>(
     title: &str,
     size: (f64, f64),
 ) -> tauri::Result<()> {
+    // Freed in the tray (`main_window.rs`), it is still there for this.
     let main_is_up = |h: &tauri::AppHandle<R>| {
-        h.get_webview_window("main").is_some()
+        (h.get_webview_window("main").is_some()
+            || h.state::<crate::main_window::MainWindow>().freed())
             && !h
                 .state::<App>()
                 .exiting
@@ -617,6 +624,9 @@ pub(crate) fn open_beside_main<R: tauri::Runtime>(
         return Ok(());
     }
     open_page(handle, label, page, title, size, true)?;
+    if let Some(window) = find(handle, label) {
+        crate::main_window::owns(handle, &window);
+    }
     if !main_is_up(handle)
         && let Some(window) = find(handle, label)
     {
@@ -633,7 +643,10 @@ pub fn close_with_main<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
     };
     let app = handle.clone();
     main.on_window_event(move |event| {
-        if let tauri::WindowEvent::Destroyed = event {
+        // Freed in the tray, it is no end (`main_window.rs`).
+        if let tauri::WindowEvent::Destroyed = event
+            && !app.state::<crate::main_window::MainWindow>().freed()
+        {
             for (label, window) in app.webview_windows() {
                 if label != "main" {
                     let _ = window.close();
@@ -689,13 +702,39 @@ pub async fn open_settings<R: tauri::Runtime>(
 /// category»).
 #[tauri::command]
 pub fn show_main_view<R: tauri::Runtime>(view: String, handle: tauri::AppHandle<R>) {
-    crate::tray::show_window(&handle);
-    let _ = handle.emit_to("main", "main-view", view);
+    crate::main_window::send(&handle, "main-view", view);
+}
+
+/// Destroys the spare windows (`main_window.rs`: freed with the main one;
+/// the next main page makes them again).
+pub fn drop_spares<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
+    let spares: Vec<String> = handle
+        .state::<Pool>()
+        .spares
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, label)| label)
+        .collect();
+    for label in spares {
+        if let Some(window) = handle.get_webview_window(&label) {
+            let _ = window.destroy();
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One window made beforehand, «Download file info»; the others are
+    /// made when they open (the owner's choice).
+    #[test]
+    fn only_download_file_info_is_made_beforehand() {
+        assert_eq!(Kind::SPARE, [Kind::Info]);
+        assert_eq!(Kind::of(INFO), Some(Kind::Info));
+        assert_eq!(Kind::of(&format!("{INFO}-3")), Some(Kind::Info));
+    }
 
     #[test]
     fn a_window_starts_with_nothing_waiting() {
@@ -736,5 +775,41 @@ mod tests {
             capability["permissions"],
             serde_json::json!(["core:event:default", "dialog:allow-open"])
         );
+    }
+
+    /// The main window is the same on every system but for its title bar
+    /// (the design of #83): hidden under the page on macOS, none on Windows
+    /// and Linux, where the page draws it.
+    #[test]
+    fn the_main_window_differs_by_system_only_in_its_title_bar() {
+        let read = |name: &str| -> serde_json::Value {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+        let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        for (name, own) in [
+            (
+                "tauri.macos.conf.json",
+                serde_json::json!({"titleBarStyle": "Overlay", "hiddenTitle": true}),
+            ),
+            (
+                "tauri.windows.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+            (
+                "tauri.linux.conf.json",
+                serde_json::json!({"decorations": false}),
+            ),
+        ] {
+            let mut expected = base.clone();
+            for (k, v) in own.as_object().unwrap() {
+                expected[k] = v.clone();
+            }
+            assert_eq!(
+                read(name)["app"]["windows"],
+                serde_json::json!([expected]),
+                "{name}"
+            );
+        }
     }
 }

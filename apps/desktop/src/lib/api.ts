@@ -26,6 +26,7 @@ import type { VideoInfoView } from "./bindings/VideoInfoView";
 import type { VideoErrorView } from "./bindings/VideoErrorView";
 import type { ChoiceView } from "./bindings/ChoiceView";
 import type { NewVideo } from "./bindings/NewVideo";
+import type { DownloadView } from "./bindings/DownloadView";
 import type { Snapshot } from "./bindings/Snapshot";
 import type { SettingsView } from "./bindings/SettingsView";
 import type { SettingsChange } from "./bindings/SettingsChange";
@@ -75,6 +76,9 @@ export const api = {
   importQueues: (path: string, keepFolders: boolean) =>
     invoke<ImportView>("import_queues", { path, keepFolders }),
   onChange: (handler: () => void): Promise<UnlistenFn> => listen("downloads-changed", handler),
+  /** A progress tick: the running downloads' rows only (`lib/progressRows.ts`). */
+  onProgress: (handler: (rows: DownloadView[]) => void): Promise<UnlistenFn> =>
+    listen<DownloadView[]>("downloads-progress", (event) => handler(event.payload)),
   showWindow: () => invoke<void>("show_window"),
   fixBrowserIntegration: () => invoke<IntegrationView>("fix_browser_integration"),
   browserIntegration: () => invoke<IntegrationView | null>("browser_integration"),

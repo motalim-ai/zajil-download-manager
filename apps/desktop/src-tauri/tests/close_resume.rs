@@ -43,6 +43,12 @@ impl App {
         self.stderr.lock().unwrap().contains(line)
     }
 
+    /// How many times the app said `line`.
+    #[cfg(not(target_os = "linux"))]
+    fn said_times(&self, line: &str) -> usize {
+        self.stderr.lock().unwrap().matches(line).count()
+    }
+
     /// When the app said `line` (first), if it did.
     #[cfg(windows)]
     fn said_at(&self, line: &str) -> Option<Instant> {
@@ -73,10 +79,16 @@ fn start(data: &Path) -> App {
 /// the tests ask Zajil to quit by closing its window on Windows. Without
 /// it, closing hides Zajil into the tray and the downloads go on (#109).
 fn start_with(data: &Path, close_quits: bool) -> App {
+    start_with_env(data, close_quits, &[])
+}
+
+/// [`start_with`], with these variables in the app's environment.
+fn start_with_env(data: &Path, close_quits: bool, env: &[(&str, &str)]) -> App {
     let app = std::env::var_os("ZAJIL_DESKTOP_APP")
         .expect("ZAJIL_DESKTOP_APP must name the built zajil-desktop");
     let mut command = Command::new(app);
     command.arg("--data-dir").arg(data);
+    command.envs(env.iter().copied());
     if close_quits {
         command.arg("--close-quits");
     }
@@ -552,4 +564,127 @@ fn session_end_with_download_complete_open_is_answered_at_once() {
     assert!(slow.is_empty(), "windows answered late: {slow:#?}");
     assert!(status.success(), "it ended with {status:?}");
     assert!(app.said("zajil: saved; terminating to finish the session end"));
+}
+
+/// A download going, with the app started so that it closes its main window
+/// into the tray `close` seconds after its page is up, through the close
+/// button's own path, and shows it again `show` seconds later
+/// (`ZAJIL_MEASURE=tray`).
+#[cfg(not(target_os = "linux"))]
+fn start_closing_into_the_tray(
+    seed: u64,
+    close: u64,
+    show: u64,
+) -> (
+    TestServer,
+    tempfile::TempDir,
+    tempfile::TempDir,
+    QueueStore,
+    App,
+) {
+    let server = TestServer::http();
+    server.put(
+        "/big.bin",
+        FileSpec::new(random_bytes(SIZE as usize, seed)).throttle(256 * 1024),
+    );
+    server.put(
+        "/small.bin",
+        FileSpec::new(random_bytes(64 * 1024, seed + 100)),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let store = QueueStore::new(data.path());
+    store
+        .update(|q| q.add("main", &server.url("/big.bin"), downloads.path()))
+        .unwrap();
+    let times = format!("{close},{show}");
+    let app = start_with_env(
+        data.path(),
+        false,
+        &[("ZAJIL_MEASURE", "tray"), ("ZAJIL_MEASURE_TRAY", &times)],
+    );
+    (server, data, downloads, store, app)
+}
+
+/// Closed into the tray, the main window is freed with its page (owner's
+/// request for 1.2.3: the page took most of Zajil's memory), the download
+/// goes on without it, and shown again the window is made again, its page
+/// reading the list and everything again. Not on Linux: CI's desktop has
+/// no tray, and closing quits there (`closing.rs`); the same code runs.
+#[cfg(not(target_os = "linux"))]
+#[test]
+#[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
+fn the_main_window_is_freed_in_the_tray_and_comes_back() {
+    let (server, _data, downloads, store, mut app) = start_closing_into_the_tray(49, 3, 12);
+    wait_until("the main window freed", Duration::from_secs(60), || {
+        app.said("zajil: the main window is freed while Zajil runs in the tray")
+    });
+    let freed = recorded(&item(&store));
+    // A small download that finishes meanwhile is said with no page: its
+    // notification and its sound (`in_tray.rs`).
+    store
+        .update(|q| q.add("main", &server.url("/small.bin"), downloads.path()))
+        .unwrap();
+    wait_until(
+        "a finished one said in the tray",
+        Duration::from_secs(60),
+        || {
+            app.said("zajil: in the tray: ")
+                && app.said("finished or failed (notifications on, sound Some(\"done\"))")
+        },
+    );
+    // The download goes on with no window: on, or done (its state file
+    // goes then).
+    wait_until(
+        "more recorded with the window freed",
+        Duration::from_secs(60),
+        || {
+            let big = item(&store);
+            big.status == Status::Done || recorded(&big) >= freed + MIB
+        },
+    );
+    assert!(
+        app.child.try_wait().expect("the app's status").is_none(),
+        "freeing the window ended Zajil"
+    );
+    assert!(!app.said("zajil: the downloads stopped; exiting"));
+    // Shown again: made again, and its page loads and reads the list.
+    wait_until(
+        "the main window made again",
+        Duration::from_secs(60),
+        || app.said("zajil: the main window is made again"),
+    );
+    wait_until("its page ready again", Duration::from_secs(60), || {
+        app.said_times("zajil: the window is ready") == 2
+    });
+    assert!(app.child.try_wait().expect("the app's status").is_none());
+}
+
+/// Windows: the session ends while the main window is freed in the tray,
+/// so Zajil shows no window at all: its own hidden window hears the end,
+/// and everything is saved before the process ends.
+#[cfg(windows)]
+#[test]
+#[ignore = "needs the built app (ZAJIL_DESKTOP_APP); run by CI after the build"]
+fn session_end_with_the_main_window_freed_saves_everything() {
+    let (_server, _data, _downloads, store, mut app) = start_closing_into_the_tray(50, 3, 600);
+    wait_until("the main window freed", Duration::from_secs(60), || {
+        app.said("zajil: the main window is freed while Zajil runs in the tray")
+    });
+    wait_until("2 MiB recorded", Duration::from_secs(90), || {
+        recorded(&item(&store)) >= 2 * MIB
+    });
+    let (_, said) = send_session_end(app.child.id());
+    let status = wait_exit(&mut app.child, Duration::from_secs(30));
+    println!("{said}");
+    assert!(
+        said.contains("ZajilSessionEnd"),
+        "Zajil's own window was not there"
+    );
+    assert!(status.success(), "it ended with {status:?}");
+    assert!(app.said("zajil: asked to stop (the Windows session is ending)"));
+    assert!(app.said("zajil: saved; terminating to finish the session end"));
+    let left = item(&store);
+    assert_ne!(left.status, Status::Done);
+    assert!(recorded(&left) >= 2 * MIB, "its progress was recorded");
 }

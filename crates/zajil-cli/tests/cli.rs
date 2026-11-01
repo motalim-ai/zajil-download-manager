@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use common::{posix_shells, printed_commands, run_in_shells};
 use zajil_core::state::DownloadState;
 use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 
@@ -50,108 +51,6 @@ fn get_downloads_into_the_chosen_folder() {
     assert_eq!(sha256_hex(&fs::read(&saved).unwrap()), sha256_hex(&data));
     assert!(text(&out.stdout).contains("Saved"));
     assert!(text(&out.stdout).contains("file.bin"));
-}
-
-/// The resume commands `zajil` printed, by shell: lines like
-/// `zajil: to resume, run this in <shell>:` followed by the indented
-/// command.
-fn printed_commands(stderr: &str) -> Vec<(String, String)> {
-    let mut found = Vec::new();
-    let mut lines = stderr.lines();
-    while let Some(line) = lines.next() {
-        if let Some(shell) = line
-            .strip_prefix("zajil: to resume, run this in ")
-            .and_then(|rest| rest.strip_suffix(':'))
-        {
-            let command = lines.next().expect("command line").trim_start();
-            found.push((shell.to_owned(), command.to_owned()));
-        }
-    }
-    assert!(!found.is_empty(), "no resume command in: {stderr}");
-    found
-}
-
-/// The POSIX shells that printed commands are run in. On CI all three must
-/// be there (zsh is installed on Linux for it): a missing shell fails the
-/// test instead of skipping it silently (owner's decision on #28). Locally
-/// a missing one is skipped.
-fn posix_shells() -> Vec<&'static str> {
-    let found: Vec<&str> = ["sh", "bash", "zsh"]
-        .into_iter()
-        .filter(|sh| Command::new(sh).args(["-c", "true"]).status().is_ok())
-        .collect();
-    if std::env::var_os("CI").is_some() {
-        assert_eq!(found, ["sh", "bash", "zsh"], "a shell is missing on CI");
-    }
-    found
-}
-
-/// Runs each printed command in its real shell, with `zajil resume`
-/// replaced by a command that only prints its argument, inside `work`.
-/// Returns what each shell passed as the argument.
-fn run_in_shells(commands: &[(String, String)], work: &Path) -> Vec<String> {
-    let mut args = Vec::new();
-    for (shell, command) in commands {
-        let quoted = command
-            .strip_prefix("zajil resume ")
-            .unwrap_or_else(|| panic!("unexpected command: {command}"));
-        let outputs: Vec<Output> = match shell.as_str() {
-            "PowerShell" => {
-                let script = work.join("t.ps1");
-                fs::write(&script, format!("Write-Output {quoted}\r\n")).unwrap();
-                vec![
-                    Command::new("powershell")
-                        .args([
-                            "-NoProfile",
-                            "-NonInteractive",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-File",
-                        ])
-                        .arg(&script)
-                        .current_dir(work)
-                        .output()
-                        .unwrap(),
-                ]
-            }
-            "cmd" => {
-                let script = work.join("t.cmd");
-                fs::write(&script, format!("@echo off\r\necho {quoted}\r\n")).unwrap();
-                vec![
-                    Command::new("cmd")
-                        .args(["/d", "/c"])
-                        .arg(&script)
-                        .current_dir(work)
-                        .output()
-                        .unwrap(),
-                ]
-            }
-            _ => posix_shells()
-                .into_iter()
-                .map(|sh| {
-                    Command::new(sh)
-                        .arg("-c")
-                        .arg(format!("printf '%s' {quoted}"))
-                        .current_dir(work)
-                        .output()
-                        .unwrap()
-                })
-                .collect(),
-        };
-        assert!(!outputs.is_empty(), "no shell found for {shell}");
-        for out in outputs {
-            assert!(out.status.success(), "{shell}: {}", text(&out.stderr));
-            let printed = text(&out.stdout).trim_end().to_owned();
-            // cmd's echo keeps the quotes.
-            let printed = printed
-                .strip_prefix('"')
-                .and_then(|p| p.strip_suffix('"'))
-                .map(str::to_owned)
-                .unwrap_or(printed);
-            args.push(printed);
-        }
-    }
-    args
 }
 
 #[test]

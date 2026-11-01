@@ -148,7 +148,7 @@ pub async fn copy_problem_info<R: tauri::Runtime>(
         tools,
         extension_old,
     };
-    crate::copy_text(&app, text(&facts, &log, home.as_deref())).await
+    crate::clipboard::copy_text(&app, text(&facts, &log, home.as_deref())).await
 }
 
 #[cfg(test)]

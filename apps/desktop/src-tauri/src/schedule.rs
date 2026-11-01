@@ -213,7 +213,7 @@ pub async fn new_queue<R: tauri::Runtime>(
     name: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    crate::change(&app, &handle, move |q| create(q, name.trim())).await
+    crate::downloads::change(&app, &handle, move |q| create(q, name.trim())).await
 }
 
 fn create(queues: &mut QueuesFile, name: &str) -> Result<(), StoreError> {
@@ -236,7 +236,7 @@ pub async fn delete_queue<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let gone = name.clone();
-    crate::change(&app, &handle, move |q| delete(q, &name)).await?;
+    crate::downloads::change(&app, &handle, move |q| delete(q, &name)).await?;
     after.chosen.lock().unwrap().remove(&gone);
     Ok(())
 }
@@ -267,7 +267,7 @@ pub async fn save_queue<R: tauri::Runtime>(
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     let schedule = schedule_of(&change)?;
-    crate::change(&app, &handle, move |q| plan(q, &name, &change, schedule)).await
+    crate::downloads::change(&app, &handle, move |q| plan(q, &name, &change, schedule)).await
 }
 
 fn plan(
@@ -346,7 +346,7 @@ pub async fn choose_after_open<R: tauri::Runtime>(
         return Ok(None);
     };
     let shown = file.to_string_lossy().into_owned();
-    crate::change(&app, &handle, move |q| {
+    crate::downloads::change(&app, &handle, move |q| {
         q.queue_mut(&name)
             .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
             .after_open = Some(file);
@@ -363,7 +363,7 @@ pub async fn clear_after_open<R: tauri::Runtime>(
     name: String,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    crate::change(&app, &handle, move |q| {
+    crate::downloads::change(&app, &handle, move |q| {
         q.queue_mut(&name)
             .ok_or_else(|| StoreError::NoSuchQueue(name.clone()))?
             .after_open = None;
@@ -426,7 +426,7 @@ pub async fn move_in_queue<R: tauri::Runtime>(
     up: bool,
     handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    crate::change(&app, &handle, move |q| shift(q, id, up)).await
+    crate::downloads::change(&app, &handle, move |q| shift(q, id, up)).await
 }
 
 fn shift(queues: &mut QueuesFile, id: u64, up: bool) -> Result<(), StoreError> {
@@ -462,8 +462,8 @@ pub async fn start_queue<R: tauri::Runtime>(
     // A download whose link is being refreshed waits for the refresh, as
     // with «Resume».
     let ids = app.refreshing.without(ids);
-    crate::change(&app, &handle, move |q| {
-        crate::set_status(q, &ids, Status::Waiting)
+    crate::downloads::change(&app, &handle, move |q| {
+        crate::downloads::set_status(q, &ids, Status::Waiting)
     })
     .await?;
     // Only now, and only for a queue with a schedule and something to run:

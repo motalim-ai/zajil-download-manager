@@ -714,7 +714,7 @@ impl QueueStore {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(corrupt("the file is too large".into()));
         }
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
+        let value: serde_json::Value = serde_json::from_slice(crate::without_bom(&bytes))
             .map_err(|e| corrupt(crate::category::printable(&e.to_string())))?;
         if value.get("format").and_then(|v| v.as_str()) != Some(FORMAT) {
             return Err(StoreError::NotAQueuesFile(path));
