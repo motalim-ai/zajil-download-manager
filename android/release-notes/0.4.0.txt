@@ -1,0 +1,11 @@
+- واجهة جديدة كاملة: التحميل الجاري في بطاقة زرقاء مع «اسحب للإيقاف»، وشريط سفلي عائم.
+- «تفاصيل التحميل»: كل اتصال وما حمّله، والسرعة والوقت الباقي.
+- «كل التحميلات» حسب الحالة واليوم.
+- الطابور المجدول يبدأ في الأيام التي تختارها.
+- «حُجب اليوم» في الحماية، والجودة المفضلة للفيديو في الإعدادات.
+
+- A completely new look: the download in progress on a blue card with «Swipe to pause», and a floating bar.
+- «Download details»: each connection and how far it has come, the speed and the time left.
+- «All downloads» by status and by day.
+- A scheduled queue starts only on the days you choose.
+- «Blocked today» in Protection, and a preferred video quality in Settings.
