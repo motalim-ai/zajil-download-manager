@@ -119,7 +119,37 @@ def _quickjs_in_box(jsbox):
 
     quickjs.QuickJSJCP._run_js_runtime = run
     _jsruntime.QuickJsRuntime._info = info
+    # YouTube's player as yt-dlp-ejs leaves it after its first, slow pass: kept in the
+    # app's cache for the next challenges of the same player (upstream keeps it off only
+    # for its size and because it never removes old ones: [_prune_players] does).
+    try:
+        from yt_dlp.extractor.youtube.jsc._builtin import ejs
+        ejs.EJSBaseJCP._ENABLE_PREPROCESSED_PLAYER_CACHE = True
+    except (ImportError, AttributeError):
+        pass
     return True
+
+
+# The preprocessed players kept: YouTube changes its player every few days.
+KEPT_PLAYERS = 2
+
+
+def _prune_players(cache_dir):
+    """Only the newest [KEPT_PLAYERS] preprocessed players stay in the cache."""
+    import os
+    if not cache_dir:
+        return
+    folder = os.path.join(cache_dir, "challenge-solver")
+    try:
+        players = [e for e in os.scandir(folder) if e.name.startswith("player,") and e.is_file(follow_symlinks=False)]
+    except OSError:
+        return
+    players.sort(key=lambda e: e.stat(follow_symlinks=False).st_mtime, reverse=True)
+    for old in players[KEPT_PLAYERS:]:
+        try:
+            os.remove(old.path)
+        except OSError:
+            pass
 
 
 def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer=None, jsbox=None, host_check=None):
@@ -197,6 +227,7 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
                 found.append(entry)
     except Exception as e:  # yt-dlp's own errors say what went wrong
         return json.dumps({"error": str(e)[:500], "version": yt_dlp.version.__version__})
+    _prune_players(cache_dir)
     result = {k: info.get(k) for k in INFO_FIELDS}
     result["formats"] = found
     result["version"] = yt_dlp.version.__version__

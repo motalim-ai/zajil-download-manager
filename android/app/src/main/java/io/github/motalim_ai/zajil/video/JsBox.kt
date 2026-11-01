@@ -6,9 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Binder
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -26,9 +30,12 @@ class JsRun(@JvmField val code: Int, @JvmField val stdout: String, @JvmField val
  * QuickJS-NG started by [JsBoxService], an isolated process with a user of
  * its own, no permissions, no network and none of the app's files; with
  * QuickJS's memory and stack limits and a time limit. Never in the app's
- * process. A new isolated process for each run.
+ * process. A new QuickJS process for each run; the isolated process stays
+ * [KEEP_MS] after the last one, then ends.
  */
 object JsBox {
+    private const val TAG = "ZajilVideo"
+
     /** The longest a challenge may take, as the desktop's `zajil-jsbox`. */
     const val TIME_LIMIT_SECONDS = 60L
 
@@ -40,9 +47,48 @@ object JsBox {
         fun run(script: String): JsRun = JsBox.run(context, script)
     }
 
-    /** Runs [script] in a new isolated process. Blocks; never on the main thread. */
+    /** Runs [script] in the isolated process. Blocks; never on the main thread. */
     fun run(context: Context, script: String): JsRun {
-        val app = context.applicationContext
+        val started = SystemClock.elapsedRealtime()
+        return runIsolated(context, script).also {
+            // How long, and how big: never the script itself.
+            Log.i(TAG, "QuickJS in the isolated process: ${script.length / 1024} KiB in ${SystemClock.elapsedRealtime() - started} ms, exit ${it.code}")
+        }
+    }
+
+    /** How long the isolated process stays after its last run, ready for the next one. */
+    private const val KEEP_MS = 30_000L
+
+    private val main = Handler(Looper.getMainLooper())
+    private val lock = Any()
+    private var bound: Bound? = null
+
+    /** The isolated process while it is bound, and its connection. */
+    private class Bound(val connection: ServiceConnection, val binder: IBinder)
+
+    private val unbind = Runnable {
+        synchronized(lock) {
+            // Unbound, the isolated process ends: nothing of the last runs stays.
+            bound?.let { runCatching { appContext?.unbindService(it.connection) } }
+            bound = null
+        }
+    }
+
+    @Volatile private var appContext: Context? = null
+
+    /**
+     * The isolated process, started if it is not there. It stays a little
+     * after a run (each run still has a QuickJS process of its own), so
+     * that a page's several challenges do not each start it again.
+     */
+    private fun service(app: Context): IBinder? {
+        synchronized(lock) {
+            main.removeCallbacks(unbind)
+            bound?.takeIf { it.binder.isBinderAlive }?.let { return it.binder }
+            bound?.let { runCatching { app.unbindService(it.connection) } }
+            bound = null
+        }
+        appContext = app
         val connected = CountDownLatch(1)
         var binder: IBinder? = null
         val connection = object : ServiceConnection {
@@ -51,22 +97,31 @@ object JsBox {
                 connected.countDown()
             }
 
-            override fun onServiceDisconnected(name: ComponentName) {}
+            override fun onServiceDisconnected(name: ComponentName) {
+                synchronized(lock) { if (bound?.connection === this) bound = null }
+            }
 
             override fun onBindingDied(name: ComponentName) = connected.countDown()
 
             override fun onNullBinding(name: ComponentName) = connected.countDown()
         }
-        if (!app.bindService(Intent(app, JsBoxService::class.java), connection, Context.BIND_AUTO_CREATE)) {
-            return JsRun(-1, "", "the isolated process could not start")
+        if (!app.bindService(Intent(app, JsBoxService::class.java), connection, Context.BIND_AUTO_CREATE)) return null
+        val service = if (connected.await(10, TimeUnit.SECONDS)) binder else null
+        if (service == null) {
+            runCatching { app.unbindService(connection) }
+            return null
         }
+        synchronized(lock) { bound = Bound(connection, service) }
+        return service
+    }
+
+    private fun runIsolated(context: Context, script: String): JsRun {
+        val app = context.applicationContext
         try {
-            if (!connected.await(10, TimeUnit.SECONDS)) return JsRun(-1, "", "the isolated process did not start")
-            val service = binder ?: return JsRun(-1, "", "the isolated process did not start")
+            val service = service(app) ?: return JsRun(-1, "", "the isolated process did not start")
             return call(service, script.toByteArray(Charsets.UTF_8))
         } finally {
-            // Unbound, the isolated process ends: nothing of this run stays.
-            runCatching { app.unbindService(connection) }
+            main.postDelayed(unbind, KEEP_MS)
         }
     }
 
@@ -83,25 +138,35 @@ object JsBox {
         }
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
+        var sent = false
         try {
+            // The parcel keeps copies of both ends it carries until it is recycled: it is,
+            // right after the call, so that the output pipe ends there (or nothing would
+            // ever end the reader's wait).
             data.writeFileDescriptor(scriptRead.fileDescriptor)
             data.writeFileDescriptor(outWrite.fileDescriptor)
-            // Ours go once the isolated process has its own copies.
-            if (!service.transact(JsBoxService.RUN, data, reply, 0)) return JsRun(-1, "", "the isolated process refused")
-            val code = reply.readInt()
-            val stderr = reply.readString().orEmpty()
+            val accepted = service.transact(JsBoxService.RUN, data, reply, 0)
+            data.recycle()
+            sent = true
             scriptRead.close()
             outWrite.close()
+            if (!accepted) return JsRun(-1, "", "the isolated process refused")
+            val code = reply.readInt()
+            val stderr = reply.readString().orEmpty()
             writer.join(TimeUnit.SECONDS.toMillis(5))
-            reader.join(TimeUnit.SECONDS.toMillis(5))
+            reader.join(TimeUnit.SECONDS.toMillis(10))
+            // Never half an answer.
+            if (reader.isAlive) return JsRun(-3, "", "the isolated process's output did not end")
             return JsRun(code, String(output, Charsets.UTF_8), stderr)
         } catch (e: Exception) {
             return JsRun(-1, "", "the isolated process stopped: ${e.javaClass.simpleName}")
         } finally {
-            data.recycle()
+            if (!sent) data.recycle()
             reply.recycle()
             runCatching { scriptRead.close() }
             runCatching { outWrite.close() }
+            // A reader still waiting ends with its pipe.
+            runCatching { outRead.close() }
         }
     }
 
@@ -160,6 +225,7 @@ class JsBoxService : Service() {
     /** QuickJS-NG on [script], its output to [out]: its exit code and its first errors. */
     private fun runQuickJs(script: InputStream, out: OutputStream): Pair<Int, String> {
         val qjs = File(applicationInfo.nativeLibraryDir, "libqjs.so")
+        val started = SystemClock.elapsedRealtime()
         val process = ProcessBuilder(
             qjs.path,
             // QuickJS's own limits, as the desktop's zajil-jsbox: 1 GiB of memory, an 8 MiB stack.
@@ -181,6 +247,7 @@ class JsBoxService : Service() {
         drain.join(5000)
         drainErrors.join(1000)
         val code = if (finished) process.exitValue() else -2
+        Log.i("ZajilVideo", "QuickJS ran ${SystemClock.elapsedRealtime() - started} ms in the isolated process")
         val message = if (finished) String(errors, Charsets.UTF_8) else "QuickJS took longer than ${JsBox.TIME_LIMIT_SECONDS} s"
         return code to message
     }
