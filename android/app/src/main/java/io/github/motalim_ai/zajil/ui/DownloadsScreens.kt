@@ -655,7 +655,8 @@ private fun Bottom(download: Download, actions: DownloadActions, onBack: () -> U
         Status.Queued -> Triple(R.string.start_now, null) { actions.startNow(id) }
         Status.Paused, Status.Interrupted -> Triple(R.string.resume, LineIcon.PlayFill) { actions.resume(id) }
         Status.NeedsLocalNetwork -> Triple(R.string.allow, null) { actions.resume(id) }
-        Status.Failed -> Triple(if (download.video != null) R.string.refresh_link else R.string.try_again, LineIcon.Reload) { actions.resume(id) }
+        // A finished file not saved yet is only saved: no new link.
+        Status.Failed -> Triple(if (download.video != null && !download.unsaved) R.string.refresh_link else R.string.try_again, LineIcon.Reload) { actions.resume(id) }
         Status.Done -> Triple(R.string.open, null) { openFile(context, download) }
         Status.Merging, Status.Publishing -> null
     }
