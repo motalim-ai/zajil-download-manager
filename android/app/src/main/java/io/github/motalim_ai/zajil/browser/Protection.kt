@@ -23,11 +23,13 @@ enum class Guard {
     /** Ads and trackers in pages: their requests are not made. */
     Ads,
 
-    /** Sites that spread malware: pages warn, downloads are refused. */
+    /**
+     * Sites that spread malware: pages warn, downloads are refused. Phishing
+     * has no list of Zajil's (the owner's decision: the open one's sources
+     * have terms of their own); WebView's Safe Browsing, always on, warns
+     * of it.
+     */
     Malware,
-
-    /** Phishing and scam sites: pages warn. */
-    Phishing,
 }
 
 /** The switches, all on unless the user turns one off, and the sites where the user turned one off. */
@@ -41,8 +43,8 @@ data class GuardSettings(
     companion object {
         /**
          * YouTube shows a wall to some ad blockers: its ads are not blocked
-         * by default there (the owner's decision). Its malware and phishing
-         * checks stay on.
+         * by default there (the owner's decision). Its malware check stays
+         * on.
          */
         val DEFAULT_OFF = mapOf("youtube.com" to setOf(Guard.Ads))
     }
@@ -76,19 +78,18 @@ class Protection(private val context: Context) {
         io.launch { load() }
     }
 
-    /** What [host] is listed as, for [guard]: ads or trackers, malware, phishing. */
+    /** What [host] is listed as, for [guard]: ads or trackers, or malware. */
     fun listed(guard: Guard, host: String): Boolean {
         val l = lists
         return when (guard) {
             Guard.Ads -> l[ListKind.Ads]?.matches(host) == true || l[ListKind.Trackers]?.matches(host) == true
             Guard.Malware -> l[ListKind.Malware]?.matches(host) == true
-            Guard.Phishing -> l[ListKind.Phishing]?.matches(host) == true
         }
     }
 
     /** The harmful kind of [host] on [site]'s page with the switches as they are, or null. */
-    fun harm(host: String, site: String?): Guard? = listOf(Guard.Malware, Guard.Phishing)
-        .firstOrNull { _settings.value.active(it, site) && listed(it, host) }
+    fun harm(host: String, site: String?): Guard? =
+        Guard.Malware.takeIf { _settings.value.active(it, site) && listed(it, host) }
 
     /** For the engine: a download, or a redirect of one, to a harmful host is refused. */
     val hostCheck = object : HostCheck {

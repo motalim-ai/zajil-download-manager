@@ -8,7 +8,6 @@ enum class ListKind(val file: String) {
     Ads("ads"),
     Trackers("trackers"),
     Malware("malware"),
-    Phishing("phishing"),
 }
 
 /**

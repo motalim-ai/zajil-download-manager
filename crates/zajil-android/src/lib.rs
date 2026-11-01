@@ -46,7 +46,7 @@ pub enum Problem {
     Other,
 }
 
-/// The app's lists of harmful sites (malware, phishing), asked for each
+/// The app's list of harmful sites (malware), asked for each
 /// host a download goes to: the link's and every redirect's. Called on the
 /// engine's threads; it must answer at once, from memory.
 #[uniffi::export(with_foreign)]

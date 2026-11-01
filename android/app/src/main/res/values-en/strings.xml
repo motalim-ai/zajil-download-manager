@@ -313,8 +313,6 @@
     <string name="guard_ads_hint">Not asked of known ad and tracking sites</string>
     <string name="guard_malware">Harmful sites</string>
     <string name="guard_malware_hint">A warning before they open; nothing is downloaded from them</string>
-    <string name="guard_phishing">Fraud and data theft</string>
-    <string name="guard_phishing_hint">A warning before sites that pose as others open</string>
     <string name="guard_off_everywhere">Off on every site, in Settings</string>
     <string name="protection_note">Not an antivirus: it protects browsing and downloads inside Zajil only. The lists are open source and on your phone, and no address you visit is sent anywhere. Android\'s Safe Browsing check is on too; it is Google\'s, and sends short fingerprints of addresses, not the addresses themselves.</string>
     <string name="protection_exceptions">Sites with exceptions</string>
@@ -329,8 +327,6 @@
     <string name="protection_update_failed">The update failed; the current lists still work.</string>
     <string name="warning_malware_title">A site that spreads malware</string>
     <string name="warning_malware_body">This site is on the list of sites that spread malware. It may try to install a program that steals your data or harms your phone, so Zajil did not open it.</string>
-    <string name="warning_phishing_title">A fraud site</string>
-    <string name="warning_phishing_body">This site is on the list of fraud and data-theft sites. It may pose as a site you know to take your password or card, so Zajil did not open it.</string>
     <string name="warning_back">Back</string>
     <string name="warning_proceed">Continue on my own responsibility</string>
     <string name="problem_refused">A harmful site; nothing was downloaded</string>

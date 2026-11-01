@@ -1,5 +1,5 @@
 //! The Android app's signed list of its protection lists (ADR-0012,
-//! section 17): ads, trackers, malware and phishing hosts, compiled from
+//! section 17): ads, trackers and malware hosts, compiled from
 //! open filter lists by the release workflow. The app ships a copy of each,
 //! and updates them only from this file: signed by one of the project's
 //! two update keys (minisign), with a sequence number that only grows, each
@@ -17,7 +17,7 @@ use crate::EngineError;
 const FORMAT: &str = "zajil-android-lists-1";
 
 /// The lists the app knows, in its order.
-const NAMES: [&str; 4] = ["ads", "trackers", "malware", "phishing"];
+const NAMES: [&str; 3] = ["ads", "trackers", "malware"];
 
 /// The largest compressed list the app downloads.
 pub const MAX_LIST_SIZE: u64 = 8 * 1024 * 1024;

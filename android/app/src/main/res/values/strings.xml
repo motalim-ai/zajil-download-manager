@@ -356,8 +356,6 @@
     <string name="guard_ads_hint">لا تُطلب من مواقع الإعلانات والتتبع المعروفة</string>
     <string name="guard_malware">المواقع الضارة</string>
     <string name="guard_malware_hint">تحذير قبل فتحها، ولا يُحمَّل منها شيء</string>
-    <string name="guard_phishing">الاحتيال وسرقة البيانات</string>
-    <string name="guard_phishing_hint">تحذير قبل فتح المواقع التي تنتحل غيرها</string>
     <string name="guard_off_everywhere">مطفأ في كل المواقع من الإعدادات</string>
     <string name="protection_note">ليس برنامج مكافحة فيروسات: يحمي التصفح والتحميل داخل زاجِل فقط. القوائم مفتوحة المصدر وعلى جهازك، ولا يُرسل أي عنوان تزوره إلى أحد. وفحص «التصفح الآمن» في أندرويد يعمل أيضًا، وهو من Google ويرسل بصمات مختصرة للعناوين لا العناوين نفسها.</string>
     <string name="protection_exceptions">المواقع المستثناة</string>
@@ -372,8 +370,6 @@
     <string name="protection_update_failed">تعذّر التحديث، والقوائم الحالية تعمل.</string>
     <string name="warning_malware_title">موقع ينشر برامج ضارة</string>
     <string name="warning_malware_body">هذا الموقع في قائمة المواقع التي تنشر برامج ضارة. وقد يحاول تثبيت برنامج يسرق بياناتك أو يضر جهازك، فلم يفتحه زاجِل.</string>
-    <string name="warning_phishing_title">موقع احتيال</string>
-    <string name="warning_phishing_body">هذا الموقع في قائمة مواقع الاحتيال وسرقة البيانات. وقد ينتحل موقعًا تعرفه ليأخذ كلمة مرورك أو بطاقتك، فلم يفتحه زاجِل.</string>
     <string name="warning_back">رجوع</string>
     <string name="warning_proceed">المتابعة على مسؤوليتي</string>
     <string name="problem_refused">موقع ضار، فلم يُحمَّل شيء</string>

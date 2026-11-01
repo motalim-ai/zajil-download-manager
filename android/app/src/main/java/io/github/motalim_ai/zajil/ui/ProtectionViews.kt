@@ -56,7 +56,6 @@ private fun guardTitle(guard: Guard) = stringResource(
     when (guard) {
         Guard.Ads -> R.string.guard_ads
         Guard.Malware -> R.string.guard_malware
-        Guard.Phishing -> R.string.guard_phishing
     },
 )
 
@@ -65,7 +64,6 @@ private fun guardHint(guard: Guard) = stringResource(
     when (guard) {
         Guard.Ads -> R.string.guard_ads_hint
         Guard.Malware -> R.string.guard_malware_hint
-        Guard.Phishing -> R.string.guard_phishing_hint
     },
 )
 
@@ -127,7 +125,7 @@ fun WarningScreen(warning: Warning, onBack: () -> Unit, onProceed: () -> Unit) {
                 Icon(lineIcon(LineIcon.ShieldAlert), null, tint = c.red, modifier = Modifier.size(38.dp))
             }
             ZText(
-                stringResource(if (warning.guard == Guard.Phishing) R.string.warning_phishing_title else R.string.warning_malware_title),
+                stringResource(R.string.warning_malware_title),
                 size = 21.sp,
                 weight = FontWeight.Bold,
                 align = TextAlign.Center,
@@ -139,7 +137,7 @@ fun WarningScreen(warning: Warning, onBack: () -> Unit, onProceed: () -> Unit) {
                 style = TextStyle(textDirection = TextDirection.Ltr),
             )
             ZText(
-                stringResource(if (warning.guard == Guard.Phishing) R.string.warning_phishing_body else R.string.warning_malware_body),
+                stringResource(R.string.warning_malware_body),
                 size = 15.sp,
                 color = c.muted,
                 align = TextAlign.Center,

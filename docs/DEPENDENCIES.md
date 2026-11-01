@@ -185,7 +185,7 @@
 | AdGuard Mobile Ads (11) | filters.adtidy.org | GPL-3.0 | نعم (بيانات) | إعلانات الهاتف |
 | EasyPrivacy | easylist.to | GPL-3.0 أو أحدث، أو CC BY-SA 3.0 (نستعمله بـ GPL-3.0) | نعم (بيانات) | المتتبعات |
 | urlhaus-filter (hosts) | malware-filter.gitlab.io | CC0-1.0 وMIT، وبياناته من URLhaus بـ CC0 | نعم (بيانات) | المواقع الضارة |
-| phishing-filter (hosts) | malware-filter.gitlab.io | CC BY-SA 4.0، وبياناته من OpenPhish وIPThreat وPhishTank | نعم (بيانات) | الاحتيال. **ينتظر قرار المالك** في شروط OpenPhish وPhishTank (ADR-0012 القسم 17) |
-| ~~Liste AR~~ | — | CC BY-NC-SA | **لا** | استُبعدت: «غير تجاري» لا يتوافق مع GPL-3.0 |
+| ~~phishing-filter~~ | malware-filter.gitlab.io | CC BY-SA 4.0، وبياناته من OpenPhish وIPThreat وPhishTank | **لا** | حُذفت بقرار المالك (2026-11-01): لبيانات OpenPhish وPhishTank شروط خاصة. للاحتيال Safe Browsing وحده |
+| ~~Liste AR~~ | — | CC BY-NC-SA | **لا** | استُبعدت بقرار المالك (2026-11-01): «غير تجاري» لا يتوافق مع إعادة التوزيع بـ GPL-3.0 |
 
 </div>

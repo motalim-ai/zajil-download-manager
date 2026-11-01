@@ -11,7 +11,7 @@ out="$here/../../android/app/src/main/assets/blocklists"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$out"
-for list in ads trackers malware phishing; do
+for list in ads trackers malware; do
   n=0
   grep -v '^#' "$here/sources.txt" | while read -r name url _; do
     [ "$name" = "$list" ] || continue

@@ -330,7 +330,7 @@ jobs:
           sequence="$(date -u +%s)"
           mkdir -p work out
           entries=()
-          for list in ads trackers malware phishing; do
+          for list in ads trackers malware; do
             n=0
             while read -r name url _; do
               [ "$name" = "$list" ] || continue
