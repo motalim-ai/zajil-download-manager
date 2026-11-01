@@ -549,6 +549,8 @@ class DownloadCenter(private val context: Context) {
         ids.mapNotNull(::find).forEach { download ->
             val video = download.video
             when {
+                // Complete already: only moved to the save folder, never downloaded again.
+                download.unsaved && download.file?.let { File(it).isFile } == true -> publish(download)
                 video == null && download.plan != null -> readPlanned(download)
                 video == null -> {
                     val stateFile = download.stateFile
@@ -737,12 +739,13 @@ class DownloadCenter(private val context: Context) {
                 if (published != null) {
                     it.copy(
                         status = Status.Done,
+                        unsaved = false,
                         uri = published.uri.toString(),
                         shownName = published.name,
                         finishedAt = System.currentTimeMillis(),
                     )
                 } else {
-                    it.copy(status = Status.Failed, problem = Problem.OTHER, stateFile = null)
+                    it.copy(status = Status.Failed, problem = Problem.OTHER, stateFile = null, unsaved = true)
                 }
             }
         }

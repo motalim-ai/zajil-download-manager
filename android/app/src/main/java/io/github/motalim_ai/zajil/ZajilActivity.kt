@@ -46,6 +46,15 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
         settledIfDone()
     }
 
+    /** The finished download waiting for the storage permission (Android 8 and 9) to be saved. */
+    private var waitingForStorage = 0L
+    private val askStorage = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        asking--
+        if (granted) downloads.resume(waitingForStorage)
+        waitingForStorage = 0L
+        settledIfDone()
+    }
+
     /** The download waiting for the local network permission, and when it was asked. */
     private var waitingForLocal = 0L
     private var askedLocalAt = 0L
@@ -231,7 +240,18 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
     /** «Resume» or «Allow»: the local network permission first, if needed. */
     override fun resume(id: Long) {
         val download = downloads.find(id) ?: return
-        if (download.local && !LocalNetwork.isGranted(this)) askLocalNetwork(id) else downloads.resume(id)
+        val storage = Manifest.permission.WRITE_EXTERNAL_STORAGE
+        when {
+            // Complete but not saved: the storage permission first, then it is moved.
+            download.unsaved && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(this, storage) != PackageManager.PERMISSION_GRANTED -> {
+                waitingForStorage = id
+                asking++
+                askStorage.launch(storage)
+            }
+            download.local && !LocalNetwork.isGranted(this) -> askLocalNetwork(id)
+            else -> downloads.resume(id)
+        }
     }
 
     override fun startNow(id: Long) = downloads.startNow(id)

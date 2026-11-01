@@ -81,6 +81,12 @@ data class Download(
     val folder: String? = null,
     /** Why yt-dlp could not read its page ([io.github.motalim_ai.zajil.video.VideoProblem]'s name), for the screen. */
     val videoProblem: String? = null,
+    /**
+     * Complete, but not moved to the save folder (on Android 8 and 9, the
+     * storage permission refused): the file waits in the app's folder, and
+     * «Retry» moves it without downloading it again.
+     */
+    val unsaved: Boolean = false,
 ) {
     /**
      * Before the engine knows the file's name: the link's last path part,
@@ -113,6 +119,7 @@ data class Download(
         put("plan", plan?.toJson())
         put("folder", folder)
         put("video_problem", videoProblem)
+        put("unsaved", unsaved)
     }
 
     companion object {
@@ -142,6 +149,7 @@ data class Download(
             plan = json.optJSONObject("plan")?.let(PlaylistPlan::fromJson),
             folder = json.optStringOrNull("folder"),
             videoProblem = json.optStringOrNull("video_problem"),
+            unsaved = json.optBoolean("unsaved"),
         )
 
         fun listToJson(downloads: List<Download>): String =

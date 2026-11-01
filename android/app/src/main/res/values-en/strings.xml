@@ -103,6 +103,7 @@
     <string name="problem_certificate">The site\'s certificate is not valid; nothing was downloaded</string>
     <string name="problem_link">This link cannot be downloaded</string>
     <string name="problem_other">The download failed</string>
+    <string name="problem_not_saved">Downloaded, but not saved in the save folder. Retry to save it without downloading it again</string>
     <string name="size_of_total">%1$s of %2$s (%3$d%%)</string>
     <string name="channel_progress">Running downloads</string>
     <string name="channel_stopped">Stopped downloads</string>

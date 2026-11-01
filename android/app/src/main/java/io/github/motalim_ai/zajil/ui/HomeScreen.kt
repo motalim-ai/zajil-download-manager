@@ -519,7 +519,7 @@ private fun detail(download: Download, place: Int, queue: Queue, network: Networ
         Status.Failed -> listOf(
             download.videoProblem?.let { name -> VideoProblem.entries.firstOrNull { it.name == name } }
                 ?.let { stringResource(shortText(it)) }
-                ?: stringResource(problemText(download.problem)),
+                ?: stringResource(if (download.unsaved) R.string.problem_not_saved else problemText(download.problem)),
         )
         Status.Done -> listOf(
             choice,

@@ -113,6 +113,7 @@
     <string name="problem_certificate">شهادة الموقع غير صالحة، فلم يُحمَّل شيء</string>
     <string name="problem_link">هذا الرابط لا يمكن تحميله</string>
     <string name="problem_other">فشل التحميل</string>
+    <string name="problem_not_saved">اكتمل التحميل ولم يُحفظ في مجلد الحفظ. أعد المحاولة ليُحفظ دون تحميله من جديد</string>
     <!-- %1$s ما نزل، و%2$s الحجم كله، و%3$d النسبة. -->
     <string name="size_of_total">%1$s من %2$s (%3$d٪)</string>
     <string name="channel_progress">التحميلات الجارية</string>
