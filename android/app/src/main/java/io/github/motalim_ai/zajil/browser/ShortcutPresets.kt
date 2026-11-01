@@ -9,14 +9,10 @@ data class Preset(val name: String, val url: String, val since: Int)
  */
 object ShortcutPresets {
     /** Raised whenever the presets change, so a stored home list follows them once. */
-    const val VERSION = 2
+    const val VERSION = 3
 
-    /**
-     * The owner's YouTube channel «متعلم» (owner's request, 2026-11-01).
-     * PLACEHOLDER: its exact address comes from the owner; until then there
-     * is no shortcut. When it is set: [VERSION] 3, and its preset `since = 3`.
-     */
-    val MOTALIM_CHANNEL: String? = null
+    /** The owner's YouTube channel «متعلم» (owner's request and address, 2026-11-01), from presets version 3. */
+    const val MOTALIM_CHANNEL = "https://www.youtube.com/@motalim-ai"
 
     /**
      * Presets the app no longer has, by the version that dropped them

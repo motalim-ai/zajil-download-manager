@@ -131,10 +131,9 @@ class BrowserStore(private val context: Context) {
         return list
     }
 
-    private fun presets() = listOfNotNull(
+    private fun presets() = listOf(
         Preset(context.getString(R.string.site_youtube), "https://m.youtube.com/", since = 1),
-        // «متعلم»: placeholder until the owner sends the channel's address.
-        ShortcutPresets.MOTALIM_CHANNEL?.let { Preset(context.getString(R.string.site_motalim), it, since = 3) },
+        Preset(context.getString(R.string.site_motalim), ShortcutPresets.MOTALIM_CHANNEL, since = 3),
         Preset(context.getString(R.string.site_facebook), "https://m.facebook.com/", since = 1),
         Preset(context.getString(R.string.site_instagram), "https://www.instagram.com/", since = 1),
         Preset("X", "https://x.com/", since = 1),

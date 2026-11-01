@@ -1,7 +1,7 @@
 package io.github.motalim_ai.zajil.browser
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShortcutPresetsTest {
@@ -37,8 +37,13 @@ class ShortcutPresetsTest {
     }
 
     @Test
-    fun the_channels_shortcut_waits_for_its_address() {
-        // Placeholder: the owner sends the channel's address; none is guessed.
-        assertNull(ShortcutPresets.MOTALIM_CHANNEL)
+    fun the_owners_channel_comes_once_to_a_changed_home() {
+        val channel = Preset("Motalim", ShortcutPresets.MOTALIM_CHANNEL, since = 3)
+        val stored = listOf(Shortcut("YouTube", "https://m.youtube.com/"), Shortcut("Snapchat", "https://www.snapchat.com/spotlight"))
+        assertEquals(stored + Shortcut("Motalim", "https://www.youtube.com/@motalim-ai"), ShortcutPresets.migrate(stored, from = 2, presets + channel))
+        // Removed by the user after that: not brought back.
+        assertEquals(stored, ShortcutPresets.migrate(stored, from = 3, presets + channel))
+        // An ASCII «@», as YouTube's own links have it.
+        assertTrue(ShortcutPresets.MOTALIM_CHANNEL.all { it.code < 128 })
     }
 }
