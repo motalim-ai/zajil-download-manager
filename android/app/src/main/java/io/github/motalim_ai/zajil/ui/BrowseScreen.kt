@@ -405,7 +405,7 @@ private fun AddressBox(url: String, private: Boolean, modifier: Modifier) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
-            lineIcon(LineIcon.Lock),
+            lineIcon(if (secure) LineIcon.Lock else LineIcon.LockOpen),
             contentDescription = stringResource(if (secure) R.string.secure else R.string.not_secure),
             tint = if (secure) c.green else c.red,
             modifier = Modifier.size(15.dp),

@@ -124,7 +124,9 @@ class BrowserController(private val context: Context) {
         if (on == _private.value) return true
         if (on && !privateSupported) return false
         close()
-        if (!on) deletePrivateProfile()
+        // Off: its data goes. On: so does any left from a session the app
+        // never ended (killed, or a profile still held when it closed).
+        deletePrivateProfile()
         _private.value = on
         return true
     }
@@ -163,7 +165,17 @@ class BrowserController(private val context: Context) {
     }
 
     private fun deletePrivateProfile() {
-        runCatching { ProfileStore.getInstance().deleteProfile(PRIVATE) }
+        if (!privateSupported) return
+        val store = ProfileStore.getInstance()
+        val profile = store.getProfile(PRIVATE) ?: return
+        // A WebView destroyed a moment ago may still hold the profile, and a
+        // profile in use cannot be deleted: its cookies and storage go now
+        // regardless, and the profile itself once it is free.
+        profile.cookieManager.removeAllCookies(null)
+        profile.webStorage.deleteAllData()
+        if (runCatching { store.deleteProfile(PRIVATE) }.isFailure) {
+            main.post { runCatching { store.deleteProfile(PRIVATE) } }
+        }
     }
 
     private fun create(): WebView {

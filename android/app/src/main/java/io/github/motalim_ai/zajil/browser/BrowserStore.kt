@@ -39,7 +39,7 @@ class BrowserStore(private val context: Context) {
     fun removeShortcut(shortcut: Shortcut) = saveShortcuts(_shortcuts.value - shortcut)
 
     fun visited(visit: Visit) {
-        val list = (listOf(visit) + _recent.value.filterNot { it.url == visit.url }).take(MAX_RECENT)
+        val list = Finds.withVisit(_recent.value, visit, MAX_RECENT)
         prefs.edit().putString(RECENT, JSONArray(list.map { JSONObject().put("title", it.title).put("url", it.url) }).toString()).apply()
         _recent.value = list
     }

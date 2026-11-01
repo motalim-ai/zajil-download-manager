@@ -83,4 +83,16 @@ class FindsTest {
         assertEquals("https://duckduckgo.com/?q=javascript%3Aalert%281%29", Finds.addressOf("javascript:alert(1)"))
         assertNull(Finds.addressOf("   "))
     }
+
+    @Test
+    fun aPageIsListedOnceInTheRecentList() {
+        val reel = Visit("A reel", "https://m.facebook.com/reel/1?s=a")
+        val other = Visit("Other", "https://m.facebook.com/reel/2")
+        val list = Finds.withVisit(listOf(other, reel), Visit("A reel", "https://m.facebook.com/reel/1?s=b"), 8)
+        assertEquals(listOf("https://m.facebook.com/reel/1?s=b", "https://m.facebook.com/reel/2"), list.map { it.url })
+        // The same title on another host is another page; an untitled one is known by its address only.
+        assertEquals(3, Finds.withVisit(list, Visit("A reel", "https://www.instagram.com/reel/1"), 8).size)
+        assertEquals(2, Finds.withVisit(listOf(Visit("", "https://a.com/1")), Visit("", "https://a.com/2"), 8).size)
+        assertEquals(1, Finds.withVisit(list, Visit("New", "https://a.com/"), 1).size)
+    }
 }

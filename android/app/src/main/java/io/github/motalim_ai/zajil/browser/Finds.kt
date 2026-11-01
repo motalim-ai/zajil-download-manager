@@ -131,6 +131,20 @@ object Finds {
     }
 
     /**
+     * The recent list with [visit] first: one entry per page, so the same
+     * address, or the same title on the same host (a reel's link changes
+     * with every visit), replaces the older one.
+     */
+    fun withVisit(recent: List<Visit>, visit: Visit, max: Int): List<Visit> {
+        val host = runCatching { URI(visit.url).host }.getOrNull()
+        val samePage = { old: Visit ->
+            old.url == visit.url ||
+                (visit.title.isNotBlank() && old.title == visit.title && host != null && runCatching { URI(old.url).host }.getOrNull() == host)
+        }
+        return (listOf(visit) + recent.filterNot(samePage)).take(max)
+    }
+
+    /**
      * What the address field opens: an http(s) address as it is, a bare
      * address («example.com/x») over https, anything else a search
      * (DuckDuckGo, which keeps no profile of its users).
