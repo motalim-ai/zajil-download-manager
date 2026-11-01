@@ -627,7 +627,7 @@ class DownloadCenter(private val context: Context) {
     private fun publish(download: Download) {
         scope.launch {
             val file = download.file?.let(::File)
-            val published = file?.let { Publisher.publish(context, it) }
+            val published = file?.let { Publisher.publish(context, it, prefs.prefs.value) }
             if (published != null) folderOf(download.id).delete()
             edit(download.id) {
                 if (published != null) {

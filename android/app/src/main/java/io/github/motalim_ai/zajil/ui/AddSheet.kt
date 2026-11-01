@@ -58,7 +58,9 @@ import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
+import io.github.motalim_ai.zajil.downloads.Publisher
 import io.github.motalim_ai.zajil.downloads.Queue
+import io.github.motalim_ai.zajil.downloads.SaveCategory
 import io.github.motalim_ai.zajil.engine.EngineException
 import io.github.motalim_ai.zajil.engine.LinkInfo
 import io.github.motalim_ai.zajil.video.VideoPages
@@ -183,7 +185,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                     ZText(infoLine(found, name, url), size = 12.5.sp, color = c.muted, maxLines = 2)
                 }
                 Chips(found, prefs.connections)
-                Places(start, queue, onStart = { when_, inQueue -> start = when_; queue = inQueue })
+                Places(name, start, queue, onStart = { when_, inQueue -> start = when_; queue = inQueue })
             }
 
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -355,9 +357,16 @@ private fun Chips(found: Found, connections: Int) {
 
 /** Where it is saved, and when it starts. */
 @Composable
-private fun Places(start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> Unit) {
+private fun Places(name: String, start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> Unit) {
     val c = Z.colors
-    val queues by LocalContext.current.downloads.settings.queues.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val queues by context.downloads.settings.queues.collectAsStateWithLifecycle()
+    val prefs by context.downloads.prefs.prefs.collectAsStateWithLifecycle()
+    // Where it will be: the chosen folder or Download/Zajil, and its type's folder there.
+    val folder = listOfNotNull(
+        prefs.saveTree?.let(Publisher::shownTree) ?: "Download/Zajil",
+        SaveCategory.of(name)?.takeIf { prefs.folderPerType }?.let { Publisher.folderName(context, it) },
+    ).joinToString("/")
     val inQueue = queues.firstOrNull { it.id == queue } ?: queues.first()
     var choosing by remember { mutableStateOf(false) }
     val now = start == StartWhen.Now
@@ -371,7 +380,7 @@ private fun Places(start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> 
             Column(Modifier.weight(1f)) {
                 ZText(stringResource(R.string.saved_in), size = 12.sp, color = c.muted)
                 // A path reads left to right, in any language.
-                ZText("Download/Zajil", style = TextStyle(textDirection = TextDirection.Ltr))
+                ZText(folder, style = TextStyle(textDirection = TextDirection.Ltr))
             }
         }
         RowLine()

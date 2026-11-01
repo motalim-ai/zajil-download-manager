@@ -1,8 +1,13 @@
 package io.github.motalim_ai.zajil.ui
 
 import android.app.LocaleManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.LocaleList
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,11 +38,12 @@ import io.github.motalim_ai.zajil.browser.BrowserController
 import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.downloads.Look
 import io.github.motalim_ai.zajil.downloads.Prefs
+import io.github.motalim_ai.zajil.downloads.Publisher
 import io.github.motalim_ai.zajil.video.ToolsUpdate
 import io.github.motalim_ai.zajil.video.YtDlp
 import kotlinx.coroutines.launch
 
-private enum class Asking { Language, Look, Connections, SpeedLimit }
+private enum class Asking { Language, Look, Connections, SpeedLimit, SavePlace }
 
 /** Settings, grouped as the approved design has them, with the green note at the end. */
 @Composable
@@ -47,6 +54,14 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
     val c = Z.colors
     var asking by rememberSaveable { mutableStateOf<Asking?>(null) }
     val units = sizeUnits()
+    // Android's own folder picker: the folder's permission is kept, the old one's given back.
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree == null) return@rememberLauncherForActivityResult
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        if (runCatching { context.contentResolver.takePersistableUriPermission(tree, flags) }.isFailure) return@rememberLauncherForActivityResult
+        center.prefs.prefs.value.saveTree?.takeIf { it != tree.toString() }?.let { old -> releaseFolder(context, old) }
+        center.prefs.update { it.copy(saveTree = tree.toString()) }
+    }
 
     Column(Modifier.fillMaxSize().background(c.bg)) {
         TitleBar(stringResource(R.string.settings))
@@ -70,7 +85,24 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
                 SettingRow(stringResource(R.string.look), value = stringResource(lookName(prefs.look)), onClick = { asking = Asking.Look })
             }
             Group(stringResource(R.string.group_download)) {
-                SettingRow(stringResource(R.string.save_place), value = "Download/Zajil", valueColor = c.muted)
+                SettingRow(
+                    stringResource(R.string.save_place),
+                    value = prefs.saveTree?.let(Publisher::shownTree) ?: "Download/Zajil",
+                    valueColor = if (prefs.saveTree == null) c.muted else c.accent,
+                    onClick = { asking = Asking.SavePlace },
+                )
+                RowLine()
+                SettingRow(
+                    stringResource(R.string.folder_per_type),
+                    hint = stringResource(R.string.folder_per_type_hint),
+                    onClick = { center.prefs.update { it.copy(folderPerType = !it.folderPerType) } },
+                ) {
+                    Switch(
+                        checked = prefs.folderPerType,
+                        onCheckedChange = { on -> center.prefs.update { it.copy(folderPerType = on) } },
+                        colors = switchColors(),
+                    )
+                }
                 RowLine()
                 SettingRow(
                     stringResource(R.string.connections_per_file),
@@ -130,6 +162,20 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
             Prefs.CONNECTIONS.map { it to pluralStringResource(R.plurals.connections, it, it) },
             prefs.connections,
             onChoose = { n -> center.prefs.update { it.copy(connections = n) } },
+            onDismiss = { asking = null },
+        )
+        Asking.SavePlace -> ChoiceSheet(
+            stringResource(R.string.save_place),
+            listOf(false to stringResource(R.string.save_default), true to stringResource(R.string.save_choose)),
+            chosen = prefs.saveTree != null,
+            onChoose = { choose ->
+                if (choose) {
+                    pickFolder.launch(null)
+                } else {
+                    prefs.saveTree?.let { old -> releaseFolder(context, old) }
+                    center.prefs.update { it.copy(saveTree = null) }
+                }
+            },
             onDismiss = { asking = null },
         )
         Asking.SpeedLimit -> ChoiceSheet(
@@ -242,3 +288,14 @@ private fun setAppLanguage(context: android.content.Context, tag: String) {
     context.getSystemService(LocaleManager::class.java)?.applicationLocales =
         if (tag.isEmpty()) LocaleList.getEmptyLocaleList() else LocaleList.forLanguageTags(tag)
 }
+
+/** Gives back the permission of a folder no longer used. */
+private fun releaseFolder(context: Context, tree: String) {
+    runCatching {
+        context.contentResolver.releasePersistableUriPermission(
+            Uri.parse(tree),
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+    }
+}
+

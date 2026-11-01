@@ -232,6 +232,15 @@
     <string name="look_light">فاتح</string>
     <string name="look_dark">داكن</string>
     <string name="save_place">مكان الحفظ</string>
+    <string name="save_default">Download/Zajil (الافتراضي)</string>
+    <string name="save_choose">اختيار مجلد…</string>
+    <string name="folder_per_type">مجلد لكل نوع</string>
+    <string name="folder_per_type_hint">فيديوهات، وصوتيات، ومستندات، وبرامج، ومضغوطات، كما على الكمبيوتر</string>
+    <string name="folder_programs">برامج</string>
+    <string name="folder_video">فيديوهات</string>
+    <string name="folder_music">صوتيات</string>
+    <string name="folder_documents">مستندات</string>
+    <string name="folder_archives">مضغوطات</string>
     <string name="connections_per_file">الاتصالات لكل ملف</string>
     <string name="speed_limit">حد السرعة</string>
     <string name="speed_limit_hint">لكل التحميلات معًا</string>

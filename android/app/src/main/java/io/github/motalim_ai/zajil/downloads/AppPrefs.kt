@@ -15,6 +15,13 @@ data class Prefs(
     val connections: Int = DEFAULT_CONNECTIONS,
     /** All downloads together, in bytes per second; null: no limit. */
     val speedLimit: Long? = null,
+    /**
+     * The folder the user chose with Android's folder picker (a document
+     * tree URI, its permission kept); null: Download/Zajil.
+     */
+    val saveTree: String? = null,
+    /** A folder for each type, as the desktop's categories ([SaveCategory]). */
+    val folderPerType: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_CONNECTIONS = 8
@@ -40,6 +47,8 @@ class AppPrefs(context: Context) {
                 .putString(LOOK, prefs.look.name)
                 .putInt(CONNECTIONS, prefs.connections)
                 .putLong(SPEED_LIMIT, prefs.speedLimit ?: 0)
+                .putString(SAVE_TREE, prefs.saveTree)
+                .putBoolean(FOLDER_PER_TYPE, prefs.folderPerType)
                 .apply()
             _prefs.value = prefs
         }
@@ -49,11 +58,15 @@ class AppPrefs(context: Context) {
         look = Look.entries.firstOrNull { it.name == store.getString(LOOK, null) } ?: Look.System,
         connections = store.getInt(CONNECTIONS, Prefs.DEFAULT_CONNECTIONS).coerceIn(1, 16),
         speedLimit = store.getLong(SPEED_LIMIT, 0).takeIf { it > 0 },
+        saveTree = store.getString(SAVE_TREE, null),
+        folderPerType = store.getBoolean(FOLDER_PER_TYPE, false),
     )
 
     private companion object {
         const val LOOK = "look"
         const val CONNECTIONS = "connections"
         const val SPEED_LIMIT = "speed_limit"
+        const val SAVE_TREE = "save_tree"
+        const val FOLDER_PER_TYPE = "folder_per_type"
     }
 }

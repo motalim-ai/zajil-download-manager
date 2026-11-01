@@ -209,6 +209,15 @@
     <string name="look_light">Light</string>
     <string name="look_dark">Dark</string>
     <string name="save_place">Saved to</string>
+    <string name="save_default">Download/Zajil (default)</string>
+    <string name="save_choose">Choose a folder…</string>
+    <string name="folder_per_type">A folder for each type</string>
+    <string name="folder_per_type_hint">Videos, Audio, Documents, Programs and Archives, as on the computer</string>
+    <string name="folder_programs">Programs</string>
+    <string name="folder_video">Videos</string>
+    <string name="folder_music">Audio</string>
+    <string name="folder_documents">Documents</string>
+    <string name="folder_archives">Archives</string>
     <string name="connections_per_file">Connections per file</string>
     <string name="speed_limit">Speed limit</string>
     <string name="speed_limit_hint">For all downloads together</string>
