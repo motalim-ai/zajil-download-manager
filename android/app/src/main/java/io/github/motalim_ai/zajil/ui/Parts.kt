@@ -155,7 +155,7 @@ fun RoundIconButton(icon: ColorIcon, label: String, onClick: () -> Unit, modifie
 
 /** A plain icon in the bar: search, more. */
 @Composable
-fun BarIconButton(icon: LineIcon, label: String, onClick: () -> Unit) {
+fun BarIconButton(icon: LineIcon, label: String, tint: Color = Z.colors.muted, onClick: () -> Unit) {
     Box(
         Modifier
             .size(48.dp)
@@ -164,7 +164,7 @@ fun BarIconButton(icon: LineIcon, label: String, onClick: () -> Unit) {
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(lineIcon(icon), contentDescription = null, tint = Z.colors.muted, modifier = Modifier.size(22.dp))
+        Icon(lineIcon(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 

@@ -123,6 +123,7 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
             Group(stringResource(R.string.group_browser)) {
                 val sites by browser.store.sites.collectAsStateWithLifecycle()
                 val recent by browser.store.recent.collectAsStateWithLifecycle()
+                val history by browser.store.history.collectAsStateWithLifecycle()
                 SettingRow(
                     stringResource(R.string.manage_sign_ins),
                     hint = stringResource(R.string.sign_ins_short),
@@ -132,9 +133,9 @@ fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onS
                 RowLine()
                 SettingRow(
                     stringResource(R.string.clear_visited),
-                    value = if (recent.isEmpty()) stringResource(R.string.nothing_to_clear) else stringResource(R.string.clear),
-                    valueColor = if (recent.isEmpty()) c.muted else c.accent,
-                    onClick = if (recent.isEmpty()) null else ({ browser.store.clearRecent() }),
+                    value = if (recent.isEmpty() && history.isEmpty()) stringResource(R.string.nothing_to_clear) else stringResource(R.string.clear),
+                    valueColor = if (recent.isEmpty() && history.isEmpty()) c.muted else c.accent,
+                    onClick = if (recent.isEmpty() && history.isEmpty()) null else ({ browser.store.clearRecent() }),
                 )
             }
             Group(stringResource(R.string.group_update)) { AppUpdateRows() }

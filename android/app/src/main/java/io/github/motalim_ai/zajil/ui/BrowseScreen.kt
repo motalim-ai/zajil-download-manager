@@ -36,6 +36,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -97,8 +98,12 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
     val icons by browser.store.icons.icons.collectAsStateWithLifecycle()
     // The shortcuts' own icons, asked once of each site itself; not in private mode.
     LaunchedEffect(shortcuts, private) { if (!private) browser.store.icons.fetchMissing(shortcuts.map { it.url }) }
+    val tabs by browser.tabs.collectAsStateWithLifecycle()
     var adding by rememberSaveable { mutableStateOf(false) }
     var refused by remember { mutableStateOf(false) }
+    var sheet by rememberSaveable { mutableStateOf<String?>(null) }
+    // Back from a new tab's home: the last tab again.
+    BackHandler(enabled = tabs.isNotEmpty()) { browser.switchTo(tabs.last().id) }
     Column(Modifier.fillMaxSize().background(c.bg)) {
         Column(
             Modifier.background(c.surface).windowInsetsPadding(WindowInsets.statusBars).padding(16.dp),
@@ -107,6 +112,7 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ZText(stringResource(R.string.browse), Modifier.weight(1f), size = 21.sp, weight = FontWeight.Bold)
                 PrivatePill(private) { refused = !browser.setPrivate(!private) }
+                if (tabs.isNotEmpty()) TabsButton(tabs.size) { sheet = "tabs" }
             }
             AddressField(onGo = browser::open)
         }
@@ -138,8 +144,18 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
                     }
                 }
             }
+            if (!private) BookmarksCard(browser)
             if (recent.isNotEmpty() && !private) {
-                ZText(stringResource(R.string.visited_lately), size = 14.sp, weight = FontWeight.Bold, color = c.muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ZText(stringResource(R.string.visited_lately), Modifier.weight(1f), size = 14.sp, weight = FontWeight.Bold, color = c.muted)
+                    ZText(
+                        stringResource(R.string.history),
+                        Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { sheet = "history" }.padding(horizontal = 8.dp, vertical = 4.dp),
+                        size = 13.5.sp,
+                        weight = FontWeight.SemiBold,
+                        color = c.accent,
+                    )
+                }
                 ZCard {
                     recent.forEachIndexed { i, visit ->
                         if (i > 0) RowLine()
@@ -166,6 +182,10 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
         }
     }
     if (adding) AddSiteSheet(onAdd = { browser.store.addShortcut(it) }, onDismiss = { adding = false })
+    when (sheet) {
+        "tabs" -> TabsSheet(browser, onDismiss = { sheet = null })
+        "history" -> HistorySheet(browser, onDismiss = { sheet = null })
+    }
 }
 
 @Composable
@@ -358,7 +378,10 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     val page by browser.page.collectAsStateWithLifecycle()
     val found by browser.found.collectAsStateWithLifecycle()
     val private by browser.privateMode.collectAsStateWithLifecycle()
+    val tabs by browser.tabs.collectAsStateWithLifecycle()
+    val bookmarks by browser.store.bookmarks.collectAsStateWithLifecycle()
     var listing by rememberSaveable { mutableStateOf(false) }
+    var showingTabs by rememberSaveable { mutableStateOf(false) }
     val state = page ?: return
     BackHandler { browser.back() }
     Column(Modifier.fillMaxSize().background(c.surface).padding(bottom = bottomPadding.calculateBottomPadding())) {
@@ -375,6 +398,13 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                 }
                 AddressBox(state.url, private, Modifier.weight(1f))
                 BarIconButton(LineIcon.Reload, stringResource(R.string.reload)) { browser.reload() }
+                val marked = bookmarks.any { it.url == state.url }
+                BarIconButton(
+                    if (marked) LineIcon.StarFilled else LineIcon.Star,
+                    stringResource(if (marked) R.string.remove_bookmark else R.string.add_bookmark),
+                    tint = if (marked) c.amber else c.muted,
+                ) { browser.store.toggleBookmark(state.title, state.url) }
+                TabsButton(tabs.size) { showingTabs = true }
             }
             if (state.loading) {
                 LinearProgressIndicator(
@@ -392,10 +422,13 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val view = browser.webView
             if (view != null) {
-                AndroidView(
-                    factory = { view.also { (it.parent as? ViewGroup)?.removeView(it) } },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // Another tab is another view.
+                key(view) {
+                    AndroidView(
+                        factory = { view.also { (it.parent as? ViewGroup)?.removeView(it) } },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             val downloadable = found.count { !(it is Found.Element && it.protected) }
             if (found.isNotEmpty()) {
@@ -403,6 +436,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
             }
         }
     }
+    if (showingTabs) TabsSheet(browser, onDismiss = { showingTabs = false })
     if (listing) {
         FoundSheet(
             found,
@@ -575,7 +609,7 @@ private fun describe(item: Found, page: io.github.motalim_ai.zajil.browser.PageS
     }
 }
 
-private fun hostOf(url: String) = runCatching { URI(url).host }.getOrNull()?.removePrefix("www.").orEmpty()
+internal fun hostOf(url: String) = runCatching { URI(url).host }.getOrNull()?.removePrefix("www.").orEmpty()
 
 private fun extOf(url: String) = runCatching { URI(url).rawPath }.getOrNull().orEmpty().substringAfterLast('/').substringAfterLast('.', "")
 

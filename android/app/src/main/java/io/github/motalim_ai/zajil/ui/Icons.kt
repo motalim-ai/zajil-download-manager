@@ -192,7 +192,7 @@ private fun draw(icon: ColorIcon, surface: Color): ImageVector = Drawing().apply
  */
 enum class LineIcon {
     Search, More, Downloads, Queues, Settings, Shared, Folder, Check, ChevronDown, Shield, Play,
-    Globe, Lock, LockOpen, Back, Reload, Private, Clock, Plus, Close,
+    Globe, Lock, LockOpen, Back, Reload, Private, Clock, Plus, Close, Star, StarFilled, History,
 }
 
 private val lineCache = HashMap<LineIcon, ImageVector>()
@@ -230,6 +230,9 @@ fun lineIcon(icon: LineIcon): ImageVector = synchronized(lineCache) {
                 LineIcon.Clock -> stroke(circle(12f, 12f, 9f) + "M12 7v5l3 2", ink, 2f)
                 LineIcon.Plus -> stroke("M12 5v14M5 12h14", ink, 2.4f)
                 LineIcon.Close -> stroke("M6 6l12 12M18 6L6 18", ink, 2.2f)
+                LineIcon.Star -> stroke("M12 3.5l2.6 5.3 5.9.9-4.25 4.15 1 5.85L12 16.95 6.75 19.7l1-5.85L3.5 9.7l5.9-.9z", ink, 2f)
+                LineIcon.StarFilled -> fill("M12 3.5l2.6 5.3 5.9.9-4.25 4.15 1 5.85L12 16.95 6.75 19.7l1-5.85L3.5 9.7l5.9-.9z", ink)
+                LineIcon.History -> stroke(circle(12f, 12f, 9f) + "M12 7v5l3 2M3 12H1M3 12l2-2", ink, 2f)
             }
         }.build()
     }

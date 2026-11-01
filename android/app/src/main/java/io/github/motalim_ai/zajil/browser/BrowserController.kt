@@ -45,12 +45,16 @@ data class PageState(
     val canGoBack: Boolean = false,
 )
 
+/** A tab, as the switcher lists it. */
+data class TabInfo(val id: Long, val title: String, val url: String)
+
 /**
- * Zajil's in-app browser (A6): one WebView, held for the window, with the
- * settings the owner set as hard rules. It finds videos in three layers
- * (a video site's page; media files and playlists the page asks for; the
- * page's `<video>` elements, reported by [finder.js]), and starts nothing
- * itself: a download starts only from the user's tap in Zajil.
+ * Zajil's in-app browser (A6; tabs from 0.3.0): a WebView for each tab,
+ * with the settings the owner set as hard rules. It finds videos in three
+ * layers (a video site's page; media files and playlists the page asks
+ * for; the page's `<video>` elements, reported by [finder.js]), and starts
+ * nothing itself: a download starts only from the user's tap in Zajil. The
+ * screen follows the current tab; none is the browser's home.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class BrowserController(private val context: Context) {
@@ -65,12 +69,12 @@ class BrowserController(private val context: Context) {
     private val _private = MutableStateFlow(false)
     val privateMode: StateFlow<Boolean> = _private.asStateFlow()
 
+    private val _tabs = MutableStateFlow<List<TabInfo>>(emptyList())
+    val tabs: StateFlow<List<TabInfo>> = _tabs.asStateFlow()
+
     /** A link the page wanted to download: offered in Zajil's sheet, never started. */
     private val _requests = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val requests: SharedFlow<String> = _requests.asSharedFlow()
-
-    var webView: WebView? = null
-        private set
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -78,10 +82,21 @@ class BrowserController(private val context: Context) {
     private val token = random()
     private val bridge = "zajil_" + random().take(12)
 
-    /** What was found, by layer, on the page on screen (main thread). */
-    private var sitePage: Found.SitePage? = null
-    private val media = LinkedHashMap<String, Found.Media>()
-    private val elements = HashMap<String, List<PageVideo>>()
+    /** A tab: its WebView, its page, and what was found on it, by layer (main thread). */
+    private inner class Tab(val id: Long, val view: WebView) {
+        var page: PageState? = null
+        var found: List<Found> = emptyList()
+        var sitePage: Found.SitePage? = null
+        val media = LinkedHashMap<String, Found.Media>()
+        val elements = HashMap<String, List<PageVideo>>()
+    }
+
+    private val tabList = mutableListOf<Tab>()
+    private var current: Tab? = null
+    private var nextId = 1L
+
+    /** The current tab's WebView; null on the home. */
+    val webView: WebView? get() = current?.view
 
     val privateSupported: Boolean
         get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
@@ -90,31 +105,81 @@ class BrowserController(private val context: Context) {
         get() = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) &&
             WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
 
-    /** Opens what the user typed or tapped: an address, or a search. */
+    /** Opens what the user typed or tapped: in the current tab, or a new one from the home. */
     fun open(input: String) {
         val url = Finds.addressOf(input) ?: return
-        val view = webView ?: create().also { webView = it }
-        _page.value = PageState(url)
-        view.loadUrl(url)
+        val tab = current ?: newTab()
+        setPage(tab, PageState(url))
+        tab.view.loadUrl(url)
+    }
+
+    /** A new tab: the home, where the next address opens in a new tab. */
+    fun newTabHome() {
+        current?.view?.onPause()
+        current = null
+        _page.value = null
+        _found.value = emptyList()
+    }
+
+    /** At most [MAX_TABS]: the oldest goes first. */
+    private fun newTab(): Tab {
+        if (tabList.size >= MAX_TABS) closeTab(tabList.first().id)
+        val tab = Tab(nextId++, create())
+        tabList += tab
+        current = tab
+        listTabs()
+        return tab
+    }
+
+    /** Shows tab [id]. */
+    fun switchTo(id: Long) {
+        val tab = tabList.firstOrNull { it.id == id } ?: return
+        current?.takeIf { it != tab }?.view?.onPause()
+        current = tab
+        tab.view.onResume()
+        _page.value = tab.page
+        _found.value = tab.found
+    }
+
+    /** Closes tab [id]; the current one gives way to the last other tab, or the home. */
+    fun closeTab(id: Long) {
+        val tab = tabList.firstOrNull { it.id == id } ?: return
+        tabList -= tab
+        tab.view.stopLoading()
+        tab.view.destroy()
+        listTabs()
+        if (tab == current) {
+            current = null
+            tabList.lastOrNull()?.let { switchTo(it.id) } ?: run {
+                _page.value = null
+                _found.value = emptyList()
+            }
+        }
     }
 
     fun reload() = webView?.reload()
 
-    /** Back in the page's history, or to the browser's home. */
+    /** Back in the tab's history, or the tab closes. */
     fun back() {
-        val view = webView ?: return
-        if (view.canGoBack()) view.goBack() else close()
+        val tab = current ?: return
+        if (tab.view.canGoBack()) tab.view.goBack() else closeTab(tab.id)
     }
 
-    /** Back to the browser's home; the page goes. */
+    /** Closes every tab: the home. */
     fun close() {
-        webView?.let {
-            it.stopLoading()
-            it.destroy()
-        }
-        webView = null
-        _page.value = null
-        reset()
+        tabList.toList().forEach { closeTab(it.id) }
+    }
+
+    private fun listTabs() {
+        _tabs.value = tabList.map { TabInfo(it.id, it.page?.title.orEmpty(), it.page?.url.orEmpty()) }
+    }
+
+    /** [tab]'s page changed: the screen shows it if it is the current tab. */
+    private fun setPage(tab: Tab, page: PageState?) {
+        val before = tab.page
+        tab.page = page
+        if (tab == current) _page.value = page
+        if (before?.title != page?.title || before?.url != page?.url) listTabs()
     }
 
     /**
@@ -229,29 +294,25 @@ class BrowserController(private val context: Context) {
                 .replace("__ZAJIL_TOKEN__", JSONObject.quote(token))
                 .replace("__ZAJIL_LABEL__", JSONObject.quote(context.getString(R.string.found_by_zajil)))
             WebViewCompat.addDocumentStartJavaScript(view, script, setOf("*"))
-            WebViewCompat.addWebMessageListener(view, bridge, setOf("*")) { _, message, origin, isMainFrame, _ ->
+            WebViewCompat.addWebMessageListener(view, bridge, setOf("*")) { from, message, origin, isMainFrame, _ ->
                 // Untrusted page data: only a report with this load's token, bounded and checked.
                 val report = Finds.parseReport(message.data, token) ?: return@addWebMessageListener
-                elements["$isMainFrame|$origin"] = report.second
-                if (isMainFrame && report.first.isNotBlank()) _page.value = _page.value?.copy(title = report.first)
-                publish()
+                val tab = tabOf(from) ?: return@addWebMessageListener
+                tab.elements["$isMainFrame|$origin"] = report.second
+                if (isMainFrame && report.first.isNotBlank()) setPage(tab, tab.page?.copy(title = report.first))
+                publish(tab)
             }
         }
         return view
     }
 
-    private fun reset() {
-        sitePage = null
-        media.clear()
-        elements.clear()
-        _found.value = emptyList()
-    }
+    private fun tabOf(view: WebView): Tab? = tabList.firstOrNull { it.view == view }
 
     /** The page's address changed: layer 1 again, and what it asks for from now on. */
-    private fun moved(url: String) {
-        sitePage = if (VideoPages.isVideoPage(url)) Found.SitePage(url, _page.value?.title.orEmpty()) else null
-        media.clear()
-        publish()
+    private fun moved(tab: Tab, url: String) {
+        tab.sitePage = if (VideoPages.isVideoPage(url)) Found.SitePage(url, tab.page?.title.orEmpty()) else null
+        tab.media.clear()
+        publish(tab)
     }
 
     /**
@@ -261,29 +322,28 @@ class BrowserController(private val context: Context) {
      * only when there is no main one), then its videos with an address of
      * their own, then the protected ones, which are not downloaded.
      */
-    private fun publish() {
-        sitePage?.let {
-            _found.value = listOf(it)
-            return
-        }
+    private fun publish(tab: Tab) {
+        tab.found = found(tab)
+        if (tab == current) _found.value = tab.found
+    }
+
+    private fun found(tab: Tab): List<Found> {
+        tab.sitePage?.let { return listOf(it) }
         // A feed (TikTok's «For you», Instagram's, Facebook's): its videos
         // by their own posts' pages, which yt-dlp reads; the files a feed
         // plays are pieces. Only the page's own site's.
-        val pageUrl = _page.value?.url
-        val posts = elements.values.flatten().map { it.page }
+        val pageUrl = tab.page?.url
+        val posts = tab.elements.values.flatten().map { it.page }
             .filter { it.isNotEmpty() && pageUrl != null && Finds.sameSite(it, pageUrl) }
             .distinct()
-        if (posts.isNotEmpty()) {
-            _found.value = posts.take(Finds.MAX_VIDEOS).map { Found.SitePage(it, "") }
-            return
-        }
+        if (posts.isNotEmpty()) return posts.take(Finds.MAX_VIDEOS).map { Found.SitePage(it, "") }
         val list = mutableListOf<Found>()
-        val playlists = media.values.filter { it.kind != MediaKind.File }
+        val playlists = tab.media.values.filter { it.kind != MediaKind.File }
         val mains = playlists.filterNot { Finds.isRendition(it.url) }
         list += (mains.ifEmpty { playlists.take(1) })
-        val videos = elements.values.flatten()
+        val videos = tab.elements.values.flatten()
         // A file the page's <video> plays: its length from there.
-        list += media.values.filter { it.kind == MediaKind.File }.map { file ->
+        list += tab.media.values.filter { it.kind == MediaKind.File }.map { file ->
             val length = videos.firstOrNull { it.src.substringBefore('?') == file.url.substringBefore('?') }?.duration ?: 0
             if (length > 0) file.copy(duration = length) else file
         }
@@ -292,7 +352,7 @@ class BrowserController(private val context: Context) {
             .distinctBy { it.src }
             .forEach { list += Found.Element(it.src, it.width, it.height, it.duration, protected = false) }
         videos.filter { it.protected }.take(1).forEach { list += Found.Element(null, it.width, it.height, it.duration, protected = true) }
-        _found.value = list
+        return list
     }
 
     private inner class Client : WebViewClient() {
@@ -303,21 +363,25 @@ class BrowserController(private val context: Context) {
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-            elements.clear()
-            _page.value = PageState(url, loading = true, canGoBack = view.canGoBack())
-            moved(url)
+            val tab = tabOf(view) ?: return
+            tab.elements.clear()
+            setPage(tab, PageState(url, loading = true, canGoBack = view.canGoBack()))
+            moved(tab, url)
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-            val before = _page.value?.url
-            _page.value = _page.value?.copy(url = url, canGoBack = view.canGoBack()) ?: PageState(url)
-            if (url != before) moved(url)
+            val tab = tabOf(view) ?: return
+            val before = tab.page?.url
+            setPage(tab, tab.page?.copy(url = url, canGoBack = view.canGoBack()) ?: PageState(url))
+            if (url != before) moved(tab, url)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
-            _page.value = _page.value?.copy(loading = false, progress = 100, canGoBack = view.canGoBack())
-            sitePage = sitePage?.copy(title = view.title.orEmpty())
-            publish()
+            val tab = tabOf(view) ?: return
+            setPage(tab, tab.page?.copy(loading = false, progress = 100, canGoBack = view.canGoBack()))
+            tab.sitePage = tab.sitePage?.copy(title = view.title.orEmpty())
+            publish(tab)
+            // Private mode: no history, no recent list, no sites (A6b).
             if (_private.value || !url.startsWith("http")) return
             store.visited(Visit(view.title?.takeIf { it.isNotBlank() } ?: url, url))
             if (!CookieManager.getInstance().getCookie(url).isNullOrEmpty()) store.keepsCookies(url)
@@ -329,10 +393,11 @@ class BrowserController(private val context: Context) {
             val url = request.url.toString()
             val kind = Finds.kindOf(url) ?: return null
             main.post {
+                val tab = tabOf(view) ?: return@post
                 val key = url.substringBefore('?')
-                if (key !in media && media.size < MAX_MEDIA) {
-                    media[key] = Found.Media(url, kind)
-                    publish()
+                if (key !in tab.media && tab.media.size < MAX_MEDIA) {
+                    tab.media[key] = Found.Media(url, kind)
+                    publish(tab)
                 }
             }
             return null
@@ -342,7 +407,7 @@ class BrowserController(private val context: Context) {
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) = handler.cancel()
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-            if (view == webView) close() else view.destroy()
+            tabOf(view)?.let { closeTab(it.id) } ?: view.destroy()
             return true
         }
     }
@@ -356,11 +421,13 @@ class BrowserController(private val context: Context) {
         }
 
         override fun onProgressChanged(view: WebView, newProgress: Int) {
-            _page.value = _page.value?.copy(progress = newProgress, loading = newProgress < 100)
+            val tab = tabOf(view) ?: return
+            setPage(tab, tab.page?.copy(progress = newProgress, loading = newProgress < 100))
         }
 
         override fun onReceivedTitle(view: WebView, title: String?) {
-            _page.value = _page.value?.copy(title = title.orEmpty())
+            val tab = tabOf(view) ?: return
+            setPage(tab, tab.page?.copy(title = title.orEmpty()))
         }
 
         /** No camera, microphone or other device for pages. */
@@ -385,6 +452,9 @@ class BrowserController(private val context: Context) {
 
         /** The most media addresses kept for a page. */
         const val MAX_MEDIA = 20
+
+        /** The most tabs open: each is a WebView, and a phone's memory is short. */
+        const val MAX_TABS = 10
 
         fun random(): String {
             val bytes = ByteArray(16)

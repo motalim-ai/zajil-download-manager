@@ -4,10 +4,16 @@ import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebStorage
 import io.github.motalim_ai.zajil.R
+import java.io.File
 import java.net.URI
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,6 +22,12 @@ data class Shortcut(val name: String, val url: String)
 
 /** A page visited lately (not in private mode). */
 data class Visit(val title: String, val url: String)
+
+/** A page in the history (A6b), with when it was opened (milliseconds since 1970). */
+data class HistoryEntry(val title: String, val url: String, val at: Long)
+
+/** A page the user kept (A6b). */
+data class Bookmark(val title: String, val url: String)
 
 /**
  * The in-app browser's own lists, in the app's private preferences: the
@@ -45,18 +57,83 @@ class BrowserStore(private val context: Context) {
         SiteIcons.siteOf(shortcut.url)?.let { site -> if (site !in sitesOf(_shortcuts.value)) icons.remove(site) }
     }
 
+    private val historyFile = File(context.filesDir, "browser-history.json")
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+
+    private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
+
+    /** The pages opened, newest first, at most [MAX_HISTORY]; never private mode's. Read from the app's files. */
+    val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
+
+    private val _bookmarks = MutableStateFlow(readBookmarks())
+    val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
+
+    init {
+        io.launch {
+            val read = runCatching {
+                JSONArray(historyFile.readText()).let { a ->
+                    (0 until minOf(a.length(), MAX_HISTORY)).map { i ->
+                        a.getJSONObject(i).let { HistoryEntry(it.getString("title"), it.getString("url"), it.getLong("at")) }
+                    }
+                }
+            }.getOrDefault(emptyList())
+            _history.update { (it + read).take(MAX_HISTORY) }
+        }
+    }
+
     fun visited(visit: Visit) {
         val list = Finds.withVisit(_recent.value, visit, MAX_RECENT)
         prefs.edit().putString(RECENT, JSONArray(list.map { JSONObject().put("title", it.title).put("url", it.url) }).toString()).apply()
         _recent.value = list
+        // The history: every page, the same one again only after another.
+        _history.update { old ->
+            val entry = HistoryEntry(visit.title, visit.url, System.currentTimeMillis())
+            (listOf(entry) + if (old.firstOrNull()?.url == visit.url) old.drop(1) else old).take(MAX_HISTORY)
+        }
+        saveHistory()
     }
 
+    /** Removes one page from the history. */
+    fun forgetVisit(entry: HistoryEntry) {
+        _history.update { it - entry }
+        saveHistory()
+    }
+
+    /** The history and the recent list go, and the icons of the sites in them (not a shortcut's). */
     fun clearRecent() {
-        // The visited sites' icons go too, but not a shortcut's.
-        (sitesOf(_recent.value.map { Shortcut("", it.url) }) - sitesOf(_shortcuts.value)).forEach(icons::remove)
+        val visited = (_recent.value.map { it.url } + _history.value.map { it.url }).map { Shortcut("", it) }
+        (sitesOf(visited) - sitesOf(_shortcuts.value) - sitesOf(_bookmarks.value.map { Shortcut("", it.url) })).forEach(icons::remove)
         prefs.edit().remove(RECENT).apply()
         _recent.value = emptyList()
+        _history.value = emptyList()
+        io.launch { historyFile.delete() }
     }
+
+    private fun saveHistory() {
+        val list = _history.value
+        io.launch {
+            val temp = File(historyFile.path + ".tmp")
+            runCatching {
+                temp.writeText(JSONArray(list.map { JSONObject().put("title", it.title).put("url", it.url).put("at", it.at) }).toString())
+                if (!temp.renameTo(historyFile)) temp.delete()
+            }.onFailure { temp.delete() }
+        }
+    }
+
+    fun isBookmarked(url: String) = _bookmarks.value.any { it.url == url }
+
+    /** Keeps [url] as a bookmark, or lets it go if it is one. */
+    fun toggleBookmark(title: String, url: String) {
+        val list = (if (isBookmarked(url)) _bookmarks.value.filterNot { it.url == url } else listOf(Bookmark(title.ifBlank { url }.take(200), url)) + _bookmarks.value).take(MAX_BOOKMARKS)
+        prefs.edit().putString(BOOKMARKS, JSONArray(list.map { JSONObject().put("title", it.title).put("url", it.url) }).toString()).apply()
+        _bookmarks.value = list
+    }
+
+    private fun readBookmarks(): List<Bookmark> = runCatching {
+        JSONArray(prefs.getString(BOOKMARKS, "[]")).let { a ->
+            (0 until minOf(a.length(), MAX_BOOKMARKS)).map { a.getJSONObject(it).let { o -> Bookmark(o.getString("title"), o.getString("url")) } }
+        }
+    }.getOrDefault(emptyList())
 
     private fun sitesOf(list: List<Shortcut>) = list.mapNotNull { SiteIcons.siteOf(it.url) }.toSet()
 
@@ -153,6 +230,9 @@ class BrowserStore(private val context: Context) {
         private const val SHORTCUTS = "shortcuts"
         private const val PRESETS = "presets_version"
         private const val RECENT = "recent"
+        private const val BOOKMARKS = "bookmarks"
+        private const val MAX_HISTORY = 500
+        private const val MAX_BOOKMARKS = 200
         private const val SITES = "sites"
         private const val MAX_RECENT = 8
     }
