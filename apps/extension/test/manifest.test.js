@@ -86,7 +86,7 @@ describe("the protocol, as zajil-host has it", () => {
     expect(rustConst(host, "MAX_COOKIES")).toBe("16 * 1024");
     expect(MAX_COOKIES).toBe(16 * 1024);
     // How Zajil says the server wanted a sign-in (`needsSignIn`).
-    expect(read("../../../crates/zajil-core/src/engine.rs")).toContain('#[error("the server answered {0}")]');
+    expect(read("../../../crates/zajil-core/src/engine/mod.rs")).toContain('#[error("the server answered {0}")]');
     // The host's own failures (#264): the same codes, each said here; and
     // "no answer" in words an extension of before the codes reads as such.
     for (const [code, key] of Object.entries(HOST_PROBLEMS)) {

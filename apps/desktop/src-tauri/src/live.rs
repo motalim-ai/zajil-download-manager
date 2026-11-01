@@ -11,7 +11,9 @@ use zajil_core::queue::QueueEvent;
 
 /// The page is told at most this often that something changed, except for
 /// a download that ends, which is told at once.
-pub const NOTIFY_EVERY: Duration = Duration::from_millis(250);
+/// Twice a second (the owner's choice, after measuring the list's cost:
+/// it was four times).
+pub const NOTIFY_EVERY: Duration = Duration::from_millis(500);
 /// A download with no progress for this long shows a speed of 0.
 const STALLED_AFTER: Duration = Duration::from_secs(2);
 
@@ -39,6 +41,10 @@ struct Inner {
     last_notify: Option<Instant>,
     /// A download ended since the last notification: tell at once.
     urgent: bool,
+    /// Something other than the running downloads' progress changed since
+    /// the last notification: the page reads the whole list again, not only
+    /// the running rows ([`Live::take_changed`]).
+    changed: bool,
     /// A notification is scheduled for later.
     scheduled: bool,
     /// Downloads that wait for their browser's cookies, which is not open
@@ -68,6 +74,16 @@ impl Live {
 
     pub fn record(&self, event: &QueueEvent) {
         let mut inner = self.inner();
+        // Bytes coming in change only the running rows' numbers.
+        if !matches!(
+            event,
+            QueueEvent::Download {
+                event: Event::Progress { .. } | Event::Restarted { .. },
+                ..
+            }
+        ) {
+            inner.changed = true;
+        }
         match event {
             QueueEvent::Started { item, .. } => {
                 inner.items.insert(*item, ItemLive::default());
@@ -178,6 +194,12 @@ impl Live {
         }
     }
 
+    /// Whether something other than progress changed since the last call:
+    /// the notification sent now says so.
+    pub fn take_changed(&self) -> bool {
+        std::mem::take(&mut self.inner().changed)
+    }
+
     /// The scheduled notification is being sent, at `now`.
     pub fn notified_later(&self, now: Instant) {
         let mut inner = self.inner();
@@ -239,25 +261,43 @@ mod tests {
     }
 
     #[test]
-    fn the_page_is_told_at_most_four_times_a_second_and_never_misses_the_last_change() {
+    fn the_page_is_told_at_most_twice_a_second_and_never_misses_the_last_change() {
+        let ms = Duration::from_millis;
+        assert_eq!(NOTIFY_EVERY, ms(500));
         let live = Live::default();
         let t0 = Instant::now();
         assert_eq!(live.notify_at(t0), Notify::Now);
-        // Within 250 ms: later, once.
-        let later = live.notify_at(t0 + Duration::from_millis(100));
-        assert_eq!(later, Notify::Later(Duration::from_millis(150)));
-        assert_eq!(
-            live.notify_at(t0 + Duration::from_millis(200)),
-            Notify::Scheduled
-        );
-        live.notified_later(t0 + Duration::from_millis(250));
+        // Within 500 ms: later, once.
+        let later = live.notify_at(t0 + ms(200));
+        assert_eq!(later, Notify::Later(ms(300)));
+        assert_eq!(live.notify_at(t0 + ms(400)), Notify::Scheduled);
+        live.notified_later(t0 + ms(500));
         // After the scheduled one, the next waits its turn again.
-        assert_eq!(
-            live.notify_at(t0 + Duration::from_millis(300)),
-            Notify::Later(Duration::from_millis(200))
-        );
-        live.notified_later(t0 + Duration::from_millis(500));
-        assert_eq!(live.notify_at(t0 + Duration::from_millis(800)), Notify::Now);
+        assert_eq!(live.notify_at(t0 + ms(600)), Notify::Later(ms(400)));
+        live.notified_later(t0 + ms(1000));
+        assert_eq!(live.notify_at(t0 + ms(1600)), Notify::Now);
+    }
+
+    /// Bytes coming in change only the running rows: the page is told
+    /// those; anything else, and it reads the whole list again.
+    #[test]
+    fn progress_alone_is_told_apart_from_other_changes() {
+        let live = Live::default();
+        assert!(!live.take_changed());
+        live.record(&QueueEvent::Started {
+            queue: "main".into(),
+            item: 1,
+        });
+        assert!(live.take_changed());
+        assert!(!live.take_changed(), "told once");
+        progress(&live, 1, 100);
+        progress(&live, 1, 200);
+        assert!(!live.take_changed());
+        live.record(&QueueEvent::WaitingForSite { item: 1 });
+        progress(&live, 1, 300);
+        assert!(live.take_changed());
+        live.record(&QueueEvent::Stopped { item: 1 });
+        assert!(live.take_changed());
     }
 
     #[test]

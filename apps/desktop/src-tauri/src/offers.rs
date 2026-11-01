@@ -3,7 +3,8 @@
 //! the middle of the screen, without the main window. The window opens at
 //! once, saying it is asking the server, and fills in when Zajil has
 //! reached the file. «Start download» there is the user's OK for a file
-//! that can run code, so it is not held again (`ok_given`). The setting
+//! that can run code, under the name the window showed, so it is not held
+//! again (`ok_given`). The setting
 //! «Start browser downloads at once» adds the download and starts it
 //! without the window, for a file that cannot run code; one that can still
 //! asks.
@@ -20,10 +21,11 @@ use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 use ts_rs::TS;
 
+use crate::App;
 use crate::closing::Closing;
+use crate::extension::{FromPage, add_from_page, extension_reach, from_page, reached};
 use crate::view::ProbeView;
 use crate::windows::{self, InfoStart};
-use crate::{App, FromPage};
 
 /// What «Download file info» of a browser's download learns once Zajil
 /// has reached the file.
@@ -172,7 +174,7 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
     lang: zajil_core::settings::Language,
     drive_cookies: impl FnOnce(&str) -> Option<String>,
 ) -> zajil_host::Response {
-    let page = match crate::from_page(request, drive_cookies) {
+    let page = match from_page(request, drive_cookies) {
         Some(Ok(page)) => page,
         Some(Err(why)) => return zajil_host::Response::refused(why),
         None => return zajil_host::Response::refused("not a download"),
@@ -191,7 +193,7 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
             Err(why) => return zajil_host::Response::refused(why),
         }
     }
-    let (probe, runs_code) = match crate::reached(&page, crate::extension_reach(&app.engine)) {
+    let (probe, runs_code) = match reached(&page, extension_reach(&app.engine)) {
         Ok(reached) => reached,
         Err(why) => {
             if let Some(n) = shown {
@@ -200,11 +202,11 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
             return zajil_host::Response::refused(why);
         }
     };
-    let given = crate::download_dir(&app.settings, &app.system_download_dir);
+    let given = crate::downloads::download_dir(&app.settings, &app.system_download_dir);
     // Started at once, as the setting says: its progress window as the
     // settings say, and nothing else.
     if shown.is_none() && !runs_code {
-        let add = crate::AddRequest {
+        let add = crate::view::AddRequest {
             url: page.url.clone(),
             name: None,
             category: None,
@@ -215,7 +217,7 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
             limit: None,
             connections: None,
         };
-        return match crate::add_from_page(
+        return match add_from_page(
             &app.store,
             &page,
             &add,
@@ -247,7 +249,7 @@ pub(crate) fn from_browser<R: tauri::Runtime>(
     let categories = app
         .categories
         .load()
-        .unwrap_or_else(|_| crate::no_categories());
+        .unwrap_or_else(|_| crate::downloads::no_categories());
     let view = crate::view::probe(&probe, &categories, &given);
     handle.state::<Offers>().answer(
         n,
@@ -285,19 +287,20 @@ pub async fn add_offer<R: tauri::Runtime>(
     app: State<'_, App>,
     offers: State<'_, Offers>,
     offer: u64,
-    request: crate::AddRequest,
+    request: crate::view::AddRequest,
     early: bool,
     handle: tauri::AppHandle<R>,
 ) -> Result<u64, String> {
-    let (page, runs_code) = {
+    let (page, runs_code, shown) = {
         let open = offers.lock();
         let found = open
             .get(&offer)
             .ok_or_else(|| format!("no download {offer} from the browser"))?;
-        if found.answer.borrow().is_none() {
-            return Err("the server has not answered yet".into());
-        }
-        (found.page.clone(), found.runs_code)
+        let shown = match &*found.answer.borrow() {
+            None => return Err("the server has not answered yet".into()),
+            Some(answer) => answer.as_ref().ok().map(|view| view.probe.name.clone()),
+        };
+        (found.page.clone(), found.runs_code, shown)
     };
     if early && runs_code {
         return Err("a file that can run code starts only with «Start download»".into());
@@ -309,13 +312,14 @@ pub async fn add_offer<R: tauri::Runtime>(
         app.from_browser.clone(),
     );
     let ok_given = request.start && !early;
+    let request = ok_for_the_shown_name(request, shown, runs_code && ok_given);
     let id = tokio::task::spawn_blocking(move || {
-        let given = crate::chosen_folder(
+        let given = crate::downloads::chosen_folder(
             request.folder.as_deref(),
-            &crate::download_dir(&settings, &system),
+            &crate::downloads::download_dir(&settings, &system),
         )
         .map_err(zajil_core::queue::StoreError::Refused)?;
-        crate::add_from_page(
+        add_from_page(
             &store, &page, &request, &given, &headers, runs_code, ok_given,
         )
     })
@@ -326,6 +330,21 @@ pub async fn add_offer<R: tauri::Runtime>(
     offers.remove(offer);
     let _ = handle.emit("downloads-changed", ());
     Ok(id)
+}
+
+/// `request`, saved under the name its window showed when it is the
+/// user's OK for a file that can run code (`ok_for_code`) and the user
+/// kept that name: the OK is for that name, and the server cannot give the
+/// file another one at the download itself (security review for 1.2.3).
+fn ok_for_the_shown_name(
+    mut request: crate::view::AddRequest,
+    shown: Option<String>,
+    ok_for_code: bool,
+) -> crate::view::AddRequest {
+    if ok_for_code && request.name.is_none() {
+        request.name = shown;
+    }
+    request
 }
 
 #[cfg(test)]
@@ -344,7 +363,7 @@ mod tests {
             ticket: None,
             private: false,
         };
-        crate::from_page(&request, |_| None).unwrap().unwrap()
+        from_page(&request, |_| None).unwrap().unwrap()
     }
 
     /// The window waits for the server's answer; a window whose download
@@ -363,5 +382,41 @@ mod tests {
         offers.remove(gone);
         let ended = tauri::async_runtime::block_on(waiting.wait_for(Option::is_some));
         assert!(ended.is_err());
+    }
+
+    /// «Start download» on a file that can run code is the OK for the name
+    /// its window showed: the download is saved under it. The user's own
+    /// name stays theirs, and a file that cannot run code keeps the
+    /// server's (the queue holds it if that name can run code).
+    #[test]
+    fn the_ok_for_a_file_that_runs_code_is_for_the_name_shown() {
+        let request = |name: Option<&str>| crate::view::AddRequest {
+            url: "https://example.com/get".into(),
+            name: name.map(str::to_owned),
+            category: None,
+            description: None,
+            queue: None,
+            folder: None,
+            start: true,
+            limit: None,
+            connections: None,
+        };
+        let shown = || Some("setup.exe".to_owned());
+        assert_eq!(
+            ok_for_the_shown_name(request(None), shown(), true)
+                .name
+                .as_deref(),
+            Some("setup.exe")
+        );
+        assert_eq!(
+            ok_for_the_shown_name(request(Some("mine.exe")), shown(), true)
+                .name
+                .as_deref(),
+            Some("mine.exe")
+        );
+        assert_eq!(
+            ok_for_the_shown_name(request(None), shown(), false).name,
+            None
+        );
     }
 }

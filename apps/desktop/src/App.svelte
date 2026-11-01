@@ -37,6 +37,8 @@
   import type { DownloadView } from "./lib/bindings/DownloadView";
   import { scheduleApi } from "./lib/scheduleApi";
   import { showTrayTip, trayTip } from "./lib/trayTip";
+import { Unseen } from "./lib/unseen";
+import { patchRows } from "./lib/progressRows";
   import { setTheme } from "./lib/theme";
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { locale, type Lang, type Digits } from "./lib/i18n.svelte";
@@ -250,14 +252,18 @@
   // Snapshots can come back out of order: only the latest asked counts
   // (review of #45: an older one could win and stay).
   let asked = 0;
+  // Not drawn while the window is hidden or minimized (`lib/unseen.ts`).
+  const unseen = new Unseen<Snapshot>();
   async function refresh() {
     const mine = ++asked;
     try {
       const next = await api.snapshot();
       if (mine !== asked) return;
-      snapshot = next;
-      announce(snapshot.downloads);
+      announce(next.downloads);
       showTrayTip(trayTip(next.downloads, locale.lang, locale.digits, locale.t));
+      const drawn = unseen.take(next, document.visibilityState === "hidden");
+      if (!drawn) return;
+      snapshot = drawn;
       error = snapshot.problem;
       // The details follow the list: closed when their download is gone
       // (review of #48: they stayed, stale, and every refresh failed), and
@@ -311,6 +317,26 @@
       const back = ["details-refresh", "details-resume", "details-pause", "details-back"].map((id) => document.getElementById(id)).find((b) => b);
       back?.focus();
     });
+  }
+
+  // A progress tick: only the running rows change (`lib/progressRows.ts`);
+  // the whole list is read when one of them is new to it.
+  function progressed(rows: Snapshot["downloads"]) {
+    showTrayTip(trayTip(rows, locale.lang, locale.digits, locale.t));
+    if (document.visibilityState === "hidden") {
+      unseen.miss();
+      return;
+    }
+    if (!patchRows(snapshot.downloads, rows)) {
+      void refresh();
+      return;
+    }
+    const id = details?.download.id;
+    if (id !== undefined && rows.some((d) => d.id === id)) {
+      void api.details(id).then((fresh) => {
+        if (details?.download.id === id) details = fresh;
+      }, () => {});
+    }
   }
 
   async function refreshLink(url: string) {
@@ -927,6 +953,7 @@
   onMount(() => {
     locale.set("ar");
     let unlisten: (() => void) | undefined;
+    let unlistenProgress: (() => void) | undefined;
     let unlistenClipboard: (() => void) | undefined;
     let unlistenMenu: (() => void) | undefined;
     let unlistenView: (() => void) | undefined;
@@ -940,6 +967,7 @@
       });
       // Listening first, so a change during the first snapshot is not lost.
       unlisten = await api.onChange(() => void refresh());
+      unlistenProgress = await api.onProgress(progressed);
       const first = refresh();
       // A copied download link waits in the paste bar, and the window
       // shows; nothing asks the server before the user presses "Download"
@@ -962,8 +990,15 @@
       // The list is drawn (timed with `ZAJIL_MEASURE=1`).
       void api.windowPainted().catch(() => {});
     })();
+    // Shown again: the list as it is now.
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && unseen.waiting) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
       unlisten?.();
+      unlistenProgress?.();
       unlistenClipboard?.();
       unlistenMenu?.();
       unlistenView?.();

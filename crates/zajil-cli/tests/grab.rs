@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Output;
 
+use common::{printed_commands, run_in_shells};
 use zajil_testserver::{FileSpec, TestServer, random_bytes, sha256_hex};
 
 fn zajil(args: &[&str]) -> Output {
@@ -231,4 +232,55 @@ fn an_unreachable_site_is_a_failure() {
         "{}",
         text(&out.stderr)
     );
+}
+
+/// A file stopped by `--max-total` (the server sends it with no length, so
+/// the limit is found while it downloads) leaves a resume command whose
+/// path comes from the server: printed for each shell, it runs nothing
+/// when pasted (as `zajil get`'s, review of #18).
+#[test]
+fn the_printed_resume_command_cannot_run_code_from_the_file_name() {
+    let site = server();
+    site.put(
+        "/big.zip",
+        FileSpec::new(random_bytes(2_000_000, 17))
+            .content_disposition("attachment; filename=\"$(touch PWNED)`id`.zip\"")
+            .without_length()
+            .throttle(1_000_000),
+    );
+    site.put("/index.html", links(&["big.zip"]));
+    let dir = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+
+    let out = grab(
+        &site.url("/index.html"),
+        dir.path(),
+        &["--max-total", "300000"],
+    );
+    let stderr = text(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    let state_file = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.to_string_lossy().ends_with(".zajil-state"))
+        .unwrap_or_else(|| panic!("no state file: {stderr}"));
+    assert!(
+        state_file
+            .to_string_lossy()
+            .contains("$(touch PWNED)`id`.zip"),
+        "{}",
+        state_file.display()
+    );
+
+    for path in run_in_shells(&printed_commands(&stderr), work.path()) {
+        // The shell passed the name through untouched…
+        assert_eq!(
+            Path::new(&path).canonicalize().unwrap(),
+            state_file.canonicalize().unwrap()
+        );
+        assert!(!path.contains("uid="), "`id` ran: {path}");
+    }
+    // …and ran nothing.
+    assert!(!work.path().join("PWNED").exists(), "`touch PWNED` ran");
+    assert!(!dir.path().join("PWNED").exists(), "`touch PWNED` ran");
 }

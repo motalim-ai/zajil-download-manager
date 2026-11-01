@@ -535,9 +535,13 @@ jobs:
           npm run build
           # Nothing of src/uitest: no chunk of its own (Names, its calls),
           # and none of its names in the page (owner's condition on #47).
-          extra=$(find dist -name '*.js' ! -name 'index-*.js')
+          # Each window has chunks of its own since 1.2.3, so the check is
+          # by name: a chunk is named after its module, and none may be one
+          # of src/uitest's.
+          uitest=$(ls src/uitest | sed 's/\.[a-z]*$//' | sort -u | paste -sd'|' -)
+          extra=$(find dist -name '*.js' | grep -E "/($uitest)-[A-Za-z0-9_-]+\.js$" || true)
           if [ -n "$extra" ]; then
-            echo "::error::the release build of the page has more than its own script:"
+            echo "::error::the release build of the page has a chunk of the UI tests:"
             echo "$extra"
             exit 1
           fi

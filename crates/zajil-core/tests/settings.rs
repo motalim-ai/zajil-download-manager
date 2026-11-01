@@ -86,6 +86,24 @@ fn values_out_of_range_are_never_written() {
     assert!(!store.path().exists());
 }
 
+/// A settings file saved by an editor that starts it with a UTF-8 byte
+/// order mark (old Notepad, Windows PowerShell 5.1) is read as it is.
+#[test]
+fn a_file_saved_with_a_byte_order_mark_is_read() {
+    let data = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(data.path());
+    store
+        .update(|file| {
+            file.language = Language::En;
+            Ok(())
+        })
+        .unwrap();
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend(fs::read(store.path()).unwrap());
+    fs::write(store.path(), bytes).unwrap();
+    assert_eq!(store.load().unwrap().language, Language::En);
+}
+
 #[test]
 fn a_damaged_file_is_refused_and_never_written_over() {
     let data = tempfile::tempdir().unwrap();

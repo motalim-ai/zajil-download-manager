@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-cli"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "clap",
  "jiff",
@@ -2675,7 +2675,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-core"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "base64",
  "dunce",
@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-grab"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "html5ever",
  "jiff",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-host"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -2726,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-i18n"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -2737,7 +2737,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-jsbox"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "getrandom 0.4.3",
  "sha2",
@@ -2747,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-platform"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "arboard",
  "dirs",
@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "zajil-testserver"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "bytes",
  "http-body-util",

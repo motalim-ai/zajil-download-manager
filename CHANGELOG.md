@@ -7,6 +7,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-01
+
+Lighter: the owner's request after two YouTube comments (Zajil's window took most of its memory, and the window felt heavier than before). Measured on macOS only (release builds, the main window in front, 30 s once settled; memory is the physical footprint of Zajil with every WebKit process it started, as Activity Monitor shows it; downloads from a local server):
+
+| Case | 1.0.0 | 1.2.2 | 1.2.3 |
+|---|---|---|---|
+| Idle, empty list | 118 MB, 0.1 % CPU | 195 MB, 0.1 % | 132 MB, 0.0 % |
+| Idle, 200 finished downloads | 178 MB, 0.2 % | 262 MB, 1.1 % | 200 MB, 0.2 % |
+| 1 download running | 299 MB, 2.8 % | 405 MB, 4.2 % | 331 MB, 2.4 % |
+| 20 downloads, 3 running (their rows out of sight) | 326 MB, 5.9 % | 446 MB, 5.9 % | 177 MB, 2.9 % |
+| In the tray, 1 download running | — | 402 MB, 4.5 % | 65 MB, 0.7 % |
+
+CPU varies by a point or two between runs of the same build. Not measured on Windows or Linux.
+
+### Changed
+
+- **Zajil in the tray frees its window** (`main_window.rs`): closed into the tray (or the Dock on macOS), the main window is destroyed with its page and the hidden window made beforehand; the downloads go on without them. It is made again, reading everything again, when the tray, the Dock, a second start, the extension or a menu shows it. What the page said meanwhile, Zajil says without it (`in_tray.rs`): the notification when a download finishes or fails, the chosen sound (the page's own tones, in a hidden window made for them alone and gone a second after its page loaded), and the tray icon's tooltip, as the page wrote them.
+- **On Windows, the session end is heard with no window shown**: a hidden window of Zajil's own, with no page, hears a shutdown, restart or logoff, besides the main window as before, and everything is saved first, as before. Checked by a test in CI on Windows; not run on a Windows machine by hand.
+- **The list is drawn less**: progress ticks carry only the running downloads' rows, and only they change in the list and the progress windows; the whole list is read when anything else changes. Twice a second instead of four (the owner's choice), in the list, the progress windows and «Video quality». Nothing is drawn while the main window is hidden or minimized; it is drawn from the latest list once it shows.
+- **One window made beforehand**, «Download file info», the one opened most (every download from the browser and from «Add a link»), instead of three (56 MB together). «Add a link» and the progress windows are made when they open, in about 0.1 s.
+- **Each window loads its own code only**: 177 KB shared, the main window 85 KB more, «Download file info» about 45 KB; every window loaded all 429 KB before.
+- **The progress window's moving stripes** move on a layer of their own, with no repaint of the bar sixty times a second. Not measured.
+- **Internal, no change in behaviour:** the desktop app's `lib.rs` and `video.rs`, zajil-platform's `fs.rs`, and zajil-core's `engine.rs` and `video.rs` are each split into a folder with a module per part (2,000 to 5,100 lines each). The code is moved, not rewritten, and the public paths stay the same; the tests are the same tests, next to what they test, and all pass as before.
+
+### Fixed
+
+- **The title bar's logo now sits opposite the window's buttons on every system** (owner's choice, 2026-11-01): on Windows and Linux in English the buttons are on the right, and the logo, kept on the right in both languages, crowded them. It takes the start of the reading direction on Windows and Linux (right in Arabic, left in English), and on a Mac the side the coloured buttons are not on.
+- **A file saved with a UTF-8 byte order mark read as damaged** (old Notepad, Windows PowerShell 5.1's `Set-Content -Encoding UTF8`; JSON does not allow the mark): the mark is now skipped before the settings, queues, categories and import files are read. Tested for the settings file and an imported queues export; the queues and categories files go through the same function, not tested on their own.
+
+### Security
+
+From a security review of the code. Each is checked by a test that failed before the fix.
+
+- **`zajil grab` printed its resume command with the path as it is**, and the path holds a name the server chose. It is now quoted for each shell, as `zajil get`'s, through one function both use; the test runs the printed commands in the real shells.
+- **Headers along a chain of redirects:** after a redirect to another site, a second redirect within that site received the browser's cookies for the link, or a user name and password given in a link to `zajil`; and the whole address of the page a link came from went to the other site. Zajil now follows redirects itself, and each hop gets the headers for its own address, as in a browser. The limits stay (at most 10 redirects, http and https only, never from https to http); a refused redirect is no longer tried again.
+- **The OK for a browser download is for the name you saw:** a server could name a file one way when Zajil checked it and another way at the download itself, and have a program saved after «Start download» on what was shown as a document. Such a download now waits for you under the name it would get, and a download you start is saved under the name you saw.
+
+### Tests
+
+- The main window freed in the tray and made again, in the real app (`close_resume.rs`, macOS and Windows; Linux's CI desktop has no tray, where closing quits): the download goes on, one that finishes meanwhile is told with no page, and the new page reads the list again. On Windows, the session end with the window freed saves everything.
+
 ## [1.2.2] - 2026-10-31
 
 The video tools update without a release of Zajil. Checked by its tests and CI; the first real list comes with the next yt-dlp.

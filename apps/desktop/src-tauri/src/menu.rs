@@ -173,3 +173,39 @@ fn build<R: Runtime>(
     all.push(&window);
     Menu::with_items(app, &all)
 }
+
+/// Which window a macOS menu command goes to, with `front` the window in
+/// front: Select all is the front window's own (in an add window, its text
+/// box's, M5.5); every other command is the main window's, which alone
+/// handles them (#98), Quit among them, which asks first while downloads
+/// run (review of #105).
+pub(crate) fn menu_target<'a>(command: &str, front: &'a str) -> &'a str {
+    if command == "select-all" {
+        front
+    } else {
+        "main"
+    }
+}
+
+/// The program's version, for «About Zajil».
+#[tauri::command]
+pub(crate) fn app_version<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> String {
+    handle.package_info().version.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #98: the macOS menu's commands reach the main window from any
+    /// window in front, but Select all stays the front window's.
+    #[test]
+    fn menu_commands_go_to_the_main_window_but_select_all() {
+        assert_eq!(menu_target("select-all", "add-1"), "add-1");
+        assert_eq!(menu_target("select-all", "main"), "main");
+        for command in ["add-link", "settings", "quit", "pause-all", "schedule"] {
+            assert_eq!(menu_target(command, "progress-7"), "main", "{command}");
+            assert_eq!(menu_target(command, "main"), "main", "{command}");
+        }
+    }
+}

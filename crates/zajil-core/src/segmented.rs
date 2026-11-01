@@ -61,7 +61,7 @@ use tokio::task::JoinSet;
 
 use crate::engine::{
     EmptyDownloadCleanup, Error, Event, Finished, NewDownload, RestartReason, Stop, blocking,
-    changed_from, finish_download, http_error, parse_content_range, save_state,
+    changed_from, finish_download, get_following, http_error, parse_content_range, save_state,
 };
 use crate::limit::Limits;
 use crate::retry;
@@ -147,6 +147,8 @@ pub(crate) struct Job {
     pub client: Client,
     /// The browser's headers for this download (M5): kept in memory only.
     pub browser: Arc<crate::browser::FromBrowser>,
+    /// `Options::max_redirects`.
+    pub max_redirects: usize,
     pub connections: usize,
     /// No split leaves a segment smaller than this.
     pub min_segment: u64,
@@ -188,6 +190,7 @@ pub(crate) async fn run(
     let Job {
         client,
         browser,
+        max_redirects,
         connections,
         min_segment,
         request_size,
@@ -235,6 +238,7 @@ pub(crate) async fn run(
         request_size,
         client,
         browser,
+        max_redirects,
         url,
         if_range,
         total,
@@ -509,6 +513,7 @@ struct Ctx {
     site: Option<Arc<tokio::sync::Semaphore>>,
     client: Client,
     browser: Arc<crate::browser::FromBrowser>,
+    max_redirects: usize,
     url: Url,
     if_range: String,
     total: u64,
@@ -1081,12 +1086,17 @@ async fn request_range(
     let to = ctx
         .request_size
         .map_or(to, |n| to.min(from.saturating_add(n - 1)));
-    let request = ctx
-        .browser
-        .apply(&ctx.url, ctx.client.get(ctx.url.clone()))
-        .header(header::RANGE, format!("bytes={from}-{to}"))
-        .header(header::IF_RANGE, &ctx.if_range)
-        .send();
+    let request = get_following(
+        &ctx.client,
+        &ctx.browser,
+        ctx.max_redirects,
+        ctx.url.clone(),
+        |request| {
+            request
+                .header(header::RANGE, format!("bytes={from}-{to}"))
+                .header(header::IF_RANGE, &ctx.if_range)
+        },
+    );
     let response = tokio::select! {
         // A stop wins over an answer that is also ready (#194).
         biased;
@@ -1099,8 +1109,12 @@ async fn request_range(
     let response = match response {
         Ok(response) => response,
         Err(err) => {
+            let why = match err {
+                Error::Http(err) => http_error(err),
+                other => other.to_string(),
+            };
             ctx.board()
-                .retry_later(id, start, http_error(err), Instant::now(), None);
+                .retry_later(id, start, why, Instant::now(), None);
             return None;
         }
     };

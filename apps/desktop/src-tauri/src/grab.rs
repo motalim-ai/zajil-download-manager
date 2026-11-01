@@ -275,9 +275,11 @@ pub async fn grab_add<R: tauri::Runtime>(
         app.system_download_dir.clone(),
     );
     let added = tokio::task::spawn_blocking(move || {
-        let given =
-            crate::chosen_folder(folder.as_deref(), &crate::download_dir(&settings, &system))
-                .map_err(StoreError::Refused)?;
+        let given = crate::downloads::chosen_folder(
+            folder.as_deref(),
+            &crate::downloads::download_dir(&settings, &system),
+        )
+        .map_err(StoreError::Refused)?;
         add_to_site_queue(&store, &host, &kept, folder.is_none(), &given, start)
     })
     .await

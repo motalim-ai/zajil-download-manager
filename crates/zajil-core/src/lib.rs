@@ -41,6 +41,14 @@ pub use segmented::{DEFAULT_CONNECTIONS, MAX_CONNECTIONS};
 /// default ([`Options::max_failures`]).
 pub const DEFAULT_TRIES: u32 = retry::MAX_FAILURES;
 
+/// A file's bytes without the UTF-8 byte order mark that some Windows
+/// editors put at its start (old Notepad, Windows PowerShell 5.1's
+/// `Set-Content -Encoding UTF8`): JSON does not allow it, and a settings or
+/// queues file edited by hand would otherwise read as damaged.
+pub(crate) fn without_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+}
+
 /// Zajil's version: the workspace's, the one its releases carry (#248: the
 /// desktop crate's own is always 0.0.0).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
