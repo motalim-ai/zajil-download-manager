@@ -59,7 +59,8 @@ object JsBox {
     /** How long the isolated process stays after its last run, ready for the next one. */
     private const val KEEP_MS = 30_000L
 
-    private val main = Handler(Looper.getMainLooper())
+    /** Made when first used: never when the class loads (the JVM tests have no main looper). */
+    private val main by lazy { Handler(Looper.getMainLooper()) }
     private val lock = Any()
     private var bound: Bound? = null
 
