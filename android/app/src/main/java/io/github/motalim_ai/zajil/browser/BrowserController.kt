@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
@@ -27,7 +28,6 @@ import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import io.github.motalim_ai.zajil.BuildConfig
-import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.CookieSource
 import io.github.motalim_ai.zajil.protection
@@ -52,6 +52,9 @@ data class PageState(
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
 )
+
+/** A page's video in full screen: its own view, and how to tell the page it ended. */
+class FullScreen(val view: View, val callback: WebChromeClient.CustomViewCallback)
 
 /** A tab, as the switcher lists it. */
 data class TabInfo(val id: Long, val title: String, val url: String)
@@ -148,6 +151,7 @@ class BrowserController(private val context: Context) {
 
     /** A new tab: the home, where the next address opens in a new tab. */
     fun newTabHome() {
+        leaveFullScreen()
         current?.view?.onPause()
         current = null
         _page.value = null
@@ -169,6 +173,7 @@ class BrowserController(private val context: Context) {
     /** Shows tab [id]. */
     fun switchTo(id: Long) {
         val tab = tabList.firstOrNull { it.id == id } ?: return
+        leaveFullScreen()
         current?.takeIf { it != tab }?.view?.onPause()
         current = tab
         tab.view.onResume()
@@ -196,11 +201,24 @@ class BrowserController(private val context: Context) {
         back()
     }
 
+    private val _fullScreen = MutableStateFlow<FullScreen?>(null)
+
+    /** A video in full screen (the page's own player asked for it), while it is. */
+    val fullScreen: StateFlow<FullScreen?> = _fullScreen.asStateFlow()
+
+    /** Out of full screen: the page is told, as its own button would. */
+    fun leaveFullScreen() {
+        val shown = _fullScreen.value ?: return
+        _fullScreen.value = null
+        runCatching { shown.callback.onCustomViewHidden() }
+    }
+
     /** The current page's site, for the protection sheet. */
     val site: String? get() = current?.site
 
     /** Closes tab [id]; the current one gives way to the last other tab, or the home. */
     fun closeTab(id: Long) {
+        leaveFullScreen()
         val tab = tabList.firstOrNull { it.id == id } ?: return
         synchronized(tabList) { tabList -= tab }
         tab.view.stopLoading()
@@ -423,7 +441,6 @@ class BrowserController(private val context: Context) {
             val script = context.assets.open("browser/finder.js").bufferedReader().use { it.readText() }
                 .replace("__ZAJIL_BRIDGE__", bridge)
                 .replace("__ZAJIL_TOKEN__", JSONObject.quote(token))
-                .replace("__ZAJIL_LABEL__", JSONObject.quote(context.getString(R.string.found_by_zajil)))
             WebViewCompat.addDocumentStartJavaScript(view, script, setOf("*"))
             WebViewCompat.addWebMessageListener(view, bridge, setOf("*")) { from, message, origin, isMainFrame, _ ->
                 // Untrusted page data: only a report with this load's token, bounded and checked.
@@ -623,6 +640,19 @@ class BrowserController(private val context: Context) {
         override fun onReceivedTitle(view: WebView, title: String?) {
             val tab = tabOf(view) ?: return
             setPage(tab, tab.page?.copy(title = title.orEmpty()))
+        }
+
+        /** A video's full screen (YouTube's button, a `<video>`'s own): shown over everything. */
+        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+            if (_fullScreen.value != null) {
+                callback.onCustomViewHidden()
+                return
+            }
+            _fullScreen.value = FullScreen(view, callback)
+        }
+
+        override fun onHideCustomView() {
+            _fullScreen.value = null
         }
 
         /** No camera, microphone or other device for pages. */

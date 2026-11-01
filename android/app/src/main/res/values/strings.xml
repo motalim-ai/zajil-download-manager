@@ -312,9 +312,11 @@
     <string name="secure">اتصال آمن</string>
     <string name="not_secure">اتصال غير آمن</string>
     <string name="download">تحميل</string>
-    <string name="found_by_zajil">وجده زاجِل</string>
     <!-- %1$s اسم الفيديو. -->
     <string name="download_named">تحميل %1$s</string>
+    <string name="edit_address">عدّل العنوان</string>
+    <string name="fold_found">صغّر الزر</string>
+    <string name="unfold_found">أظهر زر التحميل</string>
     <string name="found_site_page">صفحة فيديو يقرؤها زاجِل، وتختار الجودة بعدها</string>
     <!-- %1$s نوع الملف، و%2$s موقعه. -->
     <string name="found_file">ملف %1$s من %2$s</string>

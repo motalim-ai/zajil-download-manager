@@ -41,6 +41,16 @@ class BrowserStore(private val context: Context) {
     /** Each site's own icon, kept until its shortcut, its visits or its data go. */
     val icons = SiteIcons(context, prefs)
 
+    private val _foundFolded = MutableStateFlow(prefs.getBoolean(FOUND_FOLDED, false))
+
+    /** The page's «Download» button folded to a small circle with its count: the user's choice, kept. */
+    val foundFolded: StateFlow<Boolean> = _foundFolded.asStateFlow()
+
+    fun setFoundFolded(folded: Boolean) {
+        prefs.edit().putBoolean(FOUND_FOLDED, folded).apply()
+        _foundFolded.value = folded
+    }
+
     private val _shortcuts = MutableStateFlow(readShortcuts())
     val shortcuts: StateFlow<List<Shortcut>> = _shortcuts.asStateFlow()
 
@@ -228,6 +238,7 @@ class BrowserStore(private val context: Context) {
 
     companion object {
         private const val SHORTCUTS = "shortcuts"
+        private const val FOUND_FOLDED = "found_folded"
         private const val PRESETS = "presets_version"
         private const val RECENT = "recent"
         private const val BOOKMARKS = "bookmarks"

@@ -1,12 +1,27 @@
 package io.github.motalim_ai.zajil.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,44 +42,67 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.browser.BrowserController
 import io.github.motalim_ai.zajil.browser.Finds
 import io.github.motalim_ai.zajil.browser.Found
+import io.github.motalim_ai.zajil.browser.FullScreen
 import io.github.motalim_ai.zajil.browser.MediaKind
 import io.github.motalim_ai.zajil.browser.PageState
 import io.github.motalim_ai.zajil.browser.Shortcut
@@ -72,6 +111,9 @@ import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.video.PlaylistLinks
 import java.net.URI
 import java.net.URLDecoder
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The letter tiles' colours, for a site whose own icon Zajil does not have yet. */
 private val TILES = listOf(0xFFD42F2C, 0xFF1D63D8, 0xFFB0399B, 0xFF2A3A44, 0xFF121722, 0xFFE08A06, 0xFF1A9AD6).map(::Color)
@@ -275,35 +317,43 @@ private fun AddSiteSheet(onAdd: (Shortcut) -> Unit, onDismiss: () -> Unit) {
 /** A page: its address and tabs above, the page, «تحميل» when videos are found, and the browser's bar below. */
 @Composable
 private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit) {
-    val c = Z.colors
     val page by browser.page.collectAsStateWithLifecycle()
     val found by browser.found.collectAsStateWithLifecycle()
     val private by browser.privateMode.collectAsStateWithLifecycle()
     val tabs by browser.tabs.collectAsStateWithLifecycle()
     val bookmarks by browser.store.bookmarks.collectAsStateWithLifecycle()
     val blocked by browser.blocked.collectAsStateWithLifecycle()
+    val folded by browser.store.foundFolded.collectAsStateWithLifecycle()
+    val fullScreen by browser.fullScreen.collectAsStateWithLifecycle()
     var listing by rememberSaveable { mutableStateOf(false) }
     var showingTabs by rememberSaveable { mutableStateOf(false) }
     var protecting by rememberSaveable { mutableStateOf(false) }
     val warning by browser.warning.collectAsStateWithLifecycle()
     val state = page ?: return
     BackHandler { browser.back() }
-    val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
+            // As little as the address needs: the page has the rest (the owner's request).
             Row(
-                Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(start = 14.dp, end = 14.dp, top = 18.dp, bottom = 14.dp),
+                Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 val marked = bookmarks.any { it.url == state.url }
-                AddressBox(state.url, private, marked, Modifier.weight(1f), onBookmark = { browser.store.toggleBookmark(state.title, state.url) }) { protecting = true }
+                AddressBox(
+                    state.url,
+                    private,
+                    marked,
+                    Modifier.weight(1f),
+                    onGo = browser::open,
+                    onBookmark = { browser.store.toggleBookmark(state.title, state.url) },
+                ) { protecting = true }
                 TabsButton(tabs.size) { showingTabs = true }
             }
             if (state.loading) {
                 ThinBar(state.progress / 100f, height = 2.dp, track = Color.Transparent)
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = 66.dp + 18.dp + nav)) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                 val view = browser.webView
                 if (view != null) {
                     // Another tab is another view.
@@ -315,22 +365,27 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                     }
                 }
                 warning?.let { w -> WarningScreen(w, onBack = browser::leaveWarning, onProceed = browser::proceedAnyway) }
+                val downloadable = found.count { !(it is Found.Element && it.protected) }
+                if (found.isNotEmpty() && warning == null) {
+                    FoundButton(
+                        downloadable.coerceAtLeast(0),
+                        folded,
+                        Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 14.dp),
+                        onFold = browser.store::setFoundFolded,
+                    ) { listing = true }
+                }
             }
+            PageBar(
+                state,
+                blocked,
+                onBack = browser::back,
+                onForward = browser::forward,
+                onHome = browser::newTabHome,
+                onReload = { browser.reload() },
+                onProtection = { protecting = true },
+            )
         }
-        val downloadable = found.count { !(it is Found.Element && it.protected) }
-        if (found.isNotEmpty() && warning == null) {
-            FoundButton(downloadable.coerceAtLeast(0), Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 104.dp + nav)) { listing = true }
-        }
-        PageBar(
-            state,
-            blocked,
-            Modifier.align(Alignment.BottomCenter).padding(start = 14.dp, end = 14.dp, bottom = 18.dp + nav),
-            onBack = browser::back,
-            onForward = browser::forward,
-            onHome = browser::newTabHome,
-            onReload = { browser.reload() },
-            onProtection = { protecting = true },
-        )
+        fullScreen?.let { shown -> key(shown) { FullScreenVideo(shown, onLeave = browser::leaveFullScreen) } }
     }
     if (showingTabs) TabsSheet(browser, onDismiss = { showingTabs = false })
     if (protecting) ProtectionSheet(browser, hostOf(state.url), onDismiss = { protecting = false })
@@ -351,20 +406,81 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     }
 }
 
-/** The address: the lock (the site's protection), the address left to right, private mode, and the bookmark. */
+/**
+ * The address: the lock (the site's protection), the address left to
+ * right, private mode, and the bookmark. A tap on the address edits it,
+ * all of it selected: copied, pasted or typed over, and «Go» opens it.
+ */
 @Composable
-private fun AddressBox(url: String, private: Boolean, marked: Boolean, modifier: Modifier, onBookmark: () -> Unit, onProtection: () -> Unit) {
+private fun AddressBox(
+    url: String,
+    private: Boolean,
+    marked: Boolean,
+    modifier: Modifier,
+    onGo: (String) -> Unit,
+    onBookmark: () -> Unit,
+    onProtection: () -> Unit,
+) {
     val c = Z.colors
-    val secure = url.startsWith("https://")
+    var editing by remember { mutableStateOf(false) }
+    val shape = CircleShape
+    val box = modifier
+        .height(44.dp)
+        .dropShadow(Color(0x4D121722), 12.dp, 4.dp, (-6).dp, 22.dp)
+        .clip(shape)
+        .background(c.surface)
+    if (editing) {
+        val keyboard = LocalSoftwareKeyboardController.current
+        val focus = remember { FocusRequester() }
+        var value by remember { mutableStateOf(TextFieldValue(url, TextRange(0, url.length))) }
+        var focused by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { focus.requestFocus() }
+        BackHandler { editing = false }
+        val label = stringResource(R.string.address_hint)
+        Row(
+            box.border(1.5.dp, c.accent, shape).padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = { value = it },
+                singleLine = true,
+                // An address reads left to right, in any language.
+                textStyle = TextStyle(fontFamily = Plex, fontSize = 14.sp, color = c.ink, textDirection = TextDirection.Ltr),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = {
+                    if (value.text.isNotBlank()) {
+                        keyboard?.hide()
+                        editing = false
+                        onGo(value.text)
+                    }
+                }),
+                cursorBrush = SolidColor(c.accent),
+                decorationBox = { field ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (value.text.isEmpty()) ZText(label, size = 14.sp, color = c.muted, maxLines = 1)
+                        field()
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focus)
+                    .onFocusChanged {
+                        // Away from the field: back to the page's address.
+                        if (focused && !it.isFocused) editing = false
+                        focused = it.isFocused
+                    }
+                    .semantics { contentDescription = label },
+            )
+            RowClose(stringResource(R.string.clear)) { value = TextFieldValue("") }
+        }
+        return
+    }
     Row(
-        modifier
-            .height(48.dp)
-            .dropShadow(Color(0x4D121722), 12.dp, 4.dp, (-6).dp, 24.dp)
-            .clip(CircleShape)
-            .background(c.surface)
-            .padding(start = 4.dp, end = 4.dp),
+        box.padding(start = 2.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val secure = url.startsWith("https://")
         val lock = stringResource(R.string.protection_here)
         Box(
             Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = lock, role = Role.Button, onClick = onProtection),
@@ -377,9 +493,14 @@ private fun AddressBox(url: String, private: Boolean, marked: Boolean, modifier:
                 label = stringResource(if (secure) R.string.secure else R.string.not_secure),
             )
         }
+        val edit = stringResource(R.string.edit_address)
         ZText(
             url.removePrefix("https://").removePrefix("http://").removePrefix("www."),
-            Modifier.weight(1f),
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClickLabel = edit, role = Role.Button) { editing = true }
+                .wrapContentHeight(Alignment.CenterVertically),
             size = 14.sp,
             maxLines = 1,
             style = TextStyle(textDirection = TextDirection.Ltr),
@@ -395,12 +516,15 @@ private fun AddressBox(url: String, private: Boolean, marked: Boolean, modifier:
     }
 }
 
-/** The browser's bar: back, forward, the home, reload, and the shield with what it blocked on the page. */
+/**
+ * The browser's bar, docked at the bottom with the page right above it:
+ * back, forward, the home, reload, and the shield with what it blocked on
+ * the page. A soft highlight slides to the button pressed, then fades.
+ */
 @Composable
 private fun PageBar(
     state: PageState,
     blocked: Int,
-    modifier: Modifier,
     onBack: () -> Unit,
     onForward: () -> Unit,
     onHome: () -> Unit,
@@ -408,35 +532,75 @@ private fun PageBar(
     onProtection: () -> Unit,
 ) {
     val c = Z.colors
-    Row(
-        modifier
-            .fillMaxWidth()
-            .height(66.dp)
-            .dropShadow(Color(0x59121722), 22.dp, 10.dp, (-10).dp, 33.dp)
-            .clip(CircleShape)
-            .background(c.surface),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BarButton(LineIcon.ArrowBack, stringResource(R.string.back), c.softInk, onClick = onBack)
-        BarButton(LineIcon.ArrowForward, stringResource(R.string.forward), if (state.canGoForward) c.softInk else Color(0xFFB9BFCA), enabled = state.canGoForward, onClick = onForward)
-        BarButton(LineIcon.Home, stringResource(R.string.browser_home), c.softInk, onClick = onHome)
-        BarButton(LineIcon.Reload, stringResource(R.string.reload), c.softInk, onClick = onReload)
-        Box {
-            BarButton(LineIcon.Shield, pluralStringResource(R.plurals.blocked_here, blocked, blocked), c.green, onClick = onProtection)
-            if (blocked > 0) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = 2.dp)
-                        .heightIn(min = 20.dp)
-                        .widthIn(min = 20.dp)
-                        .clip(CircleShape)
-                        .background(c.green)
-                        .padding(horizontal = 5.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ZText(if (blocked > 99) "99+" else "$blocked", size = 11.sp, weight = FontWeight.Bold, color = Color.White)
+    val still = reducedMotion()
+    val scope = rememberCoroutineScope()
+    val centers = remember { mutableStateMapOf<Int, Float>() }
+    val x = remember { Animatable(0f) }
+    val shown = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    fun pressed(index: Int, action: () -> Unit): () -> Unit = {
+        action()
+        val center = centers[index]
+        if (center != null) {
+            scope.launch {
+                if (still || shown.value == 0f) x.snapTo(center) else x.animateTo(center, spring(dampingRatio = 0.72f, stiffness = 520f))
+            }
+            scope.launch {
+                if (!still) {
+                    shown.animateTo(1f, tween(120))
+                    delay(260)
+                    shown.animateTo(0f, tween(320))
+                }
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().background(c.surface).windowInsetsPadding(WindowInsets.navigationBars)) {
+        RowLine(c.line)
+        Box(Modifier.fillMaxWidth().height(56.dp)) {
+            // The highlight, under the buttons.
+            val size = 44.dp
+            Box(
+                Modifier
+                    .offset { IntOffset((x.value - with(density) { size.toPx() } / 2).roundToInt(), with(density) { 6.dp.roundToPx() }) }
+                    .size(size)
+                    .graphicsLayer { alpha = shown.value }
+                    .clip(CircleShape)
+                    .background(c.sunken),
+            )
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                fun Modifier.at(i: Int) = onGloballyPositioned { centers[i] = it.positionInParent().x + it.size.width / 2f }
+                BarButton(LineIcon.ArrowBack, stringResource(R.string.back), c.softInk, Modifier.at(0), onClick = pressed(0, onBack))
+                BarButton(
+                    LineIcon.ArrowForward,
+                    stringResource(R.string.forward),
+                    if (state.canGoForward) c.softInk else Color(0xFFB9BFCA),
+                    Modifier.at(1),
+                    enabled = state.canGoForward,
+                    onClick = pressed(1, onForward),
+                )
+                BarButton(LineIcon.Home, stringResource(R.string.browser_home), c.softInk, Modifier.at(2), onClick = pressed(2, onHome))
+                BarButton(LineIcon.Reload, stringResource(R.string.reload), c.softInk, Modifier.at(3), onClick = pressed(3, onReload))
+                Box(Modifier.at(4)) {
+                    BarButton(LineIcon.Shield, pluralStringResource(R.plurals.blocked_here, blocked, blocked), c.green, onClick = pressed(4, onProtection))
+                    if (blocked > 0) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .offset(x = 2.dp)
+                                .heightIn(min = 20.dp)
+                                .widthIn(min = 20.dp)
+                                .clip(CircleShape)
+                                .background(c.green)
+                                .padding(horizontal = 5.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ZText(if (blocked > 99) "99+" else "$blocked", size = 11.sp, weight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
                 }
             }
         }
@@ -444,12 +608,20 @@ private fun PageBar(
 }
 
 @Composable
-private fun BarButton(icon: LineIcon, label: String, tint: Color, enabled: Boolean = true, onClick: () -> Unit) {
+private fun BarButton(icon: LineIcon, label: String, tint: Color, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
-        Modifier
+        modifier
             .size(48.dp)
             .clip(CircleShape)
-            .clickable(enabled = enabled, onClickLabel = label, role = Role.Button, onClick = onClick)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                // The sliding highlight is the press's only mark.
+                indication = null,
+                enabled = enabled,
+                onClickLabel = label,
+                role = Role.Button,
+                onClick = onClick,
+            )
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -457,27 +629,127 @@ private fun BarButton(icon: LineIcon, label: String, tint: Color, enabled: Boole
     }
 }
 
-/** «تحميل» with how many the page has: the floating pill over the page. */
+/**
+ * «تحميل» with how many the page has, over the page's corner. Folded (the
+ * user's choice, kept), only a small circle with the count; a tap unfolds it.
+ */
 @Composable
-private fun FoundButton(count: Int, modifier: Modifier, onClick: () -> Unit) {
+private fun FoundButton(count: Int, folded: Boolean, modifier: Modifier, onFold: (Boolean) -> Unit, onClick: () -> Unit) {
     val c = Z.colors
-    Row(
-        modifier
-            .height(56.dp)
-            .dropShadow(Color(0xBF0A5FE0), 24.dp, 12.dp, (-10).dp, 28.dp)
-            .clip(CircleShape)
-            .background(c.accent)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(start = 18.dp, end = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        ZIcon(LineIcon.Download, Color.White, 24.dp)
-        ZText(stringResource(R.string.download), size = 15.5.sp, weight = FontWeight.SemiBold, color = Color.White)
-        Box(Modifier.size(32.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-            ZText("$count", size = 14.sp, weight = FontWeight.Bold, color = c.accent)
+    val still = reducedMotion()
+    val open = stringResource(R.string.download_named, "$count")
+    // The shadow and the blue on each shape, so that the folded count can stand over the circle's edge.
+    val blue = Modifier
+        .dropShadow(Color(0x990A5FE0), 18.dp, 8.dp, (-8).dp, 24.dp)
+        .clip(CircleShape)
+        .background(c.accent)
+    AnimatedContent(
+        folded,
+        modifier,
+        transitionSpec = {
+            val motion = if (still) EnterTransition.None togetherWith ExitTransition.None else fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+            // Unclipped: the shadow and the folded count reach past the button.
+            motion.using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.8f, stiffness = 500f) })
+        },
+        contentAlignment = Alignment.BottomEnd,
+        label = "found button",
+    ) { small ->
+        if (small) Box {
+            val unfold = stringResource(R.string.unfold_found)
+            Box(
+                blue
+                    .size(48.dp)
+                    .clickable(onClickLabel = unfold, role = Role.Button) { onFold(false) }
+                    .semantics { contentDescription = "$unfold، $count" },
+                contentAlignment = Alignment.Center,
+            ) {
+                ZIcon(LineIcon.Download, Color.White, 22.dp)
+            }
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-6).dp)
+                    .heightIn(min = 22.dp)
+                    .widthIn(min = 22.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(2.dp, c.accent, CircleShape)
+                    .padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ZText(if (count > 99) "99+" else "$count", size = 11.sp, weight = FontWeight.Bold, color = c.accent)
+            }
+        } else {
+            Row(blue.height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier
+                        .fillMaxHeight()
+                        .clickable(onClickLabel = open, role = Role.Button, onClick = onClick)
+                        .padding(start = 14.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ZIcon(LineIcon.Download, Color.White, 20.dp)
+                    ZText(stringResource(R.string.download), size = 14.5.sp, weight = FontWeight.SemiBold, color = Color.White)
+                    Box(Modifier.size(26.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                        ZText("$count", size = 13.sp, weight = FontWeight.Bold, color = c.accent)
+                    }
+                }
+                val fold = stringResource(R.string.fold_found)
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clickable(onClickLabel = fold, role = Role.Button) { onFold(true) }
+                        .semantics { contentDescription = fold },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(28.dp).clip(CircleShape).background(Color(0x33FFFFFF)), contentAlignment = Alignment.Center) {
+                        ZIcon(LineIcon.Minus, Color.White, 16.dp)
+                    }
+                }
+            }
         }
     }
+}
+
+/**
+ * A page's video in full screen (its player's own button): the video
+ * alone, the system bars hidden until a swipe, any orientation while it
+ * lasts; «back» leaves it, as the player's button does.
+ */
+@Composable
+private fun FullScreenVideo(shown: FullScreen, onLeave: () -> Unit) {
+    val context = LocalContext.current
+    BackHandler(onBack = onLeave)
+    DisposableEffect(shown) {
+        val activity = context.findActivity()
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        val orientation = activity?.requestedOrientation
+        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        // Landscape too, whatever the phone's rotation lock: a video's own full screen.
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+            if (orientation != null) activity.requestedOrientation = orientation
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { shown.view.also { (it.parent as? ViewGroup)?.removeView(it) } },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var at: Context? = this
+    while (at is ContextWrapper) {
+        if (at is Activity) return at
+        at = at.baseContext
+    }
+    return null
 }
 
 /** The videos found on the page (D5), each with its download button; the sign-in note at the end. */

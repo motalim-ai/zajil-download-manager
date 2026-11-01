@@ -47,10 +47,12 @@
         <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true" />
         <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
 
+        <!-- A turn of the phone keeps the activity (and the browser's pages, and a video in full screen). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -273,8 +273,10 @@
     <string name="secure">Secure connection</string>
     <string name="not_secure">Not secure</string>
     <string name="download">Download</string>
-    <string name="found_by_zajil">Found by Zajil</string>
     <string name="download_named">Download %1$s</string>
+    <string name="edit_address">Edit the address</string>
+    <string name="fold_found">Make it smaller</string>
+    <string name="unfold_found">Show the download button</string>
     <string name="found_site_page">A video page Zajil reads; you choose the quality next</string>
     <string name="found_file">%1$s file from %2$s</string>
     <string name="found_hls">HLS stream (m3u8) from %1$s</string>

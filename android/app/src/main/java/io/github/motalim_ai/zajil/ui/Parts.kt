@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -753,3 +755,13 @@ fun sizeUnits() = SizeUnits(
     stringResource(R.string.unit_mib),
     stringResource(R.string.unit_gib),
 )
+
+/**
+ * Whether the phone asks for no animations (its "Remove animations", or an
+ * animator scale of 0): what moves then snaps to its place instead.
+ */
+@Composable
+fun reducedMotion(): Boolean {
+    val resolver = LocalContext.current.contentResolver
+    return remember(resolver) { android.provider.Settings.Global.getFloat(resolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+}

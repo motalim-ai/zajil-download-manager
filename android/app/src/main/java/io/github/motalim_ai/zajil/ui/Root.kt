@@ -1,6 +1,9 @@
 package io.github.motalim_ai.zajil.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -31,19 +34,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.browser.BrowserController
 import io.github.motalim_ai.zajil.browser.Found
+import kotlinx.coroutines.launch
 
 /** The sections of the bottom bar. */
 enum class Tab(val icon: LineIcon, val label: Int) {
@@ -166,8 +173,10 @@ private fun BottomBar(tab: Tab, onTab: (Tab) -> Unit, onAdd: () -> Unit, modifie
                         drawPath(scaled, c.surface)
                     },
             ) {
-                TabButton(Tab.Settings, tab, onTab, 15.dp)
-                TabButton(Tab.Queues, tab, onTab, 81.dp)
+                val places = listOf(Tab.Settings to 15.dp, Tab.Queues to 81.dp, Tab.Browse to width - 133.dp, Tab.Downloads to width - 67.dp)
+                places.forEach { (_, x) -> TabWell(x) }
+                ChosenBlob(places.first { it.first == tab }.second)
+                places.take(2).forEach { (t, x) -> TabButton(t, tab, onTab, x) }
                 val add = stringResource(R.string.new_link)
                 Box(
                     Modifier
@@ -181,11 +190,51 @@ private fun BottomBar(tab: Tab, onTab: (Tab) -> Unit, onAdd: () -> Unit, modifie
                 ) {
                     ZIcon(LineIcon.Plus, Color.White, 26.dp)
                 }
-                TabButton(Tab.Browse, tab, onTab, width - 133.dp)
-                TabButton(Tab.Downloads, tab, onTab, width - 67.dp)
+                places.drop(2).forEach { (t, x) -> TabButton(t, tab, onTab, x) }
             }
         }
     }
+}
+
+/** A tab's round well, under the chosen one's blue. */
+@Composable
+private fun TabWell(x: Dp) {
+    Box(Modifier.offset(x = x, y = 29.dp).size(52.dp).clip(CircleShape).background(Z.colors.sunken))
+}
+
+/**
+ * The chosen tab's blue, which flows to the next one chosen: its leading
+ * edge goes first and its trailing edge follows, so it stretches on the way
+ * and settles round. With animations off, it is just there.
+ */
+@Composable
+private fun ChosenBlob(x: Dp) {
+    val still = reducedMotion()
+    val start = remember { Animatable(x.value) }
+    val end = remember { Animatable(x.value + 52f) }
+    LaunchedEffect(x) {
+        if (still) {
+            start.snapTo(x.value)
+            end.snapTo(x.value + 52f)
+            return@LaunchedEffect
+        }
+        val forward = x.value > start.value
+        val lead = spring<Float>(dampingRatio = 0.8f, stiffness = 900f)
+        val trail = spring<Float>(dampingRatio = 0.8f, stiffness = 380f)
+        launch { start.animateTo(x.value, if (forward) trail else lead) }
+        launch { end.animateTo(x.value + 52f, if (forward) lead else trail) }
+    }
+    Box(
+        Modifier
+            .offset { IntOffset(start.value.dp.roundToPx(), 29.dp.roundToPx()) }
+            .layout { measurable, _ ->
+                val w = (end.value - start.value).coerceAtLeast(0f).dp.roundToPx()
+                val placeable = measurable.measure(Constraints.fixed(w, 52.dp.roundToPx()))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
+            .clip(CircleShape)
+            .background(Z.colors.accent),
+    )
 }
 
 @Composable
@@ -193,12 +242,12 @@ private fun TabButton(t: Tab, chosen: Tab, onTab: (Tab) -> Unit, x: Dp) {
     val c = Z.colors
     val on = t == chosen
     val label = stringResource(t.label)
+    val tint by animateColorAsState(if (on) Color.White else c.softInk, label = "tab tint")
     Box(
         Modifier
             .offset(x = x, y = 29.dp)
             .size(52.dp)
             .clip(CircleShape)
-            .background(if (on) c.accent else c.sunken)
             .semantics {
                 selected = on
                 contentDescription = label
@@ -206,6 +255,6 @@ private fun TabButton(t: Tab, chosen: Tab, onTab: (Tab) -> Unit, x: Dp) {
             .clickable(role = Role.Tab, onClick = { onTab(t) }),
         contentAlignment = Alignment.Center,
     ) {
-        ZIcon(t.icon, if (on) Color.White else c.softInk, 26.dp)
+        ZIcon(t.icon, tint, 26.dp)
     }
 }
