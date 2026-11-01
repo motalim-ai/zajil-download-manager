@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.downloads.Download
+import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.NetworkState
 import io.github.motalim_ai.zajil.downloads.QueuePlan
 import io.github.motalim_ai.zajil.downloads.QueueRules
@@ -345,12 +346,11 @@ private fun DownloadCard(
             ColorImage(Kind.of(download).icon, 40.dp, Modifier.align(Alignment.Top))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ZText(
-                    download.name,
+                    // An Arabic name right to left, a Latin one left to right, as one unit.
+                    FileNames.display(download.name),
                     size = 15.sp,
                     weight = FontWeight.SemiBold,
                     maxLines = 1,
-                    // A link reads left to right, an Arabic name right to left.
-                    style = TextStyle(textDirection = TextDirection.Content),
                 )
                 Bar(download)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

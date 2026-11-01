@@ -39,10 +39,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +54,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads
+import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
 import io.github.motalim_ai.zajil.engine.EngineException
 import io.github.motalim_ai.zajil.engine.LinkInfo
@@ -250,14 +255,40 @@ private fun FileBox(
                         fontSize = 15.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = c.ink,
-                        textDirection = TextDirection.Content,
                     ),
+                    // Shown as one unit, as on the cards; the name typed has no marks.
+                    visualTransformation = IsolatedName,
                     cursorBrush = SolidColor(c.accent),
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
                 )
             }
             info()
         }
+    }
+}
+
+/** [FileNames.display] for a text field: the isolates are shown, never typed. */
+private object IsolatedName : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val name = text.text
+        val marks = FileNames.marks(name)
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int =
+                offset + marks.filter { it.first <= offset }.sumOf { it.second.length }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                var inserted = 0
+                for ((index, mark) in marks) {
+                    val at = index + inserted
+                    if (offset <= at) break
+                    val within = minOf(mark.length, offset - at)
+                    inserted += within
+                    if (within < mark.length) break
+                }
+                return (offset - inserted).coerceIn(0, name.length)
+            }
+        }
+        return TransformedText(AnnotatedString(FileNames.display(name)), mapping)
     }
 }
 

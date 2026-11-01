@@ -59,7 +59,7 @@ object Notifications {
                 .build()
         }
         val total = first.total
-        builder.setContentTitle(first.name)
+        builder.setContentTitle(FileNames.display(first.name))
             .setContentText(sizeText(context, first.done, total))
             .addAction(0, context.getString(R.string.pause), service(context, DownloadService.ACTION_PAUSE, first.id))
             .addAction(0, context.getString(R.string.cancel), service(context, DownloadService.ACTION_CANCEL, first.id))
