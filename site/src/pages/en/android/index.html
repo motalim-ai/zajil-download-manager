@@ -1,0 +1,124 @@
+<!--
+title: Zajil for Android
+description: Download Zajil Download Manager for Android for free, with no ads and no tracking, the steps to install it from outside Google Play, and how to check the file and its signature.
+nav: android
+script: android
+-->
+  <main id="main" tabindex="-1">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="hero__sky" aria-hidden="true"><div class="lanes" data-lanes></div></div>
+      <div class="wrap page-hero__inner">
+        <p class="hero__kicker">A free beta, with no ads and no tracking</p>
+        <h1 class="page-hero__title" id="page-title">Zajil for Android</h1>
+        <p class="lead"><span class="release-line" data-release>The file is on <a href="https://github.com/motalim-ai/zajil-download-manager/releases?q=android-v&amp;expanded=true">the Android releases page on GitHub</a>.</span></p>
+      </div>
+    </section>
+
+    <section class="page-section" aria-labelledby="apk-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="apk-title">The app</h2>
+          <p class="lead">The same download engine as on the computer: downloads in parts, resuming after the network drops, queues and videos. With a browser that finds the video on a page and blocks ads and harmful sites.</p>
+        </div>
+        <ul class="os-list os-list--two">
+          <li class="os">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-down"/></svg>
+            <h3 class="h3">Android</h3>
+            <p>Android 8 or later, on phones with a 64-bit processor (arm64-v8a), which most recent phones have. The app looks for its new version itself, and installs only one signed with the project's key.</p>
+            <a class="btn btn--primary" data-android="apk" href="https://github.com/motalim-ai/zajil-download-manager/releases?q=android-v&amp;expanded=true">
+              <span class="os__label"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>Download for Android</span>
+              <small class="btn__file" data-name>.apk</small>
+            </a>
+          </li>
+          <li class="os">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-shield"/></svg>
+            <h3 class="h3">What it does not do</h3>
+            <p>No ads, no analytics, no device ID, no account. It connects only to the sites you download from, and to GitHub for the update check and the signed protection lists. Every check for harmful sites happens on your phone.</p>
+          </li>
+        </ul>
+        <div class="notice">
+          <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <p><strong>Zajil is not on Google Play yet,</strong> so Android asks for your permission before installing it, and Play Protect may warn you because it is a new app from outside the store. This is expected; the steps are under <a href="#install">“Installing”</a> below.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="page-section page-section--alt" id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="install-title">Installing</h2>
+          <p class="lead">Button names differ a little between phones and languages.</p>
+        </div>
+        <div class="steps steps--two">
+          <article class="step-card" id="install-source">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-lock"/></svg>
+            <h3 class="h3">1. Allow installing from the browser</h3>
+            <ol>
+              <li>Open the file once it has downloaded, from the browser's notification or from the Files app.</li>
+              <li>Android says this source is not allowed to install apps: tap <strong>Settings</strong>.</li>
+              <li>Turn on <strong>Allow from this source</strong>, then go back.</li>
+              <li>Tap <strong>Install</strong>. You can turn the permission off again afterwards.</li>
+            </ol>
+            <figure class="phone" aria-hidden="true">
+              <div class="phone__screen">
+                <div class="phone__sheet">
+                  <p class="phone__title">Install unknown apps</p>
+                  <div class="phone__row"><span>Allow from this source</span><span class="phone__switch phone__switch--on"></span></div>
+                </div>
+              </div>
+            </figure>
+          </article>
+          <article class="step-card" id="install-protect">
+            <svg class="icon icon--lg" aria-hidden="true"><use href="#i-shield"/></svg>
+            <h3 class="h3">2. The Play Protect warning</h3>
+            <ol>
+              <li>If a message says Play Protect does not know this app, or has blocked it, tap <strong>More details</strong>.</li>
+              <li>Tap <strong>Install anyway</strong>.</li>
+              <li>If it asks to send the app to Google for a scan, that is your choice; it installs either way.</li>
+            </ol>
+            <figure class="phone" aria-hidden="true">
+              <div class="phone__screen">
+                <div class="phone__sheet">
+                  <p class="phone__title">Unknown app</p>
+                  <p class="phone__text">This app has not been scanned before.</p>
+                  <p class="phone__link">More details</p>
+                  <p class="phone__button">Install anyway</p>
+                </div>
+              </div>
+            </figure>
+          </article>
+        </div>
+        <p class="steps__note">Why does Play Protect warn? Because it does not know new apps from outside Google Play. What proves the file is ours is its checksum and its signature: all the code is on GitHub, and the file is built on GitHub only. How to check is under <a href="#verify">“Checking the file”</a>.</p>
+      </div>
+    </section>
+
+    <section class="page-section" id="verify" aria-labelledby="verify-title">
+      <div class="wrap split">
+        <h2 class="h2" id="verify-title">Checking the file</h2>
+        <div class="doc">
+          <p><strong>The file's checksum:</strong> download <code>SHA256SUMS-android</code> from <a data-android="page" href="https://github.com/motalim-ai/zajil-download-manager/releases?q=android-v&amp;expanded=true">the release page</a> into the same folder as the file, then run on a computer:</p>
+          <div class="verify">
+            <p class="verify__os">Mac</p>
+            <pre><code>shasum -a 256 -c SHA256SUMS-android --ignore-missing</code></pre>
+            <p class="verify__os">Linux</p>
+            <pre><code>sha256sum -c SHA256SUMS-android --ignore-missing</code></pre>
+            <p class="verify__os">Windows (PowerShell)</p>
+            <pre><code>$f = Get-Item .\zajil-android-*-arm64-v8a.apk
+(Get-FileHash $f).Hash -eq (Select-String -SimpleMatch $f.Name .\SHA256SUMS-android).Line.Split(' ')[0]</code></pre>
+          </div>
+          <p>The line must end in <code>OK</code>, or Windows must print <code>True</code>.</p>
+          <p><strong>The app's signature:</strong> every version of Zajil for Android is signed with one key, and Android refuses an update signed with another. Its certificate's fingerprint (SHA-256):</p>
+          <pre class="fingerprint"><code>22:09:58:0E:C2:9E:F4:9A:F1:E0:81:82:22:9F:10:0B:E2:18:16:0D:AD:7C:D9:38:84:BB:D7:0C:D9:E1:C9:E0</code></pre>
+          <p>Read it from the file with <code>apksigner</code>, from Android's developer tools:</p>
+          <pre><code>apksigner verify --print-certs zajil-android-*-arm64-v8a.apk</code></pre>
+          <p>The <code>SHA-256 digest</code> line must match the fingerprint above (without the colons, in lower case). If it does not, <strong>do not install the file</strong>, and tell us on <a href="https://github.com/motalim-ai/zajil-download-manager/issues">GitHub</a>.</p>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="notice notice--warn" role="note">
+          <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <p><strong>Download Zajil for Android from here or from <a href="https://github.com/motalim-ai/zajil-download-manager/releases?q=android-v&amp;expanded=true">its releases page on GitHub</a> only.</strong> These are its only official sources; a copy from anywhere else is not ours.</p>
+        </div>
+      </div>
+    </section>
+  </main>

@@ -60,6 +60,7 @@ const TEXT = {
     ],
     nav: [
       ["download", "/download/", "التحميل"],
+      ["android", "/android/", "أندرويد"],
       ["faq", "/faq/", "أسئلة شائعة"],
       ["privacy", "/privacy/", "الخصوصية"],
     ],
@@ -70,6 +71,7 @@ const TEXT = {
     footerSite: [
       ["/download/", "التحميل"],
       ["/download/#install", "خطوات التثبيت"],
+      ["/android/", "زاجِل لأندرويد"],
       ["/faq/", "أسئلة شائعة"],
       ["/privacy/", "سياسة الخصوصية"],
       ["/support/", "ادعم زاجِل"],
@@ -105,6 +107,7 @@ const TEXT = {
     ],
     nav: [
       ["download", "/en/download/", "Download"],
+      ["android", "/en/android/", "Android"],
       ["faq", "/en/faq/", "FAQ"],
       ["privacy", "/en/privacy/", "Privacy"],
     ],
@@ -115,6 +118,7 @@ const TEXT = {
     footerSite: [
       ["/en/download/", "Download"],
       ["/en/download/#install", "Install steps"],
+      ["/en/android/", "Zajil for Android"],
       ["/en/faq/", "FAQ"],
       ["/en/privacy/", "Privacy policy"],
       ["/en/support/", "Support Zajil"],
