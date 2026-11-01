@@ -348,6 +348,13 @@ class BrowserController(private val context: Context) {
     }
 
     private inner class Chrome : WebChromeClient() {
+        /** The page's own icon, kept for its site's tile and row; never in private mode. */
+        override fun onReceivedIcon(view: WebView, icon: Bitmap?) {
+            val url = view.url ?: return
+            if (icon == null || _private.value || !url.startsWith("http")) return
+            store.icons.fromPage(url, icon)
+        }
+
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             _page.value = _page.value?.copy(progress = newProgress, loading = newProgress < 100)
         }

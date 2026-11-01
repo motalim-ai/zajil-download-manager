@@ -3,6 +3,7 @@ package io.github.motalim_ai.zajil.ui
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -65,10 +69,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.browser.BrowserController
-import io.github.motalim_ai.zajil.browser.Found
 import io.github.motalim_ai.zajil.browser.Finds
+import io.github.motalim_ai.zajil.browser.Found
 import io.github.motalim_ai.zajil.browser.MediaKind
 import io.github.motalim_ai.zajil.browser.Shortcut
+import io.github.motalim_ai.zajil.browser.SiteIcons
 import java.net.URI
 import java.net.URLDecoder
 
@@ -88,6 +93,9 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
     val private by browser.privateMode.collectAsStateWithLifecycle()
     val shortcuts by browser.store.shortcuts.collectAsStateWithLifecycle()
     val recent by browser.store.recent.collectAsStateWithLifecycle()
+    val icons by browser.store.icons.icons.collectAsStateWithLifecycle()
+    // The shortcuts' own icons, asked once of each site itself; not in private mode.
+    LaunchedEffect(shortcuts, private) { if (!private) browser.store.icons.fetchMissing(shortcuts.map { it.url }) }
     var adding by rememberSaveable { mutableStateOf(false) }
     var refused by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.bg)) {
@@ -119,7 +127,8 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
                             if (shortcut == null) {
                                 AddTile { adding = true }
                             } else {
-                                SiteTile(shortcut, TILES[(shortcuts.indexOf(shortcut)) % TILES.size], { browser.open(shortcut.url) }) {
+                                val icon = SiteIcons.siteOf(shortcut.url)?.let { icons[it] }
+                                SiteTile(shortcut, icon, TILES[(shortcuts.indexOf(shortcut)) % TILES.size], { browser.open(shortcut.url) }) {
                                     browser.store.removeShortcut(shortcut)
                                 }
                             }
@@ -138,7 +147,12 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Icon(lineIcon(LineIcon.Clock), null, tint = c.muted, modifier = Modifier.size(20.dp))
+                            val icon = SiteIcons.siteOf(visit.url)?.let { icons[it] }
+                            if (icon != null) {
+                                Image(icon, null, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)), filterQuality = FilterQuality.Medium)
+                            } else {
+                                Icon(lineIcon(LineIcon.Clock), null, tint = c.muted, modifier = Modifier.size(20.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 ZText(visit.title, maxLines = 1, style = TextStyle(textDirection = TextDirection.Content))
                                 ZText(hostOf(visit.url), size = 12.sp, color = c.muted, maxLines = 1, style = TextStyle(textDirection = TextDirection.Ltr))
@@ -229,7 +243,7 @@ private fun AddressField(onGo: (String) -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SiteTile(shortcut: Shortcut, color: Color, onOpen: () -> Unit, onRemove: () -> Unit) {
+private fun SiteTile(shortcut: Shortcut, icon: ImageBitmap?, color: Color, onOpen: () -> Unit, onRemove: () -> Unit) {
     var asking by remember { mutableStateOf(false) }
     Column(
         Modifier
@@ -239,8 +253,19 @@ private fun SiteTile(shortcut: Shortcut, color: Color, onOpen: () -> Unit, onRem
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(color), contentAlignment = Alignment.Center) {
-            ZText(shortcut.name.take(1).uppercase(), size = 22.sp, weight = FontWeight.Bold, color = Color.White)
+        if (icon != null) {
+            // The site's own icon, on the card's color, as browsers show it.
+            val shape = RoundedCornerShape(18.dp)
+            Box(
+                Modifier.size(56.dp).clip(shape).background(Z.colors.surface).border(1.dp, Z.colors.line, shape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(icon, null, Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)), filterQuality = FilterQuality.Medium)
+            }
+        } else {
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(color), contentAlignment = Alignment.Center) {
+                ZText(shortcut.name.take(1).uppercase(), size = 22.sp, weight = FontWeight.Bold, color = Color.White)
+            }
         }
         ZText(shortcut.name, size = 12.5.sp, maxLines = 1, align = TextAlign.Center)
     }

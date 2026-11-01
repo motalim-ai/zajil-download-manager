@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** A site on the browser's home: a letter tile, never the site's own logo. */
+/** A site on the browser's home: its own icon once Zajil has it from the site, else a letter tile; never a logo in the APK. */
 data class Shortcut(val name: String, val url: String)
 
 /** A page visited lately (not in private mode). */
@@ -20,7 +20,8 @@ data class Visit(val title: String, val url: String)
 /**
  * The in-app browser's own lists, in the app's private preferences: the
  * home's sites, the pages visited lately, and the sites that keep cookies
- * in the browser (for «Manage sign-ins»). Private mode adds nothing here.
+ * in the browser (for «Manage sign-ins»), and the sites' icons
+ * ([SiteIcons]). Private mode adds nothing here.
  */
 class BrowserStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("browser", Context.MODE_PRIVATE)
@@ -36,7 +37,13 @@ class BrowserStore(private val context: Context) {
 
     fun addShortcut(shortcut: Shortcut) = saveShortcuts(_shortcuts.value.filterNot { it.url == shortcut.url } + shortcut)
 
-    fun removeShortcut(shortcut: Shortcut) = saveShortcuts(_shortcuts.value - shortcut)
+    /** Each site's own icon, kept until its shortcut, its visits or its data go. */
+    val icons = SiteIcons(context, prefs)
+
+    fun removeShortcut(shortcut: Shortcut) {
+        saveShortcuts(_shortcuts.value - shortcut)
+        SiteIcons.siteOf(shortcut.url)?.let { site -> if (site !in sitesOf(_shortcuts.value)) icons.remove(site) }
+    }
 
     fun visited(visit: Visit) {
         val list = Finds.withVisit(_recent.value, visit, MAX_RECENT)
@@ -45,9 +52,13 @@ class BrowserStore(private val context: Context) {
     }
 
     fun clearRecent() {
+        // The visited sites' icons go too, but not a shortcut's.
+        (sitesOf(_recent.value.map { Shortcut("", it.url) }) - sitesOf(_shortcuts.value)).forEach(icons::remove)
         prefs.edit().remove(RECENT).apply()
         _recent.value = emptyList()
     }
+
+    private fun sitesOf(list: List<Shortcut>) = list.mapNotNull { SiteIcons.siteOf(it.url) }.toSet()
 
     /** [url]'s site keeps cookies in the browser now. */
     fun keepsCookies(url: String) {
@@ -77,6 +88,7 @@ class BrowserStore(private val context: Context) {
             }
         }
         cookies.flush()
+        icons.remove(site)
         val sites = _sites.value - site
         prefs.edit().putStringSet(SITES, sites.toSet()).apply()
         _sites.value = sites
@@ -87,6 +99,7 @@ class BrowserStore(private val context: Context) {
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
+        icons.removeAll()
         prefs.edit().remove(SITES).apply()
         _sites.value = emptyList()
     }
