@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The desktop's dark colours, until the first frame is drawn, and for the system's own dialogs. -->
+    <style name="Theme.Zajil" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#FF8ADCFF</item>
+        <item name="android:colorPrimaryDark">#FF8ADCFF</item>
+        <item name="android:colorAccent">#FF8ADCFF</item>
+        <item name="android:windowBackground">@color/zajil_bg</item>
+    </style>
+</resources>

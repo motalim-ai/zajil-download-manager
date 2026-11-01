@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use zajil_core::limit::SpeedLimit;
 use zajil_core::{Engine, Error, Event, Options, Stop};
 
 #[cfg(target_os = "android")]
@@ -16,6 +17,9 @@ pub mod tools;
 pub mod update;
 
 uniffi::setup_scaffolding!();
+
+/// How long [`Downloads::probe`] tries a link before it gives up.
+const PROBE_FOR: Duration = Duration::from_secs(20);
 
 /// Progress reaches Kotlin at most this often (a notification is updated
 /// from it, and Android drops updates that come faster).
@@ -73,6 +77,26 @@ pub struct Tuning {
 pub enum EngineError {
     #[error("{detail}")]
     Setup { detail: String },
+    /// [`Downloads::probe`] could not reach the file. `detail` is the
+    /// engine's own words, without the link's query or credentials.
+    #[error("{detail}")]
+    Probe { problem: Problem, detail: String },
+}
+
+/// What a link leads to, before it is downloaded: for the sheet that asks
+/// the user (the desktop's add dialog, M4).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct LinkInfo {
+    /// The file's name, as a download would give it (sanitized).
+    pub name: String,
+    /// Its size, if the server said.
+    pub size: Option<u64>,
+    /// It can be split over several connections and resumed later.
+    pub resumable: bool,
+    /// Its media type, lower case, without parameters.
+    pub content_type: Option<String>,
+    /// The server answered with a web page, not a file (a sign-in page).
+    pub is_page: bool,
 }
 
 /// The app's downloads. One for the whole process.
@@ -82,6 +106,8 @@ pub struct Downloads {
     engine: Engine,
     listener: Arc<dyn Listener>,
     running: Arc<Mutex<HashMap<i64, Stop>>>,
+    /// The app's speed limit, shared by all its downloads.
+    limit: SpeedLimit,
 }
 
 enum Job {
@@ -173,6 +199,38 @@ impl Downloads {
     pub fn running(&self) -> u32 {
         u32::try_from(self.lock().len()).unwrap_or(u32::MAX)
     }
+
+    /// The speed limit of all downloads together, in bytes per second
+    /// (`None` or 0: none). Running downloads follow it at once.
+    pub fn set_speed_limit(&self, bytes_per_second: Option<u64>) {
+        self.limit.set_rate(bytes_per_second);
+    }
+
+    /// What `url` leads to, without downloading it: the first response's
+    /// headers only. Blocks for at most 20 seconds; call it off the main
+    /// thread.
+    pub fn probe(&self, url: String) -> Result<LinkInfo, EngineError> {
+        let found = self
+            .runtime
+            .block_on(async { tokio::time::timeout(PROBE_FOR, self.engine.probe(&url)).await });
+        match found {
+            Ok(Ok(probe)) => Ok(LinkInfo {
+                is_page: probe.is_page(),
+                name: probe.name,
+                size: probe.size,
+                resumable: probe.resumable,
+                content_type: probe.content_type,
+            }),
+            Ok(Err(err)) => Err(EngineError::Probe {
+                problem: describe(&err).0,
+                detail: err.to_string(),
+            }),
+            Err(_) => Err(EngineError::Probe {
+                problem: Problem::Network,
+                detail: "the server did not answer in time".to_owned(),
+            }),
+        }
+    }
 }
 
 impl Downloads {
@@ -192,11 +250,14 @@ impl Downloads {
             .enable_all()
             .build()
             .map_err(|err| setup(&err))?;
+        let engine = engine.map_err(|err| setup(&err))?;
+        let limit = SpeedLimit::new(None, engine.clock());
         Ok(Arc::new(Downloads {
             runtime,
-            engine: engine.map_err(|err| setup(&err))?,
+            engine: engine.with_speed_limit(Some(limit.clone())),
             listener,
             running: Arc::default(),
+            limit,
         }))
     }
 

@@ -63,13 +63,17 @@ data class Download(
     val order: Long = id,
     /** A video read by yt-dlp: its streams (A3). [url] is then the page's link. */
     val video: VideoJob? = null,
+    /** The name the user gave it before it started, instead of the server's. */
+    val chosenName: String? = null,
+    /** When it was complete (milliseconds since 1970). */
+    val finishedAt: Long? = null,
 ) {
     /**
-     * Before the engine knows the file's name: the link's host and path,
+     * Before the engine knows the file's name: the link's last path part,
      * never its query, which may hold a token (AGENTS.md, section 10.3).
      */
     val name: String
-        get() = shownName ?: video?.title ?: file?.substringAfterLast('/') ?: shortLink(url)
+        get() = shownName ?: video?.title ?: file?.substringAfterLast('/') ?: chosenName ?: shortLink(url)
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -86,6 +90,8 @@ data class Download(
         put("local", local)
         put("order", order)
         put("video", video?.toJson())
+        put("chosen_name", chosenName)
+        put("finished_at", finishedAt)
     }
 
     companion object {
@@ -106,6 +112,8 @@ data class Download(
             local = json.optBoolean("local"),
             order = json.optLong("order", json.getLong("id")),
             video = json.optJSONObject("video")?.let(VideoJob::fromJson),
+            chosenName = json.optStringOrNull("chosen_name"),
+            finishedAt = if (json.isNull("finished_at")) null else json.optLong("finished_at"),
         )
 
         fun listToJson(downloads: List<Download>): String =
@@ -117,10 +125,11 @@ data class Download(
     }
 }
 
+/** The link's last path part, decoded («الحلقة 12.mp4»), else its host: never its query. */
 private fun shortLink(url: String): String {
     val uri = android.net.Uri.parse(url)
     val host = uri.host ?: return url.substringBefore('?').substringBefore('#')
-    return host + (uri.path ?: "")
+    return uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: host
 }
 
 private fun JSONObject.optStringOrNull(key: String): String? =

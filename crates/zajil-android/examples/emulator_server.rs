@@ -16,7 +16,8 @@
 //!   own `adb reverse` line: the app must refuse it.
 //!
 //! With ZAJIL_SERVE_DIR, every file under that folder too, at its path
-//! (the update test, A4), and the base address is printed.
+//! (the update test, A4; percent-encoded, and under `slow/` at 256 KiB/s
+//! per connection, for the screens), and the base address is printed.
 //!
 //! Every request (its range and the bytes sent) is written to the log file
 //! every second, to check that a resume asks only for what is missing.
@@ -103,11 +104,31 @@ fn serve_dir(
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        server.put(
-            &format!("/{at}"),
-            FileSpec::new(std::fs::read(&path).unwrap()),
-        );
+        // A file under «slow/» comes at 256 KiB/s per connection, as
+        // file.bin, to see a download run; a name in Arabic is asked for
+        // percent-encoded.
+        let spec = FileSpec::new(std::fs::read(&path).unwrap());
+        let spec = if at.starts_with("slow/") {
+            spec.throttle(256 * 1024)
+        } else {
+            spec
+        };
+        server.put(&format!("/{}", encoded(&at)), spec);
     }
+}
+
+/// `path` as a link has it: bytes other than letters, digits and `-._~/`
+/// percent-encoded.
+fn encoded(path: &str) -> String {
+    path.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 fn hex(bytes: &[u8]) -> String {

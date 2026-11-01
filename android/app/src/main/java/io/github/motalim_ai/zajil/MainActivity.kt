@@ -11,23 +11,31 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.motalim_ai.zajil.downloads.Links
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
 import io.github.motalim_ai.zajil.downloads.Notifications
+import io.github.motalim_ai.zajil.ui.AddSheet
 import io.github.motalim_ai.zajil.ui.DownloadActions
-import io.github.motalim_ai.zajil.ui.DownloadsScreen
 import io.github.motalim_ai.zajil.ui.Offer
+import io.github.motalim_ai.zajil.ui.Source
+import io.github.motalim_ai.zajil.ui.StartWhen
 import io.github.motalim_ai.zajil.ui.UpdatePrefs
-import io.github.motalim_ai.zajil.update.AppUpdate
 import io.github.motalim_ai.zajil.ui.VideoSheet
 import io.github.motalim_ai.zajil.ui.VideoSheetView
+import io.github.motalim_ai.zajil.ui.ZajilScreen
 import io.github.motalim_ai.zajil.ui.ZajilTheme
+import io.github.motalim_ai.zajil.ui.isDark
+import io.github.motalim_ai.zajil.update.AppUpdate
 import io.github.motalim_ai.zajil.video.VideoChoice
 import io.github.motalim_ai.zajil.video.VideoPages
 import io.github.motalim_ai.zajil.video.YtDlp
@@ -65,8 +73,29 @@ class MainActivity : ComponentActivity(), DownloadActions {
         waitingForLocal = savedInstanceState?.getLong(WAITING_FOR_LOCAL) ?: 0
         enableEdgeToEdge()
         setContent {
-            ZajilTheme {
-                DownloadsScreen(actions = this, offer = offer.value, onOfferDone = { offer.value = null })
+            val prefs by downloads.prefs.prefs.collectAsStateWithLifecycle()
+            val dark = isDark(prefs.look)
+            // The status bar's icons follow the app's look, which may not be the system's.
+            LaunchedEffect(dark) {
+                val style = if (dark) {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            ZajilTheme(prefs.look) {
+                ZajilScreen(actions = this, onNewLink = { offer.value = Offer(null, Source.Typed) })
+                offer.value?.let { asked ->
+                    AddSheet(
+                        asked,
+                        onStart = { url, name, start ->
+                            offer.value = null
+                            add(url, name, start)
+                        },
+                        onDismiss = { offer.value = null },
+                    )
+                }
                 videoSheet.value?.let { sheet ->
                     VideoSheetView(
                         sheet,
@@ -132,7 +161,7 @@ class MainActivity : ComponentActivity(), DownloadActions {
         val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this) ?: return
         val link = Links.first(text.toString()) ?: return
         if (downloads.list.value.any { it.url == link }) return
-        offer.value = Offer(link, fromClipboard = true)
+        offer.value = Offer(link, Source.Clipboard)
     }
 
     private fun handle(intent: Intent?) {
@@ -140,10 +169,17 @@ class MainActivity : ComponentActivity(), DownloadActions {
             intent == null -> {}
             intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true -> {
                 // «Share to Zajil»: the link is offered; nothing downloads
-                // until the user taps «Download».
+                // until the user taps «Start». A video page opens its
+                // format sheet, which asks the same.
                 val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty() +
                     " " + intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty()
-                offer.value = Offer(Links.first(text), fromClipboard = false)
+                val link = Links.first(text)
+                if (link != null && VideoPages.isVideoPage(link)) {
+                    offer.value = null
+                    readVideo(link)
+                } else {
+                    offer.value = Offer(link, Source.Shared)
+                }
                 setIntent(Intent(this, MainActivity::class.java))
             }
             intent.getBooleanExtra(EXTRA_RESUME_ALL, false) -> {
@@ -154,18 +190,20 @@ class MainActivity : ComponentActivity(), DownloadActions {
         }
     }
 
-    override fun add(url: String) {
+    override fun add(url: String, name: String?, start: StartWhen) {
         if (VideoPages.isVideoPage(url)) {
             readVideo(url)
             return
         }
         lifecycleScope.launch {
             val local = LocalNetwork.isLocal(url)
-            val id = downloads.add(url, local)
-            if (local && !LocalNetwork.isGranted(this@MainActivity)) {
-                askLocalNetwork(id)
-            } else {
-                askMissingPermissions()
+            val id = downloads.add(url, local, name, later = start == StartWhen.Later)
+            when {
+                local && !LocalNetwork.isGranted(this@MainActivity) -> if (start != StartWhen.Later) askLocalNetwork(id)
+                else -> {
+                    if (start == StartWhen.Now) downloads.startNow(id)
+                    if (start != StartWhen.Later) askMissingPermissions()
+                }
             }
         }
     }

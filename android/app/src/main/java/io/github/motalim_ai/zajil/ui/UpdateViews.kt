@@ -1,18 +1,15 @@
 package io.github.motalim_ai.zajil.ui
 
 import android.content.Context
-import android.text.format.Formatter
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,9 +18,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.BuildConfig
 import io.github.motalim_ai.zajil.R
@@ -49,22 +49,26 @@ object UpdatePrefs {
     }
 }
 
-/** Zajil's own update in Settings: its version, the check, and the steps after it. */
+/**
+ * Zajil's own update in Settings: whether it looks daily, its version, the
+ * check, and the steps after it.
+ */
 @Composable
-fun AppUpdateSection() {
+fun AppUpdateRows() {
     val context = LocalContext.current
     var auto by remember { mutableStateOf(UpdatePrefs.auto(context)) }
-    Column {
-        Text(stringResource(R.string.update_version, BuildConfig.VERSION_NAME))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.update_auto), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-            Switch(checked = auto, onCheckedChange = {
-                auto = it
-                UpdatePrefs.setAuto(context, it)
-            })
-        }
-        UpdateSteps(showCheck = true)
-    }
+    SettingRow(
+        stringResource(R.string.update_auto),
+        hint = stringResource(R.string.update_version, BuildConfig.VERSION_NAME),
+        value = stringResource(if (auto) R.string.update_daily else R.string.update_off),
+        valueColor = if (auto) Z.colors.accent else Z.colors.muted,
+        onClick = {
+            auto = !auto
+            UpdatePrefs.setAuto(context, auto)
+        },
+    )
+    RowLine()
+    UpdateSteps(inSettings = true)
 }
 
 /** The card at the top of the list when an update was found at start. */
@@ -72,52 +76,85 @@ fun AppUpdateSection() {
 fun UpdateCard() {
     val state by AppUpdate.state.collectAsStateWithLifecycle()
     if (state is AppUpdate.State.Idle || state is AppUpdate.State.Latest || state is AppUpdate.State.Checking) return
-    Card(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 10.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Z.colors.sel)
+            .border(1.dp, Z.colors.line, shape),
     ) {
-        Column(Modifier.padding(12.dp)) { UpdateSteps(showCheck = false) }
+        UpdateSteps(inSettings = false)
     }
 }
 
 @Composable
-private fun UpdateSteps(showCheck: Boolean) {
+private fun UpdateSteps(inSettings: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by AppUpdate.state.collectAsStateWithLifecycle()
+    val check = { scope.launch { AppUpdate.check() } }
+    val muted = Z.colors.muted
     when (val s = state) {
-        AppUpdate.State.Idle -> if (showCheck) {
-            TextButton(onClick = { scope.launch { AppUpdate.check() } }) { Text(stringResource(R.string.update_check)) }
+        AppUpdate.State.Idle -> if (inSettings) {
+            SettingRow(stringResource(R.string.update_check), value = stringResource(R.string.check_now), onClick = { check() })
         }
-        AppUpdate.State.Checking -> Text(stringResource(R.string.ytdlp_checking), style = MaterialTheme.typography.bodySmall)
-        AppUpdate.State.Latest -> Text(stringResource(R.string.update_latest), style = MaterialTheme.typography.bodySmall)
-        is AppUpdate.State.Failed -> Column {
-            Text(stringResource(s.message), style = MaterialTheme.typography.bodySmall)
-            if (showCheck) {
-                TextButton(onClick = { scope.launch { AppUpdate.check() } }) { Text(stringResource(R.string.update_check)) }
-            }
-        }
-        is AppUpdate.State.Offered -> Column {
-            Text(
-                stringResource(
-                    R.string.update_offered,
-                    s.update.version,
-                    Formatter.formatShortFileSize(context, s.update.size.toLong()),
-                ),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            if (s.update.notes.isNotBlank()) Text(s.update.notes, style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { scope.launch { AppUpdate.download(context, s.update) } }) {
-                Text(stringResource(R.string.update_download))
-            }
-        }
-        is AppUpdate.State.Downloading -> Text(
-            stringResource(R.string.update_downloading, s.update.version, s.percent),
-            style = MaterialTheme.typography.bodySmall,
+        AppUpdate.State.Checking -> SettingRow(stringResource(R.string.update_check), value = stringResource(R.string.ytdlp_checking), valueColor = muted)
+        AppUpdate.State.Latest -> SettingRow(
+            stringResource(R.string.update_check),
+            hint = stringResource(R.string.update_latest),
+            value = stringResource(R.string.check_now),
+            onClick = { check() },
         )
-        is AppUpdate.State.Ready -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.update_ready, s.update.version), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { AppUpdate.install(context, s.apk) }) { Text(stringResource(R.string.update_install)) }
+        is AppUpdate.State.Failed -> SettingRow(
+            stringResource(R.string.update_check),
+            hint = stringResource(s.message),
+            value = if (inSettings) stringResource(R.string.check_now) else null,
+            onClick = if (inSettings) ({ check() }) else null,
+        )
+        is AppUpdate.State.Offered -> Column(Modifier.padding(vertical = 6.dp)) {
+            SettingRow(
+                stringResource(R.string.update_offered, s.update.version, Units.size(s.update.size.toLong(), sizeUnits())),
+                hint = s.update.notes.takeIf { it.isNotBlank() },
+                value = stringResource(R.string.update_download),
+                onClick = { scope.launch { AppUpdate.download(context, s.update) } },
+            )
         }
+        is AppUpdate.State.Downloading -> SettingRow(
+            stringResource(R.string.update_downloading, s.update.version, s.percent),
+            valueColor = muted,
+        )
+        is AppUpdate.State.Ready -> Row(verticalAlignment = Alignment.CenterVertically) {
+            SettingRow(
+                stringResource(R.string.update_ready, s.update.version),
+                value = stringResource(R.string.update_install),
+                onClick = { AppUpdate.install(context, s.apk) },
+            )
+        }
+    }
+}
+
+/** The green note at the end of Settings. */
+@Composable
+fun PromiseNote() {
+    val c = Z.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(c.greenBg)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        androidx.compose.material3.Icon(
+            lineIcon(LineIcon.Shield),
+            contentDescription = null,
+            tint = c.green,
+            modifier = Modifier.size(22.dp),
+        )
+        ZText(stringResource(R.string.promise), size = 13.sp, color = c.green, weight = FontWeight.Normal)
     }
 }

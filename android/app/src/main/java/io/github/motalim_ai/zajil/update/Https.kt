@@ -8,9 +8,9 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Small HTTPS fetches for Zajil's own updates (the app's and yt-dlp's), with
- * Android's TLS checks as always. Never anything else: downloads are the
- * engine's.
+ * Small HTTPS fetches for Zajil's own updates (the app's and yt-dlp's), and
+ * a video's thumbnail for the format sheet, with Android's TLS checks as
+ * always. Never anything else: downloads are the engine's.
  */
 object Https {
     /** More bytes than allowed: for a signed size, not the file it names. */

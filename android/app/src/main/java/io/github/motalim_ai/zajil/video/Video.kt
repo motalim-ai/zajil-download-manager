@@ -47,6 +47,10 @@ data class VideoInfo(
     val live: Boolean,
     val formats: List<Format>,
     val ytDlpVersion: String,
+    /** The picture the page shows for it (an https link), for the format sheet. */
+    val thumbnail: String? = null,
+    /** Its channel's name. */
+    val channel: String? = null,
 ) {
     companion object {
         /** yt-dlp's answer; an [error] if it could not read the page. */
@@ -82,6 +86,8 @@ data class VideoInfo(
                     live = o.optBoolean("is_live") || o.str("live_status") == "is_live",
                     formats = formats,
                     ytDlpVersion = o.str("version").orEmpty(),
+                    thumbnail = o.str("thumbnail")?.takeIf { it.startsWith("https://") },
+                    channel = o.str("channel") ?: o.str("uploader"),
                 ),
             )
         }

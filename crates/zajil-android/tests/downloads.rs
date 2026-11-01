@@ -309,3 +309,105 @@ fn a_new_link_to_the_same_file_keeps_what_was_downloaded() {
         .sum();
     assert!(new_bytes < size as u64, "the new link sent the whole file");
 }
+
+#[test]
+fn probe_tells_the_name_the_size_and_that_it_resumes() {
+    let body = random_body(300 * 1024);
+    let server = TestServer::http();
+    server.put(
+        "/get?id=7",
+        FileSpec::new(body.clone()).content_disposition("attachment; filename=\"تقرير.pdf\""),
+    );
+    let (ears, _rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    let info = downloads.probe(server.url("/get?id=7")).unwrap();
+
+    assert_eq!(info.name, "تقرير.pdf");
+    assert_eq!(info.size, Some(body.len() as u64));
+    assert!(info.resumable);
+    assert!(!info.is_page);
+}
+
+#[test]
+fn probe_says_when_a_file_cannot_resume() {
+    let server = TestServer::http();
+    server.put(
+        "/once.bin",
+        FileSpec::new(random_body(64 * 1024)).without_ranges(),
+    );
+    let (ears, _rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    let info = downloads.probe(server.url("/once.bin")).unwrap();
+
+    assert!(!info.resumable);
+}
+
+#[test]
+fn probe_says_when_a_link_leads_to_a_web_page() {
+    let server = TestServer::http();
+    server.put(
+        "/login",
+        FileSpec::new(b"<html></html>".to_vec()).content_type("text/html; charset=utf-8"),
+    );
+    let (ears, _rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    let info = downloads.probe(server.url("/login")).unwrap();
+
+    assert!(info.is_page);
+    assert_eq!(info.content_type.as_deref(), Some("text/html"));
+}
+
+#[test]
+fn probe_of_a_link_zajil_cannot_download_is_a_bad_link() {
+    let (ears, _rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    let err = downloads
+        .probe("ftp://example.invalid/x".to_owned())
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            zajil_android::EngineError::Probe {
+                problem: Problem::BadLink,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn the_speed_limit_slows_every_download_and_can_be_lifted() {
+    // 512 KiB at 128 KiB/s: about four seconds; without the limit, a
+    // fraction of one on the local server.
+    let body = random_body(512 * 1024);
+    let server = TestServer::http();
+    server.put("/limited.bin", FileSpec::new(body.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+
+    downloads.set_speed_limit(Some(128 * 1024));
+    let began = std::time::Instant::now();
+    downloads.start(1, server.url("/limited.bin"), dir_text(&dir));
+    let (file, _) = finished(&rx, 1);
+    let limited = began.elapsed();
+    assert!(limited >= Duration::from_secs(2), "took {limited:?}");
+    assert_eq!(sha256(&std::fs::read(file).unwrap()), sha256(&body));
+
+    downloads.set_speed_limit(None);
+    let dir = tempfile::tempdir().unwrap();
+    let began = std::time::Instant::now();
+    downloads.start(2, server.url("/limited.bin"), dir_text(&dir));
+    finished(&rx, 2);
+    assert!(
+        began.elapsed() < limited / 2,
+        "took {:?} without a limit",
+        began.elapsed()
+    );
+}

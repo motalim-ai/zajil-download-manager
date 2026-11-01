@@ -17,7 +17,10 @@ FORMAT_FIELDS = (
     "format_note", "url", "http_headers", "protocol", "has_drm", "dynamic_range",
 )
 
-INFO_FIELDS = ("id", "title", "duration", "webpage_url", "extractor_key", "is_live", "live_status")
+INFO_FIELDS = (
+    "id", "title", "duration", "webpage_url", "extractor_key", "is_live", "live_status",
+    "thumbnail", "channel", "uploader",
+)
 
 
 def formats(url, qjs, updated_yt_dlp=None, cache_dir=None):

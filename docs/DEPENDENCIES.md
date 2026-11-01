@@ -169,6 +169,7 @@
 | yt-dlp-ejs (pip) | 0.8.0 | Unlicense وMIT وISC | نعم | سكربتات تحديات يوتيوب التي يشغّلها QuickJS-NG، داخل التطبيق فلا يُنزَّل شيء منها |
 | certifi (pip) | 2026.10.23 | MPL-2.0 | نعم | شهادات الجهات الموثوقة لـ TLS في Python، فلا يُعطَّل الفحص |
 | QuickJS-NG (`libqjs.so`) | v0.17.0 (من `tools/quickjs/pins.txt`) | MIT | نعم (برنامج منفصل) | ملف الكمبيوتر نفسه `qjs-linux-aarch64` ببصمته المثبّتة، لتحديات يوتيوب |
+| خط IBM Plex Sans Arabic (400 و500 و600 و700، ملفات TTF) | 1.101، من `google/fonts` (commit `702964cf46bd`) | OFL-1.1 | نعم (ملفات الخط) | خط الواجهة نفسه على سطح المكتب، في `res/font` داخل الـ APK، لا يُحمَّل من الإنترنت. ونص الترخيص في `assets/licenses/` فيُنشر معه. بصمات SHA-256: Regular ‏`6f611412…dab9`، Medium ‏`b8363ab9…cf74`، SemiBold ‏`597bd550…e53ebd467`، Bold ‏`691e0c89…49cf74`. يزيد الـ APK نحو 1 ميجابايت |
 | JUnit 4 (`junit:junit`) | 4.13.2 | EPL-1.0 | لا (اختبار فقط) | اختبارات منطق التطبيق على JVM (`android/app/src/test`). لا يدخل التطبيق أبدًا، فلا يمس ترخيصه GPL-3.0 |
 | Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
 

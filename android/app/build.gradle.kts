@@ -1,6 +1,7 @@
 import com.android.build.api.artifact.SingleArtifact
 import java.net.URI
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -248,8 +249,62 @@ abstract class CheckManifest : DefaultTask() {
     }
 }
 
+// rustls-platform-verifier's Kotlin half must be the version its Rust half
+// expects: the one in Cargo.lock, read at configuration time.
+val verifierVersion = providers.fileContents(workspace.file("Cargo.lock")).asText.map { lock ->
+    val lines = lock.lines()
+    val at = lines.indexOfFirst { it.trim() == "name = \"rustls-platform-verifier-android\"" }
+    check(at >= 0) { "rustls-platform-verifier-android is not in Cargo.lock" }
+    lines[at + 1].substringAfter('"').substringBefore('"')
+}
+/**
+ * The debug build's network security config: rustls-platform-verifier's own
+ * (plain HTTP only to certificate revocation lists, which the engine's
+ * verifier fetches), with plain HTTP to this phone's 127.0.0.1 added for the
+ * emulator tests (android/README.md). Written from the AAR itself, so that
+ * the list never falls behind it: without it, Android reports a certificate
+ * whose list it cannot fetch as revoked (YouTube's video servers, 2026-11).
+ */
+abstract class DebugNetworkConfig : DefaultTask() {
+    @get:InputFiles
+    abstract val verifierAar: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val res: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val aar = verifierAar.singleFile
+        val config = ZipFile(aar).use { zip ->
+            val entry = zip.getEntry("res/xml/network_security_config.xml")
+                ?: throw GradleException("no network_security_config.xml in $aar")
+            zip.getInputStream(entry).readBytes().decodeToString()
+        }
+        val end = "</network-security-config>"
+        if (!config.contains(end)) throw GradleException("unexpected network_security_config.xml in $aar")
+        val local = """  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+  </domain-config>
+"""
+        val out = res.get().dir("xml").asFile.apply { mkdirs() }
+        File(out, "debug_network.xml").writeText(config.replace(end, local + end))
+    }
+}
+
+val debugNetworkConfig = tasks.register<DebugNetworkConfig>("debugNetworkConfig") {
+    verifierAar.from(
+        configurations.detachedConfiguration(
+            dependencies.create("org.rustls:rustls-platform-verifier:${verifierVersion.get()}@aar"),
+        ),
+    )
+    res = layout.buildDirectory.dir("generated/debugNetwork/res")
+}
+
 androidComponents {
     onVariants { variant ->
+        if (variant.buildType == "debug") {
+            variant.sources.res?.addGeneratedSourceDirectory(debugNetworkConfig, DebugNetworkConfig::res)
+        }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildEngine, BuildEngine::jniLibs)
         variant.sources.kotlin?.addGeneratedSourceDirectory(buildEngine, BuildEngine::kotlin)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(fetchQuickJs, FetchQuickJs::jniLibs)
@@ -279,14 +334,6 @@ androidComponents {
     }
 }
 
-// rustls-platform-verifier's Kotlin half must be the version its Rust half
-// expects: the one in Cargo.lock, read at configuration time.
-val verifierVersion = providers.fileContents(workspace.file("Cargo.lock")).asText.map { lock ->
-    val lines = lock.lines()
-    val at = lines.indexOfFirst { it.trim() == "name = \"rustls-platform-verifier-android\"" }
-    check(at >= 0) { "rustls-platform-verifier-android is not in Cargo.lock" }
-    lines[at + 1].substringAfter('"').substringBefore('"')
-}
 configurations.configureEach {
     resolutionStrategy.eachDependency {
         if (requested.group == "org.rustls" && requested.name == "rustls-platform-verifier") {

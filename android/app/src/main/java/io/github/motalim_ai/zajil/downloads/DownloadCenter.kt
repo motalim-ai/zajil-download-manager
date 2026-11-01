@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
 import io.github.motalim_ai.zajil.engine.Downloads
+import io.github.motalim_ai.zajil.engine.EngineException
+import io.github.motalim_ai.zajil.engine.LinkInfo
 import io.github.motalim_ai.zajil.engine.Listener
 import io.github.motalim_ai.zajil.engine.Problem
 import io.github.motalim_ai.zajil.engine.Tuning
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The app's downloads: the list the screen and the notification show, the
@@ -56,6 +59,10 @@ class DownloadCenter(private val context: Context) {
     val list: StateFlow<List<Download>> = _list.asStateFlow()
     private val engine = Downloads(EngineListener())
     val settings = QueueSettings(context)
+    val prefs = AppPrefs(context)
+
+    /** Each running download's speed, for the screen. */
+    val speeds = Speedometer()
     private val network = NetworkWatch(context)
     val networkState: StateFlow<NetworkState> = network.state
 
@@ -116,22 +123,44 @@ class DownloadCenter(private val context: Context) {
                 pump()
             }
         }
+        scope.launch {
+            prefs.prefs.collect { engine.setSpeedLimit(it.speedLimit?.toULong()) }
+        }
     }
 
     /**
      * Adds [url] to the queue, unless it is on the local network ([local])
      * and Zajil may not go there yet: then it waits for the permission.
+     * [name] is the user's, instead of the server's; [later] keeps it
+     * paused until the user starts it.
      */
-    fun add(url: String, local: Boolean): Long {
+    fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false): Long {
         val blocked = local && !LocalNetwork.isGranted(context)
         return insert { id, order ->
             Download(
                 id = id,
                 url = url,
-                status = if (blocked) Status.NeedsLocalNetwork else Status.Queued,
+                status = when {
+                    blocked -> Status.NeedsLocalNetwork
+                    later -> Status.Paused
+                    else -> Status.Queued
+                },
                 local = local,
                 order = order,
+                chosenName = name,
             )
+        }
+    }
+
+    /**
+     * What [url] leads to (its name, size, and whether it resumes), for the
+     * sheet that asks the user; only the first response's headers are read.
+     */
+    suspend fun probe(url: String): Result<LinkInfo> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(engine.probe(url))
+        } catch (e: EngineException) {
+            Result.failure(e)
         }
     }
 
@@ -205,6 +234,27 @@ class DownloadCenter(private val context: Context) {
     fun resumeAll() {
         _list.value.filter { it.status in resumable }.forEach { enqueue(it.id) }
         pump()
+    }
+
+    /**
+     * «Run the queue»: what was paused or stopped with the app goes back
+     * into it, and a scheduled queue opens now instead of at its time.
+     */
+    fun runQueue() {
+        settings.update { if (it.scheduled && !it.open) it.copy(open = true) else it }
+        _list.value.filter { it.status == Status.Paused || it.status == Status.Interrupted }.forEach { enqueue(it.id) }
+        pump()
+    }
+
+    /** «Stop the queue»: nothing runs or waits until the user starts it again. */
+    fun stopQueue() {
+        settings.update { if (it.scheduled && it.open) it.copy(open = false) else it }
+        pauseAll()
+    }
+
+    /** Takes the complete downloads off the list; their files stay. */
+    fun removeFinished() {
+        change { list -> list.filterNot { it.status == Status.Done } }
     }
 
     /** Android's time for data transfers is up: everything stops, queue included. */
@@ -317,11 +367,17 @@ class DownloadCenter(private val context: Context) {
             when {
                 video == null -> {
                     val stateFile = download.stateFile
+                    val tuning = Tuning(
+                        name = download.chosenName,
+                        userAgent = null,
+                        connections = prefs.prefs.value.connections.toUInt(),
+                        requestSize = null,
+                    )
                     if (stateFile != null && File(stateFile).exists()) {
-                        engine.resume(engineId(download.id, 0), stateFile)
+                        engine.resumeTuned(engineId(download.id, 0), stateFile, tuning)
                     } else {
                         // No data had been written: start again from the link.
-                        engine.start(engineId(download.id, 0), download.url, folderOf(download.id).path)
+                        engine.startTuned(engineId(download.id, 0), download.url, folderOf(download.id).path, tuning)
                     }
                 }
                 // Links that expire within minutes: new ones first, as the
@@ -450,7 +506,12 @@ class DownloadCenter(private val context: Context) {
             if (published != null) folderOf(download.id).delete()
             edit(download.id) {
                 if (published != null) {
-                    it.copy(status = Status.Done, uri = published.uri.toString(), shownName = published.name)
+                    it.copy(
+                        status = Status.Done,
+                        uri = published.uri.toString(),
+                        shownName = published.name,
+                        finishedAt = System.currentTimeMillis(),
+                    )
                 } else {
                     it.copy(status = Status.Failed, problem = Problem.OTHER, stateFile = null)
                 }
@@ -513,6 +574,7 @@ class DownloadCenter(private val context: Context) {
                     }
                 }
             }
+            find(owner)?.let { speeds.report(owner, it.done) }
         }
 
         override fun finished(id: Long, file: String, bytes: ULong) {
@@ -618,6 +680,7 @@ class DownloadCenter(private val context: Context) {
 
     private fun change(how: (List<Download>) -> List<Download>) {
         _list.update(how)
+        speeds.keepOnly(_list.value.filter { it.status == Status.Running }.map { it.id }.toSet())
         scope.launch(writer) { save(_list.value) }
     }
 
