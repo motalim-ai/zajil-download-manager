@@ -199,6 +199,7 @@ fun SettingRow(
     leading: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
     minHeight: Dp = 56.dp,
+    labelColor: Color = Z.colors.ink,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
@@ -212,7 +213,7 @@ fun SettingRow(
     ) {
         leading?.invoke()
         Column(Modifier.weight(1f)) {
-            ZText(label)
+            ZText(label, color = labelColor)
             if (hint != null) ZText(hint, size = 12.sp, color = Z.colors.muted)
         }
         if (value != null) {

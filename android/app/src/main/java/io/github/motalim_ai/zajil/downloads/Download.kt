@@ -61,6 +61,8 @@ data class Download(
     val local: Boolean = false,
     /** Its place in the queue: the smaller, the sooner. */
     val order: Long = id,
+    /** Its queue ([Queue.id]): the main one unless the user chose another. */
+    val queue: Long = Queue.MAIN,
     /** A video read by yt-dlp: its streams (A3). [url] is then the page's link. */
     val video: VideoJob? = null,
     /** The name the user gave it before it started, instead of the server's. */
@@ -95,6 +97,7 @@ data class Download(
         put("shown_name", shownName)
         put("local", local)
         put("order", order)
+        put("queue", queue)
         put("video", video?.toJson())
         put("chosen_name", chosenName)
         put("finished_at", finishedAt)
@@ -120,6 +123,7 @@ data class Download(
             shownName = json.optStringOrNull("shown_name"),
             local = json.optBoolean("local"),
             order = json.optLong("order", json.getLong("id")),
+            queue = json.optLong("queue", Queue.MAIN),
             video = json.optJSONObject("video")?.let(VideoJob::fromJson),
             chosenName = json.optStringOrNull("chosen_name"),
             finishedAt = if (json.isNull("finished_at")) null else json.optLong("finished_at"),

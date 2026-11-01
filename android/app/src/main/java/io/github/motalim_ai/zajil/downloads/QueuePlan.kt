@@ -5,7 +5,20 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** The queue's settings (A2), kept in the app's preferences ([QueueSettings]). */
+/**
+ * A queue (A2; several from 0.3.0, as the approved design's «Night queue»):
+ * its own [rules] and [name]. [MAIN] is the main queue, which the app
+ * names and which is never deleted.
+ */
+data class Queue(val id: Long, val name: String, val rules: QueueRules) {
+    val main get() = id == MAIN
+
+    companion object {
+        const val MAIN = 0L
+    }
+}
+
+/** A queue's settings (A2), kept in the app's preferences ([QueueSettings]). */
 data class QueueRules(
     /** How many downloads run at once, at least 1. */
     val maxRunning: Int = 3,
@@ -42,6 +55,17 @@ object QueuePlan {
         if (room <= 0) return emptyList()
         return queued(list).take(room).map { it.id }
     }
+
+    /**
+     * Which queued downloads start now, each queue by its own rules: a
+     * download of a queue that is gone counts as the main queue's.
+     */
+    fun toStart(list: List<Download>, queues: List<Queue>, network: NetworkState): List<Long> =
+        queues.flatMap { queue -> toStart(list.filter { queueOf(it, queues) == queue.id }, queue.rules, network) }
+
+    /** [download]'s queue among [queues]: its own, or the main one if its own is gone. */
+    fun queueOf(download: Download, queues: List<Queue>): Long =
+        download.queue.takeIf { id -> queues.any { it.id == id } } ?: Queue.MAIN
 
     /** The queued downloads in the order they start. */
     fun queued(list: List<Download>): List<Download> =

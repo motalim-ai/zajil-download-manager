@@ -137,8 +137,8 @@
     <string name="left">%1$s\u00A0left</string>
     <string name="resumes_where_stopped">resumes where it stopped</string>
     <string name="status_needs_local_network_short">Needs the «Local network» permission. Tap «Allow».</string>
-    <string name="next_in_queue">Next in the main queue</string>
-    <string name="in_queue_before">Main queue · %1$d before it</string>
+    <string name="next_in_queue">Next in %1$s</string>
+    <string name="in_queue_before">%1$s · %2$d before it</string>
     <string name="today_at">today %1$s</string>
     <string name="unit_bytes">%s B</string>
     <string name="unit_kib">%s KB</string>
@@ -161,7 +161,7 @@
     <string name="saved_in">Saved in</string>
     <string name="when_starts">When it starts</string>
     <string name="start_now_word">Now, before its turn</string>
-    <string name="start_with_queue">In the main queue</string>
+    <string name="start_with_queue">In %1$s</string>
     <string name="now_instead">Now</string>
     <string name="with_queue_instead">In the queue</string>
     <string name="change">Change</string>
@@ -186,7 +186,17 @@
     <string name="stop_queue">Stop the queue</string>
     <string name="run_queue">Run the queue now</string>
     <string name="schedule_off_hint">The queue starts by itself at a time every day</string>
-    <string name="queue_footer">Zajil on the phone has one queue. Choose «Now» under «When it starts» to start a download before its turn.</string>
+    <string name="queue_footer">Choose the queue under «When it starts» when adding, or «Now» to start a download before its turn. Each queue has its own downloads at once and conditions.</string>
+    <string name="new_queue">New queue</string>
+    <string name="queue_name">Queue name</string>
+    <string name="create_queue">Create</string>
+    <string name="rename_queue">Rename</string>
+    <string name="save_name">Save</string>
+    <string name="delete_queue">Delete queue</string>
+    <string name="delete_queue_hint">Its downloads move to the main queue as they are.</string>
+    <string name="wifi_only_short">Wi-Fi only</string>
+    <string name="queue_idle">Stopped</string>
+    <string name="choose_queue">When it starts</string>
     <string name="group_look">Look</string>
     <string name="group_download">Downloading</string>
     <string name="group_video">Video</string>
@@ -221,6 +231,10 @@
     <plurals name="queue_waiting">
         <item quantity="one">%d waiting</item>
         <item quantity="other">%d waiting</item>
+    </plurals>
+    <plurals name="queue_count">
+        <item quantity="one">%d download</item>
+        <item quantity="other">%d downloads</item>
     </plurals>
     <string name="offer_copied_title">Download the copied link?</string>
     <string name="tile_label">Zajil: download the copied link</string>

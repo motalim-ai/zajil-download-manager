@@ -53,7 +53,8 @@ object Notifications {
         if (first == null) {
             // Started downloads that wait for the network to come back.
             val waiting = list.count { it.status == Status.Queued }
-            val wifi = context.downloads.waitOf() == Wait.Wifi
+            val center = context.downloads
+            val wifi = list.filter { it.status == Status.Queued }.any { center.waitOf(it) == Wait.Wifi }
             return builder.setContentTitle(context.resources.getQuantityString(R.plurals.waiting, waiting, waiting))
                 .setContentText(context.getString(if (wifi) R.string.wait_wifi else R.string.wait_network))
                 .build()

@@ -64,6 +64,7 @@ import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.Download
 import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.NetworkState
+import io.github.motalim_ai.zajil.downloads.Queue
 import io.github.motalim_ai.zajil.downloads.QueuePlan
 import io.github.motalim_ai.zajil.downloads.QueueRules
 import io.github.motalim_ai.zajil.downloads.Status
@@ -76,7 +77,7 @@ enum class StartWhen { Now, Queue, Later }
 /** What the screens ask of the app. */
 interface DownloadActions {
     /** A link to download: a video page opens the format sheet instead. */
-    fun add(url: String, name: String? = null, start: StartWhen = StartWhen.Queue, browser: BrowserLink? = null)
+    fun add(url: String, name: String? = null, start: StartWhen = StartWhen.Queue, browser: BrowserLink? = null, queue: Long = Queue.MAIN)
     fun pause(id: Long)
     fun resume(id: Long)
     fun startNow(id: Long)
@@ -90,13 +91,17 @@ fun HomeScreen(actions: DownloadActions, bottomPadding: PaddingValues) {
     val context = LocalContext.current
     val center = context.downloads
     val list by center.list.collectAsStateWithLifecycle()
-    val rules by center.settings.rules.collectAsStateWithLifecycle()
+    val queues by center.settings.queues.collectAsStateWithLifecycle()
     val network by center.networkState.collectAsStateWithLifecycle()
     val speeds by center.speeds.rates.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf(Filter.All) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
-    val queue = remember(list) { QueuePlan.queued(list).map { it.id } }
+    // Each download's place in its own queue.
+    val places = remember(list, queues) {
+        QueuePlan.queued(list).groupBy { QueuePlan.queueOf(it, queues) }.values
+            .flatMap { inQueue -> inQueue.mapIndexed { i, d -> d.id to i } }.toMap()
+    }
     val shown = remember(list, filter, query, searching) {
         list.sortedByDescending { it.id }
             .filter { filter.matches(it) }
@@ -117,7 +122,7 @@ fun HomeScreen(actions: DownloadActions, bottomPadding: PaddingValues) {
             } else {
                 AppBar(onSearch = { searching = true })
             }
-            NowStrip(list, speeds, rules, network)
+            NowStrip(list.filter { QueuePlan.queueOf(it, queues) == Queue.MAIN }, speeds, queues.first().rules, network)
             Box(Modifier.fillMaxWidth().height(1.dp).background(Z.colors.line))
         }
         Filters(list, filter) { filter = it }
@@ -140,7 +145,8 @@ fun HomeScreen(actions: DownloadActions, bottomPadding: PaddingValues) {
             modifier = Modifier.weight(1f),
         ) {
             items(shown, key = { it.id }) { download ->
-                DownloadCard(download, queue.indexOf(download.id), rules, network, speeds[download.id] ?: 0, actions)
+                val queue = queues.first { it.id == QueuePlan.queueOf(download, queues) }
+                DownloadCard(download, places[download.id] ?: -1, queue, network, speeds[download.id] ?: 0, actions)
             }
         }
     }
@@ -162,7 +168,7 @@ private fun AppBar(onSearch: () -> Unit) {
             BarIconButton(LineIcon.More, stringResource(R.string.more_actions)) { menu = true }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Z.colors.surface) {
                 MenuItem(stringResource(R.string.resume_all)) { menu = false; center.resumeAll() }
-                MenuItem(stringResource(R.string.pause_all)) { menu = false; center.stopQueue() }
+                MenuItem(stringResource(R.string.pause_all)) { menu = false; center.stopAllQueues() }
                 MenuItem(stringResource(R.string.remove_finished)) { menu = false; center.removeFinished() }
             }
         }
@@ -312,7 +318,7 @@ private fun filterName(f: Filter) = when (f) {
 private fun DownloadCard(
     download: Download,
     place: Int,
-    rules: QueueRules,
+    queue: Queue,
     network: NetworkState,
     speed: Long,
     actions: DownloadActions,
@@ -356,7 +362,7 @@ private fun DownloadCard(
                 Bar(download)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill(stringResource(look.label), look.background(c), look.color(c))
-                    ZText(detail(download, place, rules, network, speed), Modifier.weight(1f), size = 12.5.sp, color = c.muted, maxLines = 2)
+                    ZText(detail(download, place, queue, network, speed), Modifier.weight(1f), size = 12.5.sp, color = c.muted, maxLines = 2)
                 }
             }
             when (download.status) {
@@ -456,7 +462,8 @@ private fun statusLook(status: Status): StatusLook = when (status) {
 
 /** The line beside the status: sizes, speed and time left, or why it waits. */
 @Composable
-private fun detail(download: Download, place: Int, rules: QueueRules, network: NetworkState, speed: Long): String {
+private fun detail(download: Download, place: Int, queue: Queue, network: NetworkState, speed: Long): String {
+    val rules = queue.rules
     val units = sizeUnits()
     val done = Units.size(download.done, units)
     val total = download.total?.takeIf { it > 0 }
@@ -478,12 +485,14 @@ private fun detail(download: Download, place: Int, rules: QueueRules, network: N
         Status.Merging -> listOf(stringResource(R.string.status_merging))
         Status.Publishing -> listOf(stringResource(R.string.status_publishing))
         Status.Queued -> listOf(
+            // Waiting for something else than its turn: which queue, if not the main one.
+            queue.name.takeIf { !queue.main && QueuePlan.waitOf(rules, network) != Wait.Turn },
             choice,
             when (QueuePlan.waitOf(rules, network)) {
                 Wait.Turn -> if (place <= 0) {
-                    stringResource(R.string.next_in_queue)
+                    stringResource(R.string.next_in_queue, queueName(queue))
                 } else {
-                    stringResource(R.string.in_queue_before, place)
+                    stringResource(R.string.in_queue_before, queueName(queue), place)
                 }
                 Wait.Schedule -> stringResource(R.string.wait_schedule, timeText(rules.startAt))
                 Wait.Network -> stringResource(R.string.wait_network)

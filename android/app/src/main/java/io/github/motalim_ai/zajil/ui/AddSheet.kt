@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,6 +58,7 @@ import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
+import io.github.motalim_ai.zajil.downloads.Queue
 import io.github.motalim_ai.zajil.engine.EngineException
 import io.github.motalim_ai.zajil.engine.LinkInfo
 import io.github.motalim_ai.zajil.video.VideoPages
@@ -103,7 +105,7 @@ private sealed interface Found {
  * did not hand over, is not, until they start it.
  */
 @Composable
-fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhen) -> Unit, onDismiss: () -> Unit) {
+fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhen, queue: Long) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     if (offer.url == null && offer.source != Source.Typed) {
         AlertDialog(
@@ -124,6 +126,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
     var name by remember { mutableStateOf("") }
     var nameEdited by remember { mutableStateOf(false) }
     var start by remember { mutableStateOf(StartWhen.Queue) }
+    var queue by remember { mutableLongStateOf(Queue.MAIN) }
 
     LaunchedEffect(url) {
         found = Found.Nothing
@@ -180,7 +183,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                     ZText(infoLine(found, name, url), size = 12.5.sp, color = c.muted, maxLines = 2)
                 }
                 Chips(found, prefs.connections)
-                Places(start, onStart = { start = it })
+                Places(start, queue, onStart = { when_, inQueue -> start = when_; queue = inQueue })
             }
 
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -191,7 +194,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                             // The name the user saw is the name the file gets: the
                             // server cannot change it after this OK.
                             val chosen = name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }
-                            onStart(url, chosen, start)
+                            onStart(url, chosen, start, queue)
                         }
                     },
                     modifier = Modifier.weight(2f),
@@ -201,7 +204,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                 if (!video) {
                     QuietButton(stringResource(R.string.later), onClick = {
                         if (url != null) {
-                            onStart(url, name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }, StartWhen.Later)
+                            onStart(url, name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }, StartWhen.Later, queue)
                         } else {
                             onDismiss()
                         }
@@ -352,8 +355,12 @@ private fun Chips(found: Found, connections: Int) {
 
 /** Where it is saved, and when it starts. */
 @Composable
-private fun Places(start: StartWhen, onStart: (StartWhen) -> Unit) {
+private fun Places(start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> Unit) {
     val c = Z.colors
+    val queues by LocalContext.current.downloads.settings.queues.collectAsStateWithLifecycle()
+    val inQueue = queues.firstOrNull { it.id == queue } ?: queues.first()
+    var choosing by remember { mutableStateOf(false) }
+    val now = start == StartWhen.Now
     ZCard {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp),
@@ -368,13 +375,13 @@ private fun Places(start: StartWhen, onStart: (StartWhen) -> Unit) {
             }
         }
         RowLine()
-        val now = start == StartWhen.Now
         Row(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
                 .clickable(role = Role.Button, onClickLabel = stringResource(R.string.change)) {
-                    onStart(if (now) StartWhen.Queue else StartWhen.Now)
+                    // One queue: «Now» or the queue. Several: the user picks.
+                    if (queues.size > 1) choosing = true else onStart(if (now) StartWhen.Queue else StartWhen.Now, Queue.MAIN)
                 }
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -383,15 +390,30 @@ private fun Places(start: StartWhen, onStart: (StartWhen) -> Unit) {
             Icon(lineIcon(LineIcon.Queues), null, tint = c.muted, modifier = Modifier.size(22.dp))
             Column(Modifier.weight(1f)) {
                 ZText(stringResource(R.string.when_starts), size = 12.sp, color = c.muted)
-                ZText(stringResource(if (now) R.string.start_now_word else R.string.start_with_queue))
+                ZText(if (now) stringResource(R.string.start_now_word) else stringResource(R.string.start_with_queue, queueName(inQueue)))
             }
             ZText(
-                stringResource(if (now) R.string.with_queue_instead else R.string.now_instead),
+                when {
+                    queues.size > 1 -> stringResource(R.string.change)
+                    now -> stringResource(R.string.with_queue_instead)
+                    else -> stringResource(R.string.now_instead)
+                },
                 size = 13.sp,
                 weight = FontWeight.SemiBold,
                 color = c.accent,
             )
         }
+    }
+    if (choosing) {
+        // The queues by name, then «Now, before its turn» (null).
+        val choices = queues.map<Queue, Pair<Long?, String>> { it.id to queueName(it) } + (null to stringResource(R.string.start_now_word))
+        ChoiceSheet(
+            stringResource(R.string.choose_queue),
+            choices,
+            chosen = if (now) null else inQueue.id,
+            onChoose = { id -> if (id == null) onStart(StartWhen.Now, inQueue.id) else onStart(StartWhen.Queue, id) },
+            onDismiss = { choosing = false },
+        )
     }
 }
 

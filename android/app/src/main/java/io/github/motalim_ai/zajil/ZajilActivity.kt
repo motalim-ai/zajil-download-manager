@@ -95,9 +95,9 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
         offer.value?.let { asked ->
             AddSheet(
                 asked,
-                onStart = { url, name, start ->
+                onStart = { url, name, start, queue ->
                     offer.value = null
-                    add(url, name, start, asked.link)
+                    add(url, name, start, asked.link, queue)
                 },
                 onDismiss = {
                     offer.value = null
@@ -140,14 +140,14 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
     /** A download was added: the tile's window says so. */
     protected open fun added() {}
 
-    override fun add(url: String, name: String?, start: StartWhen, browser: BrowserLink?) {
+    override fun add(url: String, name: String?, start: StartWhen, browser: BrowserLink?, queue: Long) {
         if (VideoPages.isVideoPage(url)) {
             readVideo(url, browser)
             return
         }
         lifecycleScope.launch {
             val local = LocalNetwork.isLocal(url)
-            val id = downloads.add(url, local, name, later = start == StartWhen.Later, browser = browser)
+            val id = downloads.add(url, local, name, later = start == StartWhen.Later, browser = browser, queue = queue)
             added()
             when {
                 local && !LocalNetwork.isGranted(this@ZajilActivity) -> if (start != StartWhen.Later) askLocalNetwork(id)

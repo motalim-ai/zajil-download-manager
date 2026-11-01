@@ -158,9 +158,9 @@
     <string name="left">المتبقي\u00A0%1$s</string>
     <string name="resumes_where_stopped">يكمل من حيث توقف</string>
     <string name="status_needs_local_network_short">يحتاج إذن «الشبكة المحلية». اضغط «السماح».</string>
-    <string name="next_in_queue">التالي في الطابور الرئيسي</string>
+    <string name="next_in_queue">التالي في %1$s</string>
     <!-- %1$d عدد التحميلات قبله. -->
-    <string name="in_queue_before">الطابور الرئيسي · %1$d قبله</string>
+    <string name="in_queue_before">%1$s · %2$d قبله</string>
     <string name="today_at">اليوم %1$s</string>
     <string name="unit_bytes">%s بايت</string>
     <string name="unit_kib">%s ك.ب</string>
@@ -183,7 +183,7 @@
     <string name="saved_in">يُحفظ في</string>
     <string name="when_starts">متى يبدأ</string>
     <string name="start_now_word">الآن، قبل دوره</string>
-    <string name="start_with_queue">في الطابور الرئيسي</string>
+    <string name="start_with_queue">في %1$s</string>
     <string name="now_instead">الآن</string>
     <string name="with_queue_instead">في الطابور</string>
     <string name="change">تغيير</string>
@@ -209,7 +209,17 @@
     <string name="stop_queue">إيقاف الطابور</string>
     <string name="run_queue">تشغيل الطابور الآن</string>
     <string name="schedule_off_hint">يبدأ الطابور وحده في وقت كل يوم</string>
-    <string name="queue_footer">لزاجِل على الهاتف طابور واحد. اختر «الآن» من «متى يبدأ» ليبدأ تحميل قبل دوره.</string>
+    <string name="queue_footer">اختر الطابور من «متى يبدأ» وقت الإضافة، أو «الآن» ليبدأ التحميل قبل دوره. ولكل طابور عدد تحميلاته معًا وشروطه.</string>
+    <string name="new_queue">طابور جديد</string>
+    <string name="queue_name">اسم الطابور</string>
+    <string name="create_queue">إنشاء</string>
+    <string name="rename_queue">إعادة التسمية</string>
+    <string name="save_name">حفظ</string>
+    <string name="delete_queue">حذف الطابور</string>
+    <string name="delete_queue_hint">تنتقل تحميلاته إلى الطابور الرئيسي كما هي.</string>
+    <string name="wifi_only_short">واي فاي فقط</string>
+    <string name="queue_idle">متوقف</string>
+    <string name="choose_queue">متى يبدأ</string>
     <string name="group_look">الشكل</string>
     <string name="group_download">التحميل</string>
     <string name="group_video">الفيديو</string>
@@ -256,6 +266,14 @@
         <item quantity="few">%d تحميلات في الانتظار</item>
         <item quantity="many">%d تحميلًا في الانتظار</item>
         <item quantity="other">%d تحميل في الانتظار</item>
+    </plurals>
+    <plurals name="queue_count">
+        <item quantity="zero">لا تحميلات</item>
+        <item quantity="one">تحميل واحد</item>
+        <item quantity="two">تحميلان</item>
+        <item quantity="few">%d تحميلات</item>
+        <item quantity="many">%d تحميلًا</item>
+        <item quantity="other">%d تحميل</item>
     </plurals>
     <string name="offer_copied_title">حمّل الرابط المنسوخ؟</string>
     <string name="tile_label">زاجِل: حمّل الرابط المنسوخ</string>

@@ -64,6 +64,24 @@ class QueuePlanTest {
     }
 
     @Test
+    fun each_queue_starts_its_own_by_its_own_rules() {
+        val night = Queue(1, "Night", QueueRules(maxRunning = 1, wifiOnly = true))
+        val queues = listOf(Queue(Queue.MAIN, "", QueueRules(maxRunning = 2)), night)
+        val list = listOf(queued(1), queued(2), queued(3), queued(4).copy(queue = 1), queued(5).copy(queue = 1))
+        // On mobile data: the main queue's two; the night queue waits for Wi-Fi.
+        assertEquals(listOf(1L, 2L), QueuePlan.toStart(list, queues, NetworkState(connected = true, unmetered = false)))
+        // On Wi-Fi: the night queue's one too, its own limit.
+        assertEquals(listOf(1L, 2L, 4L), QueuePlan.toStart(list, queues, NetworkState(connected = true, unmetered = true)))
+    }
+
+    @Test
+    fun a_download_of_a_queue_that_is_gone_is_the_main_queues() {
+        val queues = listOf(Queue(Queue.MAIN, "", QueueRules()))
+        assertEquals(Queue.MAIN, QueuePlan.queueOf(queued(1).copy(queue = 7), queues))
+        assertEquals(listOf(1L), QueuePlan.toStart(listOf(queued(1).copy(queue = 7)), queues, NetworkState(connected = true, unmetered = true)))
+    }
+
+    @Test
     fun moving_up_swaps_with_the_one_before() {
         val list = listOf(queued(1), running(2), queued(3), queued(4))
         val moved = QueuePlan.movedUp(list, 4)

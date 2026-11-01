@@ -125,10 +125,11 @@ class DownloadCenter(private val context: Context) {
         // what may. A network that goes for a moment (a hand-over between
         // Wi-Fi and mobile data) is given a second and a half first.
         scope.launch {
-            combine(network.state, settings.rules, ::Pair).collectLatest { (state, rules) ->
-                if (!state.allows(rules)) {
+            combine(network.state, settings.queues, ::Pair).collectLatest { (state, queues) ->
+                // Each queue by its own rules: «Wi-Fi only» stops only its own downloads.
+                if (queues.any { !state.allows(it.rules) }) {
                     delay(1_500)
-                    _list.value.filter { it.status == Status.Running }.forEach {
+                    _list.value.filter { it.status == Status.Running && !state.allows(rulesOf(it)) }.forEach {
                         requeued += it.id
                         stopEngine(it)
                     }
@@ -147,7 +148,7 @@ class DownloadCenter(private val context: Context) {
      * [name] is the user's, instead of the server's; [later] keeps it
      * paused until the user starts it.
      */
-    fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false, browser: BrowserLink? = null): Long {
+    fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false, browser: BrowserLink? = null, queue: Long = Queue.MAIN): Long {
         val blocked = local && !LocalNetwork.isGranted(context)
         return insert { id, order ->
             browser?.cookies?.let { linkCookies[id] = it }
@@ -161,6 +162,7 @@ class DownloadCenter(private val context: Context) {
                 },
                 local = local,
                 order = order,
+                queue = settings.queue(queue).id,
                 chosenName = name,
                 page = browser?.page,
                 cookieSource = browser?.source ?: CookieSource.None,
@@ -194,7 +196,7 @@ class DownloadCenter(private val context: Context) {
      * Adds a video that yt-dlp read, as the user chose it: its picture and
      * its sound, each downloaded by the engine as on the desktop.
      */
-    fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String, browser: BrowserLink? = null): Long {
+    fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String, browser: BrowserLink? = null, queue: Long = Queue.MAIN): Long {
         val hls = picked.video?.hls == true
         val formats = listOfNotNull(picked.video, picked.audio)
         val dash = !hls && formats.any { it.dash }
@@ -216,6 +218,7 @@ class DownloadCenter(private val context: Context) {
                 url = pageUrl,
                 status = Status.Queued,
                 order = order,
+                queue = settings.queue(queue).id,
                 total = picked.size,
                 video = VideoJob(info.title, picked.container, streams, choice, hls = hls, dash = dash),
                 page = browser?.page,
@@ -291,17 +294,37 @@ class DownloadCenter(private val context: Context) {
      * «Run the queue»: what was paused or stopped with the app goes back
      * into it, and a scheduled queue opens now instead of at its time.
      */
-    fun runQueue() {
-        settings.update { if (it.scheduled && !it.open) it.copy(open = true) else it }
-        _list.value.filter { it.status == Status.Paused || it.status == Status.Interrupted }.forEach { enqueue(it.id) }
+    fun runQueue(queue: Long) {
+        settings.update(queue) { if (it.scheduled && !it.open) it.copy(open = true) else it }
+        _list.value.filter { inQueue(it, queue) && (it.status == Status.Paused || it.status == Status.Interrupted) }.forEach { enqueue(it.id) }
         pump()
     }
 
     /** «Stop the queue»: nothing runs or waits until the user starts it again. */
-    fun stopQueue() {
-        settings.update { if (it.scheduled && it.open) it.copy(open = false) else it }
-        pauseAll()
+    fun stopQueue(queue: Long) {
+        settings.update(queue) { if (it.scheduled && it.open) it.copy(open = false) else it }
+        change { list -> list.map { if (inQueue(it, queue) && it.status == Status.Queued) it.copy(status = Status.Paused) else it } }
+        _list.value.filter { inQueue(it, queue) && it.status == Status.Running }.forEach(::stopEngine)
     }
+
+    /** «Pause all»: every queue stops, as «Stop» on each. */
+    fun stopAllQueues() = settings.queues.value.forEach { stopQueue(it.id) }
+
+    /** A new queue; its id. */
+    fun createQueue(name: String): Long = settings.create(name)
+
+    /** Deletes [queue] (never the main one): its downloads go to the main queue, as they are. */
+    fun deleteQueue(queue: Long) {
+        if (queue == Queue.MAIN) return
+        change { list -> list.map { if (it.queue == queue) it.copy(queue = Queue.MAIN) else it } }
+        settings.delete(queue)
+        pump()
+    }
+
+    private fun inQueue(download: Download, queue: Long) = QueuePlan.queueOf(download, settings.queues.value) == queue
+
+    /** [download]'s queue's rules. */
+    private fun rulesOf(download: Download): QueueRules = settings.queue(QueuePlan.queueOf(download, settings.queues.value)).rules
 
     /** Takes the complete downloads off the list; their files stay. */
     fun removeFinished() {
@@ -327,8 +350,8 @@ class DownloadCenter(private val context: Context) {
     }
 
     /** The schedule's time has come: the queue runs until it is empty. */
-    fun openSchedule() {
-        settings.update { if (it.scheduled) it.copy(open = true) else it }
+    fun openSchedule(queue: Long) {
+        settings.update(queue) { if (it.scheduled) it.copy(open = true) else it }
     }
 
     /** Stops it if it runs, then removes it with its files. */
@@ -378,7 +401,7 @@ class DownloadCenter(private val context: Context) {
     fun find(id: Long) = _list.value.firstOrNull { it.id == id }
 
     /** Why a queued download waits, for the screen. */
-    fun waitOf(): Wait = QueuePlan.waitOf(settings.rules.value, network.state.value)
+    fun waitOf(download: Download): Wait = QueuePlan.waitOf(rulesOf(download), network.state.value)
 
     /**
      * Starts what the queue allows now, then plans the jobs that wake it
@@ -386,12 +409,14 @@ class DownloadCenter(private val context: Context) {
      */
     fun pump(then: (() -> Unit)? = null) {
         scope.launch(pumper) {
-            val rules = settings.rules.value
-            val ids = QueuePlan.toStart(_list.value, rules, network.state.value)
+            val queues = settings.queues.value
+            val ids = QueuePlan.toStart(_list.value, queues, network.state.value)
             if (ids.isNotEmpty()) startAll(ids)
             // A scheduled queue that has run empty waits for its next time.
-            if (rules.scheduled && rules.open && _list.value.none { it.status in active }) {
-                settings.update { it.copy(open = false) }
+            for (queue in queues) {
+                if (queue.rules.scheduled && queue.rules.open && _list.value.none { it.status in active && inQueue(it, queue.id) }) {
+                    settings.update(queue.id) { it.copy(open = false) }
+                }
             }
             planJobs()
             then?.invoke()
@@ -409,8 +434,8 @@ class DownloadCenter(private val context: Context) {
         if (!DownloadService.ensure(context)) {
             change { list -> list.map { if (it.id in ids) it.copy(status = Status.Queued) else it } }
             val waiting = QueuePlan.queued(_list.value).size
-            val rules = settings.rules.value
-            if (rules.scheduled && rules.open) {
+            val due = ids.mapNotNull(::find).any { rulesOf(it).let { r -> r.scheduled && r.open } }
+            if (due) {
                 Notifications.showScheduleDue(context, waiting)
             } else {
                 Notifications.showStopped(context, waiting)
@@ -593,8 +618,8 @@ class DownloadCenter(private val context: Context) {
     private fun planJobs() {
         QueueJobService.plan(
             context,
-            waiting = _list.value.any { it.status == Status.Queued },
-            rules = settings.rules.value,
+            waiting = _list.value.filter { it.status == Status.Queued }.map { QueuePlan.queueOf(it, settings.queues.value) }.toSet(),
+            queues = settings.queues.value,
             network = network.state.value,
         )
     }
@@ -692,7 +717,7 @@ class DownloadCenter(private val context: Context) {
                     if (cancelled.remove(id)) {
                         remove(id)
                     } else {
-                        val offline = !network.state.value.allows(settings.rules.value)
+                        val offline = !network.state.value.allows(rulesOf(download))
                         val status = stoppedAs(id, if (offline) Status.Queued else Status.Failed)
                         edit(id) {
                             it.copy(
@@ -801,7 +826,7 @@ class DownloadCenter(private val context: Context) {
             val download = find(owner) ?: return
             // The connection failed because the network went: it waits in
             // the queue for the network, instead of failing.
-            val offline = problem == Problem.NETWORK && !network.state.value.allows(settings.rules.value)
+            val offline = problem == Problem.NETWORK && !network.state.value.allows(rulesOf(download))
             if (download.video == null) {
                 val status = stoppedAs(owner, if (offline) Status.Queued else Status.Failed)
                 edit(owner) {

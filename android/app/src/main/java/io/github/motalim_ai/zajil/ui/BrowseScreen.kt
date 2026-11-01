@@ -331,7 +331,7 @@ private fun AddSiteSheet(onAdd: (Shortcut) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun SheetField(value: String, onValue: (String) -> Unit, hint: String, type: KeyboardType, direction: TextDirection) {
+internal fun SheetField(value: String, onValue: (String) -> Unit, hint: String, type: KeyboardType, direction: TextDirection) {
     val c = Z.colors
     val shape = RoundedCornerShape(14.dp)
     Box(
