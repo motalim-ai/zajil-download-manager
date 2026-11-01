@@ -69,11 +69,13 @@ object YtDlp {
         listener: HlsListener,
         cookies: String?,
         referer: String?,
+        /** The file's name in [folder], without its extension ("stream", or DASH's "video" and "audio"). */
+        name: String = "stream",
     ): HlsEnd = withContext(Dispatchers.IO) {
         folder.mkdirs()
         val json = runCatching {
             python(context).getModule("zajil_video")
-                .callAttr("download_hls", url, formatId, folder.path, listener, ToolsUpdate.ytDlpZip(context)?.path, cookies, referer)
+                .callAttr("download_hls", url, formatId, folder.path, listener, ToolsUpdate.ytDlpZip(context)?.path, cookies, referer, name)
                 .toString()
         }.getOrElse { return@withContext HlsEnd.Failed(it.message.orEmpty()) }
         val o = org.json.JSONObject(json)

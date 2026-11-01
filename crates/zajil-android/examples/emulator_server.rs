@@ -120,6 +120,8 @@ fn serve_dir(
             "m3u8" => Some("application/vnd.apple.mpegurl"),
             "mp4" => Some("video/mp4"),
             "ts" => Some("video/mp2t"),
+            "mpd" => Some("application/dash+xml"),
+            "m4s" => Some("video/iso.segment"),
             _ => None,
         };
         if let Some(kind) = kind {

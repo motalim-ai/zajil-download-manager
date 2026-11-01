@@ -20,6 +20,8 @@ data class Format(
     val hasDrm: Boolean,
     /** An HLS playlist: yt-dlp downloads it itself (A6). */
     val hls: Boolean = false,
+    /** A DASH stream (a picture or a sound in pieces): yt-dlp downloads it itself, the app joins it. */
+    val dash: Boolean = false,
     /**
      * The cookies its address needs, which yt-dlp got while reading the
      * page (TikTok's): in memory only, sent to that address only.
@@ -93,6 +95,7 @@ data class VideoInfo(
                         userAgent = f.optJSONObject("http_headers")?.str("User-Agent"),
                         hasDrm = f.optBoolean("has_drm"),
                         hls = f.optBoolean("hls"),
+                        dash = f.optBoolean("dash"),
                         cookieHeader = f.str("cookie_header"),
                     )
                 }
@@ -230,11 +233,12 @@ object VideoChoice {
             return Picked(null, audio, Container.M4a)
         }
         val videos = info.formats.filter { it.height == height && muxable(it) != null }
-            // H.264 in MP4 first: every player plays it.
-            .sortedWith(compareBy<Format> { if (muxable(it) == Container.Mp4) 0 else 1 }.thenByDescending { it.tbr ?: 0.0 })
+            // H.264 in MP4 first: every player plays it. A direct file before
+            // DASH's pieces: Zajil's engine resumes it with several connections.
+            .sortedWith(compareBy<Format> { if (muxable(it) == Container.Mp4) 0 else 1 }.thenBy { if (it.dash) 1 else 0 }.thenByDescending { it.tbr ?: 0.0 })
         for (video in videos) {
             val container = muxable(video)!!
-            val audio = audios.filter { fits(it, container) }.maxWithOrNull(bestSound) ?: continue
+            val audio = audios.filter { fits(it, container) }.maxWithOrNull(compareBy<Format> { if (it.dash) 0 else 1 }.then(bestSound)) ?: continue
             return Picked(video, audio, container)
         }
         // A whole file of that height (or the page's best one, [WHOLE]):

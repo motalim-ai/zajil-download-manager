@@ -61,7 +61,12 @@ data class VideoJob(
     val refreshed: Boolean = false,
     /** An HLS playlist: yt-dlp downloads its one stream, and MediaMuxer makes it MP4 (A6). */
     val hls: Boolean = false,
+    /** DASH (A6): yt-dlp downloads each stream in turn, and MediaMuxer joins them. */
+    val dash: Boolean = false,
 ) {
+    /** Downloaded by yt-dlp, not by Zajil's engine. */
+    val byYtDlp get() = hls || dash
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("title", title)
         put("container", container.name)
@@ -69,6 +74,7 @@ data class VideoJob(
         put("choice", choice)
         put("refreshed", refreshed)
         put("hls", hls)
+        put("dash", dash)
     }
 
     companion object {
@@ -79,6 +85,7 @@ data class VideoJob(
             choice = o.optString("choice"),
             refreshed = o.optBoolean("refreshed"),
             hls = o.optBoolean("hls"),
+            dash = o.optBoolean("dash"),
         )
     }
 }

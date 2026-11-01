@@ -197,9 +197,12 @@ class DownloadCenter(private val context: Context) {
     fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String, browser: BrowserLink? = null): Long {
         val hls = picked.video?.hls == true
         val formats = listOfNotNull(picked.video, picked.audio)
+        val dash = !hls && formats.any { it.dash }
         val streams = formats.map {
             val name = when {
                 hls -> "stream"
+                dash && it == picked.video -> "video"
+                dash -> "audio"
                 it == picked.video -> "video.${it.ext}"
                 else -> "audio.${it.ext}"
             }
@@ -214,7 +217,7 @@ class DownloadCenter(private val context: Context) {
                 status = Status.Queued,
                 order = order,
                 total = picked.size,
-                video = VideoJob(info.title, picked.container, streams, choice, hls = hls),
+                video = VideoJob(info.title, picked.container, streams, choice, hls = hls, dash = dash),
                 page = browser?.page,
                 cookieSource = browser?.source ?: CookieSource.None,
                 browserAgent = browser?.userAgent,
@@ -354,7 +357,7 @@ class DownloadCenter(private val context: Context) {
             download.file?.let { if (download.video != null) File(it).delete() }
             // HLS: yt-dlp's fragments and notes, in this download's own folder
             // (deleting removes a link itself, never its target).
-            if (download.video?.hls == true) folderOf(id).listFiles()?.forEach { it.delete() }
+            if (download.video?.byYtDlp == true) folderOf(id).listFiles()?.forEach { it.delete() }
         }
         // Only if empty: never anything else that might be there.
         folderOf(id).delete()
@@ -447,7 +450,7 @@ class DownloadCenter(private val context: Context) {
 
     private fun startStreams(download: Download) {
         val video = download.video ?: return
-        if (video.hls) {
+        if (video.byYtDlp) {
             if (video.streams.all { it.finished }) merge(download) else startHls(download)
             return
         }
@@ -530,7 +533,7 @@ class DownloadCenter(private val context: Context) {
             val folder = folderOf(download.id)
             val output = File(folder, "${safeName(video.title, download.id)}.${video.container.ext}")
             if (inputs.size == 1 && !video.hls) {
-                // One whole file (A6): nothing to join, only its name.
+                // One whole file (A6), or one DASH stream: nothing to join, only its name.
                 if (!inputs[0].renameTo(output)) {
                     fail(download.id, Problem.OTHER, "could not name the file")
                     return@launch
@@ -627,13 +630,19 @@ class DownloadCenter(private val context: Context) {
     }
 
     /**
-     * An HLS video (A6): yt-dlp downloads its fragments in the app's Python
-     * (the engine does not download HLS), reporting as the engine does.
+     * An HLS or DASH video (A6): yt-dlp downloads its fragments in the app's
+     * Python (the engine does not download them), one stream after the
+     * other (DASH's picture, then its sound), reporting as the engine does.
      * Stopped, it continues later from the fragments it has.
      */
     private fun startHls(download: Download) {
         val video = download.video ?: return
-        val stream = video.streams.firstOrNull() ?: return
+        val index = video.streams.indexOfFirst { !it.finished }
+        if (index < 0) {
+            merge(download)
+            return
+        }
+        val stream = video.streams[index]
         val id = download.id
         val stop = AtomicBoolean(false)
         if (hlsStops.putIfAbsent(id, stop) != null) return
@@ -652,7 +661,7 @@ class DownloadCenter(private val context: Context) {
                                     d
                                 } else {
                                     val streams = v.streams.mapIndexed { i, s ->
-                                        if (i == 0) s.copy(done = done, total = total.takeIf { it > 0 } ?: s.total) else s
+                                        if (i == index) s.copy(done = done, total = total.takeIf { it > 0 } ?: s.total) else s
                                     }
                                     d.copy(video = v.copy(streams = streams)).withTotals()
                                 }
@@ -665,6 +674,7 @@ class DownloadCenter(private val context: Context) {
                 },
                 cookiesFor(download),
                 download.page,
+                stream.name,
             )
             hlsStops.remove(id)
             when (end) {
@@ -672,8 +682,9 @@ class DownloadCenter(private val context: Context) {
                     requeued.remove(id)
                     interrupted.remove(id)
                     val size = end.file.length()
-                    editStream(id, 0) { it.copy(file = end.file.path, finished = true, done = size, total = size) }
-                    if (cancelled.remove(id)) remove(id) else find(id)?.let(::merge)
+                    editStream(id, index) { it.copy(file = end.file.path, finished = true, done = size, total = size) }
+                    // DASH: the next stream, then the join.
+                    if (cancelled.remove(id)) remove(id) else find(id)?.let(::startHls)
                 }
                 YtDlp.HlsEnd.Stopped ->
                     if (cancelled.remove(id)) remove(id) else edit(id) { it.copy(status = stoppedAs(id, Status.Paused)) }

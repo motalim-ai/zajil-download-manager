@@ -211,6 +211,22 @@ class VideoChoiceTest {
     }
 
     @Test
+    fun dash_streams_are_joined_and_a_direct_file_comes_first() {
+        val dashVideo = video("dash-v720", 720, "avc1.64001f", "mp4").copy(dash = true)
+        val dashAudio = sound("dash-a", "mp4a.40.2", "m4a", null, "DASH audio").copy(dash = true)
+        val only = info(dashVideo, dashAudio)
+        assertEquals(listOf(720), VideoChoice.qualities(only))
+        val picked = VideoChoice.pick(only, 720, VideoChoice.sounds(only).single())!!
+        assertTrue(picked.video!!.dash && picked.audio!!.dash)
+        assertEquals(Container.Mp4, picked.container)
+        // The same height as a direct file too: the engine's file, and its direct sound.
+        val both = info(dashVideo, dashAudio, video("137", 720, "avc1.64001f", "mp4"), sound("140", "mp4a.40.2", "m4a", null, null))
+        val direct = VideoChoice.pick(both, 720, VideoChoice.sounds(both).first())!!
+        assertEquals("137", direct.video!!.id)
+        assertEquals("140", direct.audio!!.id)
+    }
+
+    @Test
     fun hls_is_one_stream_saved_as_mp4_never_joined() {
         val playlist = Format("hls-720", "mp4", "avc1", "mp4a", 720, null, 2000.0, null, null, null, null, "https://l/720.m3u8", null, false, hls = true)
         val i = info(playlist)

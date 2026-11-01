@@ -117,9 +117,8 @@ class MainActivity : ZajilActivity() {
         when (found) {
             is Found.SitePage -> readVideo(found.url, browser.linkFor(found.url))
             is Found.Media -> when (found.kind) {
-                MediaKind.Hls -> readVideo(found.url, browser.linkFor(found.url), browser.page.value?.title)
+                MediaKind.Hls, MediaKind.Dash -> readVideo(found.url, browser.linkFor(found.url), browser.page.value?.title)
                 MediaKind.File -> offer.value = Offer(found.url, Source.Browser, browser.linkFor(found.url))
-                MediaKind.Dash -> {}
             }
             is Found.Element -> found.src?.let { src ->
                 if (Finds.kindOf(src) == MediaKind.Hls) {

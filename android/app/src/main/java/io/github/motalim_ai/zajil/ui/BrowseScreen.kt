@@ -396,7 +396,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            val downloadable = found.count { !(it is Found.Element && it.protected) && !(it is Found.Media && it.kind == MediaKind.Dash) }
+            val downloadable = found.count { !(it is Found.Element && it.protected) }
             if (found.isNotEmpty()) {
                 FoundButton(downloadable.coerceAtLeast(0), Modifier.align(Alignment.BottomStart).padding(16.dp)) { listing = true }
             }
@@ -509,7 +509,7 @@ private fun FoundSheet(found: List<Found>, page: io.github.motalim_ai.zajil.brow
 private fun FoundRow(item: Found, page: io.github.motalim_ai.zajil.browser.PageState, onPick: () -> Unit) {
     val c = Z.colors
     val (title, detail, duration) = describe(item, page)
-    val usable = !(item is Found.Element && item.protected) && !(item is Found.Media && item.kind == MediaKind.Dash)
+    val usable = !(item is Found.Element && item.protected)
     val shape = RoundedCornerShape(16.dp)
     Row(
         Modifier.fillMaxWidth().clip(shape).background(c.sunken).border(1.dp, c.line, shape).padding(12.dp),
@@ -560,7 +560,7 @@ private fun describe(item: Found, page: io.github.motalim_ai.zajil.browser.PageS
         is Found.Media -> when (item.kind) {
             MediaKind.File -> Triple(nameOf(item.url), stringResource(R.string.found_file, extOf(item.url).uppercase(), hostOf(item.url)), item.duration)
             MediaKind.Hls -> Triple(pageTitle, stringResource(R.string.found_hls, hostOf(item.url)), item.duration)
-            MediaKind.Dash -> Triple(pageTitle, stringResource(R.string.found_dash), item.duration)
+            MediaKind.Dash -> Triple(pageTitle, stringResource(R.string.found_dash, hostOf(item.url)), item.duration)
         }
         is Found.Element -> if (item.protected) {
             Triple(pageTitle, stringResource(R.string.found_protected), item.duration)

@@ -251,7 +251,7 @@
     <string name="found_site_page">A video page Zajil reads; you choose the quality next</string>
     <string name="found_file">%1$s file from %2$s</string>
     <string name="found_hls">HLS stream (m3u8) from %1$s</string>
-    <string name="found_dash">DASH stream (mpd): Zajil does not download it yet</string>
+    <string name="found_dash">DASH stream (mpd) from %1$s</string>
     <string name="found_protected">Copy-protected, so Zajil does not download it</string>
     <string name="found_element">A video on the page · %1$d×%2$d</string>
     <string name="sign_in_note">Some sites ask you to sign in before their videos can be downloaded. Sign in here, in Zajil\'s browser: it stays on your phone and goes only to that site.</string>

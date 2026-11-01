@@ -288,7 +288,7 @@
     <!-- %1$s نوع الملف، و%2$s موقعه. -->
     <string name="found_file">ملف %1$s من %2$s</string>
     <string name="found_hls">بث HLS ‏(m3u8) من %1$s</string>
-    <string name="found_dash">بث DASH ‏(mpd): لا يحمّله زاجِل بعد</string>
+    <string name="found_dash">بث DASH ‏(mpd) من %1$s</string>
     <string name="found_protected">محمي من النسخ، فلا يحمّله زاجِل</string>
     <!-- %1$d العرض، و%2$d الارتفاع. -->
     <string name="found_element">فيديو في الصفحة · %1$d×%2$d</string>

@@ -77,6 +77,10 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
                     # HLS: yt-dlp downloads it itself ([download_hls]).
                     entry = {k: f.get(k) for k in FORMAT_FIELDS}
                     entry["hls"] = True
+                elif f.get("protocol") in ("http_dash_segments", "http_dash_segments_generator"):
+                    # DASH: its pieces too ([download_hls]), one stream each, joined by the app.
+                    entry = {k: f.get(k) for k in FORMAT_FIELDS}
+                    entry["dash"] = True
                 else:
                     continue
                 found.append(entry)
@@ -150,10 +154,11 @@ class _Stopped(Exception):
     pass
 
 
-def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies=None, referer=None):
-    """Downloads the HLS format [format_id] of [url] into [out_dir] with
-    yt-dlp's own fragment downloader (no FFmpeg: the fragments are joined
-    as MPEG-TS, which the app turns into MP4 with Android's MediaMuxer).
+def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies=None, referer=None, name="stream"):
+    """Downloads the HLS or DASH format [format_id] of [url] into [out_dir]
+    as [name].<ext>, with yt-dlp's own fragment downloader (no FFmpeg: HLS
+    fragments are joined as MPEG-TS, which the app turns into MP4 with
+    Android's MediaMuxer; DASH's are fragmented MP4, joined by it too).
     Again it continues from the fragments already there. [listener] is the
     app's: `progress(done, total)` and `stopping()`. Returns JSON:
     {"file": path}, {"stopped": true} or {"error": ...}.
@@ -179,7 +184,7 @@ def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies
         "plugin_dirs": [],
         "remote_components": [],
         "format": format_id,
-        "outtmpl": {"default": os.path.join(out_dir, "stream.%(ext)s")},
+        "outtmpl": {"default": os.path.join(out_dir, name + ".%(ext)s")},
         "hls_use_mpegts": True,
         "continuedl": True,
         "fixup": "never",
