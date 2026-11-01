@@ -239,8 +239,17 @@ class VideoChoiceTest {
             "https://www.tiktok.com/@u/video/7300000000000000000",
             "https://vimeo.com/123",
             "https://www.dailymotion.com/video/x8",
+            "https://www.snapchat.com/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYYWtidGhudGZpAX1TKn0JAX1TKnXJAAAAAA?share_id=x&locale=ar",
+            "https://snapchat.com/@someone/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYYWtidGhudGZp",
+            "https://t.snapchat.com/AbC123xy",
+            "https://www.snapchat.com/t/AbC123xy",
         ).forEach { assertTrue(it, VideoPages.isVideoPage(it)) }
-        listOf("https://www.instagram.com/", "https://x.com/user", "https://www.tiktok.com/@u", "ftp://x.com/u/status/1")
+        listOf(
+            "https://www.instagram.com/", "https://x.com/user", "https://www.tiktok.com/@u", "ftp://x.com/u/status/1",
+            // A profile, its Story page, a chat: not Spotlight videos.
+            "https://www.snapchat.com/add/someone", "https://www.snapchat.com/@someone", "https://story.snapchat.com/p/1/2",
+            "https://web.snapchat.com/", "https://accounts.snapchat.com/",
+        )
             .forEach { assertFalse(it, VideoPages.isVideoPage(it)) }
     }
 }

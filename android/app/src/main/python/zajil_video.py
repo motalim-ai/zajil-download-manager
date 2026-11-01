@@ -61,9 +61,13 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
             _add_cookies(ydl, url, cookies)
+            url = _snapchat_spotlight(ydl, url)
             info = ydl.sanitize_info(ydl.extract_info(url, download=False))
             found = []
-            for f in info.get("formats") or []:
+            # A page of one file (Snapchat's Spotlight) has its address on
+            # the video itself, no list of formats.
+            listed = info.get("formats") or ([dict(info, format_id=info.get("format_id") or "0")] if info.get("url") else [])
+            for f in listed:
                 if not f.get("url"):
                     continue
                 if f.get("protocol") in ("https", "http"):
@@ -90,6 +94,28 @@ def version(updated_yt_dlp=None):
         sys.path.insert(0, updated_yt_dlp)
     import yt_dlp
     return yt_dlp.version.__version__
+
+
+def _snapchat_spotlight(ydl, url):
+    """A Snapchat Spotlight link as yt-dlp knows it, snapchat.com/spotlight/ID:
+    a shared short link (t.snapchat.com/X, snapchat.com/t/X) is followed
+    first, by yt-dlp's own connection, and «/@user/spotlight/ID» is the same
+    video. Any other link is returned as it is."""
+    import re
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if host not in ("snapchat.com", "www.snapchat.com", "t.snapchat.com"):
+        return url
+    if host == "t.snapchat.com" or parts.path.startswith("/t/"):
+        try:
+            from yt_dlp.networking import Request
+            with ydl.urlopen(Request(url, method="HEAD")) as response:
+                url = response.url
+        except Exception:
+            return url
+    spotlight = re.search(r"^https://(?:www\.)?snapchat\.com/(?:@[\w.-]+/)?spotlight/([\w-]+)", url)
+    return f"https://www.snapchat.com/spotlight/{spotlight.group(1)}" if spotlight else url
 
 
 def _site(url):

@@ -142,7 +142,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
             onFailure = { e -> Found.Failed(if (e is EngineException.Probe) problemText(e.problem) else R.string.problem_other) },
         )
         val info = (found as? Found.Info)?.info
-        if (info != null && !nameEdited) name = info.name
+        if (info != null && !nameEdited) name = FileNames.withType(info.name, info.contentType)
     }
 
     val title = stringResource(

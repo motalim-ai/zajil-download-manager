@@ -40,4 +40,14 @@ class FileNamesTest {
         }
         assertEquals("", FileNames.display(""))
     }
+
+    @Test
+    fun aCdnNameGetsItsMediaExtension() {
+        assertEquals("3weU6RoMs48WpDiakllyR.1034.IRZXSOY.mp4", FileNames.withType("3weU6RoMs48WpDiakllyR.1034.IRZXSOY", "video/mp4"))
+        assertEquals("clip.mp4", FileNames.withType("clip.mp4", "video/mp4"))
+        assertEquals("clip.m4v", FileNames.withType("clip.m4v", "video/mp4; codecs=avc1"))
+        assertEquals("report.pdf", FileNames.withType("report.pdf", "application/pdf"))
+        assertEquals("song", FileNames.withType("song", null))
+        assertEquals("voice.mp3", FileNames.withType("voice", "audio/mpeg"))
+    }
 }

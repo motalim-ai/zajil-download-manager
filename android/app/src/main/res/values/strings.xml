@@ -310,8 +310,8 @@
     <string name="site_facebook">فيسبوك</string>
     <string name="site_instagram">إنستغرام</string>
     <string name="site_tiktok">تيك توك</string>
-    <string name="site_soundcloud">ساوند كلاود</string>
-    <string name="site_vimeo">فيميو</string>
+    <string name="site_snapchat">سناب شات</string>
+    <string name="site_motalim">متعلم</string>
     <plurals name="found_on_page">
         <item quantity="zero">لا فيديو في الصفحة</item>
         <item quantity="one">في الصفحة فيديو</item>

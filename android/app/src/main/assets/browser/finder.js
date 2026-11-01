@@ -36,7 +36,7 @@
    * Zajil checks it again: a video page of the page's own site, or nothing.
    */
   const PAGE =
-    /^https:\/\/(?:www\.|m\.|web\.|mobile\.)?(?:instagram\.com\/(?:p|reel|reels|tv)\/[\w-]+|facebook\.com\/(?:[^?#]+\/videos\/\d+|watch\/?\?v=\d+|reel\/\d+)|tiktok\.com\/@[\w.-]+\/video\/\d+|(?:x|twitter)\.com\/\w+\/status\/\d+)/;
+    /^https:\/\/(?:www\.|m\.|web\.|mobile\.)?(?:instagram\.com\/(?:p|reel|reels|tv)\/[\w-]+|facebook\.com\/(?:[^?#]+\/videos\/\d+|watch\/?\?v=\d+|reel\/\d+)|tiktok\.com\/@[\w.-]+\/video\/\d+|(?:x|twitter)\.com\/\w+\/status\/\d+|snapchat\.com\/(?:@[\w.-]+\/)?spotlight\/[\w-]+)/;
   const pageOf = (href) => {
     try {
       // Instagram's «/user/reel/ID» is its «/reel/ID».

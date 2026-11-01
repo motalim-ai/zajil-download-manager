@@ -294,6 +294,11 @@ object VideoPages {
         Regex("^(vm|vt)\\.tiktok\\.com$") to Regex("^/[\\w-]+"),
         Regex("^(www\\.)?vimeo\\.com$") to Regex("^/\\d+"),
         Regex("^(www\\.)?dailymotion\\.com$") to Regex("^/video/"),
+        // Snapchat's public Spotlight videos (yt-dlp's SnapchatSpotlight), by
+        // their page or a shared short link. A Story page is not one: the
+        // browser finds its files (layers 2 and 3). Never a private snap.
+        Regex("^(www\\.)?snapchat\\.com$") to Regex("^/(spotlight/|@[^/]+/spotlight/|t/)[\\w-]+"),
+        Regex("^t\\.snapchat\\.com$") to Regex("^/[\\w-]+"),
     )
 
     fun isVideoPage(url: String): Boolean {

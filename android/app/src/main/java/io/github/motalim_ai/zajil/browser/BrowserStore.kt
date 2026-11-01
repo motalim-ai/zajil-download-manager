@@ -26,6 +26,9 @@ data class Visit(val title: String, val url: String)
 class BrowserStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("browser", Context.MODE_PRIVATE)
 
+    /** Each site's own icon, kept until its shortcut, its visits or its data go. */
+    val icons = SiteIcons(context, prefs)
+
     private val _shortcuts = MutableStateFlow(readShortcuts())
     val shortcuts: StateFlow<List<Shortcut>> = _shortcuts.asStateFlow()
 
@@ -36,9 +39,6 @@ class BrowserStore(private val context: Context) {
     val sites: StateFlow<List<String>> = _sites.asStateFlow()
 
     fun addShortcut(shortcut: Shortcut) = saveShortcuts(_shortcuts.value.filterNot { it.url == shortcut.url } + shortcut)
-
-    /** Each site's own icon, kept until its shortcut, its visits or its data go. */
-    val icons = SiteIcons(context, prefs)
 
     fun removeShortcut(shortcut: Shortcut) {
         saveShortcuts(_shortcuts.value - shortcut)
@@ -105,27 +105,44 @@ class BrowserStore(private val context: Context) {
     }
 
     private fun saveShortcuts(list: List<Shortcut>) {
-        prefs.edit().putString(SHORTCUTS, JSONArray(list.map { JSONObject().put("name", it.name).put("url", it.url) }).toString()).apply()
+        prefs.edit()
+            .putString(SHORTCUTS, JSONArray(list.map { JSONObject().put("name", it.name).put("url", it.url) }).toString())
+            .putInt(PRESETS, ShortcutPresets.VERSION)
+            .apply()
         _shortcuts.value = list
     }
 
     private fun readShortcuts(): List<Shortcut> {
-        // Never changed: the design's sites, named in the app's language.
+        // Never changed: the app's sites, named in the app's language.
         val text = prefs.getString(SHORTCUTS, null) ?: return defaults()
-        return runCatching {
+        val stored = runCatching {
             JSONArray(text).let { a -> (0 until a.length()).map { a.getJSONObject(it).let { o -> Shortcut(o.getString("name"), o.getString("url")) } } }
-        }.getOrDefault(defaults())
+        }.getOrNull() ?: return defaults()
+        // Changed by the user: it follows the presets once when they change.
+        val from = prefs.getInt(PRESETS, 1)
+        if (from >= ShortcutPresets.VERSION) return stored
+        val list = ShortcutPresets.migrate(stored, from, presets())
+        prefs.edit()
+            .putString(SHORTCUTS, JSONArray(list.map { JSONObject().put("name", it.name).put("url", it.url) }).toString())
+            .putInt(PRESETS, ShortcutPresets.VERSION)
+            .apply()
+        val left = list.mapNotNull { SiteIcons.siteOf(it.url) }.toSet()
+        ShortcutPresets.droppedSince(from).mapNotNull(SiteIcons::siteOf).filter { it !in left }.forEach(icons::remove)
+        return list
     }
 
-    private fun defaults() = listOf(
-        Shortcut(context.getString(R.string.site_youtube), "https://m.youtube.com/"),
-        Shortcut(context.getString(R.string.site_facebook), "https://m.facebook.com/"),
-        Shortcut(context.getString(R.string.site_instagram), "https://www.instagram.com/"),
-        Shortcut("X", "https://x.com/"),
-        Shortcut(context.getString(R.string.site_tiktok), "https://www.tiktok.com/"),
-        Shortcut(context.getString(R.string.site_soundcloud), "https://m.soundcloud.com/"),
-        Shortcut(context.getString(R.string.site_vimeo), "https://vimeo.com/"),
+    private fun presets() = listOfNotNull(
+        Preset(context.getString(R.string.site_youtube), "https://m.youtube.com/", since = 1),
+        // «متعلم»: placeholder until the owner sends the channel's address.
+        ShortcutPresets.MOTALIM_CHANNEL?.let { Preset(context.getString(R.string.site_motalim), it, since = 3) },
+        Preset(context.getString(R.string.site_facebook), "https://m.facebook.com/", since = 1),
+        Preset(context.getString(R.string.site_instagram), "https://www.instagram.com/", since = 1),
+        Preset("X", "https://x.com/", since = 1),
+        Preset(context.getString(R.string.site_tiktok), "https://www.tiktok.com/", since = 1),
+        Preset(context.getString(R.string.site_snapchat), "https://www.snapchat.com/spotlight", since = 2),
     )
+
+    private fun defaults() = presets().map { Shortcut(it.name, it.url) }
 
     private fun readVisits(): List<Visit> = runCatching {
         JSONArray(prefs.getString(RECENT, "[]")).let { a ->
@@ -135,6 +152,7 @@ class BrowserStore(private val context: Context) {
 
     companion object {
         private const val SHORTCUTS = "shortcuts"
+        private const val PRESETS = "presets_version"
         private const val RECENT = "recent"
         private const val SITES = "sites"
         private const val MAX_RECENT = 8

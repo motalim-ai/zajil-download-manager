@@ -271,8 +271,8 @@
     <string name="site_facebook">Facebook</string>
     <string name="site_instagram">Instagram</string>
     <string name="site_tiktok">TikTok</string>
-    <string name="site_soundcloud">SoundCloud</string>
-    <string name="site_vimeo">Vimeo</string>
+    <string name="site_snapchat">Snapchat</string>
+    <string name="site_motalim">Motalim</string>
     <plurals name="found_on_page">
         <item quantity="one">%d video on the page</item>
         <item quantity="other">%d videos on the page</item>

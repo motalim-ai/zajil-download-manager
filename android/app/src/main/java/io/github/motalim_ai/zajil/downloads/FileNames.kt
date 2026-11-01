@@ -16,6 +16,24 @@ object FileNames {
     const val RLI = '⁧'
     const val PDI = '⁩'
 
+    /** The server's media types and their extensions. */
+    private val extensions = mapOf(
+        "video/mp4" to "mp4", "video/webm" to "webm", "video/quicktime" to "mov",
+        "audio/mp4" to "m4a", "audio/mpeg" to "mp3", "audio/ogg" to "ogg",
+    )
+    private val media = setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "m4a", "mp3", "ogg", "oga", "opus", "aac", "wav", "flac")
+
+    /**
+     * [name] with the extension of its [contentType] when it has no media
+     * one: a CDN's file name («3weU6….IRZXSOY», Snapchat's Stories) would
+     * not open as a video. Any other name stays as it is.
+     */
+    fun withType(name: String, contentType: String?): String {
+        val ext = extensions[contentType?.substringBefore(';')?.trim()?.lowercase()] ?: return name
+        if (name.isBlank() || name.substringAfterLast('.', "").lowercase() in media) return name
+        return "$name.$ext"
+    }
+
     /** [name] with its isolates. */
     fun display(name: String): String {
         val out = StringBuilder(name.length + 4)
