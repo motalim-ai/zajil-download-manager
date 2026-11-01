@@ -65,6 +65,47 @@ object Muxer {
         }
     }
 
+    /**
+     * Writes [output] (MP4) from every track of [input]: HLS's MPEG-TS, as
+     * yt-dlp joined its fragments (A6), with no conversion.
+     */
+    @Throws(IOException::class)
+    fun remux(input: File, output: File) {
+        output.delete()
+        val muxer = MediaMuxer(output.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(input.path)
+            if (extractor.trackCount < 1) throw IOException("a stream with no track")
+            val tracks = IntArray(extractor.trackCount) { i ->
+                extractor.selectTrack(i)
+                muxer.addTrack(extractor.getTrackFormat(i))
+            }
+            muxer.start()
+            val buffer = ByteBuffer.allocate(4 * 1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+            while (true) {
+                val track = extractor.sampleTrackIndex
+                if (track < 0) break
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) break
+                info.set(0, size, extractor.sampleTime, flagsOf(extractor.sampleFlags))
+                muxer.writeSampleData(tracks[track], buffer, info)
+                if (!extractor.advance()) break
+            }
+            muxer.stop()
+        } catch (e: IllegalStateException) {
+            output.delete()
+            throw IOException("MediaMuxer: ${e.message}", e)
+        } catch (e: IllegalArgumentException) {
+            output.delete()
+            throw IOException("MediaMuxer: ${e.message}", e)
+        } finally {
+            extractor.release()
+            runCatching { muxer.release() }
+        }
+    }
+
     private fun flagsOf(sampleFlags: Int): Int {
         var flags = 0
         if (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME

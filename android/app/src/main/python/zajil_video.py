@@ -23,7 +23,7 @@ INFO_FIELDS = (
 )
 
 
-def formats(url, qjs, updated_yt_dlp=None, cache_dir=None):
+def formats(url, qjs, updated_yt_dlp=None, cache_dir=None, cookies=None, referer=None):
     """The video at [url] and its formats, as JSON: {"error": ...} on failure.
 
     [updated_yt_dlp] is a newer yt-dlp (its zip, checked by the app against
@@ -31,6 +31,12 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None):
     [cache_dir] is the app's own cache folder for yt-dlp: YouTube's player
     code and the answers to its challenges, which QuickJS-NG takes minutes
     to work out on a phone. Nothing of the user's is kept there.
+    [cookies] is the in-app browser's `Cookie` header for [url] (the user
+    signed in there): given to yt-dlp for [url]'s site only, in memory,
+    never written. A format that needs cookies (some sites set their own
+    while the page is read) says so in its `cookie_header`, for the app's
+    engine to send to that format's address only, also in memory.
+    [referer] is the page a playlist was found on, for its server.
     """
     if updated_yt_dlp and updated_yt_dlp not in sys.path and "yt_dlp" not in sys.modules:
         sys.path.insert(0, updated_yt_dlp)
@@ -50,16 +56,28 @@ def formats(url, qjs, updated_yt_dlp=None, cache_dir=None):
         "socket_timeout": 20,
         "extractor_retries": 2,
     }
+    if referer:
+        options["http_headers"] = {"Referer": referer}
     try:
         with yt_dlp.YoutubeDL(options) as ydl:
+            _add_cookies(ydl, url, cookies)
             info = ydl.sanitize_info(ydl.extract_info(url, download=False))
+            found = []
+            for f in info.get("formats") or []:
+                if not f.get("url"):
+                    continue
+                if f.get("protocol") in ("https", "http"):
+                    entry = {k: f.get(k) for k in FORMAT_FIELDS}
+                    entry["cookie_header"] = ydl.cookiejar.get_cookie_header(f["url"]) or None
+                elif f.get("protocol") in ("m3u8_native", "m3u8"):
+                    # HLS: yt-dlp downloads it itself ([download_hls]).
+                    entry = {k: f.get(k) for k in FORMAT_FIELDS}
+                    entry["hls"] = True
+                else:
+                    continue
+                found.append(entry)
     except Exception as e:  # yt-dlp's own errors say what went wrong
         return json.dumps({"error": str(e)[:500], "version": yt_dlp.version.__version__})
-    found = []
-    for f in info.get("formats") or []:
-        if f.get("protocol") not in ("https", "http") or not f.get("url"):
-            continue
-        found.append({k: f.get(k) for k in FORMAT_FIELDS})
     result = {k: info.get(k) for k in INFO_FIELDS}
     result["formats"] = found
     result["version"] = yt_dlp.version.__version__
@@ -72,3 +90,90 @@ def version(updated_yt_dlp=None):
         sys.path.insert(0, updated_yt_dlp)
     import yt_dlp
     return yt_dlp.version.__version__
+
+
+def _site(url):
+    """[url]'s host without «www.» or «m.»: the cookies' domain."""
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).hostname or "").lower()
+    for prefix in ("www.", "m.", "mobile."):
+        if host.startswith(prefix):
+            return host[len(prefix):]
+    return host
+
+
+def _add_cookies(ydl, url, cookies):
+    """The browser's [cookies] (a `Cookie` header) for [url]'s site only."""
+    if not cookies:
+        return
+    import http.cookiejar
+    site = _site(url)
+    if not site:
+        return
+    for part in cookies.split(";"):
+        name, sep, value = part.strip().partition("=")
+        if not sep or not name:
+            continue
+        ydl.cookiejar.set_cookie(http.cookiejar.Cookie(
+            0, name, value, None, False, "." + site, True, True, "/", True,
+            True, None, True, None, None, {},
+        ))
+
+
+class _Stopped(Exception):
+    pass
+
+
+def download_hls(url, format_id, out_dir, listener, updated_yt_dlp=None, cookies=None, referer=None):
+    """Downloads the HLS format [format_id] of [url] into [out_dir] with
+    yt-dlp's own fragment downloader (no FFmpeg: the fragments are joined
+    as MPEG-TS, which the app turns into MP4 with Android's MediaMuxer).
+    Again it continues from the fragments already there. [listener] is the
+    app's: `progress(done, total)` and `stopping()`. Returns JSON:
+    {"file": path}, {"stopped": true} or {"error": ...}.
+    """
+    if updated_yt_dlp and updated_yt_dlp not in sys.path and "yt_dlp" not in sys.modules:
+        sys.path.insert(0, updated_yt_dlp)
+    import os
+    import yt_dlp
+
+    def hook(d):
+        if listener.stopping():
+            raise _Stopped()
+        done = d.get("downloaded_bytes") or 0
+        total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+        listener.progress(int(done), int(total))
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+        "cachedir": False,
+        "plugin_dirs": [],
+        "remote_components": [],
+        "format": format_id,
+        "outtmpl": {"default": os.path.join(out_dir, "stream.%(ext)s")},
+        "hls_use_mpegts": True,
+        "continuedl": True,
+        "fixup": "never",
+        "postprocessors": [],
+        "progress_hooks": [hook],
+        "socket_timeout": 20,
+        "retries": 5,
+        "fragment_retries": 5,
+    }
+    if referer:
+        options["http_headers"] = {"Referer": referer}
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            _add_cookies(ydl, url, cookies)
+            info = ydl.extract_info(url, download=True)
+            files = [d.get("filepath") for d in info.get("requested_downloads") or [] if d.get("filepath")]
+    except Exception as e:
+        if listener.stopping() or isinstance(e, _Stopped) or "_Stopped" in repr(e):
+            return json.dumps({"stopped": True})
+        return json.dumps({"error": str(e)[:500]})
+    if not files:
+        return json.dumps({"error": "yt-dlp wrote no file"})
+    return json.dumps({"file": files[0]})

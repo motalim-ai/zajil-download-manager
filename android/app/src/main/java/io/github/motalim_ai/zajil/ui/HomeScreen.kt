@@ -60,6 +60,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads
+import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.Download
 import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.NetworkState
@@ -75,7 +76,7 @@ enum class StartWhen { Now, Queue, Later }
 /** What the screens ask of the app. */
 interface DownloadActions {
     /** A link to download: a video page opens the format sheet instead. */
-    fun add(url: String, name: String? = null, start: StartWhen = StartWhen.Queue)
+    fun add(url: String, name: String? = null, start: StartWhen = StartWhen.Queue, browser: BrowserLink? = null)
     fun pause(id: Long)
     fun resume(id: Long)
     fun startNow(id: Long)

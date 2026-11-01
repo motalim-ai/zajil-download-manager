@@ -358,6 +358,7 @@ configurations.configureEach {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.webkit)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.service)
@@ -369,4 +370,6 @@ dependencies {
     implementation("${libs.jna.get()}@aar")
     implementation(libs.rustls.platform.verifier)
     testImplementation(libs.junit)
+    // Android's org.json is a stub on the JVM: the real one, for tests only.
+    testImplementation(libs.org.json)
 }

@@ -35,18 +35,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.motalim_ai.zajil.R
+import io.github.motalim_ai.zajil.browser.BrowserController
+import io.github.motalim_ai.zajil.browser.Found
 
-/** The three sections of the bottom bar. */
+/** The sections of the bottom bar. */
 enum class Tab(val icon: LineIcon, val label: Int) {
     Downloads(LineIcon.Downloads, R.string.tab_downloads),
+    Browse(LineIcon.Globe, R.string.browse),
     Queues(LineIcon.Queues, R.string.queues),
     Settings(LineIcon.Settings, R.string.settings),
 }
 
 /** The app's screen: the section the user is in, the bottom bar, and «New link» on the downloads. */
 @Composable
-fun ZajilScreen(actions: DownloadActions, onNewLink: () -> Unit) {
+fun ZajilScreen(
+    actions: DownloadActions,
+    onNewLink: () -> Unit,
+    browser: BrowserController,
+    onFound: (Found) -> Unit,
+) {
     var tab by rememberSaveable { mutableStateOf(Tab.Downloads) }
+    var signIns by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         containerColor = Z.colors.bg,
         contentWindowInsets = WindowInsets(0),
@@ -57,10 +66,12 @@ fun ZajilScreen(actions: DownloadActions, onNewLink: () -> Unit) {
     ) { padding ->
         when (tab) {
             Tab.Downloads -> HomeScreen(actions, padding)
+            Tab.Browse -> BrowseScreen(browser, onFound, onSignIns = { signIns = true }, padding)
             Tab.Queues -> QueueScreen(padding)
-            Tab.Settings -> SettingsScreen(padding)
+            Tab.Settings -> SettingsScreen(padding, browser, onSignIns = { signIns = true })
         }
     }
+    if (signIns) SignInsSheet(browser, onDismiss = { signIns = false })
 }
 
 @Composable

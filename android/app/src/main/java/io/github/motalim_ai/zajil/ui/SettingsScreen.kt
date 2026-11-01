@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
+import io.github.motalim_ai.zajil.browser.BrowserController
 import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.downloads.Look
 import io.github.motalim_ai.zajil.downloads.Prefs
@@ -39,7 +40,7 @@ private enum class Asking { Language, Look, Connections, SpeedLimit }
 
 /** Settings, grouped as the approved design has them, with the green note at the end. */
 @Composable
-fun SettingsScreen(bottomPadding: PaddingValues) {
+fun SettingsScreen(bottomPadding: PaddingValues, browser: BrowserController, onSignIns: () -> Unit) {
     val context = LocalContext.current
     val center = context.downloads
     val prefs by center.prefs.prefs.collectAsStateWithLifecycle()
@@ -87,6 +88,23 @@ fun SettingsScreen(bottomPadding: PaddingValues) {
                 )
             }
             Group(stringResource(R.string.group_video)) { VideoTools() }
+            Group(stringResource(R.string.group_browser)) {
+                val sites by browser.store.sites.collectAsStateWithLifecycle()
+                val recent by browser.store.recent.collectAsStateWithLifecycle()
+                SettingRow(
+                    stringResource(R.string.manage_sign_ins),
+                    hint = stringResource(R.string.sign_ins_short),
+                    value = pluralStringResource(R.plurals.sites, sites.size, sites.size),
+                    onClick = onSignIns,
+                )
+                RowLine()
+                SettingRow(
+                    stringResource(R.string.clear_visited),
+                    value = if (recent.isEmpty()) stringResource(R.string.nothing_to_clear) else stringResource(R.string.clear),
+                    valueColor = if (recent.isEmpty()) c.muted else c.accent,
+                    onClick = if (recent.isEmpty()) null else ({ browser.store.clearRecent() }),
+                )
+            }
             Group(stringResource(R.string.group_update)) { AppUpdateRows() }
             PromiseNote()
         }

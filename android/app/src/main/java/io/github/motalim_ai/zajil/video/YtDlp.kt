@@ -21,16 +21,66 @@ object YtDlp {
     private val lock = Mutex()
 
     /** The video at [url] and its formats; never logs the link. */
-    suspend fun read(context: Context, url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
+    suspend fun read(
+        context: Context,
+        url: String,
+        cookies: String? = null,
+        referer: String? = null,
+    ): Result<VideoInfo> = withContext(Dispatchers.IO) {
         lock.withLock {
             val started = SystemClock.elapsedRealtime()
             val python = python(context)
             val ready = SystemClock.elapsedRealtime()
             val json = python.getModule("zajil_video")
-                .callAttr("formats", url, quickJs(context), ToolsUpdate.ytDlpZip(context)?.path, cacheDir(context))
+                .callAttr("formats", url, quickJs(context), ToolsUpdate.ytDlpZip(context)?.path, cacheDir(context), cookies, referer)
                 .toString()
             Log.i(TAG, "Python ready in ${ready - started} ms, the page read in ${SystemClock.elapsedRealtime() - ready} ms")
             VideoInfo.parse(json)
+        }
+    }
+
+    /** What [downloadHls] tells, and asks, while it works. Called on Python's thread. */
+    interface HlsListener {
+        fun progress(done: Long, total: Long)
+
+        fun stopping(): Boolean
+    }
+
+    /** How an HLS download ended. */
+    sealed interface HlsEnd {
+        data class Done(val file: java.io.File) : HlsEnd
+
+        data object Stopped : HlsEnd
+
+        data class Failed(val detail: String) : HlsEnd
+    }
+
+    /**
+     * Downloads HLS format [formatId] of [url] into [folder] with yt-dlp's
+     * own fragment downloader (A6): the engine does not download HLS. Again
+     * in the same folder, it continues from the fragments already there.
+     * Not under the lock: reading a page may go on meanwhile.
+     */
+    suspend fun downloadHls(
+        context: Context,
+        url: String,
+        formatId: String,
+        folder: java.io.File,
+        listener: HlsListener,
+        cookies: String?,
+        referer: String?,
+    ): HlsEnd = withContext(Dispatchers.IO) {
+        folder.mkdirs()
+        val json = runCatching {
+            python(context).getModule("zajil_video")
+                .callAttr("download_hls", url, formatId, folder.path, listener, ToolsUpdate.ytDlpZip(context)?.path, cookies, referer)
+                .toString()
+        }.getOrElse { return@withContext HlsEnd.Failed(it.message.orEmpty()) }
+        val o = org.json.JSONObject(json)
+        when {
+            o.optBoolean("stopped") -> HlsEnd.Stopped
+            o.has("file") -> HlsEnd.Done(java.io.File(o.getString("file")))
+            else -> HlsEnd.Failed(o.optString("error"))
         }
     }
 
@@ -41,6 +91,7 @@ object YtDlp {
         }
     }
 
+    @Synchronized
     private fun python(context: Context): Python {
         if (!Python.isStarted()) Python.start(AndroidPlatform(context.applicationContext))
         return Python.getInstance()

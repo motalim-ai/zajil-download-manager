@@ -190,7 +190,10 @@ private fun draw(icon: ColorIcon, surface: Color): ImageVector = Drawing().apply
  * The design's one-colour line icons, on a 24×24 grid: drawn in black and
  * tinted by `Icon`.
  */
-enum class LineIcon { Search, More, Downloads, Queues, Settings, Shared, Folder, Check, ChevronDown, Shield, Play }
+enum class LineIcon {
+    Search, More, Downloads, Queues, Settings, Shared, Folder, Check, ChevronDown, Shield, Play,
+    Globe, Lock, Back, Reload, Private, Clock, Plus, Close,
+}
 
 private val lineCache = HashMap<LineIcon, ImageVector>()
 
@@ -216,6 +219,15 @@ fun lineIcon(icon: LineIcon): ImageVector = synchronized(lineCache) {
                     fill(circle(12f, 12f, 11f), SolidColor(Color.White), alpha = 0.25f)
                     fill("M10 8v8l6-4z", SolidColor(Color.White))
                 }
+                LineIcon.Globe -> stroke(circle(12f, 12f, 9f) + "M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z", ink, 2f)
+                LineIcon.Lock -> stroke(rect(5f, 11f, 14f, 10f, 2f) + "M8 11V8a4 4 0 0 1 8 0v3", ink, 2.4f)
+                // «Back» points to the start: right in Arabic; mirrored for English by the caller.
+                LineIcon.Back -> stroke("M9 5l7 7-7 7", ink, 2.2f)
+                LineIcon.Reload -> stroke("M19 8a8 8 0 1 0 1 5M20 3v5h-5", ink, 2.2f)
+                LineIcon.Private -> stroke("M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16", ink, 2f)
+                LineIcon.Clock -> stroke(circle(12f, 12f, 9f) + "M12 7v5l3 2", ink, 2f)
+                LineIcon.Plus -> stroke("M12 5v14M5 12h14", ink, 2.4f)
+                LineIcon.Close -> stroke("M6 6l12 12M18 6L6 18", ink, 2.2f)
             }
         }.build()
     }

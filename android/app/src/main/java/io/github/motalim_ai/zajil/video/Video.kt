@@ -18,9 +18,23 @@ data class Format(
     val url: String,
     val userAgent: String?,
     val hasDrm: Boolean,
+    /** An HLS playlist: yt-dlp downloads it itself (A6). */
+    val hls: Boolean = false,
+    /**
+     * The cookies its address needs, which yt-dlp got while reading the
+     * page (TikTok's): in memory only, sent to that address only.
+     */
+    val cookieHeader: String? = null,
 ) {
     val hasVideo get() = vcodec != null && vcodec != "none"
     val hasAudio get() = acodec != null && acodec != "none"
+
+    /**
+     * One file with the picture and the sound (X's, Facebook's, TikTok's
+     * MP4): codecs both said, or neither (the site did not say). Played as
+     * it is, nothing to join.
+     */
+    val isWhole get() = !hasDrm && ((hasVideo && hasAudio) || (vcodec == null && acodec == null))
 
     /**
      * How much its sound is the video's own, as on the desktop
@@ -75,6 +89,8 @@ data class VideoInfo(
                         url = f.getString("url"),
                         userAgent = f.optJSONObject("http_headers")?.str("User-Agent"),
                         hasDrm = f.optBoolean("has_drm"),
+                        hls = f.optBoolean("hls"),
+                        cookieHeader = f.str("cookie_header"),
                     )
                 }
             }
@@ -114,9 +130,18 @@ enum class Container(val ext: String, val mime: String) {
     M4a("m4a", "audio/mp4"),
 }
 
-/** What to download for a choice: the picture (none for sound only) and the sound. */
-data class Picked(val video: Format?, val audio: Format, val container: Container) {
-    val size: Long? get() = audio.size?.let { a -> if (video == null) a else video.size?.plus(a) }
+/**
+ * What to download for a choice: the picture (none for sound only) and the
+ * sound; or one whole file ([audio] null: [video] has both, or an HLS
+ * playlist yt-dlp downloads).
+ */
+data class Picked(val video: Format?, val audio: Format?, val container: Container) {
+    val size: Long? get() = listOfNotNull(video, audio).map { it.size }.let { sizes ->
+        if (sizes.isEmpty() || sizes.any { it == null }) null else sizes.sumOf { it!! }
+    }
+
+    /** One file, nothing to join. */
+    val whole get() = audio == null && video != null
 }
 
 /**
@@ -127,26 +152,47 @@ data class Picked(val video: Format?, val audio: Format, val container: Containe
  */
 object VideoChoice {
     private fun muxable(f: Format): Container? = when {
-        !f.hasVideo || f.hasAudio || f.hasDrm -> null
+        !f.hasVideo || f.hasAudio || f.hasDrm || f.hls -> null
         f.vcodec!!.startsWith("avc1") -> Container.Mp4
         f.vcodec.startsWith("vp9") || f.vcodec.startsWith("vp09") -> Container.Webm
         else -> null
     }
 
     private fun fits(f: Format, container: Container): Boolean = when {
-        !f.hasAudio || f.hasVideo || f.hasDrm -> false
+        !f.hasAudio || f.hasVideo || f.hasDrm || f.hls -> false
         container == Container.Webm -> f.acodec!!.startsWith("opus")
         else -> f.acodec!!.startsWith("mp4a")
     }
 
-    /** The heights offered, highest first. */
-    fun qualities(info: VideoInfo): List<Int> =
-        info.formats.filter { muxable(it) != null }.mapNotNull { it.height }.distinct().sortedDescending()
+    /** Whole files (picture and sound in one), not HLS. */
+    private fun wholes(info: VideoInfo) = info.formats.filter { !it.hls && it.isWhole }
 
-    /** The sounds offered: the video's own first, then the dubbed ones by language. */
+    private fun playlists(info: VideoInfo) = info.formats.filter { it.hls && !it.hasDrm }
+
+    /**
+     * The heights offered, highest first: of pictures to join with a
+     * sound, of whole files, and of HLS playlists. [WHOLE] is a page's one
+     * whole file whose height the site does not say (Facebook's «hd»).
+     */
+    fun qualities(info: VideoInfo): List<Int> {
+        val heights = (info.formats.filter { muxable(it) != null } + wholes(info) + playlists(info))
+            .mapNotNull { it.height }.filter { it > 0 }.distinct().sortedDescending()
+        if (heights.isNotEmpty()) return heights
+        return if (wholes(info).isNotEmpty() || playlists(info).isNotEmpty()) listOf(WHOLE) else emptyList()
+    }
+
+    /** «Sound only» can be offered: the page has a sound alone. */
+    fun hasSoundOnly(info: VideoInfo) = info.formats.any { it.hasAudio && !it.hasVideo && !it.hasDrm && !it.hls }
+
+    /**
+     * The sounds offered: the video's own first, then the dubbed ones by
+     * language. A page of whole files only has its own sound.
+     */
     fun sounds(info: VideoInfo): List<Sound> {
-        val audios = info.formats.filter { it.hasAudio && !it.hasVideo && !it.hasDrm }
-        if (audios.isEmpty()) return emptyList()
+        val audios = info.formats.filter { it.hasAudio && !it.hasVideo && !it.hasDrm && !it.hls }
+        if (audios.isEmpty()) {
+            return if (wholes(info).isNotEmpty() || playlists(info).isNotEmpty()) listOf(Sound(null, original = true)) else emptyList()
+        }
         val top = audios.maxOf { it.soundRank }
         return audios
             .map { Sound(it.language, original = it.soundRank == top) }
@@ -160,7 +206,7 @@ object VideoChoice {
      * to go with it in one container. Null if there is none.
      */
     fun pick(info: VideoInfo, height: Int?, sound: Sound): Picked? {
-        val audios = info.formats.filter { it.hasAudio && !it.hasVideo && it.matches(sound, info) }
+        val audios = info.formats.filter { it.hasAudio && !it.hasVideo && !it.hls && it.matches(sound, info) }
         if (height == null) {
             val audio = audios.filter { fits(it, Container.M4a) }.maxWithOrNull(bestSound) ?: return null
             return Picked(null, audio, Container.M4a)
@@ -173,7 +219,27 @@ object VideoChoice {
             val audio = audios.filter { fits(it, container) }.maxWithOrNull(bestSound) ?: continue
             return Picked(video, audio, container)
         }
+        // A whole file of that height (or the page's best one, [WHOLE]):
+        // H.264 in MP4 first, then the larger.
+        if (sound.original) {
+            val whole = wholes(info).filter { if (height == WHOLE) true else it.height == height }
+                .maxWithOrNull(compareBy<Format> { if (it.ext == "mp4") 1 else 0 }.thenBy { it.height ?: 0 }.thenBy { it.size ?: 0 }.thenBy { it.tbr ?: 0.0 })
+            if (whole != null) return Picked(whole, null, containerOf(whole.ext))
+            val playlist = playlists(info).filter { if (height == WHOLE) true else it.height == height }
+                .maxWithOrNull(compareBy<Format> { it.height ?: 0 }.thenBy { it.tbr ?: 0.0 })
+            // HLS is saved as MP4 (MediaMuxer, from its MPEG-TS).
+            if (playlist != null) return Picked(playlist, null, Container.Mp4)
+        }
         return null
+    }
+
+    /** The height of a page's whole file the site gives no height for. */
+    const val WHOLE = 0
+
+    private fun containerOf(ext: String) = when (ext) {
+        "webm" -> Container.Webm
+        "m4a" -> Container.M4a
+        else -> Container.Mp4
     }
 
     /**
@@ -183,22 +249,38 @@ object VideoChoice {
     private val bestSound = compareBy<Format> { if ("drc" in it.id) 0 else 1 }.thenBy { it.tbr ?: 0.0 }
 
     private fun Format.matches(sound: Sound, info: VideoInfo): Boolean {
-        val top = info.formats.filter { it.hasAudio && !it.hasVideo }.maxOfOrNull { it.soundRank }
+        val top = info.formats.filter { it.hasAudio && !it.hasVideo && !it.hls }.maxOfOrNull { it.soundRank }
         return if (sound.original) soundRank == top else soundRank != top && language == sound.language
     }
 }
 
-/** Links Zajil reads with yt-dlp rather than downloading the page itself. */
+/**
+ * Links Zajil reads with yt-dlp rather than downloading the page itself:
+ * the desktop's list (apps/desktop/src/lib/videoSites.ts), the big sites'
+ * video pages by their own paths.
+ */
 object VideoPages {
-    private val hosts = setOf("youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "youtube-nocookie.com")
+    private val pages: List<Pair<Regex, Regex>> = listOf(
+        Regex("^(www\\.|m\\.|music\\.)?youtube\\.com$") to Regex("^/(watch|shorts/|live/|embed/)"),
+        Regex("^(www\\.)?youtube-nocookie\\.com$") to Regex("^/embed/"),
+        Regex("^youtu\\.be$") to Regex("^/[\\w-]+"),
+        Regex("^(www\\.|mobile\\.)?(x|twitter)\\.com$") to Regex("^/[^/]+/status/\\d+"),
+        Regex("^t\\.co$") to Regex("^/[\\w-]+"),
+        Regex("^(www\\.)?instagram\\.com$") to Regex("^/(p|reel|reels|tv)/"),
+        Regex("^(www\\.|m\\.|web\\.)?facebook\\.com$") to Regex("^/(.+/videos/|watch|reel/|share/(v|r)/)"),
+        Regex("^fb\\.watch$") to Regex("^/[\\w-]+"),
+        Regex("^(www\\.|m\\.)?tiktok\\.com$") to Regex("^/@[^/]+/video/\\d+"),
+        Regex("^(vm|vt)\\.tiktok\\.com$") to Regex("^/[\\w-]+"),
+        Regex("^(www\\.)?vimeo\\.com$") to Regex("^/\\d+"),
+        Regex("^(www\\.)?dailymotion\\.com$") to Regex("^/video/"),
+    )
 
     fun isVideoPage(url: String): Boolean {
-        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
-        val host = uri.host?.lowercase()?.removePrefix("www.") ?: return false
-        if (host !in hosts) return false
-        val path = uri.path.orEmpty()
-        return host == "youtu.be" || path.startsWith("/watch") || path.startsWith("/shorts/") ||
-            path.startsWith("/live/") || path.startsWith("/embed/")
+        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return false
+        if (uri.scheme?.lowercase() !in setOf("http", "https")) return false
+        val host = uri.host?.lowercase() ?: return false
+        val path = uri.rawPath.orEmpty()
+        return pages.any { (h, p) -> h.containsMatchIn(host) && p.containsMatchIn(path) }
     }
 
     /**

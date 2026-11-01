@@ -59,6 +59,8 @@ data class VideoJob(
     val choice: String,
     /** yt-dlp asked again for fresh links after a refusal, once per run. */
     val refreshed: Boolean = false,
+    /** An HLS playlist: yt-dlp downloads its one stream, and MediaMuxer makes it MP4 (A6). */
+    val hls: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("title", title)
@@ -66,6 +68,7 @@ data class VideoJob(
         put("streams", JSONArray(streams.map(Stream::toJson)))
         put("choice", choice)
         put("refreshed", refreshed)
+        put("hls", hls)
     }
 
     companion object {
@@ -75,6 +78,7 @@ data class VideoJob(
             streams = o.getJSONArray("streams").let { a -> (0 until a.length()).map { Stream.fromJson(a.getJSONObject(it)) } },
             choice = o.optString("choice"),
             refreshed = o.optBoolean("refreshed"),
+            hls = o.optBoolean("hls"),
         )
     }
 }

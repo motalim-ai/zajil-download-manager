@@ -254,4 +254,71 @@
     <string name="tile_label">زاجِل: حمّل الرابط المنسوخ</string>
     <string name="tile_no_link">لا يوجد رابط منسوخ. انسخ رابطًا يبدأ بـ http أو https ثم اضغط المربع.</string>
     <string name="tile_added">أُضيف إلى تحميلات زاجِل.</string>
+    <!-- A6: the in-app browser. -->
+    <string name="browse">تصفّح</string>
+    <string name="private_mode">وضع خاص</string>
+    <string name="private_on">خاص</string>
+    <string name="private_note">وضع خاص: لا يُحفظ ما تزوره، وتُحذف الكوكيز والبيانات حين ينتهي.</string>
+    <string name="private_unsupported">متصفح هذا الهاتف لا يدعم الوضع الخاص. حدّث «Android System WebView».</string>
+    <string name="address_hint">اكتب عنوانًا أو ابحث</string>
+    <string name="sites">مواقع</string>
+    <string name="add_site">إضافة</string>
+    <string name="add_site_title">إضافة موقع</string>
+    <string name="site_name">الاسم</string>
+    <string name="site_address">العنوان</string>
+    <string name="remove_site">إزالة من المواقع</string>
+    <string name="visited_lately">زرتها مؤخرًا</string>
+    <string name="browse_promise">تصفّح كالمعتاد، وحين تجد فيديو يظهر زر التحميل. لا إعلانات، ولا تتبع، وتسجيل دخولك يبقى على جهازك.</string>
+    <string name="back">رجوع</string>
+    <string name="reload">إعادة التحميل</string>
+    <string name="secure">اتصال آمن</string>
+    <string name="not_secure">اتصال غير آمن</string>
+    <string name="download">تحميل</string>
+    <string name="found_by_zajil">وجده زاجِل</string>
+    <!-- %1$s اسم الفيديو. -->
+    <string name="download_named">تحميل %1$s</string>
+    <string name="found_site_page">صفحة فيديو يقرؤها زاجِل، وتختار الجودة بعدها</string>
+    <!-- %1$s نوع الملف، و%2$s موقعه. -->
+    <string name="found_file">ملف %1$s من %2$s</string>
+    <string name="found_hls">بث HLS ‏(m3u8) من %1$s</string>
+    <string name="found_dash">بث DASH ‏(mpd): لا يحمّله زاجِل بعد</string>
+    <string name="found_protected">محمي من النسخ، فلا يحمّله زاجِل</string>
+    <!-- %1$d العرض، و%2$d الارتفاع. -->
+    <string name="found_element">فيديو في الصفحة · %1$d×%2$d</string>
+    <string name="sign_in_note">بعض المواقع تطلب تسجيل الدخول لتحميل فيديوهاتها. سجّل دخولك هنا في متصفح زاجِل، ويبقى على جهازك، ولا يُرسل إلا لهذا الموقع.</string>
+    <string name="manage_sign_ins">إدارة تسجيلات الدخول</string>
+    <string name="sign_ins_hint">المواقع التي حفظت كوكيز في متصفح زاجِل، ومنها تسجيلات دخولك. حذف موقع يُخرجك منه.</string>
+    <string name="sign_ins_short">المواقع التي حفظت كوكيز</string>
+    <string name="no_sign_ins">لا مواقع حفظت كوكيز بعد.</string>
+    <!-- %1$s اسم الموقع. -->
+    <string name="forget_site">حذف كوكيز %1$s</string>
+    <string name="forget_all">حذف الكل</string>
+    <string name="group_browser">المتصفح</string>
+    <string name="clear_visited">مسح ما زرته مؤخرًا</string>
+    <string name="clear">مسح</string>
+    <string name="nothing_to_clear">لا شيء</string>
+    <string name="source_browser">من المتصفح</string>
+    <string name="quality_whole">الملف كما في الصفحة</string>
+    <string name="site_youtube">يوتيوب</string>
+    <string name="site_facebook">فيسبوك</string>
+    <string name="site_instagram">إنستغرام</string>
+    <string name="site_tiktok">تيك توك</string>
+    <string name="site_soundcloud">ساوند كلاود</string>
+    <string name="site_vimeo">فيميو</string>
+    <plurals name="found_on_page">
+        <item quantity="zero">لا فيديو في الصفحة</item>
+        <item quantity="one">في الصفحة فيديو</item>
+        <item quantity="two">في الصفحة فيديوهان</item>
+        <item quantity="few">في الصفحة %d فيديوهات</item>
+        <item quantity="many">في الصفحة %d فيديو</item>
+        <item quantity="other">في الصفحة %d فيديو</item>
+    </plurals>
+    <plurals name="sites">
+        <item quantity="zero">لا مواقع</item>
+        <item quantity="one">موقع واحد</item>
+        <item quantity="two">موقعان</item>
+        <item quantity="few">%d مواقع</item>
+        <item quantity="many">%d موقعًا</item>
+        <item quantity="other">%d موقع</item>
+    </plurals>
 </resources>

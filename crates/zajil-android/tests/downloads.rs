@@ -257,6 +257,7 @@ fn a_tuned_start_takes_the_name_it_is_given() {
         user_agent: Some("Zajil-test".to_owned()),
         connections: Some(4),
         request_size: Some(64 * 1024),
+        ..Tuning::default()
     };
 
     downloads.start_tuned(1, server.url("/videoplayback"), dir_text(&dir), tuning);
@@ -410,4 +411,92 @@ fn the_speed_limit_slows_every_download_and_can_be_lifted() {
         "took {:?} without a limit",
         began.elapsed()
     );
+}
+
+#[test]
+fn the_browsers_cookies_and_page_go_with_a_tuned_download() {
+    let body = random_body(256 * 1024);
+    let server = TestServer::http();
+    server.put("/member/clip.mp4", FileSpec::new(body.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+    let url = server.url("/member/clip.mp4");
+    let page = server.url("/member/page?id=1");
+    let tuning = Tuning {
+        cookies: Some("session=abc".to_owned()),
+        cookie_url: Some(url.clone()),
+        referrer: Some(page.clone()),
+        ..Tuning::default()
+    };
+
+    downloads.start_tuned(1, url, dir_text(&dir), tuning);
+    finished(&rx, 1);
+
+    let requests = server.requests();
+    assert!(!requests.is_empty());
+    for request in requests.iter().filter(|r| r.path.ends_with("clip.mp4")) {
+        assert_eq!(
+            request.cookie.as_deref(),
+            Some("session=abc"),
+            "{request:?}"
+        );
+        // The same origin: the whole page, as the browsers send it.
+        assert_eq!(
+            request.referer.as_deref(),
+            Some(page.as_str()),
+            "{request:?}"
+        );
+    }
+}
+
+#[test]
+fn the_browsers_cookies_never_follow_a_redirect_to_another_host() {
+    let body = random_body(64 * 1024);
+    let server = TestServer::http();
+    server.put("/cdn/clip.mp4", FileSpec::new(body));
+    // Another host for the same server: «localhost» instead of 127.0.0.1.
+    let elsewhere = server
+        .url("/cdn/clip.mp4")
+        .replace("127.0.0.1", "localhost");
+    server.redirect("/go", &elsewhere, 302);
+    let dir = tempfile::tempdir().unwrap();
+    let (ears, rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+    let url = server.url("/go");
+    let tuning = Tuning {
+        cookies: Some("session=abc".to_owned()),
+        cookie_url: Some(url.clone()),
+        referrer: Some(server.url("/page")),
+        ..Tuning::default()
+    };
+
+    downloads.start_tuned(1, url, dir_text(&dir), tuning);
+    finished(&rx, 1);
+
+    for request in server
+        .requests()
+        .iter()
+        .filter(|r| r.path.ends_with("clip.mp4"))
+    {
+        assert_eq!(request.cookie, None, "{request:?}");
+    }
+}
+
+#[test]
+fn a_tuned_probe_sends_the_browsers_cookies() {
+    let server = TestServer::http();
+    server.put("/member/f.bin", FileSpec::new(random_body(4096)));
+    let (ears, _rx) = Ears::new();
+    let downloads = Downloads::new(ears).unwrap();
+    let url = server.url("/member/f.bin");
+    let tuning = Tuning {
+        cookies: Some("session=abc".to_owned()),
+        cookie_url: Some(url.clone()),
+        ..Tuning::default()
+    };
+
+    downloads.probe_tuned(url, tuning).unwrap();
+
+    assert_eq!(server.requests()[0].cookie.as_deref(), Some("session=abc"));
 }

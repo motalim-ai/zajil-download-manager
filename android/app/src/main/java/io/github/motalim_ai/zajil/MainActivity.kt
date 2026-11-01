@@ -9,6 +9,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import io.github.motalim_ai.zajil.browser.BrowserController
+import io.github.motalim_ai.zajil.browser.Finds
+import io.github.motalim_ai.zajil.browser.Found
+import io.github.motalim_ai.zajil.browser.MediaKind
 import io.github.motalim_ai.zajil.downloads.CopiedLinks
 import io.github.motalim_ai.zajil.downloads.Links
 import io.github.motalim_ai.zajil.downloads.Notifications
@@ -23,8 +27,15 @@ import io.github.motalim_ai.zajil.video.VideoPages
 import kotlinx.coroutines.launch
 
 class MainActivity : ZajilActivity() {
+    /** The in-app browser (A6): its WebView lives as long as this window. */
+    private val browser by lazy { BrowserController(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A page's own download: offered in the sheet, never started by the page.
+        lifecycleScope.launch {
+            browser.requests.collect { url -> offer.value = Offer(url, Source.Browser, browser.linkFor(url)) }
+        }
         enableEdgeToEdge()
         setContent {
             val prefs by downloads.prefs.prefs.collectAsStateWithLifecycle()
@@ -39,7 +50,12 @@ class MainActivity : ZajilActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
             ZajilTheme(prefs.look) {
-                ZajilScreen(actions = this, onNewLink = { offer.value = Offer(null, Source.Typed) })
+                ZajilScreen(
+                    actions = this,
+                    onNewLink = { offer.value = Offer(null, Source.Typed) },
+                    browser = browser,
+                    onFound = ::download,
+                )
                 Sheets()
             }
         }
@@ -66,7 +82,41 @@ class MainActivity : ZajilActivity() {
 
     override fun onResume() {
         super.onResume()
+        browser.onResume()
         lookAtClipboardSoon()
+    }
+
+    override fun onPause() {
+        browser.onPause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        browser.destroy()
+        super.onDestroy()
+    }
+
+    /**
+     * A video the browser found, after the user's tap (A6): a video site's
+     * page and a playlist go to yt-dlp's sheet, a file to the new-download
+     * sheet; each with the page and, for the page's own site, its cookies.
+     */
+    private fun download(found: Found) {
+        when (found) {
+            is Found.SitePage -> readVideo(found.url, browser.linkFor(found.url))
+            is Found.Media -> when (found.kind) {
+                MediaKind.Hls -> readVideo(found.url, browser.linkFor(found.url))
+                MediaKind.File -> offer.value = Offer(found.url, Source.Browser, browser.linkFor(found.url))
+                MediaKind.Dash -> {}
+            }
+            is Found.Element -> found.src?.let { src ->
+                if (Finds.kindOf(src) == MediaKind.Hls) {
+                    readVideo(src, browser.linkFor(src))
+                } else {
+                    offer.value = Offer(src, Source.Browser, browser.linkFor(src))
+                }
+            }
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

@@ -127,11 +127,11 @@ private fun Choice(
 
     ZText(stringResource(R.string.video_quality), size = 13.5.sp, weight = FontWeight.Bold, color = c.muted)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val choices: List<Int?> = heights + listOf(null)
+        val choices: List<Int?> = heights + (if (VideoChoice.hasSoundOnly(info)) listOf(null) else emptyList())
         choices.forEach { h ->
             val size = sound?.let { VideoChoice.pick(info, h, it) }?.size
             ChoiceRow(
-                label = h?.let { "${it}p" } ?: stringResource(R.string.video_sound_only),
+                label = qualityLabel(h),
                 selected = height == h,
                 onClick = { height = h },
                 note = when {
@@ -152,7 +152,7 @@ private fun Choice(
 
     if (picked == null) ZText(stringResource(R.string.video_no_pair), size = 12.5.sp, color = c.red)
 
-    val label = height?.let { "${it}p" } ?: stringResource(R.string.video_sound_only)
+    val label = qualityLabel(height)
     val choice = listOfNotNull(label, sound?.takeIf { sounds.size > 1 }?.let { soundLabel(it) }).joinToString(" · ")
     Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         MainButton(
@@ -256,6 +256,14 @@ private fun SoundMenu(sounds: List<Sound>, chosen: Sound?, onChoose: (Sound) -> 
             }
         }
     }
+}
+
+/** «1080p», the page's one file, or «Sound only». */
+@Composable
+private fun qualityLabel(height: Int?): String = when (height) {
+    null -> stringResource(R.string.video_sound_only)
+    VideoChoice.WHOLE -> stringResource(R.string.quality_whole)
+    else -> "${height}p"
 }
 
 /** «25:14», «1:02:09». */

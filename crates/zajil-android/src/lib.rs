@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use zajil_core::limit::SpeedLimit;
-use zajil_core::{Engine, Error, Event, Options, Stop};
+use zajil_core::{Engine, Error, Event, FromBrowser, Options, Stop};
 
 #[cfg(target_os = "android")]
 mod tls;
@@ -71,6 +71,18 @@ pub struct Tuning {
     pub user_agent: Option<String>,
     pub connections: Option<u32>,
     pub request_size: Option<u64>,
+    /// The in-app browser's cookies (a `Cookie` header) for
+    /// [`Tuning::cookie_url`], sent only to that address's origin, never to
+    /// a host a redirect leads to (`zajil_core::FromBrowser`). In memory
+    /// only: never in the state file.
+    #[uniffi(default = None)]
+    pub cookies: Option<String>,
+    #[uniffi(default = None)]
+    pub cookie_url: Option<String>,
+    /// The page the link was found on: sent as the browsers do
+    /// (`strict-origin-when-cross-origin`).
+    #[uniffi(default = None)]
+    pub referrer: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -121,10 +133,24 @@ impl Tuning {
             .named(self.name.as_deref())
             .with_user_agent(self.user_agent.as_deref())
             .with_request_size(self.request_size);
+        if self.cookies.is_some() || self.referrer.is_some() {
+            engine = engine.with_browser(self.browser());
+        }
         if let Some(connections) = self.connections {
             engine = engine.with_connections(usize::try_from(connections).unwrap_or(usize::MAX));
         }
         engine
+    }
+
+    /// What the browser adds to the requests: its cookies for their own
+    /// origin, and the page.
+    fn browser(&self) -> FromBrowser {
+        FromBrowser::new(
+            self.cookie_url.as_deref().unwrap_or_default(),
+            self.cookies.as_deref(),
+            self.referrer.as_deref(),
+        )
+        .with_user_agent(self.user_agent.as_deref())
     }
 }
 
@@ -210,9 +236,16 @@ impl Downloads {
     /// headers only. Blocks for at most 20 seconds; call it off the main
     /// thread.
     pub fn probe(&self, url: String) -> Result<LinkInfo, EngineError> {
+        self.probe_tuned(url, Tuning::default())
+    }
+
+    /// Like [`Downloads::probe`], made as [`Tuning`] says (the in-app
+    /// browser's cookies and page).
+    pub fn probe_tuned(&self, url: String, tuning: Tuning) -> Result<LinkInfo, EngineError> {
+        let engine = tuning.apply(&self.engine);
         let found = self
             .runtime
-            .block_on(async { tokio::time::timeout(PROBE_FOR, self.engine.probe(&url)).await });
+            .block_on(async { tokio::time::timeout(PROBE_FOR, engine.probe(&url)).await });
         match found {
             Ok(Ok(probe)) => Ok(LinkInfo {
                 is_page: probe.is_page(),

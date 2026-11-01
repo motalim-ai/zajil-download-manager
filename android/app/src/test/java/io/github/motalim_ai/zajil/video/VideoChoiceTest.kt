@@ -48,7 +48,7 @@ class VideoChoiceTest {
         val i = info(video("137", 1080, "avc1.640028", "mp4", tbr = 3000.0), video("248", 1080, "vp9", "webm", tbr = 2500.0), own, ownOpus)
         val picked = VideoChoice.pick(i, 1080, Sound("en", original = true))!!
         assertEquals("137", picked.video!!.id)
-        assertEquals("140", picked.audio.id)
+        assertEquals("140", picked.audio!!.id)
         assertEquals(Container.Mp4, picked.container)
     }
 
@@ -56,7 +56,7 @@ class VideoChoiceTest {
     fun vp9_takes_opus_into_webm_when_only_vp9_has_the_height() {
         val i = info(video("313", 2160, "vp9", "webm"), own, ownOpus)
         val picked = VideoChoice.pick(i, 2160, Sound("en", original = true))!!
-        assertEquals("251", picked.audio.id)
+        assertEquals("251", picked.audio!!.id)
         assertEquals(Container.Webm, picked.container)
     }
 
@@ -70,15 +70,15 @@ class VideoChoiceTest {
     fun a_dubbed_sound_picks_that_language() {
         val i = info(video("137", 1080, "avc1", "mp4"), arabic, own)
         val picked = VideoChoice.pick(i, 1080, Sound("ar", original = false))!!
-        assertEquals("140-ar", picked.audio.id)
-        assertEquals(VideoChoice.pick(i, 1080, Sound("en", true))!!.audio.id, "140")
+        assertEquals("140-ar", picked.audio!!.id)
+        assertEquals(VideoChoice.pick(i, 1080, Sound("en", true))!!.audio!!.id, "140")
     }
 
     @Test
     fun the_plain_sound_wins_over_the_range_compressed_one() {
         val i = info(video("137", 1080, "avc1", "mp4"), ownDrc, own)
-        assertEquals("140", VideoChoice.pick(i, 1080, Sound("en", true))!!.audio.id)
-        assertEquals("140", VideoChoice.pick(i, null, Sound("en", true))!!.audio.id)
+        assertEquals("140", VideoChoice.pick(i, 1080, Sound("en", true))!!.audio!!.id)
+        assertEquals("140", VideoChoice.pick(i, null, Sound("en", true))!!.audio!!.id)
     }
 
     @Test
@@ -118,5 +118,70 @@ class VideoChoiceTest {
         assertTrue(VideoPages.expiresSoon("https://r.googlevideo.com/videoplayback?expire=${now + 60}&itag=18", now))
         assertFalse(VideoPages.expiresSoon("https://r.googlevideo.com/videoplayback?expire=${now + 3600}&itag=18", now))
         assertFalse(VideoPages.expiresSoon("https://example.com/file.mp4", now))
+    }
+
+    private fun whole(id: String, height: Int?, ext: String = "mp4", vcodec: String? = null, acodec: String? = null, size: Long? = 1000, cookie: String? = null) =
+        Format(id, ext, vcodec, acodec, height, null, 1000.0, size, null, null, null, "https://w/$id", null, false, cookieHeader = cookie)
+
+    @Test
+    fun whole_files_x_style_are_offered_by_height() {
+        val i = info(whole("http-320", 180), whole("http-832", 360), whole("http-2176", 720))
+        assertEquals(listOf(720, 360, 180), VideoChoice.qualities(i))
+        assertEquals(listOf(Sound(null, original = true)), VideoChoice.sounds(i))
+        assertFalse(VideoChoice.hasSoundOnly(i))
+        val picked = VideoChoice.pick(i, 360, Sound(null, original = true))!!
+        assertEquals("http-832", picked.video!!.id)
+        assertNull(picked.audio)
+        assertTrue(picked.whole)
+        assertEquals(Container.Mp4, picked.container)
+    }
+
+    @Test
+    fun a_whole_file_without_height_is_the_pages_file_facebook_style() {
+        val i = info(whole("sd", null, size = 300), whole("hd", null, size = 600))
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(i))
+        assertEquals("hd", VideoChoice.pick(i, VideoChoice.WHOLE, Sound(null, original = true))!!.video!!.id)
+    }
+
+    @Test
+    fun joined_streams_still_come_first_when_a_page_has_both() {
+        val i = info(video("137", 1080, "avc1.640028", "mp4"), own, whole("22", 720, vcodec = "avc1", acodec = "mp4a.40.2"))
+        assertEquals(listOf(1080, 720), VideoChoice.qualities(i))
+        assertEquals("137", VideoChoice.pick(i, 1080, Sound("en", original = true))!!.video!!.id)
+        assertEquals("22", VideoChoice.pick(i, 720, Sound("en", original = true))!!.video!!.id)
+    }
+
+    @Test
+    fun hls_is_one_stream_saved_as_mp4_never_joined() {
+        val playlist = Format("hls-720", "mp4", "avc1", "mp4a", 720, null, 2000.0, null, null, null, null, "https://l/720.m3u8", null, false, hls = true)
+        val i = info(playlist)
+        assertEquals(listOf(720), VideoChoice.qualities(i))
+        val picked = VideoChoice.pick(i, 720, Sound(null, original = true))!!
+        assertTrue(picked.video!!.hls)
+        assertEquals(Container.Mp4, picked.container)
+    }
+
+    @Test
+    fun a_formats_own_cookies_are_kept_for_its_download() {
+        val i = info(whole("download", 1024, vcodec = "h264", acodec = "aac", cookie = "tt_chain_token=x"))
+        assertEquals("tt_chain_token=x", VideoChoice.pick(i, 1024, Sound(null, original = true))!!.video!!.cookieHeader)
+    }
+
+    @Test
+    fun the_desktops_video_sites_are_video_pages() {
+        listOf(
+            "https://x.com/user/status/1234567890?s=46&t=abc",
+            "https://twitter.com/user/status/1",
+            "https://www.instagram.com/reel/C1a2B3/?igsh=x",
+            "https://m.facebook.com/watch/?v=1",
+            "https://www.facebook.com/share/r/1Ab/",
+            "https://fb.watch/abc/",
+            "https://vt.tiktok.com/ZS4ghQ5py/",
+            "https://www.tiktok.com/@u/video/7300000000000000000",
+            "https://vimeo.com/123",
+            "https://www.dailymotion.com/video/x8",
+        ).forEach { assertTrue(it, VideoPages.isVideoPage(it)) }
+        listOf("https://www.instagram.com/", "https://x.com/user", "https://www.tiktok.com/@u", "ftp://x.com/u/status/1")
+            .forEach { assertFalse(it, VideoPages.isVideoPage(it)) }
     }
 }

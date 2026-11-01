@@ -42,6 +42,10 @@
         android:usesCleartextTraffic="false"
         tools:targetApi="37">
 
+        <!-- The in-app browser (A6): Safe Browsing on, and no usage reports to Google. -->
+        <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true" />
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -67,6 +67,12 @@ data class Download(
     val chosenName: String? = null,
     /** When it was complete (milliseconds since 1970). */
     val finishedAt: Long? = null,
+    /** The in-app browser's page it was found on (A6). */
+    val page: String? = null,
+    /** Whose cookies go with it; the cookies themselves are never kept here. */
+    val cookieSource: CookieSource = CookieSource.None,
+    /** The in-app browser's User-Agent, when it came from there. */
+    val browserAgent: String? = null,
 ) {
     /**
      * Before the engine knows the file's name: the link's last path part,
@@ -92,6 +98,9 @@ data class Download(
         put("video", video?.toJson())
         put("chosen_name", chosenName)
         put("finished_at", finishedAt)
+        put("page", page)
+        put("cookie_source", cookieSource.name)
+        put("browser_agent", browserAgent)
     }
 
     companion object {
@@ -114,6 +123,9 @@ data class Download(
             video = json.optJSONObject("video")?.let(VideoJob::fromJson),
             chosenName = json.optStringOrNull("chosen_name"),
             finishedAt = if (json.isNull("finished_at")) null else json.optLong("finished_at"),
+            page = json.optStringOrNull("page"),
+            cookieSource = CookieSource.entries.firstOrNull { it.name == json.optStringOrNull("cookie_source") } ?: CookieSource.None,
+            browserAgent = json.optStringOrNull("browser_agent"),
         )
 
         fun listToJson(downloads: List<Download>): String =

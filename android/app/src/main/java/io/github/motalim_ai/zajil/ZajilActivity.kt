@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
 import io.github.motalim_ai.zajil.ui.AddSheet
 import io.github.motalim_ai.zajil.ui.DownloadActions
@@ -66,6 +67,9 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
     /** A video link's format sheet, while it is open (A3). */
     protected val videoSheet = mutableStateOf<VideoSheet?>(null)
 
+    /** The browser's page and cookies for the video the sheet is about (A6), in memory only. */
+    private var videoLink: BrowserLink? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         waitingForLocal = savedInstanceState?.getLong(WAITING_FOR_LOCAL) ?: 0
@@ -91,7 +95,7 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
                 asked,
                 onStart = { url, name, start ->
                     offer.value = null
-                    add(url, name, start)
+                    add(url, name, start, asked.link)
                 },
                 onDismiss = {
                     offer.value = null
@@ -104,7 +108,7 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
                 sheet,
                 onDownload = { url, info, picked, choice ->
                     videoSheet.value = null
-                    downloads.addVideo(url, info, picked, choice)
+                    downloads.addVideo(url, info, picked, choice, videoLink)
                     added()
                     askMissingPermissions()
                     settledIfDone()
@@ -120,14 +124,14 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
     /** A download was added: the tile's window says so. */
     protected open fun added() {}
 
-    override fun add(url: String, name: String?, start: StartWhen) {
+    override fun add(url: String, name: String?, start: StartWhen, browser: BrowserLink?) {
         if (VideoPages.isVideoPage(url)) {
-            readVideo(url)
+            readVideo(url, browser)
             return
         }
         lifecycleScope.launch {
             val local = LocalNetwork.isLocal(url)
-            val id = downloads.add(url, local, name, later = start == StartWhen.Later)
+            val id = downloads.add(url, local, name, later = start == StartWhen.Later, browser = browser)
             added()
             when {
                 local && !LocalNetwork.isGranted(this@ZajilActivity) -> if (start != StartWhen.Later) askLocalNetwork(id)
@@ -144,10 +148,11 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
      * A video page: yt-dlp reads it on the phone, and the sheet offers its
      * qualities and sounds. Nothing downloads until the user chooses.
      */
-    protected fun readVideo(url: String) {
+    protected fun readVideo(url: String, browser: BrowserLink? = null) {
+        videoLink = browser
         videoSheet.value = VideoSheet.Reading(url)
         lifecycleScope.launch {
-            val read = YtDlp.read(this@ZajilActivity, url)
+            val read = YtDlp.read(this@ZajilActivity, url, browser?.cookies, browser?.page)
             if (videoSheet.value?.url != url) return@launch
             videoSheet.value = read.fold(
                 onSuccess = { info ->

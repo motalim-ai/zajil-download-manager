@@ -3,6 +3,7 @@ package io.github.motalim_ai.zajil.downloads
 import android.content.Context
 import android.os.Environment
 import android.util.AtomicFile
+import android.webkit.CookieManager
 import io.github.motalim_ai.zajil.engine.Downloads
 import io.github.motalim_ai.zajil.engine.EngineException
 import io.github.motalim_ai.zajil.engine.LinkInfo
@@ -18,6 +19,7 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,6 +92,17 @@ class DownloadCenter(private val context: Context) {
     private val relink = ConcurrentHashMap.newKeySet<Long>()
 
     /**
+     * The in-app browser's cookies for a download, as they were when the
+     * user tapped (A6); and a video stream's own (yt-dlp's, by engine id).
+     * In memory only: never in the list on disk.
+     */
+    private val linkCookies = ConcurrentHashMap<Long, String>()
+    private val streamCookies = ConcurrentHashMap<Long, String>()
+
+    /** HLS downloads yt-dlp is running, and the flag that stops each. */
+    private val hlsStops = ConcurrentHashMap<Long, AtomicBoolean>()
+
+    /**
      * Where unfinished downloads live: the app's own folder on the shared
      * storage, which needs no permission (ADR-0012, section 4).
      */
@@ -134,9 +147,10 @@ class DownloadCenter(private val context: Context) {
      * [name] is the user's, instead of the server's; [later] keeps it
      * paused until the user starts it.
      */
-    fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false): Long {
+    fun add(url: String, local: Boolean, name: String? = null, later: Boolean = false, browser: BrowserLink? = null): Long {
         val blocked = local && !LocalNetwork.isGranted(context)
         return insert { id, order ->
+            browser?.cookies?.let { linkCookies[id] = it }
             Download(
                 id = id,
                 url = url,
@@ -148,6 +162,9 @@ class DownloadCenter(private val context: Context) {
                 local = local,
                 order = order,
                 chosenName = name,
+                page = browser?.page,
+                cookieSource = browser?.source ?: CookieSource.None,
+                browserAgent = browser?.userAgent,
             )
         }
     }
@@ -156,9 +173,18 @@ class DownloadCenter(private val context: Context) {
      * What [url] leads to (its name, size, and whether it resumes), for the
      * sheet that asks the user; only the first response's headers are read.
      */
-    suspend fun probe(url: String): Result<LinkInfo> = withContext(Dispatchers.IO) {
+    suspend fun probe(url: String, browser: BrowserLink? = null): Result<LinkInfo> = withContext(Dispatchers.IO) {
         try {
-            Result.success(engine.probe(url))
+            val tuning = Tuning(
+                name = null,
+                userAgent = browser?.userAgent,
+                connections = null,
+                requestSize = null,
+                cookies = browser?.cookies,
+                cookieUrl = url,
+                referrer = browser?.page,
+            )
+            Result.success(engine.probeTuned(url, tuning))
         } catch (e: EngineException) {
             Result.failure(e)
         }
@@ -168,22 +194,44 @@ class DownloadCenter(private val context: Context) {
      * Adds a video that yt-dlp read, as the user chose it: its picture and
      * its sound, each downloaded by the engine as on the desktop.
      */
-    fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String): Long {
-        val streams = listOfNotNull(
-            picked.video?.let { Stream(it.id, it.url, "video.${it.ext}", it.userAgent, video = true, total = it.size) },
-            picked.audio.let { Stream(it.id, it.url, "audio.${it.ext}", it.userAgent, video = false, total = it.size) },
-        )
+    fun addVideo(pageUrl: String, info: VideoInfo, picked: Picked, choice: String, browser: BrowserLink? = null): Long {
+        val hls = picked.video?.hls == true
+        val formats = listOfNotNull(picked.video, picked.audio)
+        val streams = formats.map {
+            val name = when {
+                hls -> "stream"
+                it == picked.video -> "video.${it.ext}"
+                else -> "audio.${it.ext}"
+            }
+            Stream(it.id, it.url, name, it.userAgent, video = it == picked.video, total = it.size)
+        }
         return insert { id, order ->
+            browser?.cookies?.let { linkCookies[id] = it }
+            formats.forEachIndexed { i, f -> f.cookieHeader?.let { streamCookies[engineId(id, i)] = it } }
             Download(
                 id = id,
                 url = pageUrl,
                 status = Status.Queued,
                 order = order,
                 total = picked.size,
-                video = VideoJob(info.title, picked.container, streams, choice),
+                video = VideoJob(info.title, picked.container, streams, choice, hls = hls),
+                page = browser?.page,
+                cookieSource = browser?.source ?: CookieSource.None,
+                browserAgent = browser?.userAgent,
             )
         }
     }
+
+    /**
+     * The in-app browser's cookies for [download]: as they were when the
+     * user tapped, or (after a restart) the browser's own again. Private
+     * mode's are gone by then.
+     */
+    private fun cookiesFor(download: Download, url: String = download.url): String? =
+        linkCookies[download.id] ?: when (download.cookieSource) {
+            CookieSource.Browser -> runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
+            CookieSource.Private, CookieSource.None -> null
+        }
 
     private fun insert(make: (id: Long, order: Long) -> Download): Long {
         var id = 0L
@@ -304,10 +352,15 @@ class DownloadCenter(private val context: Context) {
                 stream.stateFile?.let { File(it).delete() }
             }
             download.file?.let { if (download.video != null) File(it).delete() }
+            // HLS: yt-dlp's fragments and notes, in this download's own folder
+            // (deleting removes a link itself, never its target).
+            if (download.video?.hls == true) folderOf(id).listFiles()?.forEach { it.delete() }
         }
         // Only if empty: never anything else that might be there.
         folderOf(id).delete()
         heldForNetwork -= id
+        linkCookies.remove(id)
+        (0 until STREAMS.toInt()).forEach { streamCookies.remove(engineId(id, it)) }
         change { list -> list.filterNot { it.id == id } }
         pump()
     }
@@ -369,9 +422,12 @@ class DownloadCenter(private val context: Context) {
                     val stateFile = download.stateFile
                     val tuning = Tuning(
                         name = download.chosenName,
-                        userAgent = null,
+                        userAgent = download.browserAgent,
                         connections = prefs.prefs.value.connections.toUInt(),
                         requestSize = null,
+                        cookies = cookiesFor(download),
+                        cookieUrl = download.url,
+                        referrer = download.page,
                     )
                     if (stateFile != null && File(stateFile).exists()) {
                         engine.resumeTuned(engineId(download.id, 0), stateFile, tuning)
@@ -391,6 +447,10 @@ class DownloadCenter(private val context: Context) {
 
     private fun startStreams(download: Download) {
         val video = download.video ?: return
+        if (video.hls) {
+            if (video.streams.all { it.finished }) merge(download) else startHls(download)
+            return
+        }
         video.streams.forEachIndexed { i, stream ->
             if (stream.finished) return@forEachIndexed
             val tuning = Tuning(
@@ -399,6 +459,9 @@ class DownloadCenter(private val context: Context) {
                 // As the desktop gives a YouTube video's picture and sound.
                 connections = if (stream.video) 16u else 8u,
                 requestSize = 10uL shl 20,
+                cookies = streamCookies[engineId(download.id, i)],
+                cookieUrl = stream.url,
+                referrer = download.page,
             )
             val stateFile = stream.stateFile
             if (stateFile != null && File(stateFile).exists()) {
@@ -420,7 +483,7 @@ class DownloadCenter(private val context: Context) {
         scope.launch {
             val download = find(id) ?: return@launch
             val video = download.video ?: return@launch
-            val info = YtDlp.read(context, download.url).getOrElse { e ->
+            val info = YtDlp.read(context, download.url, cookiesFor(download), download.page).getOrElse { e ->
                 fail(id, Problem.SERVER, e.message.orEmpty())
                 return@launch
             }
@@ -439,6 +502,7 @@ class DownloadCenter(private val context: Context) {
                         kept = stream.copy(stateFile = null, done = 0)
                     }
                 }
+                format.cookieHeader?.let { streamCookies[engineId(id, video.streams.indexOf(stream))] = it }
                 kept.copy(url = format.url, userAgent = format.userAgent)
             }
             edit(id) { it.copy(video = video.copy(streams = streams, refreshed = true)) }
@@ -460,6 +524,33 @@ class DownloadCenter(private val context: Context) {
             val inputs = video.streams.mapNotNull { it.file?.let(::File) }
             val folder = folderOf(download.id)
             val output = File(folder, "${safeName(video.title, download.id)}.${video.container.ext}")
+            if (inputs.size == 1 && !video.hls) {
+                // One whole file (A6): nothing to join, only its name.
+                if (!inputs[0].renameTo(output)) {
+                    fail(download.id, Problem.OTHER, "could not name the file")
+                    return@launch
+                }
+                edit(download.id) { it.copy(status = Status.Publishing, file = output.path) }
+                find(download.id)?.let(::publish)
+                return@launch
+            }
+            if (inputs.size == 1) {
+                // HLS: yt-dlp's MPEG-TS, made MP4 by MediaMuxer.
+                if (!Muxer.hasRoom(inputs, folder)) {
+                    fail(download.id, Problem.NOT_ENOUGH_SPACE, "no room to make the MP4")
+                    return@launch
+                }
+                try {
+                    Muxer.remux(inputs[0], output)
+                } catch (e: IOException) {
+                    fail(download.id, Problem.OTHER, e.message.orEmpty())
+                    return@launch
+                }
+                inputs[0].delete()
+                edit(download.id) { it.copy(status = Status.Publishing, file = output.path) }
+                find(download.id)?.let(::publish)
+                return@launch
+            }
             if (!Muxer.hasRoom(inputs, folder)) {
                 fail(download.id, Problem.NOT_ENOUGH_SPACE, "no room to join the picture and the sound")
                 return@launch
@@ -522,10 +613,81 @@ class DownloadCenter(private val context: Context) {
     private fun streamsOf(download: Download) = download.video?.streams?.size ?: 1
 
     private fun isRunning(download: Download) =
-        (0 until streamsOf(download)).any { engine.isRunning(engineId(download.id, it)) }
+        hlsStops.containsKey(download.id) || (0 until streamsOf(download)).any { engine.isRunning(engineId(download.id, it)) }
 
     private fun stopEngine(download: Download) {
+        hlsStops[download.id]?.set(true)
         (0 until streamsOf(download)).forEach { engine.pause(engineId(download.id, it)) }
+    }
+
+    /**
+     * An HLS video (A6): yt-dlp downloads its fragments in the app's Python
+     * (the engine does not download HLS), reporting as the engine does.
+     * Stopped, it continues later from the fragments it has.
+     */
+    private fun startHls(download: Download) {
+        val video = download.video ?: return
+        val stream = video.streams.firstOrNull() ?: return
+        val id = download.id
+        val stop = AtomicBoolean(false)
+        if (hlsStops.putIfAbsent(id, stop) != null) return
+        scope.launch {
+            val end = YtDlp.downloadHls(
+                context,
+                download.url,
+                stream.formatId,
+                folderOf(id),
+                object : YtDlp.HlsListener {
+                    override fun progress(done: Long, total: Long) {
+                        _list.update { list ->
+                            list.map { d ->
+                                val v = d.video
+                                if (d.id != id || v == null) {
+                                    d
+                                } else {
+                                    val streams = v.streams.mapIndexed { i, s ->
+                                        if (i == 0) s.copy(done = done, total = total.takeIf { it > 0 } ?: s.total) else s
+                                    }
+                                    d.copy(video = v.copy(streams = streams)).withTotals()
+                                }
+                            }
+                        }
+                        speeds.report(id, done)
+                    }
+
+                    override fun stopping() = stop.get()
+                },
+                cookiesFor(download),
+                download.page,
+            )
+            hlsStops.remove(id)
+            when (end) {
+                is YtDlp.HlsEnd.Done -> {
+                    requeued.remove(id)
+                    interrupted.remove(id)
+                    val size = end.file.length()
+                    editStream(id, 0) { it.copy(file = end.file.path, finished = true, done = size, total = size) }
+                    if (cancelled.remove(id)) remove(id) else find(id)?.let(::merge)
+                }
+                YtDlp.HlsEnd.Stopped ->
+                    if (cancelled.remove(id)) remove(id) else edit(id) { it.copy(status = stoppedAs(id, Status.Paused)) }
+                is YtDlp.HlsEnd.Failed ->
+                    if (cancelled.remove(id)) {
+                        remove(id)
+                    } else {
+                        val offline = !network.state.value.allows(settings.rules.value)
+                        val status = stoppedAs(id, if (offline) Status.Queued else Status.Failed)
+                        edit(id) {
+                            it.copy(
+                                status = status,
+                                problem = Problem.SERVER.takeIf { status == Status.Failed },
+                                detail = end.detail.take(300).takeIf { status == Status.Failed },
+                            )
+                        }
+                    }
+            }
+            pump()
+        }
     }
 
     /** Where a download goes once the engine has stopped it. */

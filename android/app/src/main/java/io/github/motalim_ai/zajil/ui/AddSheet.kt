@@ -54,6 +54,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads
+import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.downloads.LocalNetwork
 import io.github.motalim_ai.zajil.engine.EngineException
@@ -72,6 +73,9 @@ enum class Source {
 
     /** The Quick Settings tile: the user asked for the copied link. */
     Tile,
+
+    /** Found in Zajil's browser (A6): asked about with that page's cookies and address. */
+    Browser,
 }
 
 /**
@@ -81,7 +85,7 @@ enum class Source {
  * downloads until the user taps «Start»; a shared text with no link has a
  * null [url] and says so.
  */
-data class Offer(val url: String?, val source: Source)
+data class Offer(val url: String?, val source: Source, val link: BrowserLink? = null)
 
 /** What the sheet knows of the file before it is downloaded. */
 private sealed interface Found {
@@ -133,7 +137,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
         if (LocalNetwork.isLocal(url) && !LocalNetwork.isGranted(context)) return@LaunchedEffect
         if (offer.source == Source.Typed) delay(400)
         found = Found.Looking
-        found = context.downloads.probe(url).fold(
+        found = context.downloads.probe(url, offer.link).fold(
             onSuccess = { Found.Info(it) },
             onFailure = { e -> Found.Failed(if (e is EngineException.Probe) problemText(e.problem) else R.string.problem_other) },
         )
@@ -152,6 +156,12 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                     Pill(
                         stringResource(R.string.source_shared), c.bg, c.muted,
                         icon = lineIcon(LineIcon.Shared), height = 28.dp, weight = FontWeight.Normal,
+                    )
+                }
+                if (offer.source == Source.Browser) {
+                    Pill(
+                        stringResource(R.string.source_browser), c.bg, c.muted,
+                        icon = lineIcon(LineIcon.Globe), height = 28.dp, weight = FontWeight.Normal,
                     )
                 }
             }
@@ -178,7 +188,9 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                     stringResource(if (video) R.string.choose_quality else R.string.start_download),
                     onClick = {
                         if (url != null) {
-                            val chosen = name.trim().takeIf { nameEdited && it.isNotEmpty() }
+                            // The name the user saw is the name the file gets: the
+                            // server cannot change it after this OK.
+                            val chosen = name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }
                             onStart(url, chosen, start)
                         }
                     },
@@ -189,7 +201,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
                 if (!video) {
                     QuietButton(stringResource(R.string.later), onClick = {
                         if (url != null) {
-                            onStart(url, name.trim().takeIf { nameEdited && it.isNotEmpty() }, StartWhen.Later)
+                            onStart(url, name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }, StartWhen.Later)
                         } else {
                             onDismiss()
                         }
