@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -21,6 +22,7 @@ import android.webkit.WebViewClient
 import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import io.github.motalim_ai.zajil.BuildConfig
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.CookieSource
@@ -179,6 +181,8 @@ class BrowserController(private val context: Context) {
     }
 
     private fun create(): WebView {
+        // DevTools over adb, in the debug build only: how a site's blank page is diagnosed.
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         val view = WebView(context)
         if (_private.value) {
             ProfileStore.getInstance().getOrCreateProfile(PRIVATE)
@@ -206,6 +210,11 @@ class BrowserController(private val context: Context) {
             displayZoomControls = false
             if (_private.value) cacheMode = WebSettings.LOAD_NO_CACHE
         }
+        // The page's height is the screen's, never «wrap content»: Compose's
+        // AndroidView gives a view without layout params WRAP_CONTENT, and
+        // WebView then makes 100vh zero, so Facebook's login (100vh) was a
+        // blank white page (owner's report, 2026-11-01).
+        view.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         // Third-party cookies stay off (WebView's default), in both modes.
         cookieManager()?.setAcceptThirdPartyCookies(view, false)
         view.webViewClient = Client()
@@ -255,6 +264,17 @@ class BrowserController(private val context: Context) {
     private fun publish() {
         sitePage?.let {
             _found.value = listOf(it)
+            return
+        }
+        // A feed (TikTok's «For you», Instagram's, Facebook's): its videos
+        // by their own posts' pages, which yt-dlp reads; the files a feed
+        // plays are pieces. Only the page's own site's.
+        val pageUrl = _page.value?.url
+        val posts = elements.values.flatten().map { it.page }
+            .filter { it.isNotEmpty() && pageUrl != null && Finds.sameSite(it, pageUrl) }
+            .distinct()
+        if (posts.isNotEmpty()) {
+            _found.value = posts.take(Finds.MAX_VIDEOS).map { Found.SitePage(it, "") }
             return
         }
         val list = mutableListOf<Found>()

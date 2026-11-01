@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -24,6 +25,7 @@ import io.github.motalim_ai.zajil.ui.VideoSheet
 import io.github.motalim_ai.zajil.ui.VideoSheetView
 import io.github.motalim_ai.zajil.video.VideoChoice
 import io.github.motalim_ai.zajil.video.VideoPages
+import io.github.motalim_ai.zajil.video.VideoProblems
 import io.github.motalim_ai.zajil.video.YtDlp
 import kotlinx.coroutines.launch
 
@@ -117,9 +119,23 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
                     videoSheet.value = null
                     settledIfDone()
                 },
+                onBrowse = if (browses) {
+                    { url ->
+                        videoSheet.value = null
+                        openInBrowser(url)
+                    }
+                } else {
+                    null
+                },
             )
         }
     }
+
+    /** Whether this window has Zajil's browser, to sign in on a site there. */
+    protected open val browses: Boolean = false
+
+    /** Opens [url] in Zajil's browser, where the user can sign in on its site. */
+    protected open fun openInBrowser(url: String) {}
 
     /** A download was added: the tile's window says so. */
     protected open fun added() {}
@@ -162,21 +178,19 @@ abstract class ZajilActivity : ComponentActivity(), DownloadActions {
             }.fold(
                 onSuccess = { info ->
                     when {
-                        info.live -> VideoSheet.Refused(url, R.string.video_live, null)
+                        info.live -> VideoSheet.Refused(url, R.string.video_live)
                         VideoChoice.sounds(info).isEmpty() && info.formats.any { it.hasDrm } ->
-                            VideoSheet.Refused(url, R.string.video_drm, null)
-                        VideoChoice.sounds(info).isEmpty() -> VideoSheet.Refused(url, R.string.video_nothing, null)
+                            VideoSheet.Refused(url, R.string.video_drm)
+                        VideoChoice.sounds(info).isEmpty() -> VideoSheet.Refused(url, R.string.video_nothing)
                         else -> VideoSheet.Ready(url, info)
                     }
                 },
                 onFailure = { e ->
                     val detail = e.message.orEmpty()
-                    val message = when {
-                        "confirm you" in detail && "bot" in detail -> R.string.video_bot_check
-                        "DRM" in detail -> R.string.video_drm
-                        else -> R.string.video_unreadable
-                    }
-                    VideoSheet.Refused(url, message, detail.takeIf { message == R.string.video_unreadable })
+                    // yt-dlp's own words go to the log only, without any address.
+                    Log.w("ZajilVideo", VideoProblems.forLog(detail))
+                    val problem = VideoProblems.of(detail, url)
+                    VideoSheet.Refused(url, problem.message, problem.signIn)
                 },
             )
         }

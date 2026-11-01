@@ -38,9 +38,12 @@ class VideoChoiceTest {
             video("701", 2160, "av01.0.12M.10", "mp4"),
             video("134", 360, "avc1.4d401e", "mp4"),
             own,
+            ownOpus,
         )
         // AV1 alone (none here alone) would be left out: MediaMuxer is not asked for it.
         assertEquals(listOf(2160, 1080, 360), VideoChoice.qualities(i))
+        // Without Opus, 2160p (VP9 only) cannot be joined, so it is not offered.
+        assertEquals(listOf(1080, 360), VideoChoice.qualities(info(*i.formats.filter { it != ownOpus }.toTypedArray())))
     }
 
     @Test
@@ -182,6 +185,29 @@ class VideoChoiceTest {
         assertTrue(picked.whole)
         // One sound anywhere, and a picture alone is again only for joining.
         assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(info(whole("sd", null), video("dash-840v", 840, "vp09", "mp4"))))
+    }
+
+    @Test
+    fun instagrams_vp9_with_only_aac_is_not_offered_owners_samsung() {
+        // A reel today: H.264 up to 1280p, VP9 at 1920p, one AAC sound with no
+        // language, and the site's own MP4 files with no codecs said.
+        val aac = sound("dash-a", "mp4a.40.2", "m4a", null, "DASH audio")
+        val i = info(
+            whole("1", null), whole("2", null),
+            video("dash-1280v", 1280, "avc1.64001F", "mp4"),
+            video("dash-1920v", 1920, "vp09.00.40.08", "mp4"),
+            aac,
+        )
+        assertEquals(listOf(1280), VideoChoice.qualities(i))
+        val sound = VideoChoice.sounds(i).single()
+        assertTrue(sound.original)
+        val picked = VideoChoice.pick(i, 1280, sound)!!
+        assertEquals("dash-1280v", picked.video!!.id)
+        assertEquals("dash-a", picked.audio!!.id)
+        // Only VP9 pictures: the site's own file instead.
+        val vp9Only = info(whole("1", null), video("dash-1920v", 1920, "vp09.00.40.08", "mp4"), aac)
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(vp9Only))
+        assertTrue(VideoChoice.pick(vp9Only, VideoChoice.WHOLE, VideoChoice.sounds(vp9Only).single())!!.whole)
     }
 
     @Test

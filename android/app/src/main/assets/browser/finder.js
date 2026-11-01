@@ -22,8 +22,73 @@
   const post = port.postMessage.bind(port);
   const stringify = JSON.stringify;
   const all = Document.prototype.querySelectorAll;
+  const inside = Element.prototype.querySelectorAll;
+  const attribute = Element.prototype.getAttribute;
   const rectOf = Element.prototype.getBoundingClientRect;
   const later = setTimeout;
+  const keysOf = Object.keys;
+  const Address = URL;
+
+  /**
+   * A video's own page on a feed whose address is not it (Instagram's,
+   * Facebook's, X's): the nearest link to a video page around the video,
+   * never past an element that holds another video (that is the feed).
+   * Zajil checks it again: a video page of the page's own site, or nothing.
+   */
+  const PAGE =
+    /^https:\/\/(?:www\.|m\.|web\.|mobile\.)?(?:instagram\.com\/(?:p|reel|reels|tv)\/[\w-]+|facebook\.com\/(?:[^?#]+\/videos\/\d+|watch\/?\?v=\d+|reel\/\d+)|tiktok\.com\/@[\w.-]+\/video\/\d+|(?:x|twitter)\.com\/\w+\/status\/\d+)/;
+  const pageOf = (href) => {
+    try {
+      // Instagram's «/user/reel/ID» is its «/reel/ID».
+      const url = new Address(href, location.href).href.replace(/(instagram\.com)\/[\w.]+\/(p|reel|reels|tv)\//, "$1/$2/");
+      const match = PAGE.exec(url);
+      return match ? match[0] : "";
+    } catch {
+      return "";
+    }
+  };
+  const linkedPage = (video) => {
+    let node = video.parentElement;
+    for (let depth = 0; node && depth < 12; depth++, node = node.parentElement) {
+      if (depth > 0 && inside.call(node, "video").length > 1) break;
+      for (const link of inside.call(node, "a[href]")) {
+        const page = pageOf(attribute.call(link, "href") || "");
+        if (page) return page;
+      }
+    }
+    return "";
+  };
+
+  /**
+   * TikTok's feed has no link to the video playing: its id is in the
+   * item's own props (React's, on the elements around the video), and its
+   * author in the item's link to «/@user».
+   */
+  const tiktokPage = (video) => {
+    if (!/(^|\.)tiktok\.com$/.test(location.hostname)) return "";
+    let id = "";
+    let author = "";
+    let node = video;
+    for (let depth = 0; node && depth < 10 && !(id && author); depth++, node = node.parentElement) {
+      if (depth > 0 && inside.call(node, "video").length > 1) break;
+      if (!author) {
+        for (const link of inside.call(node, 'a[href^="/@"]')) {
+          const user = /^\/@([\w.-]{1,64})\/?$/.exec(attribute.call(link, "href") || "");
+          if (user) {
+            author = user[1];
+            break;
+          }
+        }
+      }
+      if (id) continue;
+      const key = keysOf(node).find((k) => k.startsWith("__reactFiber"));
+      for (let fiber = key ? node[key] : null, steps = 0; fiber && steps < 40 && !id; fiber = fiber.return, steps++) {
+        const props = fiber.memoizedProps;
+        if (props && typeof props.id === "string" && /^\d{15,20}$/.test(props.id)) id = props.id;
+      }
+    }
+    return id && author ? `https://www.tiktok.com/@${author}/video/${id}` : "";
+  };
 
   /** The smallest video that counts (not an icon or a preview), as the extension's button. */
   const MIN_WIDTH = 200;
@@ -56,6 +121,7 @@
         h: Math.round(box.height),
         d: Number.isFinite(video.duration) ? Math.round(video.duration) : 0,
         p: video.mediaKeys != null || encrypted.has(video),
+        page: linkedPage(video) || tiktokPage(video),
       });
       if (found.length >= 20) break;
     }
@@ -102,7 +168,7 @@
     const message = stringify({
       t: TOKEN,
       title: String(document.title || "").slice(0, 200),
-      videos: current.map(({ src, w, h, d, p }) => ({ src, w, h, d, p })),
+      videos: current.map(({ src, w, h, d, p, page }) => ({ src, w, h, d, p, page })),
     });
     place(current);
     if (message === last) return;

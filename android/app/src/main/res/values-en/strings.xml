@@ -40,6 +40,13 @@
     <string name="video_nothing">Zajil found no format on the page that it can download.</string>
     <string name="video_bot_check">YouTube asked to confirm you are not a bot. Try again shortly.</string>
     <string name="video_unreadable">The video page could not be read.</string>
+    <string name="video_private">This video is private. If you are allowed to see it, sign in to the site in «Browse» and open it from there.</string>
+    <string name="video_sign_in">The site asks you to sign in for this video. Sign in to it in «Browse», then open the video from there.</string>
+    <string name="video_not_public">This video could not be read; it may not be public, or it may need you to sign in. Sign in to the site in «Browse», then open the video from there.</string>
+    <string name="video_gone">This video is not available: it may have been removed, or not be shown in your country.</string>
+    <string name="video_unsupported">Zajil knows no way to read this site.</string>
+    <string name="video_network">The site could not be reached. Check your internet connection, then try again.</string>
+    <string name="video_open_in_browser">Open it in «Browse»</string>
     <string name="update_version">Version %1$s</string>
     <string name="update_auto">Look for a Zajil update</string>
     <string name="update_check">Look for a new version</string>

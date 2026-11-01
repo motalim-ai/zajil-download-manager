@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import io.github.motalim_ai.zajil.browser.BrowserController
@@ -29,6 +30,16 @@ import kotlinx.coroutines.launch
 class MainActivity : ZajilActivity() {
     /** The in-app browser (A6): its WebView lives as long as this window. */
     private val browser by lazy { BrowserController(this) }
+
+    /** How many times a link was opened in the browser from a sheet: the screen goes to «Browse». */
+    private val browseRequests = mutableIntStateOf(0)
+
+    override val browses = true
+
+    override fun openInBrowser(url: String) {
+        browser.open(url)
+        browseRequests.intValue++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +66,7 @@ class MainActivity : ZajilActivity() {
                     onNewLink = { offer.value = Offer(null, Source.Typed) },
                     browser = browser,
                     onFound = ::download,
+                    browseRequests = browseRequests.intValue,
                 )
                 Sheets()
             }

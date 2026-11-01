@@ -65,6 +65,21 @@ class FindsTest {
     }
 
     @Test
+    fun aFeedVideosPageIsKeptOnlyWhenItIsAVideoPage() {
+        val pages = listOf(
+            "https://www.tiktok.com/@aesthetic_affairsx/video/7702507360018763039",
+            "https://www.instagram.com/reel/C1a2B3/",
+            "javascript:alert(1)",
+            "https://www.tiktok.com/@aesthetic_affairsx",
+            "https://evil.example/@u/video/1",
+        )
+        val videos = pages.joinToString(",") { """{"src":"blob:https://www.tiktok.com/x","w":400,"h":700,"page":"$it"}""" }
+        val (_, read) = Finds.parseReport("""{"t":"abc123","videos":[$videos]}""", token)!!
+        assertEquals(listOf(pages[0], pages[1], "", "", ""), read.map { it.page })
+        assertTrue(read.all { it.src.isEmpty() })
+    }
+
+    @Test
     fun cookiesGoOnlyToThePagesOwnSite() {
         assertTrue(Finds.sameSite("https://www.facebook.com/reel/1", "https://m.facebook.com/"))
         assertTrue(Finds.sameSite("https://video.example.co.uk/a.mp4", "https://www.example.co.uk/page"))

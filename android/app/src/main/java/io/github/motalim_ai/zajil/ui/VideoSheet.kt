@@ -63,8 +63,11 @@ sealed interface VideoSheet {
 
     data class Ready(override val url: String, val info: VideoInfo) : VideoSheet
 
-    /** [message] is said to the user; [detail] is yt-dlp's own words. */
-    data class Refused(override val url: String, val message: Int, val detail: String?) : VideoSheet
+    /**
+     * [message] is said to the user (never yt-dlp's own words); [signIn]:
+     * signing in on the site, in Zajil's browser, may let it read.
+     */
+    data class Refused(override val url: String, val message: Int, val signIn: Boolean = false) : VideoSheet
 }
 
 /**
@@ -79,6 +82,7 @@ fun VideoSheetView(
     sheet: VideoSheet,
     onDownload: (url: String, info: VideoInfo, picked: Picked, choice: String) -> Unit,
     onDismiss: () -> Unit,
+    onBrowse: ((url: String) -> Unit)? = null,
 ) {
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.video_quality)) {
         Column(
@@ -99,7 +103,9 @@ fun VideoSheetView(
                 }
                 is VideoSheet.Refused -> {
                     ZText(stringResource(sheet.message), size = 16.sp, weight = FontWeight.Bold)
-                    sheet.detail?.let { ZText(it, size = 12.5.sp, color = Z.colors.muted) }
+                    if (sheet.signIn && onBrowse != null) {
+                        MainButton(stringResource(R.string.video_open_in_browser), onClick = { onBrowse(sheet.url) }, modifier = Modifier.fillMaxWidth())
+                    }
                     QuietButton(stringResource(R.string.ok), onClick = onDismiss, modifier = Modifier.fillMaxWidth())
                 }
                 is VideoSheet.Ready -> Choice(sheet, onDownload, onDismiss)

@@ -18,6 +18,7 @@ import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -53,8 +54,11 @@ fun ZajilScreen(
     onNewLink: () -> Unit,
     browser: BrowserController,
     onFound: (Found) -> Unit,
+    browseRequests: Int = 0,
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.Downloads) }
+    // A link opened in the browser from elsewhere (the video sheet's «Open it in Browse»).
+    LaunchedEffect(browseRequests) { if (browseRequests > 0) tab = Tab.Browse }
     var signIns by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         containerColor = Z.colors.bg,

@@ -41,6 +41,13 @@
     <string name="video_nothing">لم يجد زاجِل في الصفحة صيغة يستطيع تحميلها.</string>
     <string name="video_bot_check">طلب يوتيوب التأكد من أنك لست برنامجًا آليًا. حاول بعد قليل.</string>
     <string name="video_unreadable">تعذّرت قراءة صفحة الفيديو.</string>
+    <string name="video_private">هذا الفيديو خاص. إن كان مسموحًا لك برؤيته، فسجّل دخولك في الموقع من «تصفّح» وافتحه من هناك.</string>
+    <string name="video_sign_in">يطلب الموقع تسجيل الدخول لهذا الفيديو. سجّل دخولك فيه من «تصفّح»، ثم افتح الفيديو من هناك.</string>
+    <string name="video_not_public">تعذّرت قراءة هذا الفيديو، وقد يكون غير عام أو يحتاج تسجيل الدخول. سجّل دخولك في الموقع من «تصفّح»، ثم افتح الفيديو من هناك.</string>
+    <string name="video_gone">هذا الفيديو غير متاح: ربما حُذف، أو لا يُعرض في بلدك.</string>
+    <string name="video_unsupported">لا يعرف زاجِل طريقة لقراءة هذا الموقع.</string>
+    <string name="video_network">تعذّر الاتصال بالموقع. تأكد من الاتصال بالإنترنت، ثم حاول مرة أخرى.</string>
+    <string name="video_open_in_browser">افتحه في «تصفّح»</string>
     <string name="update_version">الإصدار %1$s</string>
     <string name="update_auto">البحث عن تحديث زاجِل</string>
     <string name="update_check">البحث عن نسخة جديدة</string>

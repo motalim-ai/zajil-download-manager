@@ -188,8 +188,13 @@ object VideoChoice {
         // A picture alone counts only with a sound to join it to (Facebook
         // gives VP9 pictures with no sound beside its whole files).
         val pictures = if (hasSoundOnly(info)) info.formats.filter { muxable(it) != null } else emptyList()
+        val sounds = sounds(info)
         val heights = (pictures + wholes(info) + playlists(info))
             .mapNotNull { it.height }.filter { it > 0 }.distinct().sortedDescending()
+            // Only a height that downloads with one of the sounds: Instagram's
+            // 1920p is VP9, which joins only with Opus, and it has AAC only
+            // (owner's report, 2026-11-01: «لا توجد هذه الجودة بهذا الصوت»).
+            .filter { height -> sounds.any { pick(info, height, it) != null } }
         if (heights.isNotEmpty()) return heights
         return if (wholes(info).isNotEmpty() || playlists(info).isNotEmpty()) listOf(WHOLE) else emptyList()
     }

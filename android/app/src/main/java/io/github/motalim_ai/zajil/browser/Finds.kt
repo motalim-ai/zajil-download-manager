@@ -1,5 +1,6 @@
 package io.github.motalim_ai.zajil.browser
 
+import io.github.motalim_ai.zajil.video.VideoPages
 import java.net.URI
 import java.net.URLEncoder
 import org.json.JSONObject
@@ -32,8 +33,11 @@ sealed interface Found {
     }
 }
 
-/** A video element as the page's script described it. */
-data class PageVideo(val src: String, val width: Int, val height: Int, val duration: Int, val protected: Boolean)
+/**
+ * A video element as the page's script described it, and [page]: its own
+ * post's address on a feed (a video site's video page), or empty.
+ */
+data class PageVideo(val src: String, val width: Int, val height: Int, val duration: Int, val protected: Boolean, val page: String = "")
 
 object Finds {
     private val files = setOf("mp4", "m4v", "webm", "mov", "m4a", "mp3", "ogg", "oga", "opus", "flac", "wav", "3gp")
@@ -96,6 +100,7 @@ object Finds {
                 height = v.optInt("h").coerceIn(0, 100_000),
                 duration = v.optInt("d").coerceIn(0, 10_000_000),
                 protected = v.optBoolean("p"),
+                page = v.optString("page").take(MAX_SRC).let { if (isHttp(it) && VideoPages.isVideoPage(it)) it else "" },
             )
         }
         return title to videos
