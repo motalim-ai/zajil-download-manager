@@ -7,4 +7,11 @@
         <item name="android:colorAccent">#FF1C6CD0</item>
         <item name="android:windowBackground">@color/zajil_bg</item>
     </style>
+    <!-- The Quick Settings tile's window: only its sheet shows, over the screen below. -->
+    <style name="Theme.Zajil.Overlay" parent="Theme.Zajil">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

@@ -142,7 +142,6 @@
     <string name="queues">Queues</string>
     <string name="new_download">New download</string>
     <string name="source_shared">Shared</string>
-    <string name="source_clipboard">From the clipboard</string>
     <string name="link_hint">https://…</string>
     <string name="file_name">File name</string>
     <string name="probing">Looking at the file…</string>
@@ -216,4 +215,8 @@
         <item quantity="one">%d waiting</item>
         <item quantity="other">%d waiting</item>
     </plurals>
+    <string name="offer_copied_title">Download the copied link?</string>
+    <string name="tile_label">Zajil: download the copied link</string>
+    <string name="tile_no_link">No copied link. Copy a link that starts with http or https, then tap the tile.</string>
+    <string name="tile_added">Added to Zajil\'s downloads.</string>
 </resources>

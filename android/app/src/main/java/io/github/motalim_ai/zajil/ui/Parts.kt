@@ -30,9 +30,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.motalim_ai.zajil.R
 import java.time.LocalTime
+import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.time.format.DecimalStyle
 
@@ -297,9 +300,11 @@ fun QuietButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ZSheet(onDismiss: () -> Unit, label: String, content: @Composable ColumnScope.() -> Unit) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = state,
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
         containerColor = Z.colors.surface,
         contentColor = Z.colors.ink,
@@ -319,7 +324,11 @@ fun ZSheet(onDismiss: () -> Unit, label: String, content: @Composable ColumnScop
             Modifier
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 22.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars),
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                // What the sheet learns after it opened (a file's size, a
+                // typed link's details) makes it taller: it opens up to
+                // show all of it, its buttons included.
+                .onSizeChanged { if (state.isVisible) scope.launch { state.expand() } },
             content = content,
         )
     }

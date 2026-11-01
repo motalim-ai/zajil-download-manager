@@ -62,11 +62,22 @@ import io.github.motalim_ai.zajil.video.VideoPages
 import kotlinx.coroutines.delay
 
 /** Where a link came from. */
-enum class Source { Shared, Clipboard, Typed }
+enum class Source {
+    Shared,
+
+    /** Found on the clipboard when Zajil opened: the user did not hand it over. */
+    Clipboard,
+
+    Typed,
+
+    /** The Quick Settings tile: the user asked for the copied link. */
+    Tile,
+}
 
 /**
  * A link to ask about: shared by another app, found on the clipboard when
- * Zajil opened, or typed after «New link» ([url] null until then). Nothing
+ * Zajil opened or asked for with the Quick Settings tile, or typed after
+ * «New link» ([url] null until then). Nothing
  * downloads until the user taps «Start»; a shared text with no link has a
  * null [url] and says so.
  */
@@ -114,7 +125,8 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
         found = Found.Nothing
         if (!nameEdited) name = url?.let(::nameFromLink).orEmpty()
         if (url == null || video) return@LaunchedEffect
-        // The clipboard was not handed over: nothing goes to its server yet.
+        // The clipboard was not handed over: nothing goes to its server yet
+        // (the tile is the user asking for it).
         if (offer.source == Source.Clipboard) return@LaunchedEffect
         // Android lets Zajil on the local network only with the permission,
         // asked when the download starts.
@@ -129,19 +141,18 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
         if (info != null && !nameEdited) name = info.name
     }
 
-    ZSheet(onDismiss = onDismiss, label = stringResource(R.string.new_download)) {
+    val title = stringResource(
+        if (offer.source == Source.Clipboard || offer.source == Source.Tile) R.string.offer_copied_title else R.string.new_download,
+    )
+    ZSheet(onDismiss = onDismiss, label = title) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ZText(stringResource(R.string.new_download), Modifier.weight(1f), size = 19.sp, weight = FontWeight.Bold)
-                when (offer.source) {
-                    Source.Shared -> Pill(
+                ZText(title, Modifier.weight(1f), size = 19.sp, weight = FontWeight.Bold)
+                if (offer.source == Source.Shared) {
+                    Pill(
                         stringResource(R.string.source_shared), c.bg, c.muted,
                         icon = lineIcon(LineIcon.Shared), height = 28.dp, weight = FontWeight.Normal,
                     )
-                    Source.Clipboard -> Pill(
-                        stringResource(R.string.source_clipboard), c.bg, c.muted, height = 28.dp, weight = FontWeight.Normal,
-                    )
-                    Source.Typed -> {}
                 }
             }
 

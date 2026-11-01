@@ -62,6 +62,35 @@
             </intent-filter>
         </activity>
 
+        <!--
+          The Quick Settings tile's window: transparent over the screen, it
+          reads the clipboard once it has the focus and shows the sheet.
+          Only the tile opens it.
+        -->
+        <activity
+            android:name=".CopiedLinkActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Zajil.Overlay"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+          «زاجِل: حمّل الرابط المنسوخ» in Quick Settings. Exported, as every
+          tile must be, but only the system can bind it (ADR-0012, section 11).
+        -->
+        <service
+            android:name=".CopiedLinkTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_zajil"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".downloads.DownloadService"
             android:exported="false"

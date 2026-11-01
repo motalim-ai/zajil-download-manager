@@ -164,7 +164,6 @@
     <string name="queues">الطوابير</string>
     <string name="new_download">تحميل جديد</string>
     <string name="source_shared">بالمشاركة</string>
-    <string name="source_clipboard">من الحافظة</string>
     <string name="link_hint">https://…</string>
     <string name="file_name">اسم الملف</string>
     <string name="probing">يتعرّف على الملف…</string>
@@ -251,4 +250,8 @@
         <item quantity="many">%d في الانتظار</item>
         <item quantity="other">%d في الانتظار</item>
     </plurals>
+    <string name="offer_copied_title">حمّل الرابط المنسوخ؟</string>
+    <string name="tile_label">زاجِل: حمّل الرابط المنسوخ</string>
+    <string name="tile_no_link">لا يوجد رابط منسوخ. انسخ رابطًا يبدأ بـ http أو https ثم اضغط المربع.</string>
+    <string name="tile_added">أُضيف إلى تحميلات زاجِل.</string>
 </resources>

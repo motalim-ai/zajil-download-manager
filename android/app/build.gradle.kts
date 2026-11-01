@@ -222,8 +222,9 @@ abstract class CheckManifest : DefaultTask() {
     @get:Input
     abstract val allowedPermissions: SetProperty<String>
 
+    /** Each exported component, and the permission a caller needs ("": none). */
     @get:Input
-    abstract val allowedExported: SetProperty<String>
+    abstract val allowedExported: MapProperty<String, String>
 
     @TaskAction
     fun check() {
@@ -240,11 +241,19 @@ abstract class CheckManifest : DefaultTask() {
         val exported = listOf("activity", "activity-alias", "service", "receiver", "provider")
             .flatMap(::elements)
             .filter { it.getAttributeNS(android, "exported") == "true" }
-            .map { it.getAttributeNS(android, "name") }
+        val allowed = allowedExported.get()
         val problems = permissions.filterNot { it in allowedPermissions.get() }
             .map { "permission not in ADR-0012: $it" } +
-            exported.filterNot { it in allowedExported.get() }
-                .map { "exported component not in ADR-0012: $it" }
+            exported.mapNotNull { component ->
+                val name = component.getAttributeNS(android, "name")
+                val needs = allowed[name]
+                when {
+                    needs == null -> "exported component not in ADR-0012: $name"
+                    component.getAttributeNS(android, "permission") != needs ->
+                        "exported component $name must be guarded by ${needs.ifEmpty { "no permission" }}"
+                    else -> null
+                }
+            }
         if (problems.isNotEmpty()) throw GradleException(problems.joinToString("\n"))
     }
 }
@@ -328,7 +337,11 @@ androidComponents {
                 // registers unexported (core-ktx): no other app gets it.
                 "${variant.applicationId.get()}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
             )
-            allowedExported = setOf("io.github.motalim_ai.zajil.MainActivity")
+            allowedExported = mapOf(
+                "io.github.motalim_ai.zajil.MainActivity" to "",
+                // The Quick Settings tile: only the system may bind it.
+                "io.github.motalim_ai.zajil.CopiedLinkTile" to "android.permission.BIND_QUICK_SETTINGS_TILE",
+            )
         }
         tasks.matching { it.name == "assemble$name" }.configureEach { dependsOn(check) }
     }
