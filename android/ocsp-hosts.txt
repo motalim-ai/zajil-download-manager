@@ -1,0 +1,51 @@
+# OCSP responders of the big certificate authorities (ADR-0012, section 17).
+#
+# rustls-platform-verifier checks revocation on Android with OCSP first,
+# then the CA's revocation list (CRL), and its network security config lets
+# the app use plain HTTP only to CRL hosts (the answers are signed). With
+# OCSP blocked, Android downloaded the whole list for every new connection:
+# DigiCert's is 11.4 MB, and parsing it filled the app's heap (Facebook's
+# video servers, 2026-11-01). These hosts let OCSP answer first, in a few
+# KB; the build adds them to the library's own file
+# (app/build.gradle.kts, `networkConfig`). A CA missing here falls back to
+# its list, as before.
+#
+# One host per line; subdomains are not included.
+ocsp.digicert.com
+ocsp.digicert.cn
+ocsp.dcocsp.cn
+ocsp.sectigo.com
+ocsp.comodoca.com
+ocsp.usertrust.com
+ocsp.trust-provider.com
+ocsp.sectigochina.com
+ocsp.globalsign.com
+ocsp2.globalsign.com
+ocsp.godaddy.com
+ocsp.starfieldtech.com
+ocsp.entrust.net
+o.pki.goog
+ocsp.pki.goog
+oneocsp.microsoft.com
+ocsp.msocsp.com
+ocsp.r2m01.amazontrust.com
+ocsp.r2m02.amazontrust.com
+ocsp.r2m03.amazontrust.com
+ocsp.r2m04.amazontrust.com
+ocsp.e2m01.amazontrust.com
+ocsp.e2m02.amazontrust.com
+ocsp.e2m03.amazontrust.com
+ocsp.e2m04.amazontrust.com
+ocsp.rootca1.amazontrust.com
+ocsp.rootca2.amazontrust.com
+ocsp.rootca3.amazontrust.com
+ocsp.rootca4.amazontrust.com
+ocsp.certum.pl
+subca.ocsp-certum.com
+ocsps.ssl.com
+ocsp.harica.gr
+ocsp.buypass.com
+ocsp.quovadisglobal.com
+ocsp.swisssign.net
+ocsp03.actalis.it
+commercial.ocsp.identrust.com

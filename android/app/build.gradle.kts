@@ -267,16 +267,25 @@ val verifierVersion = providers.fileContents(workspace.file("Cargo.lock")).asTex
     lines[at + 1].substringAfter('"').substringBefore('"')
 }
 /**
- * The debug build's network security config: rustls-platform-verifier's own
- * (plain HTTP only to certificate revocation lists, which the engine's
- * verifier fetches), with plain HTTP to this phone's 127.0.0.1 added for the
- * emulator tests (android/README.md). Written from the AAR itself, so that
- * the list never falls behind it: without it, Android reports a certificate
- * whose list it cannot fetch as revoked (YouTube's video servers, 2026-11).
+ * The app's network security config, for every build:
+ * rustls-platform-verifier's own (plain HTTP only to certificate
+ * revocation lists, which the engine's verifier fetches), with the OCSP
+ * responders of `ocsp-hosts.txt` added, so that OCSP answers before a
+ * list is downloaded (ADR-0012, section 17), and in a debug build plain
+ * HTTP to this phone's 127.0.0.1 for the emulator tests (android/README.md).
+ * Written from the AAR itself, under the library's resource name, so that
+ * the list never falls behind it and the library's manifest entry points
+ * to this file.
  */
-abstract class DebugNetworkConfig : DefaultTask() {
+abstract class NetworkConfig : DefaultTask() {
     @get:InputFiles
     abstract val verifierAar: ConfigurableFileCollection
+
+    @get:InputFile
+    abstract val ocspHosts: RegularFileProperty
+
+    @get:Input
+    abstract val localTests: Property<Boolean>
 
     @get:OutputDirectory
     abstract val res: DirectoryProperty
@@ -291,29 +300,36 @@ abstract class DebugNetworkConfig : DefaultTask() {
         }
         val end = "</network-security-config>"
         if (!config.contains(end)) throw GradleException("unexpected network_security_config.xml in $aar")
-        val local = """  <domain-config cleartextTrafficPermitted="true">
-    <domain includeSubdomains="false">127.0.0.1</domain>
-  </domain-config>
-"""
+        val hosts = ocspHosts.get().asFile.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+        hosts.forEach { if (!Regex("^[a-z0-9.-]+$").matches(it)) throw GradleException("not a host: $it") }
+        val ocsp = "  <domain-config cleartextTrafficPermitted=\"true\">\n" +
+            hosts.joinToString("") { "    <domain includeSubdomains=\"false\">$it</domain>\n" } +
+            "  </domain-config>\n"
+        val local = if (localTests.get()) {
+            "  <domain-config cleartextTrafficPermitted=\"true\">\n" +
+                "    <domain includeSubdomains=\"false\">127.0.0.1</domain>\n" +
+                "  </domain-config>\n"
+        } else {
+            ""
+        }
         val out = res.get().dir("xml").asFile.apply { mkdirs() }
-        File(out, "debug_network.xml").writeText(config.replace(end, local + end))
+        File(out, "network_security_config.xml").writeText(config.replace(end, ocsp + local + end))
     }
-}
-
-val debugNetworkConfig = tasks.register<DebugNetworkConfig>("debugNetworkConfig") {
-    verifierAar.from(
-        configurations.detachedConfiguration(
-            dependencies.create("org.rustls:rustls-platform-verifier:${verifierVersion.get()}@aar"),
-        ),
-    )
-    res = layout.buildDirectory.dir("generated/debugNetwork/res")
 }
 
 androidComponents {
     onVariants { variant ->
-        if (variant.buildType == "debug") {
-            variant.sources.res?.addGeneratedSourceDirectory(debugNetworkConfig, DebugNetworkConfig::res)
+        val networkConfig = tasks.register<NetworkConfig>("${variant.name}NetworkConfig") {
+            verifierAar.from(
+                configurations.detachedConfiguration(
+                    dependencies.create("org.rustls:rustls-platform-verifier:${verifierVersion.get()}@aar"),
+                ),
+            )
+            ocspHosts = rootProject.layout.projectDirectory.file("ocsp-hosts.txt")
+            localTests = variant.buildType == "debug"
+            res = layout.buildDirectory.dir("generated/networkConfig/${variant.name}/res")
         }
+        variant.sources.res?.addGeneratedSourceDirectory(networkConfig, NetworkConfig::res)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildEngine, BuildEngine::jniLibs)
         variant.sources.kotlin?.addGeneratedSourceDirectory(buildEngine, BuildEngine::kotlin)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(fetchQuickJs, FetchQuickJs::jniLibs)
