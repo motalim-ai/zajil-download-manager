@@ -1,0 +1,293 @@
+package io.github.motalim_ai.zajil.video
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class VideoChoiceTest {
+    private fun video(id: String, height: Int, vcodec: String, ext: String, tbr: Double = 1000.0, size: Long? = 1000) =
+        Format(id, ext, vcodec, "none", height, 30.0, tbr, size, null, null, null, "https://v/$id", null, false)
+
+    private fun sound(
+        id: String,
+        acodec: String,
+        ext: String,
+        language: String?,
+        note: String?,
+        preference: Int? = null,
+        tbr: Double = 128.0,
+    ) = Format(id, ext, "none", acodec, null, null, tbr, 100, language, preference, note, "https://a/$id", null, false)
+
+    private val own = sound("140", "mp4a.40.2", "m4a", "en", "English original (default), medium", 10)
+    private val ownDrc = sound("140-drc", "mp4a.40.2", "m4a", "en", "English original (default), medium, DRC", 10, tbr = 129.0)
+    private val ownOpus = sound("251", "opus", "webm", "en", "English original (default), medium", 10, tbr = 140.0)
+    private val arabic = sound("140-ar", "mp4a.40.2", "m4a", "ar", "Arabic (dubbed-auto), medium", -1)
+    private val arabicOpus = sound("251-ar", "opus", "webm", "ar", "Arabic (dubbed-auto), medium", -1)
+
+    private fun info(vararg formats: Format) = VideoInfo("id", "title", 60.0, false, formats.toList(), "2026.10.21")
+
+    @Test
+    fun the_qualities_are_the_heights_that_can_be_joined_highest_first() {
+        val i = info(
+            video("137", 1080, "avc1.640028", "mp4"),
+            video("248", 1080, "vp9", "webm"),
+            video("313", 2160, "vp9", "webm"),
+            video("399", 1080, "av01.0.08M.08", "mp4"),
+            video("701", 2160, "av01.0.12M.10", "mp4"),
+            video("134", 360, "avc1.4d401e", "mp4"),
+            own,
+            ownOpus,
+        )
+        // AV1 alone (none here alone) would be left out: MediaMuxer is not asked for it.
+        assertEquals(listOf(2160, 1080, 360), VideoChoice.qualities(i))
+        // Without Opus, 2160p (VP9 only) cannot be joined, so it is not offered.
+        assertEquals(listOf(1080, 360), VideoChoice.qualities(info(*i.formats.filter { it != ownOpus }.toTypedArray())))
+    }
+
+    @Test
+    fun h264_with_aac_in_mp4_comes_first_at_a_height() {
+        val i = info(video("137", 1080, "avc1.640028", "mp4", tbr = 3000.0), video("248", 1080, "vp9", "webm", tbr = 2500.0), own, ownOpus)
+        val picked = VideoChoice.pick(i, 1080, Sound("en", original = true))!!
+        assertEquals("137", picked.video!!.id)
+        assertEquals("140", picked.audio!!.id)
+        assertEquals(Container.Mp4, picked.container)
+    }
+
+    @Test
+    fun vp9_takes_opus_into_webm_when_only_vp9_has_the_height() {
+        val i = info(video("313", 2160, "vp9", "webm"), own, ownOpus)
+        val picked = VideoChoice.pick(i, 2160, Sound("en", original = true))!!
+        assertEquals("251", picked.audio!!.id)
+        assertEquals(Container.Webm, picked.container)
+    }
+
+    @Test
+    fun the_videos_own_sound_is_offered_first_then_the_dubbed_ones() {
+        val i = info(video("137", 1080, "avc1", "mp4"), arabic, own, arabicOpus, ownOpus)
+        assertEquals(listOf(Sound("en", true), Sound("ar", false)), VideoChoice.sounds(i))
+    }
+
+    @Test
+    fun a_dubbed_sound_picks_that_language() {
+        val i = info(video("137", 1080, "avc1", "mp4"), arabic, own)
+        val picked = VideoChoice.pick(i, 1080, Sound("ar", original = false))!!
+        assertEquals("140-ar", picked.audio!!.id)
+        assertEquals(VideoChoice.pick(i, 1080, Sound("en", true))!!.audio!!.id, "140")
+    }
+
+    @Test
+    fun the_plain_sound_wins_over_the_range_compressed_one() {
+        val i = info(video("137", 1080, "avc1", "mp4"), ownDrc, own)
+        assertEquals("140", VideoChoice.pick(i, 1080, Sound("en", true))!!.audio!!.id)
+        assertEquals("140", VideoChoice.pick(i, null, Sound("en", true))!!.audio!!.id)
+    }
+
+    @Test
+    fun sound_only_is_m4a() {
+        val picked = VideoChoice.pick(info(own, ownOpus), null, Sound("en", true))!!
+        assertNull(picked.video)
+        assertEquals(Container.M4a, picked.container)
+    }
+
+    @Test
+    fun no_pair_is_null_and_the_size_adds_both_streams() {
+        val i = info(video("313", 2160, "vp9", "webm", size = 900), own)
+        // VP9 needs Opus, and there is only AAC.
+        assertNull(VideoChoice.pick(i, 2160, Sound("en", true)))
+        val j = info(video("137", 1080, "avc1", "mp4", size = 900), own)
+        assertEquals(1000L, VideoChoice.pick(j, 1080, Sound("en", true))!!.size)
+    }
+
+    @Test
+    fun youtube_pages_are_video_pages_and_files_are_not() {
+        listOf(
+            "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "https://youtu.be/jNQXAC9IVRw",
+            "https://m.youtube.com/shorts/abc",
+            "https://music.youtube.com/watch?v=x",
+        ).forEach { assertTrue(it, VideoPages.isVideoPage(it)) }
+        listOf(
+            "https://www.youtube.com/",
+            "https://example.com/watch?v=x",
+            "https://rr1---sn-x.googlevideo.com/videoplayback?itag=18",
+        ).forEach { assertFalse(it, VideoPages.isVideoPage(it)) }
+    }
+
+    @Test
+    fun a_link_about_to_expire_is_known_by_its_expire() {
+        val now = 1_800_000_000L
+        assertTrue(VideoPages.expiresSoon("https://r.googlevideo.com/videoplayback?expire=${now + 60}&itag=18", now))
+        assertFalse(VideoPages.expiresSoon("https://r.googlevideo.com/videoplayback?expire=${now + 3600}&itag=18", now))
+        assertFalse(VideoPages.expiresSoon("https://example.com/file.mp4", now))
+    }
+
+    private fun whole(id: String, height: Int?, ext: String = "mp4", vcodec: String? = null, acodec: String? = null, size: Long? = 1000, cookie: String? = null) =
+        Format(id, ext, vcodec, acodec, height, null, 1000.0, size, null, null, null, "https://w/$id", null, false, cookieHeader = cookie)
+
+    @Test
+    fun whole_files_x_style_are_offered_by_height() {
+        val i = info(whole("http-320", 180), whole("http-832", 360), whole("http-2176", 720))
+        assertEquals(listOf(720, 360, 180), VideoChoice.qualities(i))
+        assertEquals(listOf(Sound(null, original = true)), VideoChoice.sounds(i))
+        assertFalse(VideoChoice.hasSoundOnly(i))
+        val picked = VideoChoice.pick(i, 360, Sound(null, original = true))!!
+        assertEquals("http-832", picked.video!!.id)
+        assertNull(picked.audio)
+        assertTrue(picked.whole)
+        assertEquals(Container.Mp4, picked.container)
+    }
+
+    @Test
+    fun a_whole_file_without_height_is_the_pages_file_facebook_style() {
+        val i = info(whole("sd", null, size = 300), whole("hd", null, size = 600))
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(i))
+        assertEquals("hd", VideoChoice.pick(i, VideoChoice.WHOLE, Sound(null, original = true))!!.video!!.id)
+    }
+
+    @Test
+    fun pictures_with_no_sound_to_join_are_not_offered_facebook_as_read_on_the_phone() {
+        val i = info(
+            video("1417507216490308v", 636, "vp09.00.21.08", "mp4"),
+            video("1417507223156974v", 848, "vp09.00.30.08", "mp4"),
+            whole("sd", null, size = 293785),
+            whole("hd", null, size = 622802),
+        )
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(i))
+        assertEquals("hd", VideoChoice.pick(i, VideoChoice.WHOLE, VideoChoice.sounds(i).first())!!.video!!.id)
+        // On the phone Facebook says no sizes: yt-dlp's order decides, best last.
+        val unsized = info(whole("sd", null, size = null), whole("hd", null, size = null))
+        assertEquals("hd", VideoChoice.pick(unsized, VideoChoice.WHOLE, Sound(null, original = true))!!.video!!.id)
+    }
+
+    @Test
+    fun joined_streams_still_come_first_when_a_page_has_both() {
+        val i = info(video("137", 1080, "avc1.640028", "mp4"), own, whole("22", 720, vcodec = "avc1", acodec = "mp4a.40.2"))
+        assertEquals(listOf(1080, 720), VideoChoice.qualities(i))
+        assertEquals("137", VideoChoice.pick(i, 1080, Sound("en", original = true))!!.video!!.id)
+        assertEquals("22", VideoChoice.pick(i, 720, Sound("en", original = true))!!.video!!.id)
+    }
+
+    @Test
+    fun a_silent_video_is_offered_by_its_pictures_instagram_as_read_on_the_mac() {
+        // Instagram says has_audio false: yt-dlp gives every format acodec «none».
+        val i = info(
+            Format("0", "mp4", null, "none", null, null, null, null, null, null, null, "https://i/0", null, false),
+            video("dash-840v", 840, "avc1.64001F", "mp4"),
+            video("dash-1280v", 1280, "avc1.64001F", "mp4"),
+        )
+        assertEquals(listOf(1280, 840), VideoChoice.qualities(i))
+        assertEquals(listOf(Sound(null, original = true)), VideoChoice.sounds(i))
+        val picked = VideoChoice.pick(i, 1280, Sound(null, original = true))!!
+        assertEquals("dash-1280v", picked.video!!.id)
+        assertNull(picked.audio)
+        assertTrue(picked.whole)
+        // One sound anywhere, and a picture alone is again only for joining.
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(info(whole("sd", null), video("dash-840v", 840, "vp09", "mp4"))))
+    }
+
+    @Test
+    fun instagrams_vp9_with_only_aac_is_not_offered_owners_samsung() {
+        // A reel today: H.264 up to 1280p, VP9 at 1920p, one AAC sound with no
+        // language, and the site's own MP4 files with no codecs said.
+        val aac = sound("dash-a", "mp4a.40.2", "m4a", null, "DASH audio")
+        val i = info(
+            whole("1", null), whole("2", null),
+            video("dash-1280v", 1280, "avc1.64001F", "mp4"),
+            video("dash-1920v", 1920, "vp09.00.40.08", "mp4"),
+            aac,
+        )
+        assertEquals(listOf(1280), VideoChoice.qualities(i))
+        val sound = VideoChoice.sounds(i).single()
+        assertTrue(sound.original)
+        val picked = VideoChoice.pick(i, 1280, sound)!!
+        assertEquals("dash-1280v", picked.video!!.id)
+        assertEquals("dash-a", picked.audio!!.id)
+        // Only VP9 pictures: the site's own file instead.
+        val vp9Only = info(whole("1", null), video("dash-1920v", 1920, "vp09.00.40.08", "mp4"), aac)
+        assertEquals(listOf(VideoChoice.WHOLE), VideoChoice.qualities(vp9Only))
+        assertTrue(VideoChoice.pick(vp9Only, VideoChoice.WHOLE, VideoChoice.sounds(vp9Only).single())!!.whole)
+    }
+
+    @Test
+    fun dash_streams_are_joined_and_a_direct_file_comes_first() {
+        val dashVideo = video("dash-v720", 720, "avc1.64001f", "mp4").copy(dash = true)
+        val dashAudio = sound("dash-a", "mp4a.40.2", "m4a", null, "DASH audio").copy(dash = true)
+        val only = info(dashVideo, dashAudio)
+        assertEquals(listOf(720), VideoChoice.qualities(only))
+        val picked = VideoChoice.pick(only, 720, VideoChoice.sounds(only).single())!!
+        assertTrue(picked.video!!.dash && picked.audio!!.dash)
+        assertEquals(Container.Mp4, picked.container)
+        // The same height as a direct file too: the engine's file, and its direct sound.
+        val both = info(dashVideo, dashAudio, video("137", 720, "avc1.64001f", "mp4"), sound("140", "mp4a.40.2", "m4a", null, null))
+        val direct = VideoChoice.pick(both, 720, VideoChoice.sounds(both).first())!!
+        assertEquals("137", direct.video!!.id)
+        assertEquals("140", direct.audio!!.id)
+    }
+
+    @Test
+    fun a_playlist_plan_takes_the_nearest_height_and_falls_back_to_the_own_sound() {
+        val i = info(
+            video("137", 1080, "avc1.640028", "mp4"),
+            video("136", 720, "avc1.64001f", "mp4"),
+            video("135", 480, "avc1.4d401e", "mp4"),
+            own,
+        )
+        // Up to 720: 720. Up to 360: none that low, so the lowest above it.
+        assertEquals("136", VideoChoice.forPlan(i, 720, null)!!.video!!.id)
+        assertEquals("135", VideoChoice.forPlan(i, 360, null)!!.video!!.id)
+        // The sound alone.
+        assertNull(VideoChoice.forPlan(i, null, null)!!.video)
+        // An Arabic dub where there is one, the video's own where there is none.
+        assertEquals("140-ar", VideoChoice.forPlan(info(video("137", 1080, "avc1", "mp4"), arabic, own), 1080, "ar")!!.audio!!.id)
+        assertEquals("140", VideoChoice.forPlan(i, 1080, "ar")!!.audio!!.id)
+        // Whole files only (X): the one up to the height.
+        assertEquals("http-832", VideoChoice.forPlan(info(whole("http-320", 180), whole("http-832", 360), whole("http-2176", 720)), 480, null)!!.video!!.id)
+        // Nothing at all: null, and that video alone is skipped.
+        assertNull(VideoChoice.forPlan(info(), 720, null))
+    }
+
+    @Test
+    fun hls_is_one_stream_saved_as_mp4_never_joined() {
+        val playlist = Format("hls-720", "mp4", "avc1", "mp4a", 720, null, 2000.0, null, null, null, null, "https://l/720.m3u8", null, false, hls = true)
+        val i = info(playlist)
+        assertEquals(listOf(720), VideoChoice.qualities(i))
+        val picked = VideoChoice.pick(i, 720, Sound(null, original = true))!!
+        assertTrue(picked.video!!.hls)
+        assertEquals(Container.Mp4, picked.container)
+    }
+
+    @Test
+    fun a_formats_own_cookies_are_kept_for_its_download() {
+        val i = info(whole("download", 1024, vcodec = "h264", acodec = "aac", cookie = "tt_chain_token=x"))
+        assertEquals("tt_chain_token=x", VideoChoice.pick(i, 1024, Sound(null, original = true))!!.video!!.cookieHeader)
+    }
+
+    @Test
+    fun the_desktops_video_sites_are_video_pages() {
+        listOf(
+            "https://x.com/user/status/1234567890?s=46&t=abc",
+            "https://twitter.com/user/status/1",
+            "https://www.instagram.com/reel/C1a2B3/?igsh=x",
+            "https://m.facebook.com/watch/?v=1",
+            "https://www.facebook.com/share/r/1Ab/",
+            "https://fb.watch/abc/",
+            "https://vt.tiktok.com/ZS4ghQ5py/",
+            "https://www.tiktok.com/@u/video/7300000000000000000",
+            "https://vimeo.com/123",
+            "https://www.dailymotion.com/video/x8",
+            "https://www.snapchat.com/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYYWtidGhudGZpAX1TKn0JAX1TKnXJAAAAAA?share_id=x&locale=ar",
+            "https://snapchat.com/@someone/spotlight/W7_EDlXWTBiXAEEniNoMPwAAYYWtidGhudGZp",
+            "https://t.snapchat.com/AbC123xy",
+            "https://www.snapchat.com/t/AbC123xy",
+        ).forEach { assertTrue(it, VideoPages.isVideoPage(it)) }
+        listOf(
+            "https://www.instagram.com/", "https://x.com/user", "https://www.tiktok.com/@u", "ftp://x.com/u/status/1",
+            // A profile, its Story page, a chat: not Spotlight videos.
+            "https://www.snapchat.com/add/someone", "https://www.snapchat.com/@someone", "https://story.snapchat.com/p/1/2",
+            "https://web.snapchat.com/", "https://accounts.snapchat.com/",
+        )
+            .forEach { assertFalse(it, VideoPages.isVideoPage(it)) }
+    }
+}

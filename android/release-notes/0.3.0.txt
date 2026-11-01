@@ -1,0 +1,11 @@
+- طوابير متعددة، لكل منها عدد تحميلاتها ووقتها و«Wi-Fi فقط»، ونقل التحميل بين الطوابير.
+- اختيار مجلد الحفظ، ومجلد لكل نوع ملف.
+- قوائم تشغيل يوتيوب وقنواته، وفيديو DASH.
+- في المتصفح: تبويبات ومفضلة وسجل.
+- الحماية: حجب الإعلانات والمتتبعات، وتحذير قبل المواقع الضارة، ورفض التحميل منها.
+
+- Several queues, each with its own number of downloads, schedule and «Wi-Fi only»; move a download to another queue.
+- Choose the save folder, and a folder for each type of file.
+- YouTube playlists and channels, and DASH videos.
+- In the browser: tabs, bookmarks and history.
+- Protection: ads and trackers blocked, a warning before harmful sites, and no downloads from them.

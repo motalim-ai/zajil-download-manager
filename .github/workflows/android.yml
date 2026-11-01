@@ -1,0 +1,382 @@
+# Zajil for Android (ADR-0012; A4). Not run on GitHub yet: the owner holds
+# every Android push until he lifts it (ADR-0012, owner's decision 7).
+#
+# - build: on a tag android-vX.Y.Z, or by hand. The unsigned release APK and
+#   the JVM tests; no secret is reachable here.
+# - release: on a tag android-vX.Y.Z from main, in the `release` environment
+#   (the owner approves each run). Signs the APK with apksigner (its key is a
+#   secret of that environment; android/RELEASING.md), checks the signing
+#   certificate against android/signing-cert.sha256, writes the signed
+#   update file and the SHA-256 list, and makes a DRAFT release: the owner
+#   tries it, then publishes it.
+# - channel: by hand, once the owner has published android-vX.Y.Z. Puts
+#   that release's signed latest-android.json on the android-channel
+#   pre-release, where installed apps look (update/AppUpdate.kt).
+# - tools-android: by hand, from main. Writes tools-android.json from
+#   tools/yt-dlp/pins-android.txt and tools/sequence-android.txt, signs it,
+#   and puts it on android-channel (video/ToolsUpdate.kt reads it).
+#
+# Signatures: the project's update key (TAURI_SIGNING_PRIVATE_KEY and its
+# password, as the desktop's release and tools-list workflows use it), each
+# checked with minisign against the public key built into the apps.
+
+name: Android
+
+on:
+  push:
+    tags: ["android-v*"]
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "build, channel (after publishing a release), tools-android or lists-android"
+        required: true
+        default: build
+        type: choice
+        options: [build, channel, tools-android, lists-android]
+      version:
+        description: "For channel: the published version, X.Y.Z"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}-${{ inputs.job }}
+  cancel-in-progress: false
+
+env:
+  NDK_VERSION: "29.0.14206865"
+  CARGO_NDK_VERSION: "4.1.2"
+
+jobs:
+  build:
+    name: Build the APK
+    if: github.event_name == 'push' || inputs.job == 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Chaquopy runs pip with a Python of the version it embeds.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Rust for Android
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Android SDK packages
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "platforms;android-37.0" "build-tools;37.0.0" >/dev/null
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: The tag is the app's version
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/android-v}"
+          ours="$(tr -d '[:space:]' < android/version.txt)"
+          [ "$tag" = "$ours" ] || { echo "::error::tag android-v$tag, but the app is $ours"; exit 1; }
+      - name: Build and test
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease testDebugUnitTest -Pzajil.buildPython="$(which python3.13)"
+      - name: The APK
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < android/version.txt)"
+          mkdir out
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "out/zajil-android-$version-arm64-v8a-unsigned.apk"
+          ls -l out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-unsigned
+          path: out/
+          if-no-files-found: error
+
+  release:
+    name: Sign and draft the release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Only a tag on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::the tag is not on main"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-unsigned
+          path: out
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Sign the APK
+        env:
+          ZAJIL_ANDROID_KEYSTORE_B64: ${{ secrets.ZAJIL_ANDROID_KEYSTORE_B64 }}
+          ZAJIL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ZAJIL_ANDROID_KEYSTORE_PASSWORD }}
+          ZAJIL_ANDROID_KEY_ALIAS: ${{ secrets.ZAJIL_ANDROID_KEY_ALIAS }}
+          ZAJIL_ANDROID_KEY_PASSWORD: ${{ secrets.ZAJIL_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$ZAJIL_ANDROID_KEYSTORE_B64" ] || { echo "::error::the release environment has no ZAJIL_ANDROID_KEYSTORE_B64"; exit 1; }
+          [ -s android/signing-cert.sha256 ] || { echo "::error::android/signing-cert.sha256 is missing: the owner publishes the certificate's fingerprint first"; exit 1; }
+          bt="$ANDROID_HOME/build-tools/37.0.0"
+          [ -x "$bt/apksigner" ] || "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;37.0.0" >/dev/null
+          keystore="$RUNNER_TEMP/zajil.jks"
+          trap 'rm -f "$keystore"' EXIT
+          umask 077
+          printf '%s' "$ZAJIL_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
+          version="${GITHUB_REF#refs/tags/android-v}"
+          unsigned="out/zajil-android-$version-arm64-v8a-unsigned.apk"
+          apk="zajil-android-$version-arm64-v8a.apk"
+          "$bt/zipalign" -f -p 4 "$unsigned" aligned.apk
+          "$bt/apksigner" sign --ks "$keystore" --ks-key-alias "$ZAJIL_ANDROID_KEY_ALIAS" \
+            --ks-pass env:ZAJIL_ANDROID_KEYSTORE_PASSWORD --key-pass env:ZAJIL_ANDROID_KEY_PASSWORD \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$apk" aligned.apk
+          rm -f aligned.apk "$keystore"
+          "$bt/apksigner" verify --verbose "$apk"
+          got="$("$bt/apksigner" verify --print-certs "$apk" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')"
+          want="$(grep -v '^#' android/signing-cert.sha256 | tr -d ' :\n' | tr 'A-F' 'a-f')"
+          [ "$got" = "$want" ] || { echo "::error::signed by $got, not the published $want"; exit 1; }
+      - name: The signed update file and the SHA-256 list
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          version="${GITHUB_REF#refs/tags/android-v}"
+          apk="zajil-android-$version-arm64-v8a.apk"
+          IFS=. read -r major minor patch <<< "$version"
+          code=$(( major * 1000000 + minor * 1000 + patch ))
+          notes=""
+          [ -f "android/release-notes/$version.txt" ] && notes="$(cat "android/release-notes/$version.txt")"
+          jq -n --arg version "$version" --argjson code "$code" --arg apk "$apk" \
+            --arg sha "$(sha256sum "$apk" | cut -d' ' -f1)" --argjson size "$(stat -c %s "$apk")" --arg notes "$notes" \
+            '{format: "zajil-android-update-1", version: $version, version_code: $code, apk: $apk, sha256: $sha, size: $size, notes: $notes}' \
+            > latest-android.json
+          sha256sum "$apk" > SHA256SUMS-android
+          sudo apt-get install -y -q --no-install-recommends minisign
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          key="$(base64 -d apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+          for f in latest-android.json SHA256SUMS-android; do
+            (cd apps/desktop && npx tauri signer sign "$GITHUB_WORKSPACE/$f" >/dev/null)
+            base64 -d "$f.sig" > "$f.minisig"
+            rm "$f.sig"
+            minisign -Vm "$f" -x "$f.minisig" -P "$key"
+          done
+          cat latest-android.json
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/android-v}"
+          gh release create "android-v$version" --draft --prerelease --verify-tag \
+            --title "زاجِل لأندرويد $version" \
+            --notes "Zajil for Android $version. Check: android/RELEASING.md." \
+            "zajil-android-$version-arm64-v8a.apk" SHA256SUMS-android SHA256SUMS-android.minisig \
+            latest-android.json latest-android.json.minisig
+
+  channel:
+    name: Point installed apps at a published release
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'channel'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Only a published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version is X.Y.Z"; exit 1; }
+          draft="$(gh release view "android-v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          [ "$draft" = false ] || { echo "::error::android-v$VERSION is still a draft: publish it first"; exit 1; }
+          gh release download "android-v$VERSION" --repo "$GITHUB_REPOSITORY" -p 'latest-android.json*'
+          sudo apt-get install -y -q --no-install-recommends minisign
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: src
+      - name: Check, and put on android-channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          minisign -Vm latest-android.json -x latest-android.json.minisig \
+            -P "$(base64 -d src/apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+          if ! gh release view android-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create android-channel --repo "$GITHUB_REPOSITORY" --prerelease --target main \
+              --title "Zajil for Android: update channel" \
+              --notes "Signed files that Zajil for Android reads to find its update and yt-dlp's (ADR-0012, section 8). Not a release."
+          fi
+          gh release upload android-channel --repo "$GITHUB_REPOSITORY" --clobber latest-android.json latest-android.json.minisig
+
+  tools-android:
+    name: Sign and publish tools-android.json
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'tools-android'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Only from main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run it from main only"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Write tools-android.json
+        run: |
+          set -euo pipefail
+          pins=tools/yt-dlp/pins-android.txt
+          version="$(grep -m1 '^version ' "$pins" | cut -d' ' -f2)"
+          read -r _ file sha < <(grep -m1 '^python ' "$pins")
+          sequence="$(grep -v '^#' tools/sequence-android.txt | grep -m1 -E '^[0-9]+$')"
+          jq -n --argjson sequence "$sequence" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg version "$version" --arg file "$file" --arg sha "$sha" \
+            '{format: "zajil-android-tools-1", sequence: $sequence, issued_at: $issued,
+              yt_dlp: {version: $version, file: $file, sha256: $sha}}' > tools-android.json
+          cat tools-android.json
+          # The pinned file is what yt-dlp published.
+          curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/$version/$file" -o yt-dlp.check
+          echo "$sha  yt-dlp.check" | sha256sum -c -
+      - name: Newer than the published list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ours="$(jq .sequence tools-android.json)"
+          if gh release download android-channel -p tools-android.json -O published.json 2>/dev/null; then
+            theirs="$(jq .sequence published.json)"
+            [ "$ours" -gt "$theirs" ] || { echo "::error::tools/sequence-android.txt ($ours) is not higher than the published list ($theirs)"; exit 1; }
+          fi
+      - name: Sign and check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          sudo apt-get install -y -q --no-install-recommends minisign
+          (cd apps/desktop && npx tauri signer sign "$GITHUB_WORKSPACE/tools-android.json" >/dev/null)
+          base64 -d tools-android.json.sig > tools-android.json.minisig
+          rm tools-android.json.sig
+          minisign -Vm tools-android.json -x tools-android.json.minisig \
+            -P "$(base64 -d apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+      - name: Publish on android-channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view android-channel >/dev/null 2>&1; then
+            gh release create android-channel --prerelease --target main \
+              --title "Zajil for Android: update channel" \
+              --notes "Signed files that Zajil for Android reads to find its update and yt-dlp's (ADR-0012, section 8). Not a release."
+          fi
+          gh release upload android-channel tools-android.json tools-android.json.minisig --clobber
+
+  lists-android:
+    name: Compile, sign and publish the protection lists
+    if: github.event_name == 'workflow_dispatch' && inputs.job == 'lists-android'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Only from main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::run it from main only"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Compile the lists from tools/blocklists/sources.txt
+        run: |
+          set -euo pipefail
+          sequence="$(date -u +%s)"
+          mkdir -p work out
+          entries=()
+          for list in ads trackers malware; do
+            n=0
+            while read -r name url _; do
+              [ "$name" = "$list" ] || continue
+              n=$((n + 1))
+              curl -fsSL --max-time 120 -o "work/$list-$n" "$url"
+            done < <(grep -v '^#' tools/blocklists/sources.txt)
+            python3 -I tools/blocklists/compile.py "$list" "work/$list.txt" work/"$list"-*
+            file="zajil-lists-$list-$sequence.txt.gz"
+            gzip -9n < "work/$list.txt" > "out/$file"
+            entries+=("$(jq -n --arg name "$list" --arg file "$file" \
+              --arg sha "$(sha256sum "out/$file" | cut -d' ' -f1)" --argjson size "$(stat -c %s "out/$file")" \
+              '{name: $name, file: $file, sha256: $sha, size: $size}')")
+          done
+          printf '%s\n' "${entries[@]}" | jq -s --argjson sequence "$sequence" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{format: "zajil-android-lists-1", sequence: $sequence, issued_at: $issued, lists: .}' > out/lists-android.json
+          cat out/lists-android.json
+      - name: Sign and check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::the release environment has no TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+          (cd apps/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+          sudo apt-get install -y -q --no-install-recommends minisign
+          (cd apps/desktop && npx tauri signer sign "$GITHUB_WORKSPACE/out/lists-android.json" >/dev/null)
+          base64 -d out/lists-android.json.sig > out/lists-android.json.minisig
+          rm out/lists-android.json.sig
+          minisign -Vm out/lists-android.json -x out/lists-android.json.minisig \
+            -P "$(base64 -d apps/desktop/src-tauri/update-keys/signing.pub | sed -n 2p)"
+      - name: Publish on android-channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view android-channel >/dev/null 2>&1; then
+            gh release create android-channel --prerelease --target main \
+              --title "Zajil for Android: update channel" \
+              --notes "Signed files that Zajil for Android reads to find its update, yt-dlp's and its protection lists (ADR-0012, sections 8 and 17). Not a release."
+          fi
+          # The lists first, then the signed file that names them.
+          gh release upload android-channel out/zajil-lists-*.txt.gz --clobber
+          gh release upload android-channel out/lists-android.json out/lists-android.json.minisig --clobber
+          # Older lists' files: no longer named by any signed file.
+          keep="$(jq -r '.lists[].file' out/lists-android.json)"
+          gh release view android-channel --json assets --jq '.assets[].name' | grep '^zajil-lists-' | while read -r old; do
+            grep -qxF "$old" <<< "$keep" || gh release delete-asset android-channel "$old" --yes
+          done
+

@@ -55,6 +55,9 @@
 | `tauri-plugin-single-instance` | 2.5.4 | Apache-2.0 أو MIT | `zajil-desktop` | نسخة واحدة من زاجِل للمستخدم: حين تكون النافذة مخفية في شريط النظام، فتح زاجِل مرة أخرى يُظهرها بدل أن يبدأ برنامجًا ثانيًا على الطوابير نفسها (في ويندوز ولينكس فقط؛ وفي ماك قناة زاجِل الخاصة في مجلد بياناته، لأن الإضافة هناك تستمع في مسار ثابت في `/tmp`، #60). لا يُستعمل مع `--data-dir` (الاختبارات والصور). لا يجلب حزمًا أخرى | M5.5 |
 | `ts-rs` | 12.0.1 | MIT | `zajil-desktop` | توليد أنواع TypeScript من أنواع Rust التي تتبادلها الواجهة والمحرّك (ADR-0003)، والـ CI يتأكد أن الملفات المولَّدة محدّثة | M4 |
 | `tempfile` | 3.27.0 | MIT أو Apache-2.0 | الاختبارات فقط | مجلدات مؤقتة للاختبارات | M1 |
+| `uniffi` | 0.32.2 | MPL-2.0 | `zajil-android` | واجهة Kotlin لمحرّك تطبيق أندرويد (ADR-0012): الأنواع والأخطاء والـ callbacks تتولد من Rust، بلا JNI مكتوب باليد. ومعه `uniffi_core` و`uniffi_macros` وما معهما (MPL-2.0، وMIT أو Apache-2.0). **وميزة `bindgen`** (أداة `uniffi-bindgen` التي تكتب ملف Kotlin وقت البناء، ولا تدخل التطبيق) تجلب `askama` و`basic-toml` (MIT أو Apache-2.0)؛ و`basic-toml` «غير مصونة» (RUSTSEC-2026-0374، ليست ثغرة)، فهي مستثناة في `deny.toml` بسببها | A1 |
+| `ed25519-dalek` و`blake2` | 2.2.0 و0.10.6 | BSD-3-Clause، وMIT أو Apache-2.0 | `zajil-android` (اختبارات فقط) | توقيع قائمة أدوات أندرويد بمفتاح مؤقت في الاختبار، بصيغة minisign، ليُختبر القبول لا الرفض فقط | A3 |
+| `jni` | 0.22.4 | MIT أو Apache-2.0 | `zajil-android` (أندرويد فقط) | نقطة JNI الوحيدة: تعطي `Context` التطبيق لـ `rustls-platform-verifier` ليفحص الشهادات بمخزن أندرويد (ADR-0012، القسم 2). وهي أصلًا تحت `rustls-platform-verifier` في أندرويد، بنفس الإصدار | A1 |
 
 ## مكتبات الواجهة والإضافة (npm)
 
@@ -97,6 +100,8 @@
 | msys2/setup-msys2 (v2.33.0) | MIT | بيئة بناء FFmpeg في ويندوز (M6) |
 | GnuPG | GPL-3.0 أو أحدث | التحقق من توقيع مصدر FFmpeg في الـ CI (موجود على أجهزة الـ CI) |
 | مُترجما FFmpeg في ويندوز (MSYS2: gcc لـ x64، وclang لـ arm64) | GPL-3.0 مع استثناء مكتبات التشغيل (libgcc)، وApache-2.0 مع استثناء LLVM (compiler-rt)، والملكية العامة/ZPL لكود بدء التشغيل في MinGW-w64 | الربط الثابت يضع في `ffmpeg.exe` كود بدء التشغيل وlibgcc (x64) أو compiler-rt (arm64). والاستثناءات تعفي الملف الناتج من شروط تلك التراخيص ومن إلزام نشر إشعاراتها. أما winpthreads (ترخيصها يطلب إشعارًا) فلا تدخل: `build.sh` يفرض خيوط ويندوز (`HAVE_W32THREADS 1` و`HAVE_PTHREADS 0`) |
+| actions/setup-java (v6.1.0) وactions/setup-python (v7.1.0) | MIT | JDK 17 وPython 3.13 لبناء تطبيق أندرويد (`android.yml`، لم يُشغَّل بعد) |
+| zipalign وapksigner (Android build-tools 37.0.0) | Apache-2.0 | توقيع الـ APK في workflow الإصدار |
 | Rust toolchain 1.99.1 (`rust-toolchain.toml`) | MIT أو Apache-2.0 | المترجم والأدوات |
 
 </div>
@@ -140,5 +145,48 @@
 |---|---|---|
 | خط Alexandria (500 إلى 900، عربي ولاتيني) | OFL-1.1 | خط العناوين في الموقع |
 | خط IBM Plex Sans Arabic (400 و500 و600 و700، عربي ولاتيني) | OFL-1.1 | خط النص في الموقع، وهو خط واجهة البرنامج نفسه |
+
+</div>
+
+<div dir="rtl">
+
+## تطبيق أندرويد (`android/`، ADR-0012)
+
+الإصدارات في `android/gradle/libs.versions.toml`. **لا مكتبة إعلانات ولا تحليلات ولا تقارير أعطال، ولا Google Play Services**، وفحص الـ manifest في البناء يرفض أي صلاحية أو مكوّن مصدَّر تضيفه مكتبة دون أن يكون في ADR-0012.
+
+| المكتبة | الإصدار | الترخيص | تدخل التطبيق؟ | السبب |
+|---|---|---|---|---|
+| AndroidX: `core-ktx` و`activity-compose` و`lifecycle-runtime-compose` و`lifecycle-service` | 1.19.1 و1.13.0 و2.11.0 و2.11.0 | Apache-2.0 | نعم | الإشعارات والخدمة الأمامية والواجهة |
+| Jetpack Compose (`compose-bom`) و Material 3 | 2026.09.00 | Apache-2.0 | نعم | الواجهة. وأُزيلت أدوات المعاينة (`ui-tooling`) لأنها تضيف نشاطًا مصدَّرًا في نسخة التطوير |
+| `kotlinx-coroutines-android` | 1.11.0 | Apache-2.0 | نعم | نقل الملف المكتمل إلى مجلد التحميلات خارج الخيط الرئيسي |
+| JNA (`net.java.dev.jna:jna`) | 5.19.1 | Apache-2.0 أو LGPL-2.1 أو أحدث (نستعمله بـ Apache-2.0) | نعم | ما تستدعي به ملفات UniFFI المولَّدة المحرّك. ومعه `libjnidispatch.so` |
+| جزء Kotlin من `rustls-platform-verifier` (منسوخ، لا AAR) | commit `252e2516` (الوسم `v/0.7.1`) | MIT أو Apache-2.0 | نعم | يفحص به المحرّك الشهادات بمخزن أندرويد. `CertificateVerifier.kt` وملف الشبكة (`android/network-security-base.xml`) منسوخان من الـ commit الذي يطابقه جزء Rust في `Cargo.lock`، بدل AAR من فرع `maven-archive` المتحرك، فلا مستودع Maven غير google() وmavenCentral() (ADR-0012، القسم 19). تغيير زاجِل الوحيد: جهات النظام وحدها. بصمة الأصل: `CertificateVerifier.kt` ‏`251031aec272…4bc4ed`، وملف الشبكة ‏`a81434f9139f…2b29f6a` (والبناء يفحص الثاني). ونص الترخيصين في `assets/licenses` |
+| Android Gradle Plugin وKotlin وGradle (wrapper) | 9.4.1 و2.4.21 و9.8.2 | Apache-2.0 | لا (بناء) | البناء. والـ wrapper نفس ما في مشروع المالك الآخر |
+| `cargo-ndk` | 4.1.2 | MIT أو Apache-2.0 | لا (بناء) | بناء المحرّك لأندرويد بمترجم الـ NDK (`android/build-engine.sh`) |
+| Chaquopy (Gradle plugin وما يضعه في التطبيق) | 17.2.0 | MIT | نعم | Python داخل التطبيق لـ yt-dlp (ADR-0012، القسم 14) |
+| Python (من Chaquopy) | 3.13 | PSF-2.0 | نعم | تشغيل yt-dlp. ومعه OpenSSL (Apache-2.0) وSQLite (ملكية عامة) وliblzma وما يأتي مع Python نفسه |
+| yt-dlp (pip) | 2026.10.21 (من `tools/yt-dlp/pins.txt`) | Unlicense | نعم | يقرأ صفحة الفيديو ويعطي صيغها فقط؛ التحميل بمحرّك زاجِل |
+| yt-dlp-ejs (pip) | 0.8.0 | Unlicense وMIT وISC | نعم | سكربتات تحديات يوتيوب التي يشغّلها QuickJS-NG، داخل التطبيق فلا يُنزَّل شيء منها |
+| certifi (pip) | 2026.10.23 | MPL-2.0 | نعم | شهادات الجهات الموثوقة لـ TLS في Python، فلا يُعطَّل الفحص |
+| QuickJS-NG (`libqjs.so`) | v0.17.0 (من `tools/quickjs/pins.txt`) | MIT | نعم (برنامج منفصل) | ملف الكمبيوتر نفسه `qjs-linux-aarch64` ببصمته المثبّتة، لتحديات يوتيوب |
+| خط IBM Plex Sans Arabic (400 و500 و600 و700، ملفات TTF) | 1.101، من `google/fonts` (commit `702964cf46bd`) | OFL-1.1 | نعم (ملفات الخط) | خط الواجهة نفسه على سطح المكتب، في `res/font` داخل الـ APK، لا يُحمَّل من الإنترنت. ونص الترخيص في `assets/licenses/` فيُنشر معه. بصمات SHA-256: Regular ‏`6f611412…dab9`، Medium ‏`b8363ab9…cf74`، SemiBold ‏`597bd550…e53ebd467`، Bold ‏`691e0c89…49cf74`. يزيد الـ APK نحو 1 ميجابايت |
+| أيقونات Lucide (3 أيقونات) | من إصدار أقدم من 1.61.0، كما في ملفات تصميم D5 | ISC | نعم (مسارات في `ui/Icons.kt`) | تصميم D5 (0.4.0): مسارات الترس واللغات والبرق منسوخة كما هي من ملفات التصميم المعتمد، وهي مسارات Lucide من إصدار أقدم من الذي يأخذ منه سطح المكتب (لا تطابق `lucide-static` 1.61.0). ونص ترخيصها (ISC) في `assets/licenses/lucide-LICENSE.txt` فيصل مع التطبيق. وباقي الأيقونات رُسمت لزاجِل بأسلوبها في التصميم المعتمد |
+| `androidx.webkit` | 1.17.1 | Apache-2.0 | نعم | متصفح زاجِل (ADR-0012 القسم 17): سكربت بدء الصفحة، و`addWebMessageListener` بدل `addJavascriptInterface`، وprofile مستقل للوضع الخاص |
+| `org.json:json` | 20251224 | Public Domain | لا (اختبار فقط) | اختبارات JVM لقراءة رسائل الصفحة (`FindsTest`)، لأن `org.json` في أندرويد فارغ خارج الجهاز |
+| JUnit 4 (`junit:junit`) | 4.13.2 | EPL-1.0 | لا (اختبار فقط) | اختبارات منطق التطبيق على JVM (`android/app/src/test`). لا يدخل التطبيق أبدًا، فلا يمس ترخيصه GPL-3.0 |
+| Android NDK | 29.0.14206865 | Apache-2.0 وغيرها (أدوات Google) | لا (بناء) | المترجم والمكتبات التي يُربط بها المحرّك |
+
+### قوائم الحماية في تطبيق أندرويد (`android/app/src/main/assets/blocklists`، ADR-0012 القسم 17)
+
+بيانات لا كود: تُجمع إلى أسماء مواقع بـ `tools/blocklists/compile.py`، وكل ملف يبدأ بأسماء مصادره وتراخيصها. المصادر في `tools/blocklists/sources.txt`، وتُحدَّث فقط من ملف موقّع.
+
+| القائمة | المصدر | الترخيص | تدخل التطبيق؟ | ملاحظة |
+|---|---|---|---|---|
+| EasyList | easylist.to | GPL-3.0 أو أحدث، أو CC BY-SA 3.0 (نستعمله بـ GPL-3.0) | نعم (بيانات) | الإعلانات |
+| AdGuard Mobile Ads (11) | filters.adtidy.org | GPL-3.0 | نعم (بيانات) | إعلانات الهاتف |
+| EasyPrivacy | easylist.to | GPL-3.0 أو أحدث، أو CC BY-SA 3.0 (نستعمله بـ GPL-3.0) | نعم (بيانات) | المتتبعات |
+| urlhaus-filter (hosts) | malware-filter.gitlab.io | CC0-1.0 وMIT، وبياناته من URLhaus بـ CC0 | نعم (بيانات) | المواقع الضارة |
+| ~~phishing-filter~~ | malware-filter.gitlab.io | CC BY-SA 4.0، وبياناته من OpenPhish وIPThreat وPhishTank | **لا** | حُذفت بقرار المالك (2026-11-01): لبيانات OpenPhish وPhishTank شروط خاصة. للاحتيال Safe Browsing وحده |
+| ~~Liste AR~~ | — | CC BY-NC-SA | **لا** | استُبعدت بقرار المالك (2026-11-01): «غير تجاري» لا يتوافق مع إعادة التوزيع بـ GPL-3.0 |
 
 </div>

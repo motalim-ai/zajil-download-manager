@@ -1,0 +1,37 @@
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.21"
+composeBom = "2026.09.00"
+activityCompose = "1.13.0"
+coreKtx = "1.19.1"
+webkit = "1.17.1"
+orgJson = "20251224"
+lifecycle = "2.11.0"
+coroutines = "1.11.0"
+# UniFFI's Kotlin bindings call the engine through JNA (Apache-2.0).
+jna = "5.19.1"
+# Python inside the app, for yt-dlp (ADR-0012, section 6; MIT).
+chaquopy = "17.2.0"
+# Unit tests of the app's pure logic, on the JVM (EPL-1.0; tests only, never in the app).
+junit = "4.13.2"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+junit = { module = "junit:junit", version.ref = "junit" }
+# Unversioned: the version is the one in Cargo.lock (app/build.gradle.kts).
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+chaquopy = { id = "com.chaquo.python", version.ref = "chaquopy" }

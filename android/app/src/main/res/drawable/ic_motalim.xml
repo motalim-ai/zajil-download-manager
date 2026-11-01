@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Motalim channel's mark (the D5 hand-over, the owner's own logo): white strokes, drawn on #0354D6 by the app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="1160" android:viewportHeight="1160">
+    <group android:translateX="-385" android:translateY="-385">
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="146"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M740 628L965 500L1190 628" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="146"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M590 785V1065A375 369 0 0 0 1340 1065V785C1150 790 1050 880 965 1010C880 880 780 790 590 785Z" />
+    </group>
+</vector>

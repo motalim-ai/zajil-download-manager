@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The D5 design's blue, also for the system's own dialogs (the time picker). -->
+    <style name="Theme.Zajil" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#FF0A5FE0</item>
+        <item name="android:colorPrimaryDark">#FF0A5FE0</item>
+        <item name="android:colorAccent">#FF0A5FE0</item>
+        <item name="android:windowBackground">@color/zajil_bg</item>
+    </style>
+    <!-- The Quick Settings tile's window: only its sheet shows, over the screen below. -->
+    <style name="Theme.Zajil.Overlay" parent="Theme.Zajil">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

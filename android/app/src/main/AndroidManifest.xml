@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every permission and every exported component here is listed in ADR-0012
+  (section 11), and the build checks the merged manifest against that list
+  (CheckManifest in app/build.gradle.kts).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!--
+      Android 17 and later: links to a device on the user's own network.
+      Asked only when such a link is added, never at start (ADR-0012, 12).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- Installing Zajil's own update, when the user agrees (A4). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The public Download folder on Android 8 and 9 only. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!--
+      No backup: the list and the engine's state files may hold a token that
+      is part of a link (owner's decision on #28).
+    -->
+    <application
+        android:name=".ZajilApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Zajil"
+        android:usesCleartextTraffic="false"
+        tools:targetApi="37">
+
+        <!-- The in-app browser (A6): Safe Browsing on, and no usage reports to Google. -->
+        <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true" />
+        <meta-data android:name="android.webkit.WebView.MetricsOptOut" android:value="true" />
+
+        <!-- A turn of the phone keeps the activity (and the browser's pages, and a video in full screen). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!--
+              «Share to Zajil» from any app: text with a link. Not VIEW: Zajil
+              never takes other apps' links for itself (ADR-0012, section 5).
+            -->
+            <intent-filter android:label="@string/share_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The Quick Settings tile's window: transparent over the screen, it
+          reads the clipboard once it has the focus and shows the sheet.
+          Only the tile opens it.
+        -->
+        <activity
+            android:name=".CopiedLinkActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Zajil.Overlay"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+          «زاجِل: حمّل الرابط المنسوخ» in Quick Settings. Exported, as every
+          tile must be, but only the system can bind it (ADR-0012, section 11).
+        -->
+        <service
+            android:name=".CopiedLinkTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_zajil"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".downloads.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Wakes the queue at its time or when the network returns (A2). -->
+        <service
+            android:name=".downloads.QueueJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- The «resume» notification's tap: not exported, so no other app resumes downloads. -->
+        <activity
+            android:name=".downloads.ResumeAllActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Zajil.Overlay" />
+
+        <!-- QuickJS-NG for YouTube's challenges (ADR-0009's rule on Android): an isolated
+             process with its own user, no permissions, no network, none of the app's files. -->
+        <service
+            android:name=".video.JsBoxService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":jsbox" />
+
+        <!-- The result of installing Zajil's update; only the installer's PendingIntent reaches it. -->
+        <receiver
+            android:name=".update.UpdateReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".downloads.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Only for benchmarking tools; exported, so not here. -->
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:node="remove" />
+    </application>
+</manifest>

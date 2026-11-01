@@ -58,6 +58,9 @@ icu_properties = "2.4.0"
 # system time zone on every OS, and a bundled tz database on Windows.
 jiff = "0.2.38"
 thiserror = "2.0.21"
+# The Kotlin interface of the Android app's engine (ADR-0012): types, errors
+# and callbacks generated from Rust, no hand-written JNI.
+uniffi = "0.32.2"
 tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_JobObjects", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_Shutdown", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

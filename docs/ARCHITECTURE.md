@@ -47,8 +47,10 @@ zajil-download-manager/
 │   ├── zajil-host/        # مضيف Native Messaging الصغير              (M5)
 │   ├── zajil-jsbox/       # صندوق QuickJS-NG ليوتيوب، يشغّله yt-dlp    (M6)
 │   ├── zajil-i18n/        # الترجمات (Fluent) لجهة Rust               (M4)
+│   ├── zajil-android/     # واجهة المحرّك لتطبيق أندرويد عبر UniFFI     (A1، ADR-0012)
 │   └── zajil-testserver/  # سيرفر تجريبي للحالات الصعبة (للاختبار فقط) (M1)
 ├── apps/desktop/          # تطبيق Tauri: الواجهة (M4)
+├── android/               # تطبيق أندرويد: Kotlin وCompose فوق zajil-android (A1، android/README.md)
 ├── locales/               # ملفات الترجمة ar وen (Fluent)، للواجهة ولجهة Rust (M4)
 ├── extension/             # إضافة المتصفح MV3 لـ Chrome/Edge/Firefox (M5)
 ├── docs/                  # الوثائق والـ ADR

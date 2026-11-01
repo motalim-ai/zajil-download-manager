@@ -1,0 +1,48 @@
+[package]
+name = "zajil-android"
+description = "Zajil's engine for the Android app: the UniFFI interface its Kotlin calls (ADR-0012)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# cdylib: the library the app loads; lib: for uniffi-bindgen and the tests.
+crate-type = ["cdylib", "lib"]
+
+# Writes the Kotlin bindings from the built library (android/build-engine.sh).
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[dependencies]
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uniffi.workspace = true
+zajil-core.workspace = true
+
+# Android only (ADR-0012, section 2): the one JNI entry point, which hands the
+# app's Context to the TLS verifier the engine uses. Same versions as
+# reqwest's own (Cargo.lock).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.22.4", default-features = false }
+rustls-platform-verifier = "0.7.1"
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dev-dependencies]
+# Signing a tools list with a throwaway key, to test the good one too.
+base64.workspace = true
+blake2 = "0.10.6"
+ed25519-dalek = "2.2.0"
+getrandom.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+zajil-core = { path = "../zajil-core", features = ["test-support"] }
+zajil-testserver.workspace = true

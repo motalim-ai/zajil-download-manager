@@ -38,6 +38,11 @@ ignore = [
   { id = "RUSTSEC-2026-0370", reason = "one of zbus_names, zvariant, zvariant_derive: folded into zbus, used by zbus 5 under tauri-plugin-notification on Linux; unmaintained, no vulnerability" },
   { id = "RUSTSEC-2026-0371", reason = "one of zbus_names, zvariant, zvariant_derive: folded into zbus, used by zbus 5 under tauri-plugin-notification on Linux; unmaintained, no vulnerability" },
   { id = "RUSTSEC-2026-0372", reason = "one of zbus_names, zvariant, zvariant_derive: folded into zbus, used by zbus 5 under tauri-plugin-notification on Linux; unmaintained, no vulnerability" },
+  # "Unmaintained", not a vulnerability: basic-toml, read at build time by
+  # askama's proc-macro inside uniffi_bindgen, the tool that writes the
+  # Android app's Kotlin bindings (ADR-0012). Only the bindgen feature of
+  # zajil-android builds it; nothing of it is in the app.
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml: build-time proc-macro of askama under uniffi_bindgen (the Kotlin bindings tool); unmaintained, no vulnerability" },
 ]
 
 [licenses]

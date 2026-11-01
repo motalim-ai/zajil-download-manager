@@ -510,6 +510,10 @@ pub(crate) async fn get_following(
     let mut was_https = false;
     let mut hops = 0;
     loop {
+        // A harmful host, by the program's own list: not even asked.
+        if let Some(host) = browser.refuses(&url) {
+            return Err(Error::Refused { host });
+        }
         let response = more(browser.apply(&url, client.get(url.clone())))
             .send()
             .await

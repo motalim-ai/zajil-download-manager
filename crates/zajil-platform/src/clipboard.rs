@@ -68,7 +68,7 @@ impl Clipboard for SystemClipboard {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 mod imp {
     use std::io;
 
@@ -125,6 +125,47 @@ mod imp {
 
     fn other(err: arboard::Error) -> io::Error {
         io::Error::other(format!("the clipboard: {err}"))
+    }
+}
+
+/// Android: the app reads the clipboard itself, in Kotlin, and only while
+/// it is in front (the system allows nothing else, ADR-0012). There is no
+/// clipboard here to open.
+#[cfg(target_os = "android")]
+mod imp {
+    use std::io;
+
+    use super::Content;
+
+    pub struct Inner;
+
+    impl Inner {
+        pub fn new() -> io::Result<Self> {
+            Err(unsupported())
+        }
+
+        pub fn changed(&mut self) -> bool {
+            true
+        }
+
+        pub fn set_text(&mut self, _text: &str) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        pub fn clear(&mut self) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        pub fn text(&mut self, _max_bytes: usize) -> io::Result<Content> {
+            Err(unsupported())
+        }
+    }
+
+    fn unsupported() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the clipboard is read by the app on Android",
+        )
     }
 }
 
