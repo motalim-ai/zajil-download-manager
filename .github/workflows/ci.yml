@@ -103,14 +103,19 @@ jobs:
           bash scripts/check-no-private-keys.sh
       # A change of the video tools raises their number (ADR-0011, section
       # 2): Zajil takes a signed tools list only when its number is higher.
+      # Android's pins have their own list and number (ADR-0012, section 8).
       - name: The tools' number follows their pins
         if: github.event_name == 'pull_request'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed=$(git diff --name-only "$BASE" HEAD -- 'tools/*/pins*.txt')
+          changed=$(git diff --name-only "$BASE" HEAD -- 'tools/*/pins*.txt' ':!tools/*/pins-android.txt')
           if [ -n "$changed" ] && git diff --quiet "$BASE" HEAD -- tools/sequence.txt; then
             echo "::error::$changed changed: raise tools/sequence.txt too"; exit 1
+          fi
+          changed=$(git diff --name-only "$BASE" HEAD -- 'tools/*/pins-android.txt')
+          if [ -n "$changed" ] && git diff --quiet "$BASE" HEAD -- tools/sequence-android.txt; then
+            echo "::error::$changed changed: raise tools/sequence-android.txt too"; exit 1
           fi
       # The signed update checks TLS and the signature always (ADR-0011): no
       # `dangerous…` setting of Tauri's updater, in any build.
