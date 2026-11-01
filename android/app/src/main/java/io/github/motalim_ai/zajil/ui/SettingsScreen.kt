@@ -95,7 +95,7 @@ fun SettingsScreen(bottomPadding: PaddingValues) {
     when (asking) {
         Asking.Language -> ChoiceSheet(
             stringResource(R.string.language),
-            listOf("" to stringResource(R.string.as_system), "ar" to "العربية", "en" to "English"),
+            listOf("" to stringResource(R.string.as_system), "ar" to stringResource(R.string.arabic), "en" to stringResource(R.string.english)),
             appLanguage(context),
             onChoose = { setAppLanguage(context, it) },
             onDismiss = { asking = null },
