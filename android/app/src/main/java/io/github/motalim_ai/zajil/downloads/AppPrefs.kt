@@ -22,9 +22,17 @@ data class Prefs(
     val saveTree: String? = null,
     /** A folder for each type, as the desktop's categories ([SaveCategory]). */
     val folderPerType: Boolean = false,
+    /** The video quality the video sheet chooses first: the highest at or under it (D5's «الجودة المفضلة»). */
+    val videoHeight: Int = DEFAULT_VIDEO_HEIGHT,
 ) {
     companion object {
         const val DEFAULT_CONNECTIONS = 8
+
+        /** As the video sheet chose before it could be set. */
+        const val DEFAULT_VIDEO_HEIGHT = 1080
+
+        /** The qualities the screen offers, in lines. */
+        val VIDEO_HEIGHTS = listOf(2160, 1440, 1080, 720, 480, 360)
 
         /** The connections the screen offers. */
         val CONNECTIONS = listOf(1, 2, 4, 8, 16)
@@ -49,6 +57,7 @@ class AppPrefs(context: Context) {
                 .putLong(SPEED_LIMIT, prefs.speedLimit ?: 0)
                 .putString(SAVE_TREE, prefs.saveTree)
                 .putBoolean(FOLDER_PER_TYPE, prefs.folderPerType)
+                .putInt(VIDEO_HEIGHT, prefs.videoHeight)
                 .apply()
             _prefs.value = prefs
         }
@@ -60,6 +69,7 @@ class AppPrefs(context: Context) {
         speedLimit = store.getLong(SPEED_LIMIT, 0).takeIf { it > 0 },
         saveTree = store.getString(SAVE_TREE, null),
         folderPerType = store.getBoolean(FOLDER_PER_TYPE, false),
+        videoHeight = store.getInt(VIDEO_HEIGHT, Prefs.DEFAULT_VIDEO_HEIGHT).coerceIn(144, 4320),
     )
 
     private companion object {
@@ -68,5 +78,6 @@ class AppPrefs(context: Context) {
         const val SPEED_LIMIT = "speed_limit"
         const val SAVE_TREE = "save_tree"
         const val FOLDER_PER_TYPE = "folder_per_type"
+        const val VIDEO_HEIGHT = "video_height"
     }
 }

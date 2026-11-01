@@ -67,7 +67,7 @@ private const val ARABIC = "ar"
 @Composable
 fun AskListView(onVideo: () -> Unit, onList: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ZText(stringResource(R.string.in_a_playlist), size = 19.sp, weight = FontWeight.Bold)
+        SheetTitle(stringResource(R.string.in_a_playlist))
         ZText(stringResource(R.string.in_a_playlist_hint), size = 13.5.sp, color = Z.colors.muted)
         ChoiceRow(stringResource(R.string.this_video_only), selected = false, onClick = onVideo)
         ChoiceRow(stringResource(R.string.whole_playlist), selected = false, onClick = onList)
@@ -104,15 +104,15 @@ fun PlaylistView(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ZText(
                 info.title,
-                size = 17.sp,
+                size = 19.sp,
                 weight = FontWeight.Bold,
                 maxLines = 2,
                 style = TextStyle(textDirection = TextDirection.Content, lineHeight = 23.sp),
             )
             ZText(
-                listOfNotNull(pluralStringResource(R.plurals.playlist_videos, videos, videos), info.channel).joinToString(" · "),
+                listOfNotNull(pluralStringResource(R.plurals.playlist_videos, videos, videos), info.channel).joinToString(stringResource(R.string.list_sep)),
                 size = 12.5.sp,
-                color = c.muted,
+                color = c.faint,
                 maxLines = 1,
             )
         }
@@ -131,7 +131,7 @@ fun PlaylistView(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     size = 13.5.sp,
                     weight = FontWeight.SemiBold,
-                    color = c.accent,
+                    color = c.link,
                 )
             }
         }
@@ -139,8 +139,8 @@ fun PlaylistView(
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = 330.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .border(1.dp, c.line, RoundedCornerShape(14.dp)),
+                .clip(RoundedCornerShape(22.dp))
+                .border(1.dp, c.line, RoundedCornerShape(22.dp)),
         ) {
             itemsIndexed(info.entries) { i, entry ->
                 if (i > 0) RowLine()
@@ -150,18 +150,18 @@ fun PlaylistView(
         if (videos == 0 && info.entries.any { it.playlist }) {
             ZText(stringResource(R.string.playlists_only), size = 12.5.sp, color = c.muted)
         }
-        ZCard {
-            SettingRow(stringResource(R.string.video_quality), value = playlistQuality(height), onClick = { asking = "quality" })
-            RowLine()
+        Column {
+            SettingRow(stringResource(R.string.video_quality), value = playlistQuality(height), icon = LineIcon.Video, onClick = { asking = "quality" })
             SettingRow(
                 stringResource(R.string.video_sound),
+                icon = LineIcon.AudioBars,
                 value = stringResource(if (dub == null) R.string.video_sound_original else R.string.dub_arabic_if_any),
                 onClick = { asking = "sound" },
             )
             if (queues.size > 1) {
-                RowLine()
                 SettingRow(
                     stringResource(R.string.choose_queue),
+                    icon = LineIcon.Queues,
                     value = queueName(queues.firstOrNull { it.id == queue } ?: queues.first()),
                     onClick = { asking = "queue" },
                 )
@@ -173,7 +173,6 @@ fun PlaylistView(
                 onClick = { onDownload(info.entries.filterIndexed { i, e -> chosen[i] && e.downloadable }, height, dub, queue) },
                 modifier = Modifier.weight(2f),
                 enabled = count > 0,
-                icon = lineIcon(LineIcon.Downloads),
             )
             QuietButton(stringResource(R.string.cancel_sheet), onClick = onDismiss, modifier = Modifier.weight(1f))
         }
@@ -222,12 +221,12 @@ private fun EntryRow(entry: PlaylistEntry, checked: Boolean, onToggle: (Boolean)
                     Modifier.toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onToggle)
                 },
             )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (entry.playlist) {
-            Icon(lineIcon(LineIcon.Queues), null, tint = c.accent, modifier = Modifier.size(22.dp))
+            ZIcon(LineIcon.Queues, c.accent, 22.dp)
         } else {
             CheckBox(checked && enabled, enabled)
         }
@@ -267,7 +266,7 @@ private fun Thumb(entry: PlaylistEntry) {
         }
     }
     Box(
-        Modifier.size(width = 72.dp, height = 41.dp).clip(RoundedCornerShape(8.dp)).background(Z.colors.sunken),
+        Modifier.size(width = 72.dp, height = 41.dp).clip(RoundedCornerShape(10.dp)).background(Z.colors.sunken),
         contentAlignment = Alignment.Center,
     ) {
         picture?.let { Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
@@ -299,6 +298,6 @@ private fun CheckBox(checked: Boolean, enabled: Boolean) {
             .border(2.dp, if (checked) c.accent else if (enabled) c.muted else c.line, shape),
         contentAlignment = Alignment.Center,
     ) {
-        if (checked) Icon(lineIcon(LineIcon.Check), null, tint = c.accentInk, modifier = Modifier.size(16.dp))
+        if (checked) ZIcon(LineIcon.Check, Color.White, 16.dp)
     }
 }

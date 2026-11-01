@@ -44,7 +44,7 @@ class QueueJobService : JobService() {
         fun plan(context: Context, waiting: Set<Long>, queues: List<Queue>, network: NetworkState) {
             val now = ZonedDateTime.now()
             val starts = queues.filter { it.id in waiting && it.rules.scheduled && !it.rules.open }
-                .associate { it.id to QueuePlan.nextStart(now, it.rules.startAt).toInstant().toEpochMilli() }
+                .associate { it.id to QueuePlan.nextStart(now, it.rules.startAt, days = it.rules.days).toInstant().toEpochMilli() }
             val blocked = queues.filter { it.id in waiting && !network.allows(it.rules) }
             val networkType = when {
                 blocked.isEmpty() -> null

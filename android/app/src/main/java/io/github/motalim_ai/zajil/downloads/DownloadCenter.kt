@@ -329,7 +329,7 @@ class DownloadCenter(private val context: Context) {
         var id = 0L
         change { list ->
             id = (list.maxOfOrNull { it.id } ?: 0) + 1
-            list + make(id, (list.maxOfOrNull { it.order } ?: 0) + 1)
+            list + make(id, (list.maxOfOrNull { it.order } ?: 0) + 1).copy(addedAt = System.currentTimeMillis())
         }
         pump()
         return id

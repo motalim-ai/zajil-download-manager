@@ -4,7 +4,7 @@
     <string name="app_name">زاجِل</string>
     <string name="link">رابط التحميل</string>
     <string name="paste">لصق</string>
-    <string name="empty">لا تحميلات بعد. شارك رابطًا إلى زاجِل، أو اضغط «رابط جديد».</string>
+    <string name="empty">لا تحميلات بعد. شارك رابطًا إلى زاجِل، أو اضغط زر الإضافة «+».</string>
     <string name="pause">إيقاف مؤقت</string>
     <string name="resume">استكمال</string>
     <string name="cancel">إلغاء التحميل</string>
@@ -26,7 +26,7 @@
     <string name="max_running">عدد التحميلات معًا</string>
     <string name="wifi_only">على الواي فاي فقط</string>
     <string name="wifi_only_hint">يتوقف على بيانات الهاتف، ويكمل حين يعود الواي فاي</string>
-    <string name="schedule">موعد يومي</string>
+    <string name="schedule">موعد البدء</string>
     <string name="schedule_hint">في الموعد يصلك إشعار، وبضغطة يبدأ</string>
     <string name="status_merging">يدمج الصورة والصوت</string>
     <string name="video_reading">يقرأ صفحة الفيديو…</string>
@@ -68,7 +68,6 @@
     <string name="video_unsupported">لا يعرف زاجِل طريقة لقراءة هذا الموقع.</string>
     <string name="video_network">تعذّر الاتصال بالموقع. تأكد من الاتصال بالإنترنت، ثم حاول مرة أخرى.</string>
     <string name="video_open_in_browser">افتحه في «تصفّح»</string>
-    <string name="update_version">الإصدار %1$s</string>
     <string name="update_auto">البحث عن تحديث زاجِل</string>
     <string name="update_check">البحث عن نسخة جديدة</string>
     <string name="update_latest">هذه أحدث نسخة.</string>
@@ -78,7 +77,7 @@
     <!-- %1$s النسخة، و%2$s حجمها. -->
     <string name="update_offered">زاجِل %1$s متاحة (%2$s)</string>
     <string name="update_download">تنزيل التحديث</string>
-    <string name="update_downloading">ينزّل زاجِل %1$s… %2$d٪</string>
+    <string name="update_downloading">ينزّل زاجِل %1$s… %2$s٪</string>
     <string name="update_ready">اكتمل تنزيل زاجِل %1$s، وتُحقِّق منه.</string>
     <string name="update_install">تثبيت</string>
     <string name="ytdlp_version">yt-dlp %1$s</string>
@@ -92,17 +91,17 @@
         <item quantity="zero">لا تحميلات تنتظر</item>
         <item quantity="one">اضغط ليبدأ التحميل المنتظر</item>
         <item quantity="two">اضغط ليبدأ التحميلان المنتظران</item>
-        <item quantity="few">اضغط لتبدأ %d تحميلات تنتظر</item>
-        <item quantity="many">اضغط ليبدأ %d تحميلًا ينتظر</item>
-        <item quantity="other">اضغط ليبدأ %d تحميل ينتظر</item>
+        <item quantity="few">اضغط لتبدأ %s تحميلات تنتظر</item>
+        <item quantity="many">اضغط ليبدأ %s تحميلًا ينتظر</item>
+        <item quantity="other">اضغط ليبدأ %s تحميل ينتظر</item>
     </plurals>
     <plurals name="waiting">
         <item quantity="zero">لا تحميلات تنتظر</item>
         <item quantity="one">تحميل ينتظر</item>
         <item quantity="two">تحميلان ينتظران</item>
-        <item quantity="few">%d تحميلات تنتظر</item>
-        <item quantity="many">%d تحميلًا ينتظر</item>
-        <item quantity="other">%d تحميل ينتظر</item>
+        <item quantity="few">%s تحميلات تنتظر</item>
+        <item quantity="many">%s تحميلًا ينتظر</item>
+        <item quantity="other">%s تحميل ينتظر</item>
     </plurals>
     <string name="status_interrupted">توقف مع إغلاق البرنامج، ويُستكمَل عند فتحه</string>
     <string name="status_paused">متوقف مؤقتًا</string>
@@ -114,8 +113,8 @@
     <string name="problem_link">هذا الرابط لا يمكن تحميله</string>
     <string name="problem_other">فشل التحميل</string>
     <string name="problem_not_saved">اكتمل التحميل ولم يُحفظ في مجلد الحفظ. أعد المحاولة ليُحفظ دون تحميله من جديد</string>
-    <!-- %1$s ما نزل، و%2$s الحجم كله، و%3$d النسبة. -->
-    <string name="size_of_total">%1$s من %2$s (%3$d٪)</string>
+    <!-- %1$s ما نزل، و%2$s الحجم كله، و%3$s النسبة. -->
+    <string name="size_of_total">%1$s من %2$s (%3$s٪)</string>
     <string name="channel_progress">التحميلات الجارية</string>
     <string name="channel_stopped">التحميلات المتوقفة</string>
     <string name="tap_to_resume">اضغط للاستكمال من حيث توقف</string>
@@ -123,17 +122,17 @@
         <item quantity="zero">لا تحميلات</item>
         <item quantity="one">تحميل واحد</item>
         <item quantity="two">تحميلان</item>
-        <item quantity="few">%d تحميلات</item>
-        <item quantity="many">%d تحميلًا</item>
-        <item quantity="other">%d تحميل</item>
+        <item quantity="few">%s تحميلات</item>
+        <item quantity="many">%s تحميلًا</item>
+        <item quantity="other">%s تحميل</item>
     </plurals>
     <plurals name="stopped">
         <item quantity="zero">لا تحميلات متوقفة</item>
         <item quantity="one">تحميل متوقف</item>
         <item quantity="two">تحميلان متوقفان</item>
-        <item quantity="few">%d تحميلات متوقفة</item>
-        <item quantity="many">%d تحميلًا متوقفًا</item>
-        <item quantity="other">%d تحميل متوقف</item>
+        <item quantity="few">%s تحميلات متوقفة</item>
+        <item quantity="many">%s تحميلًا متوقفًا</item>
+        <item quantity="other">%s تحميل متوقف</item>
     </plurals>
     <!-- The approved design (home, sheets, queue, settings). -->
     <string name="logo">شعار زاجِل</string>
@@ -145,16 +144,14 @@
     <string name="pause_all">إيقاف الكل</string>
     <string name="remove_finished">إزالة المكتملة من القائمة</string>
     <string name="nothing_matches">لا تحميلات هنا.</string>
-    <!-- %1$d عدد التحميلات الجارية. -->
-    <string name="downloading_now">يحمّل الآن %1$d</string>
+    <!-- %1$s عدد التحميلات الجارية. -->
     <string name="nothing_running">لا تحميل جارٍ الآن</string>
     <string name="main_queue">الطابور الرئيسي</string>
-    <string name="main_queue_is">الطابور الرئيسي: %1$s</string>
     <string name="queue_running">يعمل</string>
     <string name="queue_empty">فارغ</string>
     <string name="queue_starts_at">يبدأ %1$s</string>
     <string name="filter_all">الكل</string>
-    <string name="filter_active">جارية</string>
+    <string name="filter_active">نشطة</string>
     <string name="filter_done">مكتملة</string>
     <string name="filter_video">فيديوهات</string>
     <string name="filter_music">صوتيات</string>
@@ -164,7 +161,6 @@
     <string name="filter_archives">مضغوطة</string>
     <string name="filter_other">أخرى</string>
     <string name="chip_running">يحمّل</string>
-    <string name="chip_queued">في الطابور</string>
     <string name="chip_paused">متوقف</string>
     <string name="chip_needs_permission">يحتاج إذنًا</string>
     <string name="chip_failed">فشل</string>
@@ -176,13 +172,11 @@
     <!-- %1$s ما نزل، و%2$s الحجم كله. -->
     <string name="of_total">%1$s من %2$s</string>
     <string name="per_second">%1$s/ث</string>
-    <string name="left">المتبقي\u00A0%1$s</string>
     <string name="resumes_where_stopped">يكمل من حيث توقف</string>
     <string name="status_needs_local_network_short">يحتاج إذن «الشبكة المحلية». اضغط «السماح».</string>
     <string name="next_in_queue">التالي في %1$s</string>
-    <!-- %1$d عدد التحميلات قبله. -->
-    <string name="in_queue_before">%1$s · %2$d قبله</string>
-    <string name="today_at">اليوم %1$s</string>
+    <!-- %1$s عدد التحميلات قبله. -->
+    <string name="in_queue_before">%1$s · %2$s قبله</string>
     <string name="unit_bytes">%s بايت</string>
     <string name="unit_kib">%s ك.ب</string>
     <string name="unit_mib">%s م.ب</string>
@@ -203,11 +197,6 @@
     <string name="is_a_page">الرابط يفتح صفحة ويب، لا ملفًا</string>
     <string name="saved_in">يُحفظ في</string>
     <string name="when_starts">متى يبدأ</string>
-    <string name="start_now_word">الآن، قبل دوره</string>
-    <string name="start_with_queue">في %1$s</string>
-    <string name="now_instead">الآن</string>
-    <string name="with_queue_instead">في الطابور</string>
-    <string name="change">تغيير</string>
     <string name="start_download">ابدأ التحميل</string>
     <string name="later">لاحقًا</string>
     <string name="choose_quality">اختر الجودة</string>
@@ -229,7 +218,7 @@
     <string name="more">أكثر</string>
     <string name="stop_queue">إيقاف الطابور</string>
     <string name="run_queue">تشغيل الطابور الآن</string>
-    <string name="schedule_off_hint">يبدأ الطابور وحده في وقت كل يوم</string>
+    <string name="schedule_off_hint">يبدأ الطابور وحده في الموعد والأيام التي تختارها</string>
     <string name="queue_footer">اختر الطابور من «متى يبدأ» وقت الإضافة، أو «الآن» ليبدأ التحميل قبل دوره. ولكل طابور عدد تحميلاته معًا وشروطه.</string>
     <string name="new_queue">طابور جديد</string>
     <string name="queue_name">اسم الطابور</string>
@@ -239,12 +228,10 @@
     <string name="delete_queue">حذف الطابور</string>
     <string name="delete_queue_hint">تنتقل تحميلاته إلى الطابور الرئيسي كما هي.</string>
     <string name="wifi_only_short">واي فاي فقط</string>
-    <string name="queue_idle">متوقف</string>
     <string name="choose_queue">متى يبدأ</string>
     <string name="group_look">الشكل</string>
     <string name="group_download">التحميل</string>
     <string name="group_video">الفيديو</string>
-    <string name="group_update">التحديث</string>
     <string name="language">اللغة</string>
     <string name="arabic">العربية</string>
     <string name="english">English</string>
@@ -264,53 +251,49 @@
     <string name="folder_archives">مضغوطات</string>
     <string name="connections_per_file">الاتصالات لكل ملف</string>
     <string name="speed_limit">حد السرعة</string>
-    <string name="speed_limit_hint">لكل التحميلات معًا</string>
     <string name="no_limit">بلا حد</string>
     <string name="video_tools">أدوات الفيديو</string>
     <string name="tools_ready">جاهزة</string>
     <string name="tools_signed">تُحدَّث بقائمة موقّعة</string>
-    <string name="update_daily">مرة يوميًا</string>
-    <string name="update_off">متوقف</string>
     <string name="check_now">ابحث الآن</string>
     <string name="promise">بلا إعلانات ولا تتبع. مفتوح المصدر، والتحديثات موقّعة بمفتاح المشروع.</string>
     <plurals name="connections">
         <item quantity="zero">بلا اتصالات</item>
         <item quantity="one">اتصال واحد</item>
         <item quantity="two">اتصالان</item>
-        <item quantity="few">%d اتصالات</item>
-        <item quantity="many">%d اتصالًا</item>
-        <item quantity="other">%d اتصال</item>
+        <item quantity="few">%1$s اتصالات</item>
+        <item quantity="many">%1$s اتصالًا</item>
+        <item quantity="other">%1$s اتصال</item>
     </plurals>
     <plurals name="queue_downloading">
         <item quantity="zero">لا تحميل جارٍ</item>
         <item quantity="one">تحميل جارٍ</item>
         <item quantity="two">تحميلان جاريان</item>
-        <item quantity="few">%d تحميلات جارية</item>
-        <item quantity="many">%d تحميلًا جاريًا</item>
-        <item quantity="other">%d تحميل جارٍ</item>
+        <item quantity="few">%s تحميلات جارية</item>
+        <item quantity="many">%s تحميلًا جاريًا</item>
+        <item quantity="other">%s تحميل جارٍ</item>
     </plurals>
     <plurals name="queue_waiting">
         <item quantity="zero">لا تحميل في الانتظار</item>
         <item quantity="one">تحميل في الانتظار</item>
         <item quantity="two">تحميلان في الانتظار</item>
-        <item quantity="few">%d تحميلات في الانتظار</item>
-        <item quantity="many">%d تحميلًا في الانتظار</item>
-        <item quantity="other">%d تحميل في الانتظار</item>
+        <item quantity="few">%s تحميلات في الانتظار</item>
+        <item quantity="many">%s تحميلًا في الانتظار</item>
+        <item quantity="other">%s تحميل في الانتظار</item>
     </plurals>
     <plurals name="queue_count">
         <item quantity="zero">لا تحميلات</item>
         <item quantity="one">تحميل واحد</item>
         <item quantity="two">تحميلان</item>
-        <item quantity="few">%d تحميلات</item>
-        <item quantity="many">%d تحميلًا</item>
-        <item quantity="other">%d تحميل</item>
+        <item quantity="few">%s تحميلات</item>
+        <item quantity="many">%s تحميلًا</item>
+        <item quantity="other">%s تحميل</item>
     </plurals>
-    <string name="offer_copied_title">حمّل الرابط المنسوخ؟</string>
     <string name="tile_label">زاجِل: حمّل الرابط المنسوخ</string>
     <string name="tile_no_link">لا يوجد رابط منسوخ. انسخ رابطًا يبدأ بـ http أو https ثم اضغط المربع.</string>
     <string name="tile_added">أُضيف إلى تحميلات زاجِل.</string>
     <!-- A6: the in-app browser. -->
-    <string name="browse">تصفّح</string>
+    <string name="browse">المتصفح</string>
     <string name="private_mode">وضع خاص</string>
     <string name="private_on">خاص</string>
     <string name="private_note">وضع خاص: لا يُحفظ ما تزوره، وتُحذف الكوكيز والبيانات حين ينتهي.</string>
@@ -338,8 +321,8 @@
     <string name="found_hls">بث HLS ‏(m3u8) من %1$s</string>
     <string name="found_dash">بث DASH ‏(mpd) من %1$s</string>
     <string name="found_protected">محمي من النسخ، فلا يحمّله زاجِل</string>
-    <!-- %1$d العرض، و%2$d الارتفاع. -->
-    <string name="found_element">فيديو في الصفحة · %1$d×%2$d</string>
+    <!-- %1$s العرض، و%2$s الارتفاع. -->
+    <string name="found_element">فيديو في الصفحة · %1$s×%2$s</string>
     <string name="sign_in_note">بعض المواقع تطلب تسجيل الدخول لتحميل فيديوهاتها. سجّل دخولك هنا في متصفح زاجِل، ويبقى على جهازك، ولا يُرسل إلا لهذا الموقع.</string>
     <string name="manage_sign_ins">إدارة تسجيلات الدخول</string>
     <string name="sign_ins_hint">المواقع التي حفظت كوكيز في متصفح زاجِل، ومنها تسجيلات دخولك. حذف موقع يُخرجك منه.</string>
@@ -363,7 +346,6 @@
     <string name="no_exceptions">لا مواقع مستثناة.</string>
     <string name="remove_exception">إعادة الحماية فيه</string>
     <string name="protection_lists">قوائم الحماية</string>
-    <string name="protection_lists_date">آخر تحديث: %1$s</string>
     <string name="protection_checking">يبحث عن قوائم أحدث…</string>
     <string name="protection_updated">حُدِّثت القوائم.</string>
     <string name="protection_latest">القوائم هي الأحدث.</string>
@@ -375,7 +357,7 @@
     <string name="problem_refused">موقع ضار، فلم يُحمَّل شيء</string>
     <string name="video_harmful">هذا الموقع في قائمة المواقع الضارة، فلم يقرأه زاجِل.</string>
     <string name="tabs">التبويبات</string>
-    <string name="tabs_open">التبويبات المفتوحة: %1$d</string>
+    <string name="tabs_open">التبويبات المفتوحة: %1$s</string>
     <string name="no_tabs">لا تبويبات مفتوحة.</string>
     <string name="new_tab">تبويب جديد</string>
     <string name="close_tab">إغلاق التبويب</string>
@@ -402,56 +384,132 @@
         <item quantity="zero">لا فيديو في الصفحة</item>
         <item quantity="one">في الصفحة فيديو</item>
         <item quantity="two">في الصفحة فيديوهان</item>
-        <item quantity="few">في الصفحة %d فيديوهات</item>
-        <item quantity="many">في الصفحة %d فيديو</item>
-        <item quantity="other">في الصفحة %d فيديو</item>
+        <item quantity="few">في الصفحة %s فيديوهات</item>
+        <item quantity="many">في الصفحة %s فيديو</item>
+        <item quantity="other">في الصفحة %s فيديو</item>
     </plurals>
     <plurals name="sites">
         <item quantity="zero">لا مواقع</item>
         <item quantity="one">موقع واحد</item>
         <item quantity="two">موقعان</item>
-        <item quantity="few">%d مواقع</item>
-        <item quantity="many">%d موقعًا</item>
-        <item quantity="other">%d موقع</item>
+        <item quantity="few">%s مواقع</item>
+        <item quantity="many">%s موقعًا</item>
+        <item quantity="other">%s موقع</item>
     </plurals>
     <plurals name="playlist_videos">
         <item quantity="zero">لا فيديوهات</item>
         <item quantity="one">فيديو واحد</item>
         <item quantity="two">فيديوهان</item>
-        <item quantity="few">%d فيديوهات</item>
-        <item quantity="many">%d فيديو</item>
-        <item quantity="other">%d فيديو</item>
+        <item quantity="few">%s فيديوهات</item>
+        <item quantity="many">%s فيديو</item>
+        <item quantity="other">%s فيديو</item>
     </plurals>
     <plurals name="playlist_chosen">
         <item quantity="zero">لم يُحدَّد شيء</item>
         <item quantity="one">حُدِّد فيديو واحد</item>
         <item quantity="two">حُدِّد فيديوهان</item>
-        <item quantity="few">حُدِّدت %d فيديوهات</item>
-        <item quantity="many">حُدِّد %d فيديو</item>
-        <item quantity="other">حُدِّد %d فيديو</item>
+        <item quantity="few">حُدِّدت %s فيديوهات</item>
+        <item quantity="many">حُدِّد %s فيديو</item>
+        <item quantity="other">حُدِّد %s فيديو</item>
     </plurals>
     <plurals name="playlist_unavailable">
         <item quantity="zero">كل الفيديوهات متاحة</item>
         <item quantity="one">فيديو واحد غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
         <item quantity="two">فيديوهان غير متاحين (خاصان أو محذوفان)، ولن يُحمَّلا</item>
-        <item quantity="few">%d فيديوهات غير متاحة (خاصة أو محذوفة)، ولن تُحمَّل</item>
-        <item quantity="many">%d فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
-        <item quantity="other">%d فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
+        <item quantity="few">%s فيديوهات غير متاحة (خاصة أو محذوفة)، ولن تُحمَّل</item>
+        <item quantity="many">%s فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
+        <item quantity="other">%s فيديو غير متاح (خاص أو محذوف)، ولن يُحمَّل</item>
     </plurals>
     <plurals name="download_chosen">
         <item quantity="zero">تحميل</item>
         <item quantity="one">تحميل فيديو واحد</item>
         <item quantity="two">تحميل فيديوهين</item>
-        <item quantity="few">تحميل %d فيديوهات</item>
-        <item quantity="many">تحميل %d فيديو</item>
-        <item quantity="other">تحميل %d فيديو</item>
+        <item quantity="few">تحميل %s فيديوهات</item>
+        <item quantity="many">تحميل %s فيديو</item>
+        <item quantity="other">تحميل %s فيديو</item>
     </plurals>
     <plurals name="blocked_here">
         <item quantity="zero">لم يُحجب شيء في هذه الصفحة</item>
         <item quantity="one">حُجب في هذه الصفحة: طلب واحد</item>
         <item quantity="two">حُجب في هذه الصفحة: طلبان</item>
-        <item quantity="few">حُجب في هذه الصفحة: %d طلبات</item>
-        <item quantity="many">حُجب في هذه الصفحة: %d طلبًا</item>
-        <item quantity="other">حُجب في هذه الصفحة: %d طلب</item>
+        <item quantity="few">حُجب في هذه الصفحة: %s طلبات</item>
+        <item quantity="many">حُجب في هذه الصفحة: %s طلبًا</item>
+        <item quantity="other">حُجب في هذه الصفحة: %s طلب</item>
     </plurals>
+    <!-- The D5 design (0.4.0). -->
+    <string name="greeting">السلام عليكم</string>
+    <string name="tagline">ما يدخل هاتفك يبقى معك، فاختر ما ينفعك.</string>
+    <string name="speed_now">%1$s الآن</string>
+    <string name="light_mode">الوضع الفاتح</string>
+    <string name="dark_mode">الوضع الداكن</string>
+    <string name="hero_idle_title">لا شيء يُحمَّل الآن</string>
+    <string name="hero_idle_hint">الصق رابطًا، أو افتح موقعًا في المتصفح.</string>
+    <string name="left_short">باقٍ %1$s</string>
+    <string name="download_details">تفاصيل التحميل</string>
+    <string name="swipe_to_pause">اسحب للإيقاف</string>
+    <string name="tile_clipboard">الحافظة</string>
+    <string name="tile_playlists">قوائم تشغيل</string>
+    <string name="activity">النشاط</string>
+    <string name="see_all">عرض الكل</string>
+    <string name="pill_waiting">منتظر</string>
+    <string name="list_sep">"، "</string>
+    <string name="filter_waiting">في الانتظار</string>
+    <string name="filter_failed">فشل</string>
+    <string name="no_playlists">لم تحمّل قائمة تشغيل بعد. الصق رابط قائمة في «تحميل جديد».</string>
+    <string name="day_today">اليوم</string>
+    <string name="day_yesterday">أمس</string>
+    <string name="day_earlier">قبل ذلك</string>
+    <string name="all_downloads">كل التحميلات</string>
+    <string name="speed_label">السرعة الآن</string>
+    <string name="time_left">الوقت الباقي</string>
+    <string name="size_label">الحجم</string>
+    <string name="status_label">الحالة</string>
+    <string name="source">المصدر</string>
+    <string name="queue_label">الطابور</string>
+    <string name="queue_working">يعمل</string>
+    <string name="queue_resting">متوقف</string>
+    <string name="stop_word">إيقاف</string>
+    <string name="run_word">تشغيل</string>
+    <string name="source_clipboard">من الحافظة</string>
+    <string name="add_to_queue">أضف إلى %1$s</string>
+    <string name="now_word">الآن</string>
+    <string name="other_queue">طابور آخر</string>
+    <string name="download_size">تحميل، %1$s</string>
+    <string name="forward">للأمام</string>
+    <string name="browser_home">صفحة البداية</string>
+    <string name="blocked_today">حُجب اليوم</string>
+    <string name="guards_on">تعمل</string>
+    <string name="guards_off">متوقفة</string>
+    <string name="blocked_ads">إعلانات</string>
+    <string name="blocked_trackers">متتبعات</string>
+    <string name="blocked_malware">مواقع ضارة</string>
+    <string name="what_is_blocked">ما يُحجب</string>
+    <string name="guard_phishing">مواقع الاحتيال</string>
+    <string name="guard_phishing_hint">التصفح الآمن، يعمل دائمًا</string>
+    <string name="always_on">مفعّلة</string>
+    <string name="last_update">آخر تحديث</string>
+    <string name="update_now">حدّث الآن</string>
+    <string name="preferred_quality">الجودة المفضلة</string>
+    <string name="protection_short">الإعلانات والمواقع الضارة في المتصفح</string>
+    <string name="group_about">حول زاجِل</string>
+    <string name="version">الإصدار</string>
+    <!-- The details' segment bars: how many connections still work on the file. -->
+    <plurals name="connections_working">
+        <item quantity="zero">لا اتصال يعمل الآن</item>
+        <item quantity="one">اتصال واحد يحمّل الملف</item>
+        <item quantity="two">اتصالان يحمّلان أجزاء الملف معًا</item>
+        <item quantity="few">%1$s اتصالات تحمّل أجزاء الملف معًا</item>
+        <item quantity="many">%1$s اتصالًا تحمّل أجزاء الملف معًا</item>
+        <item quantity="other">%1$s اتصال تحمّل أجزاء الملف معًا</item>
+    </plurals>
+    <!-- After the count of blocked requests, which is shown on its own: «1,284 طلبًا». -->
+    <plurals name="requests">
+        <item quantity="zero">طلب</item>
+        <item quantity="one">طلب</item>
+        <item quantity="two">طلبان</item>
+        <item quantity="few">طلبات</item>
+        <item quantity="many">طلبًا</item>
+        <item quantity="other">طلب</item>
+    </plurals>
+    <string name="lists_signed">%1$s، موقّعة ومتحقَّق منها</string>
 </resources>

@@ -87,6 +87,8 @@ data class Download(
      * «Retry» moves it without downloading it again.
      */
     val unsaved: Boolean = false,
+    /** When it was added (milliseconds since 1970); null for one added before 0.4.0. */
+    val addedAt: Long? = null,
 ) {
     /**
      * Before the engine knows the file's name: the link's last path part,
@@ -120,6 +122,7 @@ data class Download(
         put("folder", folder)
         put("video_problem", videoProblem)
         put("unsaved", unsaved)
+        put("added_at", addedAt)
     }
 
     companion object {
@@ -150,6 +153,7 @@ data class Download(
             folder = json.optStringOrNull("folder"),
             videoProblem = json.optStringOrNull("video_problem"),
             unsaved = json.optBoolean("unsaved"),
+            addedAt = if (json.isNull("added_at")) null else json.optLong("added_at"),
         )
 
         fun listToJson(downloads: List<Download>): String =

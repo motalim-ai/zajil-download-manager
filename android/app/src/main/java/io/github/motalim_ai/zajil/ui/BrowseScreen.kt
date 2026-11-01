@@ -3,7 +3,6 @@ package io.github.motalim_ai.zajil.ui
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,10 +14,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -27,12 +29,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,13 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -63,7 +56,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,20 +65,22 @@ import io.github.motalim_ai.zajil.browser.BrowserController
 import io.github.motalim_ai.zajil.browser.Finds
 import io.github.motalim_ai.zajil.browser.Found
 import io.github.motalim_ai.zajil.browser.MediaKind
+import io.github.motalim_ai.zajil.browser.PageState
 import io.github.motalim_ai.zajil.browser.Shortcut
 import io.github.motalim_ai.zajil.browser.SiteIcons
+import io.github.motalim_ai.zajil.downloads.FileNames
 import io.github.motalim_ai.zajil.video.PlaylistLinks
 import java.net.URI
 import java.net.URLDecoder
 
-/** The tiles' colours, from the design (letters, never the sites' own logos). */
-private val TILES = listOf(0xFFD42F2C, 0xFF1D63D8, 0xFFB0399B, 0xFF2A3A44, 0xFF10263D, 0xFFE08A06, 0xFF1A9AD6).map(::Color)
+/** The letter tiles' colours, for a site whose own icon Zajil does not have yet. */
+private val TILES = listOf(0xFFD42F2C, 0xFF1D63D8, 0xFFB0399B, 0xFF2A3A44, 0xFF121722, 0xFFE08A06, 0xFF1A9AD6).map(::Color)
 
-/** «Browse» (A6): the browser's home, or the page with its found videos. */
+/** «المتصفح» (A6; D5): the browser's home, or the page with its found videos. */
 @Composable
 fun BrowseScreen(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit, bottomPadding: PaddingValues) {
     val page by browser.page.collectAsStateWithLifecycle()
-    if (page == null) BrowseHome(browser, bottomPadding) else BrowsePage(browser, onFound, onSignIns, bottomPadding)
+    if (page == null) BrowseHome(browser, bottomPadding) else BrowsePage(browser, onFound, onSignIns)
 }
 
 @Composable
@@ -104,82 +98,68 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
     var sheet by rememberSaveable { mutableStateOf<String?>(null) }
     // Back from a new tab's home: the last tab again.
     BackHandler(enabled = tabs.isNotEmpty()) { browser.switchTo(tabs.last().id) }
-    Column(Modifier.fillMaxSize().background(c.bg)) {
-        Column(
-            Modifier.background(c.surface).windowInsetsPadding(WindowInsets.statusBars).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ZText(stringResource(R.string.browse), Modifier.weight(1f), size = 21.sp, weight = FontWeight.Bold)
-                PrivatePill(private) { refused = !browser.setPrivate(!private) }
-                if (tabs.isNotEmpty()) TabsButton(tabs.size) { sheet = "tabs" }
-            }
-            AddressField(onGo = browser::open)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottomPadding.calculateBottomPadding())) {
+        TabHeader(stringResource(R.string.browse)) {
+            HeaderButton(
+                stringResource(if (private) R.string.private_on else R.string.private_mode),
+                { refused = !browser.setPrivate(!private) },
+                LineIcon.Private,
+                background = if (private) c.amberBg else c.surface,
+                tint = if (private) c.amber else c.ink,
+            )
+            if (tabs.isNotEmpty()) TabsButton(tabs.size) { sheet = "tabs" }
         }
-        RowLine()
-        Column(
-            Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .padding(bottom = bottomPadding.calculateBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            if (refused) ZText(stringResource(R.string.private_unsupported), size = 13.sp, color = c.red)
-            if (private) Note(stringResource(R.string.private_note), c.amberBg, c.amber, LineIcon.Private)
-            ZText(stringResource(R.string.sites), size = 14.sp, weight = FontWeight.Bold, color = c.muted)
-            (shortcuts.map<Shortcut, Shortcut?> { it } + null).chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEachIndexed { i, shortcut ->
+        AddressField(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), onGo = browser::open)
+        if (refused) ZText(stringResource(R.string.private_unsupported), Modifier.padding(horizontal = 22.dp, vertical = 8.dp), size = 13.sp, color = c.red)
+        if (private) Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp)) { Note(stringResource(R.string.private_note), c.amberBg, c.amber, LineIcon.Private) }
+        SectionLabel(stringResource(R.string.sites), Modifier.padding(top = 2.dp))
+        // Five to a row, as the design; the last place adds a site.
+        val tiles: List<Shortcut?> = shortcuts + null
+        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            tiles.chunked(5).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { shortcut ->
                         Box(Modifier.weight(1f)) {
                             if (shortcut == null) {
                                 AddTile { adding = true }
                             } else {
                                 val icon = SiteIcons.siteOf(shortcut.url)?.let { icons[it] }
-                                SiteTile(shortcut, icon, TILES[(shortcuts.indexOf(shortcut)) % TILES.size], { browser.open(shortcut.url) }) {
+                                SiteTile(shortcut, icon, TILES[shortcuts.indexOf(shortcut) % TILES.size], { browser.open(shortcut.url) }) {
                                     browser.store.removeShortcut(shortcut)
                                 }
                             }
                         }
-                        if (i == row.lastIndex) repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
+                    repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
-            if (!private) BookmarksCard(browser)
-            if (recent.isNotEmpty() && !private) {
+        }
+        if (!private) BookmarksCard(browser)
+        if (recent.isNotEmpty() && !private) {
+            ZCard(Modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp), padding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ZText(stringResource(R.string.visited_lately), Modifier.weight(1f), size = 14.sp, weight = FontWeight.Bold, color = c.muted)
+                    ZText(stringResource(R.string.visited_lately), Modifier.weight(1f), size = 15.sp, weight = FontWeight.SemiBold)
                     ZText(
                         stringResource(R.string.history),
-                        Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { sheet = "history" }.padding(horizontal = 8.dp, vertical = 4.dp),
+                        Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { sheet = "history" }.padding(horizontal = 6.dp, vertical = 8.dp),
                         size = 13.5.sp,
-                        weight = FontWeight.SemiBold,
-                        color = c.accent,
+                        color = c.quietLink,
                     )
                 }
-                ZCard {
-                    recent.forEachIndexed { i, visit ->
-                        if (i > 0) RowLine()
-                        Row(
-                            Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { browser.open(visit.url) }.padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            val icon = SiteIcons.siteOf(visit.url)?.let { icons[it] }
-                            if (icon != null) {
-                                Image(icon, null, Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)), filterQuality = FilterQuality.Medium)
-                            } else {
-                                Icon(lineIcon(LineIcon.Clock), null, tint = c.muted, modifier = Modifier.size(20.dp))
-                            }
-                            Column(Modifier.weight(1f)) {
-                                ZText(visit.title, maxLines = 1, style = TextStyle(textDirection = TextDirection.Content))
-                                ZText(hostOf(visit.url), size = 12.sp, color = c.muted, maxLines = 1, style = TextStyle(textDirection = TextDirection.Ltr))
-                            }
-                        }
-                    }
+                recent.forEachIndexed { i, visit ->
+                    if (i > 0) RowLine()
+                    SiteRow(
+                        visit.url,
+                        visit.title,
+                        hostOf(visit.url),
+                        SiteIcons.siteOf(visit.url)?.let { icons[it] },
+                        LineIcon.Clock,
+                        onClick = { browser.open(visit.url) },
+                    )
                 }
             }
-            Note(stringResource(R.string.browse_promise), c.greenBg, c.green, LineIcon.Shield)
         }
+        Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp)) { Note(stringResource(R.string.browse_promise), c.greenBg, c.green, LineIcon.Shield) }
     }
     if (adding) AddSiteSheet(onAdd = { browser.store.addShortcut(it) }, onDismiss = { adding = false })
     when (sheet) {
@@ -188,78 +168,28 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
     }
 }
 
+/** «ابحث أو اكتب رابطًا»: a white pill on the background. */
 @Composable
-private fun PrivatePill(on: Boolean, onClick: () -> Unit) {
-    val c = Z.colors
-    val shape = CircleShape
-    Row(
-        Modifier
-            .heightIn(min = 48.dp)
-            .clip(shape)
-            .clickable(role = Role.Switch, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            Modifier
-                .height(36.dp)
-                .clip(shape)
-                .background(if (on) c.amberBg else c.surface)
-                .border(1.dp, if (on) c.amber else c.outline, shape)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(lineIcon(LineIcon.Private), null, tint = if (on) c.amber else c.muted, modifier = Modifier.size(16.dp))
-            ZText(
-                stringResource(if (on) R.string.private_on else R.string.private_mode),
-                size = 13.sp,
-                weight = FontWeight.SemiBold,
-                color = if (on) c.amber else c.muted,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AddressField(onGo: (String) -> Unit) {
-    val c = Z.colors
+private fun AddressField(modifier: Modifier, onGo: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
-    val shape = RoundedCornerShape(16.dp)
-    val go = {
-        if (text.isNotBlank()) {
-            keyboard?.hide()
-            onGo(text)
-            text = ""
-        }
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .clip(shape)
-            .background(c.sunken)
-            .border(1.5.dp, c.outline, shape)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Icon(lineIcon(LineIcon.Search), null, tint = c.muted, modifier = Modifier.size(20.dp))
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (text.isEmpty()) ZText(stringResource(R.string.address_hint), color = c.muted, size = 15.sp)
-            val label = stringResource(R.string.address_hint)
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                textStyle = TextStyle(fontFamily = Plex, fontSize = 15.sp, color = c.ink, textDirection = TextDirection.Content),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { go() }),
-                cursorBrush = SolidColor(c.accent),
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
-            )
-        }
-    }
+    ZField(
+        text,
+        { text = it },
+        stringResource(R.string.address_hint),
+        modifier.card(28.dp),
+        icon = LineIcon.Search,
+        type = KeyboardType.Uri,
+        imeAction = ImeAction.Go,
+        onAction = {
+            if (text.isNotBlank()) {
+                keyboard?.hide()
+                onGo(text)
+                text = ""
+            }
+        },
+        background = Z.colors.surface,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -269,23 +199,18 @@ private fun SiteTile(shortcut: Shortcut, icon: ImageBitmap?, color: Color, onOpe
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(onClickLabel = shortcut.name, onClick = onOpen, onLongClick = { asking = true }),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (icon != null) {
-            // The site's own icon, on the card's color, as browsers show it.
-            val shape = RoundedCornerShape(18.dp)
-            Box(
-                Modifier.size(56.dp).clip(shape).background(Z.colors.surface).border(1.dp, Z.colors.line, shape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(icon, null, Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)), filterQuality = FilterQuality.Medium)
-            }
-        } else {
-            Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(color), contentAlignment = Alignment.Center) {
-                ZText(shortcut.name.take(1).uppercase(), size = 22.sp, weight = FontWeight.Bold, color = Color.White)
+        Box(Modifier.cardShadow(20.dp)) {
+            if (icon == null && !isMotalim(shortcut.url)) {
+                Box(Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(color), contentAlignment = Alignment.Center) {
+                    ZText(shortcut.name.take(1).uppercase(), size = 24.sp, weight = FontWeight.Bold, color = Color.White)
+                }
+            } else {
+                SiteBadge(shortcut.url, icon, 60.dp, 20.dp)
             }
         }
         ZText(shortcut.name, size = 12.5.sp, maxLines = 1, align = TextAlign.Center)
@@ -305,21 +230,17 @@ private fun SiteTile(shortcut: Shortcut, icon: ImageBitmap?, color: Color, onOpe
 private fun AddTile(onClick: () -> Unit) {
     val c = Z.colors
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = onClick),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
-            Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(c.surface)
-                .border(1.5.dp, c.outline, RoundedCornerShape(18.dp)),
+            Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).border(1.5.dp, Color(0xFFB9BFCA), RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(lineIcon(LineIcon.Plus), null, tint = c.accent, modifier = Modifier.size(22.dp))
+            ZIcon(LineIcon.Plus, c.muted, 24.dp)
         }
-        ZText(stringResource(R.string.add_site), size = 12.5.sp, color = c.accent)
+        ZText(stringResource(R.string.add_site), size = 12.5.sp, color = c.muted)
     }
 }
 
@@ -329,10 +250,10 @@ private fun AddSiteSheet(onAdd: (Shortcut) -> Unit, onDismiss: () -> Unit) {
     var address by rememberSaveable { mutableStateOf("") }
     val url = Finds.addressOf(address)?.takeIf { address.isNotBlank() && !it.startsWith("https://duckduckgo.com/?q=") }
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.add_site_title)) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ZText(stringResource(R.string.add_site_title), size = 19.sp, weight = FontWeight.Bold)
-            SheetField(name, { name = it }, stringResource(R.string.site_name), KeyboardType.Text, TextDirection.Content)
-            SheetField(address, { address = it }, stringResource(R.string.site_address), KeyboardType.Uri, TextDirection.Ltr)
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SheetTitle(stringResource(R.string.add_site_title))
+            ZField(name, { name = it }, stringResource(R.string.site_name))
+            ZField(address, { address = it }, stringResource(R.string.site_address), icon = LineIcon.Link, type = KeyboardType.Uri, direction = TextDirection.Ltr)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MainButton(
                     stringResource(R.string.add_site),
@@ -351,93 +272,65 @@ private fun AddSiteSheet(onAdd: (Shortcut) -> Unit, onDismiss: () -> Unit) {
     }
 }
 
+/** A page: its address and tabs above, the page, «تحميل» when videos are found, and the browser's bar below. */
 @Composable
-internal fun SheetField(value: String, onValue: (String) -> Unit, hint: String, type: KeyboardType, direction: TextDirection) {
-    val c = Z.colors
-    val shape = RoundedCornerShape(14.dp)
-    Box(
-        Modifier.fillMaxWidth().heightIn(min = 50.dp).clip(shape).background(c.sunken).border(1.5.dp, c.outline, shape).padding(horizontal = 14.dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        if (value.isEmpty()) ZText(hint, color = c.muted, size = 15.sp)
-        BasicTextField(
-            value = value,
-            onValueChange = onValue,
-            singleLine = true,
-            textStyle = TextStyle(fontFamily = Plex, fontSize = 15.sp, color = c.ink, textDirection = direction),
-            keyboardOptions = KeyboardOptions(keyboardType = type),
-            cursorBrush = SolidColor(c.accent),
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = hint },
-        )
-    }
-}
-
-@Composable
-private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit, bottomPadding: PaddingValues) {
+private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit) {
     val c = Z.colors
     val page by browser.page.collectAsStateWithLifecycle()
     val found by browser.found.collectAsStateWithLifecycle()
     val private by browser.privateMode.collectAsStateWithLifecycle()
     val tabs by browser.tabs.collectAsStateWithLifecycle()
     val bookmarks by browser.store.bookmarks.collectAsStateWithLifecycle()
+    val blocked by browser.blocked.collectAsStateWithLifecycle()
     var listing by rememberSaveable { mutableStateOf(false) }
     var showingTabs by rememberSaveable { mutableStateOf(false) }
     var protecting by rememberSaveable { mutableStateOf(false) }
     val warning by browser.warning.collectAsStateWithLifecycle()
     val state = page ?: return
     BackHandler { browser.back() }
-    Column(Modifier.fillMaxSize().background(c.surface).padding(bottom = bottomPadding.calculateBottomPadding())) {
-        Column(Modifier.background(c.surface).windowInsetsPadding(WindowInsets.statusBars)) {
+    val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(start = 14.dp, end = 14.dp, top = 18.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // «Back» points to the start of the line: right in Arabic, left in English.
-                val mirror = LocalLayoutDirection.current == LayoutDirection.Ltr
-                Box(Modifier.graphicsLayer { scaleX = if (mirror) -1f else 1f }) {
-                    BarIconButton(LineIcon.Back, stringResource(R.string.back)) { browser.back() }
-                }
-                AddressBox(state.url, private, Modifier.weight(1f)) { protecting = true }
-                BarIconButton(LineIcon.Reload, stringResource(R.string.reload)) { browser.reload() }
                 val marked = bookmarks.any { it.url == state.url }
-                BarIconButton(
-                    if (marked) LineIcon.StarFilled else LineIcon.Star,
-                    stringResource(if (marked) R.string.remove_bookmark else R.string.add_bookmark),
-                    tint = if (marked) c.amber else c.muted,
-                ) { browser.store.toggleBookmark(state.title, state.url) }
+                AddressBox(state.url, private, marked, Modifier.weight(1f), onBookmark = { browser.store.toggleBookmark(state.title, state.url) }) { protecting = true }
                 TabsButton(tabs.size) { showingTabs = true }
             }
             if (state.loading) {
-                LinearProgressIndicator(
-                    progress = { state.progress / 100f },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                    color = c.accent,
-                    trackColor = c.line,
-                    gapSize = 0.dp,
-                    drawStopIndicator = {},
-                )
-            } else {
-                RowLine()
+                ThinBar(state.progress / 100f, height = 2.dp, track = Color.Transparent)
             }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            val view = browser.webView
-            if (view != null) {
-                // Another tab is another view.
-                key(view) {
-                    AndroidView(
-                        factory = { view.also { (it.parent as? ViewGroup)?.removeView(it) } },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+            Box(Modifier.weight(1f).fillMaxWidth().padding(bottom = 66.dp + 18.dp + nav)) {
+                val view = browser.webView
+                if (view != null) {
+                    // Another tab is another view.
+                    key(view) {
+                        AndroidView(
+                            factory = { view.also { (it.parent as? ViewGroup)?.removeView(it) } },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
-            }
-            warning?.let { w -> WarningScreen(w, onBack = browser::leaveWarning, onProceed = browser::proceedAnyway) }
-            val downloadable = found.count { !(it is Found.Element && it.protected) }
-            if (found.isNotEmpty() && warning == null) {
-                FoundButton(downloadable.coerceAtLeast(0), Modifier.align(Alignment.BottomStart).padding(16.dp)) { listing = true }
+                warning?.let { w -> WarningScreen(w, onBack = browser::leaveWarning, onProceed = browser::proceedAnyway) }
             }
         }
+        val downloadable = found.count { !(it is Found.Element && it.protected) }
+        if (found.isNotEmpty() && warning == null) {
+            FoundButton(downloadable.coerceAtLeast(0), Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 104.dp + nav)) { listing = true }
+        }
+        PageBar(
+            state,
+            blocked,
+            Modifier.align(Alignment.BottomCenter).padding(start = 14.dp, end = 14.dp, bottom = 18.dp + nav),
+            onBack = browser::back,
+            onForward = browser::forward,
+            onHome = browser::newTabHome,
+            onReload = { browser.reload() },
+            onProtection = { protecting = true },
+        )
     }
     if (showingTabs) TabsSheet(browser, onDismiss = { showingTabs = false })
     if (protecting) ProtectionSheet(browser, hostOf(state.url), onDismiss = { protecting = false })
@@ -458,26 +351,30 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     }
 }
 
+/** The address: the lock (the site's protection), the address left to right, private mode, and the bookmark. */
 @Composable
-private fun AddressBox(url: String, private: Boolean, modifier: Modifier, onProtection: () -> Unit) {
+private fun AddressBox(url: String, private: Boolean, marked: Boolean, modifier: Modifier, onBookmark: () -> Unit, onProtection: () -> Unit) {
     val c = Z.colors
     val secure = url.startsWith("https://")
-    val shape = RoundedCornerShape(14.dp)
     Row(
-        modifier.height(42.dp).clip(shape).background(c.sunken).border(1.dp, c.line, shape).padding(horizontal = 12.dp),
+        modifier
+            .height(48.dp)
+            .dropShadow(Color(0x4D121722), 12.dp, 4.dp, (-6).dp, 24.dp)
+            .clip(CircleShape)
+            .background(c.surface)
+            .padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // The lock opens «Protection on this site».
+        val lock = stringResource(R.string.protection_here)
         Box(
-            Modifier.size(30.dp).clip(CircleShape).clickable(onClickLabel = stringResource(R.string.protection_here), role = Role.Button, onClick = onProtection),
+            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = lock, role = Role.Button, onClick = onProtection),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                lineIcon(if (secure) LineIcon.Lock else LineIcon.LockOpen),
-                contentDescription = stringResource(if (secure) R.string.secure else R.string.not_secure),
-                tint = if (secure) c.green else c.red,
-                modifier = Modifier.size(15.dp),
+            ZIcon(
+                if (secure) LineIcon.Lock else LineIcon.LockOpen,
+                if (secure) c.green else c.red,
+                18.dp,
+                label = stringResource(if (secure) R.string.secure else R.string.not_secure),
             )
         }
         ZText(
@@ -487,97 +384,156 @@ private fun AddressBox(url: String, private: Boolean, modifier: Modifier, onProt
             maxLines = 1,
             style = TextStyle(textDirection = TextDirection.Ltr),
         )
-        if (private) Icon(lineIcon(LineIcon.Private), stringResource(R.string.private_on), tint = c.amber, modifier = Modifier.size(16.dp))
+        if (private) ZIcon(LineIcon.Private, c.amber, 16.dp, label = stringResource(R.string.private_on))
+        val label = stringResource(if (marked) R.string.remove_bookmark else R.string.add_bookmark)
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = label, role = Role.Button, onClick = onBookmark).semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            ZIcon(if (marked) LineIcon.StarFilled else LineIcon.Star, if (marked) c.amber else c.chevron, 20.dp)
+        }
     }
 }
 
+/** The browser's bar: back, forward, the home, reload, and the shield with what it blocked on the page. */
+@Composable
+private fun PageBar(
+    state: PageState,
+    blocked: Int,
+    modifier: Modifier,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onHome: () -> Unit,
+    onReload: () -> Unit,
+    onProtection: () -> Unit,
+) {
+    val c = Z.colors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(66.dp)
+            .dropShadow(Color(0x59121722), 22.dp, 10.dp, (-10).dp, 33.dp)
+            .clip(CircleShape)
+            .background(c.surface),
+        horizontalArrangement = Arrangement.SpaceAround,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BarButton(LineIcon.ArrowBack, stringResource(R.string.back), c.softInk, onClick = onBack)
+        BarButton(LineIcon.ArrowForward, stringResource(R.string.forward), if (state.canGoForward) c.softInk else Color(0xFFB9BFCA), enabled = state.canGoForward, onClick = onForward)
+        BarButton(LineIcon.Home, stringResource(R.string.browser_home), c.softInk, onClick = onHome)
+        BarButton(LineIcon.Reload, stringResource(R.string.reload), c.softInk, onClick = onReload)
+        Box {
+            BarButton(LineIcon.Shield, pluralStringResource(R.plurals.blocked_here, blocked, blocked), c.green, onClick = onProtection)
+            if (blocked > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = 2.dp)
+                        .heightIn(min = 20.dp)
+                        .widthIn(min = 20.dp)
+                        .clip(CircleShape)
+                        .background(c.green)
+                        .padding(horizontal = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ZText(if (blocked > 99) "99+" else "$blocked", size = 11.sp, weight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarButton(icon: LineIcon, label: String, tint: Color, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClickLabel = label, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        ZIcon(icon, tint, 24.dp)
+    }
+}
+
+/** «تحميل» with how many the page has: the floating pill over the page. */
 @Composable
 private fun FoundButton(count: Int, modifier: Modifier, onClick: () -> Unit) {
     val c = Z.colors
-    val shape = RoundedCornerShape(18.dp)
     Row(
         modifier
-            .shadow(10.dp, shape)
-            .clip(shape)
+            .height(56.dp)
+            .dropShadow(Color(0xBF0A5FE0), 24.dp, 12.dp, (-10).dp, 28.dp)
+            .clip(CircleShape)
             .background(c.accent)
             .clickable(role = Role.Button, onClick = onClick)
-            .height(56.dp)
-            .padding(start = 14.dp, end = 18.dp),
+            .padding(start = 18.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(lineIcon(LineIcon.Downloads), null, tint = c.accentInk, modifier = Modifier.size(22.dp))
-        ZText(stringResource(R.string.download), size = 15.5.sp, weight = FontWeight.SemiBold, color = c.accentInk)
-        Box(
-            Modifier.widthIn(min = 24.dp).height(24.dp).clip(RoundedCornerShape(12.dp)).background(c.accentInk).padding(horizontal = 6.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            ZText("$count", size = 13.sp, weight = FontWeight.Bold, color = c.accent)
+        ZIcon(LineIcon.Download, Color.White, 24.dp)
+        ZText(stringResource(R.string.download), size = 15.5.sp, weight = FontWeight.SemiBold, color = Color.White)
+        Box(Modifier.size(32.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+            ZText("$count", size = 14.sp, weight = FontWeight.Bold, color = c.accent)
         }
     }
 }
 
-/** The videos found on the page, each to the sheet that downloads it. */
+/** The videos found on the page (D5), each with its download button; the sign-in note at the end. */
 @Composable
-private fun FoundSheet(found: List<Found>, page: io.github.motalim_ai.zajil.browser.PageState, onPick: (Found) -> Unit, onSignIns: () -> Unit, onDismiss: () -> Unit) {
+private fun FoundSheet(found: List<Found>, page: PageState, onPick: (Found) -> Unit, onSignIns: () -> Unit, onDismiss: () -> Unit) {
     val c = Z.colors
     val title = pluralStringResource(R.plurals.found_on_page, found.size, found.size)
     ZSheet(onDismiss = onDismiss, label = title) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ZText(title, Modifier.weight(1f), size = 19.sp, weight = FontWeight.Bold)
-                ZText(hostOf(page.url), size = 12.5.sp, color = c.muted, maxLines = 1, style = TextStyle(textDirection = TextDirection.Ltr))
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SheetTitle(title) { SheetClose(onDismiss) }
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                found.forEach { item -> FoundRow(item, page) { onPick(item) } }
             }
-            found.forEach { item -> FoundRow(item, page) { onPick(item) } }
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.amberBg).padding(horizontal = 14.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(lineIcon(LineIcon.Lock), null, tint = c.amber, modifier = Modifier.size(22.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ZText(stringResource(R.string.sign_in_note), size = 13.sp, color = c.ink)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ZIcon(LineIcon.Lock, c.muted, 18.dp, Modifier.offset(y = 2.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ZText(stringResource(R.string.sign_in_note), size = 13.sp, color = c.muted)
                     ZText(
                         stringResource(R.string.manage_sign_ins),
-                        Modifier.heightIn(min = 32.dp).clickable(role = Role.Button, onClick = onSignIns),
+                        Modifier.heightIn(min = 40.dp).clickable(role = Role.Button, onClick = onSignIns).padding(vertical = 8.dp),
                         size = 13.sp,
-                        weight = FontWeight.Bold,
-                        color = c.amber,
+                        weight = FontWeight.SemiBold,
+                        color = c.link,
                     )
                 }
             }
-            QuietButton(stringResource(R.string.close), onClick = onDismiss, modifier = Modifier.fillMaxWidth(), height = 50.dp)
         }
     }
 }
 
 @Composable
-private fun FoundRow(item: Found, page: io.github.motalim_ai.zajil.browser.PageState, onPick: () -> Unit) {
+private fun FoundRow(item: Found, page: PageState, onPick: () -> Unit) {
     val c = Z.colors
     val (title, detail, duration) = describe(item, page)
     val usable = !(item is Found.Element && item.protected)
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(22.dp)
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(c.sunken).border(1.dp, c.line, shape).padding(12.dp),
+        Modifier.fillMaxWidth().clip(shape).border(1.dp, c.line, shape).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF111A24)),
+            Modifier
+                .size(width = 92.dp, height = 54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF1D2A40), Color(0xFF0B0F17)))),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(lineIcon(LineIcon.Play), null, tint = Color.Unspecified, modifier = Modifier.size(22.dp))
-            if (duration > 0) {
-                ZText(
-                    clock(duration),
-                    Modifier.align(Alignment.BottomStart).padding(4.dp).clip(RoundedCornerShape(4.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp),
-                    size = 10.5.sp,
-                    color = Color.White,
-                )
-            }
+            ZIcon(LineIcon.PlayFill, Color.White, 22.dp)
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ZText(title, size = 14.5.sp, weight = FontWeight.SemiBold, maxLines = 1, style = TextStyle(textDirection = TextDirection.Content))
-            ZText(detail, size = 12.sp, color = if (usable) c.muted else c.amber, maxLines = 2)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            // A file's name mixes scripts: one unit, as in the lists.
+            ZText(FileNames.display(title), size = 14.5.sp, weight = FontWeight.SemiBold, maxLines = 1, style = TextStyle(textDirection = TextDirection.Content))
+            ZText(detail, size = 12.5.sp, color = if (usable) c.faint else c.amber, maxLines = 2)
+            val tag = if (duration > 0) clock(duration) else tagOf(item)
+            if (tag != null) Pill(tag, c.sunken, c.softInk, height = 24.dp, radius = 8.dp, size = 12.sp, weight = FontWeight.Normal)
         }
         if (usable) {
             val label = stringResource(R.string.download_named, title)
@@ -590,15 +546,25 @@ private fun FoundRow(item: Found, page: io.github.motalim_ai.zajil.browser.PageS
                     .semantics { contentDescription = label },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(lineIcon(LineIcon.Downloads), null, tint = c.accentInk, modifier = Modifier.size(22.dp))
+                ZIcon(LineIcon.Download, Color.White, 22.dp)
             }
         }
     }
 }
 
+/** A stream's kind as its file names it, when its length is not known: «m3u8», «mpd». */
+private fun tagOf(item: Found): String? = when (item) {
+    is Found.Media -> when (item.kind) {
+        MediaKind.Hls -> "m3u8"
+        MediaKind.Dash -> "mpd"
+        MediaKind.File -> extOf(item.url).lowercase().ifEmpty { null }
+    }
+    else -> null
+}
+
 /** A found video's title, its line under it, and its length (0: unknown). */
 @Composable
-private fun describe(item: Found, page: io.github.motalim_ai.zajil.browser.PageState): Triple<String, String, Int> {
+private fun describe(item: Found, page: PageState): Triple<String, String, Int> {
     val pageTitle = page.title.ifBlank { hostOf(page.url) }
     return when (item) {
         is Found.SitePage -> Triple(
@@ -632,54 +598,32 @@ private fun nameOf(url: String): String {
 private fun clock(seconds: Int): String =
     if (seconds >= 3600) "%d:%02d:%02d".format(seconds / 3600, seconds % 3600 / 60, seconds % 60) else "%d:%02d".format(seconds / 60, seconds % 60)
 
-/** A short note on a coloured ground, as the design's. */
-@Composable
-internal fun Note(text: String, background: Color, color: Color, icon: LineIcon) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(background).padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Icon(lineIcon(icon), null, tint = color, modifier = Modifier.size(22.dp))
-        ZText(text, size = 13.sp, color = color)
-    }
-}
-
 /** «Manage sign-ins»: the sites that keep cookies in the browser, each to forget, or all. */
 @Composable
 fun SignInsSheet(browser: BrowserController, onDismiss: () -> Unit) {
     val c = Z.colors
     val sites by browser.store.sites.collectAsStateWithLifecycle()
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.manage_sign_ins)) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ZText(stringResource(R.string.manage_sign_ins), size = 19.sp, weight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SheetTitle(stringResource(R.string.manage_sign_ins)) { SheetClose(onDismiss) }
             ZText(stringResource(R.string.sign_ins_hint), size = 13.sp, color = c.muted)
             if (sites.isEmpty()) {
                 ZText(stringResource(R.string.no_sign_ins), color = c.muted)
             } else {
-                ZCard {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).border(1.dp, c.line, RoundedCornerShape(22.dp))) {
                     sites.forEachIndexed { i, site ->
                         if (i > 0) RowLine()
                         Row(
-                            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 14.dp, end = 6.dp),
+                            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ZText(site, Modifier.weight(1f), style = TextStyle(textDirection = TextDirection.Ltr))
-                            val label = stringResource(R.string.forget_site, site)
-                            Box(
-                                Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = label) { browser.store.forget(site) }
-                                    .semantics { contentDescription = label },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(lineIcon(LineIcon.Close), null, tint = c.red, modifier = Modifier.size(20.dp))
-                            }
+                            ZText(site, Modifier.weight(1f), size = 15.sp, style = TextStyle(textDirection = TextDirection.Ltr))
+                            RowClose(stringResource(R.string.forget_site, site)) { browser.store.forget(site) }
                         }
                     }
                 }
                 QuietButton(stringResource(R.string.forget_all), onClick = { browser.store.forgetAll() }, modifier = Modifier.fillMaxWidth(), color = c.red)
             }
-            QuietButton(stringResource(R.string.close), onClick = onDismiss, modifier = Modifier.fillMaxWidth(), height = 50.dp)
         }
     }
 }
-

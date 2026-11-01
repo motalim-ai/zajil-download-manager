@@ -64,6 +64,13 @@ class MainActivity : ZajilActivity() {
                 ZajilScreen(
                     actions = this,
                     onNewLink = { offer.value = Offer(null, Source.Typed) },
+                    // The home's «Clipboard» tile: the user asks for the copied link, as with the Quick Settings tile.
+                    onClipboard = {
+                        offer.value = when (val copied = CopiedLinks.read(this, onlyNew = false) { false }) {
+                            is CopiedLinks.Copied.Link -> Offer(copied.url, Source.Tile)
+                            else -> Offer(null, Source.Typed)
+                        }
+                    },
                     browser = browser,
                     onFound = ::download,
                     browseRequests = browseRequests.intValue,

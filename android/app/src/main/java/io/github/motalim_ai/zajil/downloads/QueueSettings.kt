@@ -1,6 +1,7 @@
 package io.github.motalim_ai.zajil.downloads
 
 import android.content.Context
+import java.time.DayOfWeek
 import java.time.LocalTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,6 +83,7 @@ class QueueSettings(context: Context) {
         .put(SCHEDULED, queue.rules.scheduled)
         .put(START_AT, queue.rules.startAt.toSecondOfDay() / 60)
         .put(OPEN, queue.rules.open)
+        .put(DAYS, queue.rules.days.sumOf { 1 shl (it.value - 1) })
 
     private fun fromJson(o: JSONObject) = Queue(
         id = o.getLong("id"),
@@ -92,8 +94,13 @@ class QueueSettings(context: Context) {
             scheduled = o.optBoolean(SCHEDULED),
             startAt = LocalTime.ofSecondOfDay(o.optInt(START_AT, 120).coerceIn(0, 24 * 60 - 1) * 60L),
             open = o.optBoolean(OPEN),
+            days = daysOf(o.optInt(DAYS, ALL_DAYS)),
         ),
     )
+
+    /** A bit for each day, Monday first; none counts as every day. */
+    private fun daysOf(bits: Int): Set<DayOfWeek> =
+        DayOfWeek.entries.filter { bits and (1 shl (it.value - 1)) != 0 }.toSet().ifEmpty { DayOfWeek.entries.toSet() }
 
     companion object {
         /** The most downloads at once the screen offers. */
@@ -107,5 +114,7 @@ class QueueSettings(context: Context) {
         private const val SCHEDULED = "scheduled"
         private const val START_AT = "start_at_minute"
         private const val OPEN = "open"
+        private const val DAYS = "days"
+        private const val ALL_DAYS = 0b1111111
     }
 }

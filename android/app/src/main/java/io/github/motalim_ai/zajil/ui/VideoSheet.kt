@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
@@ -45,7 +46,9 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
+import io.github.motalim_ai.zajil.downloads
 import io.github.motalim_ai.zajil.update.Https
 import io.github.motalim_ai.zajil.video.Picked
 import io.github.motalim_ai.zajil.video.PlaylistEntry
@@ -97,7 +100,7 @@ fun VideoSheetView(
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.video_quality)) {
         Column(
             Modifier.verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             when (sheet) {
                 is VideoSheet.Reading -> Row(
@@ -105,14 +108,14 @@ fun VideoSheetView(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    CircularProgressIndicator(Modifier.size(28.dp), color = Z.colors.accent, strokeWidth = 3.dp)
+                    CircularProgressIndicator(Modifier.size(28.dp), color = Z.colors.accent, strokeWidth = 3.dp, trackColor = Z.colors.sunken)
                     Column {
                         ZText(stringResource(R.string.video_reading), size = 16.sp, weight = FontWeight.SemiBold)
                         ZText(sheet.url.toUri().host.orEmpty(), size = 12.5.sp, color = Z.colors.muted)
                     }
                 }
                 is VideoSheet.Refused -> {
-                    ZText(stringResource(sheet.message), size = 16.sp, weight = FontWeight.Bold)
+                    ZText(stringResource(sheet.message), size = 17.sp, weight = FontWeight.SemiBold)
                     if (sheet.signIn && onBrowse != null) {
                         MainButton(stringResource(R.string.video_open_in_browser), onClick = { onBrowse(sheet.url) }, modifier = Modifier.fillMaxWidth())
                     }
@@ -136,57 +139,62 @@ fun VideoSheetView(
 private fun Choice(
     sheet: VideoSheet.Ready,
     onDownload: (url: String, info: VideoInfo, picked: Picked, choice: String) -> Unit,
-    onDismiss: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onDismiss: () -> Unit,
 ) {
     val c = Z.colors
     val info = sheet.info
     val units = sizeUnits()
+    val prefs by LocalContext.current.downloads.prefs.prefs.collectAsStateWithLifecycle()
     val heights = remember(info) { VideoChoice.qualities(info) }
     val sounds = remember(info) { VideoChoice.sounds(info) }
-    var height by remember(info) { mutableStateOf(heights.firstOrNull { it <= 1080 } ?: heights.firstOrNull()) }
+    val soundOnly = remember(info) { VideoChoice.hasSoundOnly(info) }
+    // The highest quality at or under the one chosen in Settings.
+    var height by remember(info) { mutableStateOf(heights.firstOrNull { it <= prefs.videoHeight } ?: heights.lastOrNull()) }
     var sound by remember(info) { mutableStateOf(sounds.firstOrNull()) }
     val picked = sound?.let { VideoChoice.pick(info, height, it) }
 
     Header(sheet)
 
-    ZText(stringResource(R.string.video_quality), size = 13.5.sp, weight = FontWeight.Bold, color = c.muted)
+    // «فيديو / صوت فقط»: sound only is a choice of its own when the page has it.
+    if (soundOnly && heights.isNotEmpty()) {
+        Segmented(
+            listOf(false to stringResource(R.string.kind_video), true to stringResource(R.string.video_sound_only)),
+            height == null,
+            onChoose = { audio -> height = if (audio) null else heights.firstOrNull { it <= prefs.videoHeight } ?: heights.lastOrNull() },
+        )
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val choices: List<Int?> = heights + (if (VideoChoice.hasSoundOnly(info)) listOf(null) else emptyList())
+        val choices: List<Int?> = if (height == null || heights.isEmpty()) listOf(null) else heights
         choices.forEach { h ->
             val size = sound?.let { VideoChoice.pick(info, h, it) }?.size
+            val sharpest = h != null && h == heights.firstOrNull() && heights.size > 1
             ChoiceRow(
-                label = qualityLabel(h),
+                label = if (h == null) "M4A" else qualityLabel(h),
                 selected = height == h,
                 onClick = { height = h },
                 note = when {
-                    h == null -> "m4a"
-                    h == heights.firstOrNull() && heights.size > 1 -> stringResource(R.string.quality_sharpest)
-                    h == heights.lastOrNull() && heights.size > 2 -> stringResource(R.string.quality_saves_data)
+                    sharpest -> stringResource(R.string.quality_sharpest)
+                    h != null && h == heights.lastOrNull() && heights.size > 2 -> stringResource(R.string.quality_saves_data)
                     else -> null
                 },
+                noteColor = if (sharpest) c.blue else c.green,
                 end = size?.let { Units.size(it, units) } ?: "",
             )
         }
     }
 
-    if (sounds.isNotEmpty()) {
-        ZText(stringResource(R.string.video_sound), size = 13.5.sp, weight = FontWeight.Bold, color = c.muted)
-        SoundMenu(sounds, sound) { sound = it }
-    }
+    if (sounds.isNotEmpty()) SoundRow(sounds, sound) { sound = it }
 
     if (picked == null) ZText(stringResource(R.string.video_no_pair), size = 12.5.sp, color = c.red)
 
     val label = qualityLabel(height)
     val choice = listOfNotNull(label, sound?.takeIf { sounds.size > 1 }?.let { soundLabel(it) }).joinToString(" · ")
-    Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        MainButton(
-            stringResource(R.string.download_choice, label),
-            onClick = { picked?.let { onDownload(sheet.url, info, it, choice) } },
-            modifier = Modifier.weight(2f),
-            enabled = picked != null,
-        )
-        QuietButton(stringResource(R.string.cancel_sheet), onClick = onDismiss, modifier = Modifier.weight(1f))
-    }
+    MainButton(
+        picked?.size?.let { stringResource(R.string.download_size, Units.size(it, units)) } ?: stringResource(R.string.download_choice, label),
+        onClick = { picked?.let { onDownload(sheet.url, info, it, choice) } },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = picked != null,
+    )
 }
 
 /** The thumbnail with the length on it, the title, and where it is from. */
@@ -206,70 +214,70 @@ private fun Header(sheet: VideoSheet.Ready) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(
             Modifier
-                .size(width = 112.dp, height = 63.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF2E9BFF), Color(0xFF1747C9)))),
+                .size(width = 116.dp, height = 66.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF1747C9), Color(0xFF3FA5FF)))),
             contentAlignment = Alignment.Center,
         ) {
             thumbnail?.let {
                 Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
-            Icon(lineIcon(LineIcon.Play), contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(26.dp))
+            ZIcon(LineIcon.PlayFill, Color.White, 24.dp)
             info.duration?.let { seconds ->
-                ZText(
-                    duration(seconds),
+                Box(
                     Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 6.dp, bottom = 5.dp)
-                        .clip(RoundedCornerShape(5.dp))
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(6.dp))
                         .background(Color(0x8C000000))
-                        .padding(horizontal = 5.dp),
-                    size = 11.sp,
-                    color = Color.White,
-                )
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ZText(duration(seconds), size = 11.5.sp, color = Color.White)
+                }
             }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ZText(
                 info.title,
                 size = 16.sp,
-                weight = FontWeight.Bold,
+                weight = FontWeight.SemiBold,
                 maxLines = 2,
                 // An English title reads left to right, an Arabic one right to left.
                 style = TextStyle(textDirection = TextDirection.Content, lineHeight = 22.sp),
             )
             ZText(
-                listOfNotNull(sheet.url.toUri().host?.removePrefix("www.")?.removePrefix("m."), info.channel).joinToString(" · "),
+                listOfNotNull(sheet.url.toUri().host?.removePrefix("www.")?.removePrefix("m."), info.channel).joinToString(stringResource(R.string.list_sep)),
                 size = 12.5.sp,
-                color = Z.colors.muted,
+                color = Z.colors.faint,
                 maxLines = 1,
             )
         }
     }
 }
 
-/** A video may have dozens of dubbed sounds: a menu, not a list, so that «Download» stays in reach. */
+/** «الصوت»: the video's own sound, or a dubbed one from a menu (a video may have dozens). */
 @Composable
-private fun SoundMenu(sounds: List<Sound>, chosen: Sound?, onChoose: (Sound) -> Unit) {
+private fun SoundRow(sounds: List<Sound>, chosen: Sound?, onChoose: (Sound) -> Unit) {
     val c = Z.colors
     var open by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(14.dp)
     Box {
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 50.dp)
-                .clip(shape)
-                .background(c.sunken)
-                .border(1.5.dp, c.outline, shape)
-                .clickable(enabled = sounds.size > 1, role = Role.DropdownList) { open = true }
-                .padding(horizontal = 14.dp),
+                .heightIn(min = 52.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .clickable(enabled = sounds.size > 1, role = Role.DropdownList) { open = true },
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ZText(chosen?.let { soundLabel(it) }.orEmpty(), Modifier.weight(1f), size = 15.sp, weight = FontWeight.Medium)
-            if (sounds.size > 1) {
-                Icon(lineIcon(LineIcon.ChevronDown), contentDescription = null, tint = c.muted, modifier = Modifier.size(18.dp))
+            IconCircle(LineIcon.AudioBars, c.sunken, c.softInk)
+            Column(Modifier.weight(1f)) {
+                ZText(stringResource(R.string.video_sound), size = 12.5.sp, color = c.faint)
+                ZText(chosen?.let { soundLabel(it) }.orEmpty(), size = 14.5.sp, weight = FontWeight.Medium, maxLines = 1)
             }
+            if (sounds.size > 1) ZIcon(LineIcon.Chevron, c.chevron, 20.dp)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = c.surface) {
             sounds.forEach { s ->

@@ -16,11 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -100,11 +100,11 @@ private sealed interface Found {
 }
 
 /**
- * The new download sheet (the approved design): the file's name, which the
- * user may change, its size and kind, whether it resumes, where it goes
- * and when it starts. A shared or typed link is asked about at once (only
- * the first answer's headers); a link from the clipboard, which the user
- * did not hand over, is not, until they start it.
+ * The new download sheet (D5): the link, the file's name, which the user
+ * may change, its size and kind, whether it resumes, where it goes and
+ * when it starts. A shared or typed link is asked about at once (only the
+ * first answer's headers); a link from the clipboard, which the user did
+ * not hand over, is not, until they start it.
  */
 @Composable
 fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhen, queue: Long) -> Unit, onDismiss: () -> Unit) {
@@ -121,6 +121,7 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
     }
     val c = Z.colors
     val prefs by context.downloads.prefs.prefs.collectAsStateWithLifecycle()
+    val queues by context.downloads.settings.queues.collectAsStateWithLifecycle()
     var link by remember { mutableStateOf(offer.url.orEmpty()) }
     val url = link.trim().takeIf(::isLink)
     val video = url != null && VideoPages.isVideoPage(url)
@@ -150,102 +151,94 @@ fun AddSheet(offer: Offer, onStart: (url: String, name: String?, start: StartWhe
         if (info != null && !nameEdited) name = FileNames.withType(info.name, info.contentType)
     }
 
-    val title = stringResource(
-        if (offer.source == Source.Clipboard || offer.source == Source.Tile) R.string.offer_copied_title else R.string.new_download,
-    )
+    val title = stringResource(R.string.new_download)
+    // The name the user saw is the name the file gets: the server cannot
+    // change it after this OK.
+    val chosen = { name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) } }
     ZSheet(onDismiss = onDismiss, label = title) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ZText(title, Modifier.weight(1f), size = 19.sp, weight = FontWeight.Bold)
-                if (offer.source == Source.Shared) {
-                    Pill(
-                        stringResource(R.string.source_shared), c.bg, c.muted,
-                        icon = lineIcon(LineIcon.Shared), height = 28.dp, weight = FontWeight.Normal,
-                    )
-                }
-                if (offer.source == Source.Browser) {
-                    Pill(
-                        stringResource(R.string.source_browser), c.bg, c.muted,
-                        icon = lineIcon(LineIcon.Globe), height = 28.dp, weight = FontWeight.Normal,
-                    )
+            SheetTitle(title) {
+                when (offer.source) {
+                    Source.Clipboard, Source.Tile -> Pill(stringResource(R.string.source_clipboard), c.sel, c.blue, icon = LineIcon.Clipboard, height = 32.dp, radius = 16.dp, size = 13.sp, weight = FontWeight.Medium)
+                    Source.Shared -> Pill(stringResource(R.string.source_shared), c.sel, c.blue, icon = LineIcon.Share, height = 32.dp, radius = 16.dp, size = 13.sp, weight = FontWeight.Medium)
+                    Source.Browser -> Pill(stringResource(R.string.source_browser), c.sel, c.blue, icon = LineIcon.Globe, height = 32.dp, radius = 16.dp, size = 13.sp, weight = FontWeight.Medium)
+                    Source.Typed -> {}
                 }
             }
 
-            if (offer.source == Source.Typed) LinkField(link, onLink = { link = it })
+            LinkField(link, typed = offer.source == Source.Typed, onLink = { link = it })
 
             if (url != null && video) {
                 FileBox(Kind.Video, stringResource(R.string.video_link), null, editable = false, onName = {}) {
-                    ZText(stringResource(R.string.video_link_hint, url.toUri().host.orEmpty()), size = 12.5.sp, color = c.muted)
+                    ZText(stringResource(R.string.video_link_hint, url.toUri().host.orEmpty()), size = 12.5.sp, color = c.faint)
                 }
             } else if (url != null) {
                 FileBox(Kind.ofName(name), stringResource(R.string.file_name), name, editable = true, onName = {
                     name = it
                     nameEdited = true
                 }) {
-                    ZText(infoLine(found, name, url), size = 12.5.sp, color = c.muted, maxLines = 2)
+                    ZText(infoLine(found, name, url), size = 12.5.sp, color = c.faint, maxLines = 2)
                 }
                 Chips(found, prefs.connections)
-                Places(name, start, queue, onStart = { when_, inQueue -> start = when_; queue = inQueue })
+                SavedIn(name)
+                When(queues, start, queue, onStart = { when_, inQueue -> start = when_; queue = inQueue })
             }
 
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val inQueue = queues.firstOrNull { it.id == queue } ?: queues.first()
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MainButton(
-                    stringResource(if (video) R.string.choose_quality else R.string.start_download),
-                    onClick = {
-                        if (url != null) {
-                            // The name the user saw is the name the file gets: the
-                            // server cannot change it after this OK.
-                            val chosen = name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }
-                            onStart(url, chosen, start, queue)
-                        }
+                    when {
+                        video -> stringResource(R.string.choose_quality)
+                        start == StartWhen.Now -> stringResource(R.string.start_download)
+                        else -> stringResource(R.string.add_to_queue, queueName(inQueue))
                     },
-                    modifier = Modifier.weight(2f),
+                    onClick = { if (url != null) onStart(url, chosen(), start, queue) },
+                    modifier = Modifier.weight(1f),
                     enabled = url != null,
-                    icon = lineIcon(LineIcon.Downloads),
                 )
                 if (!video) {
                     QuietButton(stringResource(R.string.later), onClick = {
-                        if (url != null) {
-                            onStart(url, name.trim().takeIf { it.isNotEmpty() && (nameEdited || found is Found.Info) }, StartWhen.Later, queue)
-                        } else {
-                            onDismiss()
-                        }
-                    }, modifier = Modifier.weight(1f))
+                        if (url != null) onStart(url, chosen(), StartWhen.Later, queue) else onDismiss()
+                    }, modifier = Modifier.widthIn(min = 100.dp))
                 }
             }
         }
     }
 }
 
+/** The link, left to right in any language; «Paste» when it was typed. */
 @Composable
-private fun LinkField(link: String, onLink: (String) -> Unit) {
+private fun LinkField(link: String, typed: Boolean, onLink: (String) -> Unit) {
     val context = LocalContext.current
     val c = Z.colors
-    val shape = RoundedCornerShape(14.dp)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-            Modifier
-                .weight(1f)
-                .heightIn(min = 50.dp)
-                .clip(shape)
-                .background(c.sunken)
-                .border(1.5.dp, c.outline, shape)
-                .padding(horizontal = 14.dp),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            if (link.isEmpty()) ZText(stringResource(R.string.link_hint), color = c.muted, size = 15.sp)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 54.dp).clip(RoundedCornerShape(18.dp)).background(c.sunken).padding(start = 16.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        ZIcon(LineIcon.Link, c.muted, 22.dp)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (link.isEmpty()) ZText(stringResource(R.string.link_hint), color = c.muted, size = 14.5.sp, style = TextStyle(textDirection = TextDirection.Ltr))
             BasicTextField(
                 value = link,
                 onValueChange = onLink,
                 singleLine = true,
                 // Links read left to right, in any language.
-                textStyle = TextStyle(fontFamily = Plex, fontSize = 15.sp, color = c.ink, textDirection = TextDirection.Ltr),
+                textStyle = TextStyle(fontFamily = Plex, fontSize = 14.5.sp, color = c.ink, textDirection = TextDirection.Ltr),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 cursorBrush = SolidColor(c.accent),
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = context.getString(R.string.link) },
             )
         }
-        QuietButton(stringResource(R.string.paste), onClick = { pasted(context)?.let(onLink) }, height = 50.dp, color = c.accent)
+        if (typed) {
+            ZText(
+                stringResource(R.string.paste),
+                Modifier.clip(RoundedCornerShape(14.dp)).clickable(role = Role.Button) { pasted(context)?.let(onLink) }.padding(horizontal = 10.dp, vertical = 12.dp),
+                size = 14.sp,
+                weight = FontWeight.SemiBold,
+                color = c.link,
+            )
+        }
     }
 }
 
@@ -259,20 +252,18 @@ private fun FileBox(
     info: @Composable () -> Unit,
 ) {
     val c = Z.colors
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(22.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(c.sunken)
             .border(1.dp, c.line, shape)
-            .padding(12.dp),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ColorImage(kind.icon, 44.dp)
+        IconCircle(kind.icon, c.sel, c.blue, size = 48.dp, iconSize = 22.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            ZText(label, size = 12.sp, color = c.muted)
             if (editable && name != null) {
                 BasicTextField(
                     value = name,
@@ -284,11 +275,13 @@ private fun FileBox(
                         fontWeight = FontWeight.SemiBold,
                         color = c.ink,
                     ),
-                    // Shown as one unit, as on the cards; the name typed has no marks.
+                    // Shown as one unit, as in the lists; the name typed has no marks.
                     visualTransformation = IsolatedName,
                     cursorBrush = SolidColor(c.accent),
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
                 )
+            } else {
+                ZText(label, size = 15.5.sp, weight = FontWeight.SemiBold)
             }
             info()
         }
@@ -320,21 +313,22 @@ private object IsolatedName : VisualTransformation {
     }
 }
 
-/** «2.4 MB · Document · from example.com». */
+/** «مستند PDF، 2.4 م.ب، من example.com». */
 @Composable
 private fun infoLine(found: Found, name: String, url: String): String {
     val host = url.toUri().host.orEmpty()
     val kind = stringResource(kindName(Kind.ofName(name)))
     val from = stringResource(R.string.from_host, host)
+    val sep = stringResource(R.string.list_sep)
     return when (found) {
         Found.Looking -> stringResource(R.string.probing)
-        is Found.Failed -> listOf(stringResource(found.message), from).joinToString(" · ")
+        is Found.Failed -> listOf(stringResource(found.message), from).joinToString(sep)
         is Found.Info -> listOfNotNull(
-            found.info.size?.let { Units.size(it.toLong(), sizeUnits()) } ?: stringResource(R.string.size_unknown),
             kind,
+            found.info.size?.let { Units.size(it.toLong(), sizeUnits()) } ?: stringResource(R.string.size_unknown),
             from,
-        ).joinToString(" · ")
-        Found.Nothing -> listOf(stringResource(R.string.size_when_started), from).joinToString(" · ")
+        ).joinToString(sep)
+        Found.Nothing -> listOf(stringResource(R.string.size_when_started), from).joinToString(sep)
     }
 }
 
@@ -344,96 +338,81 @@ private fun Chips(found: Found, connections: Int) {
     val info = (found as? Found.Info)?.info ?: return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (info.isPage) {
-            Pill(stringResource(R.string.is_a_page), c.amberBg, c.amber, height = 30.dp)
+            Pill(stringResource(R.string.is_a_page), c.amberBg, c.amber)
         }
         if (info.resumable) {
-            Pill(stringResource(R.string.resumes), c.greenBg, c.green, icon = lineIcon(LineIcon.Check), height = 30.dp)
-            Pill(pluralStringResource(R.plurals.connections, connections, connections), c.sel, c.accent, height = 30.dp)
+            Pill(stringResource(R.string.resumes), c.greenBg, c.green, icon = LineIcon.Check)
+            Pill(pluralStringResource(R.plurals.connections, connections, "$connections"), c.sel, c.blue)
         } else {
-            Pill(stringResource(R.string.does_not_resume), c.amberBg, c.amber, height = 30.dp)
+            Pill(stringResource(R.string.does_not_resume), c.amberBg, c.amber)
         }
     }
 }
 
-/** Where it is saved, and when it starts. */
+/** «يُحفظ في»: the chosen folder or Download/Zajil, and its type's folder there. */
 @Composable
-private fun Places(name: String, start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> Unit) {
+private fun SavedIn(name: String) {
     val c = Z.colors
     val context = LocalContext.current
-    val queues by context.downloads.settings.queues.collectAsStateWithLifecycle()
     val prefs by context.downloads.prefs.prefs.collectAsStateWithLifecycle()
-    // Where it will be: the chosen folder or Download/Zajil, and its type's folder there.
     val folder = listOfNotNull(
         prefs.saveTree?.let(Publisher::shownTree) ?: "Download/Zajil",
         SaveCategory.of(name)?.takeIf { prefs.folderPerType }?.let { Publisher.folderName(context, it) },
     ).joinToString("/")
-    val inQueue = queues.firstOrNull { it.id == queue } ?: queues.first()
-    var choosing by remember { mutableStateOf(false) }
-    val now = start == StartWhen.Now
-    ZCard {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(lineIcon(LineIcon.Folder), null, tint = c.muted, modifier = Modifier.size(22.dp))
-            Column(Modifier.weight(1f)) {
-                ZText(stringResource(R.string.saved_in), size = 12.sp, color = c.muted)
-                // A path reads left to right, in any language.
-                ZText(folder, style = TextStyle(textDirection = TextDirection.Ltr))
-            }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        IconCircle(LineIcon.Folder, c.sunken, c.softInk)
+        Column(Modifier.weight(1f)) {
+            ZText(stringResource(R.string.saved_in), size = 12.5.sp, color = c.faint)
+            // A path reads left to right, in any language.
+            ZText(folder, size = 14.5.sp, weight = FontWeight.Medium, maxLines = 1, style = TextStyle(textDirection = TextDirection.Ltr))
         }
-        RowLine()
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.change)) {
-                    // One queue: «Now» or the queue. Several: the user picks.
-                    if (queues.size > 1) choosing = true else onStart(if (now) StartWhen.Queue else StartWhen.Now, Queue.MAIN)
-                }
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(lineIcon(LineIcon.Queues), null, tint = c.muted, modifier = Modifier.size(22.dp))
-            Column(Modifier.weight(1f)) {
-                ZText(stringResource(R.string.when_starts), size = 12.sp, color = c.muted)
-                ZText(if (now) stringResource(R.string.start_now_word) else stringResource(R.string.start_with_queue, queueName(inQueue)))
-            }
-            ZText(
-                when {
-                    queues.size > 1 -> stringResource(R.string.change)
-                    now -> stringResource(R.string.with_queue_instead)
-                    else -> stringResource(R.string.now_instead)
-                },
-                size = 13.sp,
-                weight = FontWeight.SemiBold,
-                color = c.accent,
-            )
-        }
-    }
-    if (choosing) {
-        // The queues by name, then «Now, before its turn» (null).
-        val choices = queues.map<Queue, Pair<Long?, String>> { it.id to queueName(it) } + (null to stringResource(R.string.start_now_word))
-        ChoiceSheet(
-            stringResource(R.string.choose_queue),
-            choices,
-            chosen = if (now) null else inQueue.id,
-            onChoose = { id -> if (id == null) onStart(StartWhen.Now, inQueue.id) else onStart(StartWhen.Queue, id) },
-            onDismiss = { choosing = false },
-        )
     }
 }
 
-fun kindName(kind: Kind) = when (kind) {
-    Kind.Video -> R.string.kind_video
-    Kind.Music -> R.string.kind_music
-    Kind.Images -> R.string.kind_image
-    Kind.Documents -> R.string.kind_document
-    Kind.Programs -> R.string.kind_program
-    Kind.Archives -> R.string.kind_archive
-    Kind.Other -> R.string.kind_file
+/**
+ * «متى يبدأ»: now, or with a queue. Up to two queues fit beside «الآن»;
+ * with more, the third place picks among the others.
+ */
+@Composable
+private fun When(queues: List<Queue>, start: StartWhen, queue: Long, onStart: (StartWhen, Long) -> Unit) {
+    val c = Z.colors
+    var choosing by remember { mutableStateOf(false) }
+    val now = start == StartWhen.Now
+    // null: «Now»; a queue's id; or -1: «another queue».
+    val other = -1L
+    val shown = if (queues.size <= 2) queues.map { it.id } else listOf(queues.first().id, other)
+    val chosenOther = queues.size > 2 && !now && queue != queues.first().id
+    val options = buildList<Pair<Long?, String>> {
+        add(null to stringResource(R.string.now_word))
+        shown.forEach { id ->
+            val q = queues.firstOrNull { it.id == id }
+            add(id to if (q != null) queueName(q) else if (chosenOther) queueName(queues.first { it.id == queue }) else stringResource(R.string.other_queue))
+        }
+    }
+    val chosen: Long? = when {
+        now -> null
+        chosenOther -> other
+        else -> queue
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ZText(stringResource(R.string.when_starts), size = 13.5.sp, weight = FontWeight.SemiBold, color = c.muted)
+        Segmented(options, chosen, onChoose = { id ->
+            when (id) {
+                null -> onStart(StartWhen.Now, queue)
+                other -> choosing = true
+                else -> onStart(StartWhen.Queue, id)
+            }
+        })
+    }
+    if (choosing) {
+        ChoiceSheet(
+            stringResource(R.string.choose_queue),
+            queues.drop(1).map { it.id to queueName(it) },
+            chosen = queue,
+            onChoose = { id -> onStart(StartWhen.Queue, id) },
+            onDismiss = { choosing = false },
+        )
+    }
 }
 
 /** An http(s) link with a host: the only kind the engine downloads. */

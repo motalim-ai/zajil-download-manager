@@ -3,7 +3,7 @@
     <string name="app_name">Zajil</string>
     <string name="link">Download link</string>
     <string name="paste">Paste</string>
-    <string name="empty">No downloads yet. Share a link to Zajil, or tap «New link».</string>
+    <string name="empty">No downloads yet. Share a link to Zajil, or tap the «+» button.</string>
     <string name="pause">Pause</string>
     <string name="resume">Resume</string>
     <string name="cancel">Cancel download</string>
@@ -25,7 +25,7 @@
     <string name="max_running">Downloads at once</string>
     <string name="wifi_only">Wi-Fi only</string>
     <string name="wifi_only_hint">Stops on mobile data and goes on when Wi-Fi is back</string>
-    <string name="schedule">Daily time</string>
+    <string name="schedule">Start time</string>
     <string name="schedule_hint">At that time a notification comes, and one tap starts it</string>
     <string name="status_merging">Joining the picture and the sound</string>
     <string name="video_reading">Reading the video page…</string>
@@ -67,7 +67,6 @@
     <string name="video_unsupported">Zajil knows no way to read this site.</string>
     <string name="video_network">The site could not be reached. Check your internet connection, then try again.</string>
     <string name="video_open_in_browser">Open it in «Browse»</string>
-    <string name="update_version">Version %1$s</string>
     <string name="update_auto">Look for a Zajil update</string>
     <string name="update_check">Look for a new version</string>
     <string name="update_latest">This is the newest version.</string>
@@ -76,7 +75,7 @@
     <string name="update_not_installed">The update was not installed.</string>
     <string name="update_offered">Zajil %1$s is available (%2$s)</string>
     <string name="update_download">Download the update</string>
-    <string name="update_downloading">Downloading Zajil %1$s… %2$d%%</string>
+    <string name="update_downloading">Downloading Zajil %1$s… %2$s%%</string>
     <string name="update_ready">Zajil %1$s is downloaded and verified.</string>
     <string name="update_install">Install</string>
     <string name="ytdlp_version">yt-dlp %1$s</string>
@@ -88,11 +87,11 @@
     <string name="schedule_due">The queue\'s time has come</string>
     <plurals name="tap_to_start">
         <item quantity="one">Tap to start the waiting download</item>
-        <item quantity="other">Tap to start %d waiting downloads</item>
+        <item quantity="other">Tap to start %s waiting downloads</item>
     </plurals>
     <plurals name="waiting">
-        <item quantity="one">%d download waiting</item>
-        <item quantity="other">%d downloads waiting</item>
+        <item quantity="one">%s download waiting</item>
+        <item quantity="other">%s downloads waiting</item>
     </plurals>
     <string name="status_interrupted">Stopped with the app; resumes when it opens</string>
     <string name="status_paused">Paused</string>
@@ -104,17 +103,17 @@
     <string name="problem_link">This link cannot be downloaded</string>
     <string name="problem_other">The download failed</string>
     <string name="problem_not_saved">Downloaded, but not saved in the save folder. Retry to save it without downloading it again</string>
-    <string name="size_of_total">%1$s of %2$s (%3$d%%)</string>
+    <string name="size_of_total">%1$s of %2$s (%3$s%%)</string>
     <string name="channel_progress">Running downloads</string>
     <string name="channel_stopped">Stopped downloads</string>
     <string name="tap_to_resume">Tap to resume from where it stopped</string>
     <plurals name="running">
-        <item quantity="one">%d download</item>
-        <item quantity="other">%d downloads</item>
+        <item quantity="one">%s download</item>
+        <item quantity="other">%s downloads</item>
     </plurals>
     <plurals name="stopped">
-        <item quantity="one">%d stopped download</item>
-        <item quantity="other">%d stopped downloads</item>
+        <item quantity="one">%s stopped download</item>
+        <item quantity="other">%s stopped downloads</item>
     </plurals>
     <!-- The approved design (home, sheets, queue, settings). -->
     <string name="logo">Zajil logo</string>
@@ -126,10 +125,8 @@
     <string name="pause_all">Pause all</string>
     <string name="remove_finished">Remove finished from the list</string>
     <string name="nothing_matches">No downloads here.</string>
-    <string name="downloading_now">Downloading %1$d</string>
     <string name="nothing_running">Nothing downloading</string>
     <string name="main_queue">Main queue</string>
-    <string name="main_queue_is">Main queue: %1$s</string>
     <string name="queue_running">running</string>
     <string name="queue_empty">empty</string>
     <string name="queue_starts_at">starts %1$s</string>
@@ -144,7 +141,6 @@
     <string name="filter_archives">Archives</string>
     <string name="filter_other">Other</string>
     <string name="chip_running">Downloading</string>
-    <string name="chip_queued">Queued</string>
     <string name="chip_paused">Paused</string>
     <string name="chip_needs_permission">Needs permission</string>
     <string name="chip_failed">Failed</string>
@@ -155,12 +151,10 @@
     <string name="try_again">Try again</string>
     <string name="of_total">%1$s of %2$s</string>
     <string name="per_second">%1$s/s</string>
-    <string name="left">%1$s\u00A0left</string>
     <string name="resumes_where_stopped">resumes where it stopped</string>
     <string name="status_needs_local_network_short">Needs the «Local network» permission. Tap «Allow».</string>
     <string name="next_in_queue">Next in %1$s</string>
-    <string name="in_queue_before">%1$s · %2$d before it</string>
-    <string name="today_at">today %1$s</string>
+    <string name="in_queue_before">%1$s · %2$s before it</string>
     <string name="unit_bytes">%s B</string>
     <string name="unit_kib">%s KB</string>
     <string name="unit_mib">%s MB</string>
@@ -181,11 +175,6 @@
     <string name="is_a_page">The link opens a web page, not a file</string>
     <string name="saved_in">Saved in</string>
     <string name="when_starts">When it starts</string>
-    <string name="start_now_word">Now, before its turn</string>
-    <string name="start_with_queue">In %1$s</string>
-    <string name="now_instead">Now</string>
-    <string name="with_queue_instead">In the queue</string>
-    <string name="change">Change</string>
     <string name="start_download">Start download</string>
     <string name="later">Later</string>
     <string name="choose_quality">Choose the quality</string>
@@ -206,7 +195,7 @@
     <string name="more">More</string>
     <string name="stop_queue">Stop the queue</string>
     <string name="run_queue">Run the queue now</string>
-    <string name="schedule_off_hint">The queue starts by itself at a time every day</string>
+    <string name="schedule_off_hint">The queue starts by itself at the time and on the days you choose</string>
     <string name="queue_footer">Choose the queue under «When it starts» when adding, or «Now» to start a download before its turn. Each queue has its own downloads at once and conditions.</string>
     <string name="new_queue">New queue</string>
     <string name="queue_name">Queue name</string>
@@ -216,12 +205,10 @@
     <string name="delete_queue">Delete queue</string>
     <string name="delete_queue_hint">Its downloads move to the main queue as they are.</string>
     <string name="wifi_only_short">Wi-Fi only</string>
-    <string name="queue_idle">Stopped</string>
     <string name="choose_queue">When it starts</string>
     <string name="group_look">Look</string>
     <string name="group_download">Downloading</string>
     <string name="group_video">Video</string>
-    <string name="group_update">Updates</string>
     <string name="language">Language</string>
     <string name="arabic">العربية</string>
     <string name="english">English</string>
@@ -241,37 +228,33 @@
     <string name="folder_archives">Archives</string>
     <string name="connections_per_file">Connections per file</string>
     <string name="speed_limit">Speed limit</string>
-    <string name="speed_limit_hint">For all downloads together</string>
     <string name="no_limit">No limit</string>
     <string name="video_tools">Video tools</string>
     <string name="tools_ready">Ready</string>
     <string name="tools_signed">updated from a signed list</string>
-    <string name="update_daily">Once a day</string>
-    <string name="update_off">Off</string>
     <string name="check_now">Check now</string>
     <string name="promise">No ads and no tracking. Open source, and updates are signed with the project\'s key.</string>
     <plurals name="connections">
-        <item quantity="one">%d connection</item>
-        <item quantity="other">%d connections</item>
+        <item quantity="one">%1$s connection</item>
+        <item quantity="other">%1$s connections</item>
     </plurals>
     <plurals name="queue_downloading">
-        <item quantity="one">%d downloading</item>
-        <item quantity="other">%d downloading</item>
+        <item quantity="one">%s downloading</item>
+        <item quantity="other">%s downloading</item>
     </plurals>
     <plurals name="queue_waiting">
-        <item quantity="one">%d waiting</item>
-        <item quantity="other">%d waiting</item>
+        <item quantity="one">%s waiting</item>
+        <item quantity="other">%s waiting</item>
     </plurals>
     <plurals name="queue_count">
-        <item quantity="one">%d download</item>
-        <item quantity="other">%d downloads</item>
+        <item quantity="one">%s download</item>
+        <item quantity="other">%s downloads</item>
     </plurals>
-    <string name="offer_copied_title">Download the copied link?</string>
     <string name="tile_label">Zajil: download the copied link</string>
     <string name="tile_no_link">No copied link. Copy a link that starts with http or https, then tap the tile.</string>
     <string name="tile_added">Added to Zajil\'s downloads.</string>
     <!-- A6: the in-app browser. -->
-    <string name="browse">Browse</string>
+    <string name="browse">Browser</string>
     <string name="private_mode">Private mode</string>
     <string name="private_on">Private</string>
     <string name="private_note">Private mode: what you visit is not kept, and cookies and site data are deleted when it ends.</string>
@@ -297,7 +280,7 @@
     <string name="found_hls">HLS stream (m3u8) from %1$s</string>
     <string name="found_dash">DASH stream (mpd) from %1$s</string>
     <string name="found_protected">Copy-protected, so Zajil does not download it</string>
-    <string name="found_element">A video on the page · %1$d×%2$d</string>
+    <string name="found_element">A video on the page · %1$s×%2$s</string>
     <string name="sign_in_note">Some sites ask you to sign in before their videos can be downloaded. Sign in here, in Zajil\'s browser: it stays on your phone and goes only to that site.</string>
     <string name="manage_sign_ins">Manage sign-ins</string>
     <string name="sign_ins_hint">The sites that keep cookies in Zajil\'s browser, your sign-ins among them. Removing a site signs you out of it.</string>
@@ -320,7 +303,6 @@
     <string name="no_exceptions">No sites with exceptions.</string>
     <string name="remove_exception">Protect it again</string>
     <string name="protection_lists">Protection lists</string>
-    <string name="protection_lists_date">Last updated: %1$s</string>
     <string name="protection_checking">Looking for newer lists…</string>
     <string name="protection_updated">The lists were updated.</string>
     <string name="protection_latest">The lists are the newest.</string>
@@ -332,7 +314,7 @@
     <string name="problem_refused">A harmful site; nothing was downloaded</string>
     <string name="video_harmful">This site is on the list of harmful sites, so Zajil did not read it.</string>
     <string name="tabs">Tabs</string>
-    <string name="tabs_open">Open tabs: %1$d</string>
+    <string name="tabs_open">Open tabs: %1$s</string>
     <string name="no_tabs">No tabs open.</string>
     <string name="new_tab">New tab</string>
     <string name="close_tab">Close tab</string>
@@ -356,31 +338,97 @@
     <string name="site_snapchat">Snapchat</string>
     <string name="site_motalim">Motalim</string>
     <plurals name="found_on_page">
-        <item quantity="one">%d video on the page</item>
-        <item quantity="other">%d videos on the page</item>
+        <item quantity="one">%s video on the page</item>
+        <item quantity="other">%s videos on the page</item>
     </plurals>
     <plurals name="sites">
-        <item quantity="one">%d site</item>
-        <item quantity="other">%d sites</item>
+        <item quantity="one">%s site</item>
+        <item quantity="other">%s sites</item>
     </plurals>
     <plurals name="playlist_videos">
-        <item quantity="one">%d video</item>
-        <item quantity="other">%d videos</item>
+        <item quantity="one">%s video</item>
+        <item quantity="other">%s videos</item>
     </plurals>
     <plurals name="playlist_chosen">
-        <item quantity="one">%d video chosen</item>
-        <item quantity="other">%d videos chosen</item>
+        <item quantity="one">%s video chosen</item>
+        <item quantity="other">%s videos chosen</item>
     </plurals>
     <plurals name="playlist_unavailable">
-        <item quantity="one">%d video is not available (private or removed) and will not be downloaded</item>
-        <item quantity="other">%d videos are not available (private or removed) and will not be downloaded</item>
+        <item quantity="one">%s video is not available (private or removed) and will not be downloaded</item>
+        <item quantity="other">%s videos are not available (private or removed) and will not be downloaded</item>
     </plurals>
     <plurals name="download_chosen">
-        <item quantity="one">Download %d video</item>
-        <item quantity="other">Download %d videos</item>
+        <item quantity="one">Download %s video</item>
+        <item quantity="other">Download %s videos</item>
     </plurals>
     <plurals name="blocked_here">
-        <item quantity="one">Blocked on this page: %d request</item>
-        <item quantity="other">Blocked on this page: %d requests</item>
+        <item quantity="one">Blocked on this page: %s request</item>
+        <item quantity="other">Blocked on this page: %s requests</item>
     </plurals>
+    <!-- The D5 design (0.4.0). -->
+    <string name="greeting">Peace be upon you</string>
+    <string name="tagline">What comes into your phone stays with you, so choose what benefits you.</string>
+    <string name="speed_now">%1$s now</string>
+    <string name="light_mode">Light mode</string>
+    <string name="dark_mode">Dark mode</string>
+    <string name="hero_idle_title">Nothing is downloading</string>
+    <string name="hero_idle_hint">Paste a link, or open a site in the browser.</string>
+    <string name="left_short">%1$s left</string>
+    <string name="download_details">Download details</string>
+    <string name="swipe_to_pause">Swipe to pause</string>
+    <string name="tile_clipboard">Clipboard</string>
+    <string name="tile_playlists">Playlists</string>
+    <string name="activity">Activity</string>
+    <string name="see_all">See all</string>
+    <string name="pill_waiting">Waiting</string>
+    <string name="list_sep">", "</string>
+    <string name="filter_waiting">Waiting</string>
+    <string name="filter_failed">Failed</string>
+    <string name="no_playlists">No playlists yet. Paste a playlist\'s link in «New download».</string>
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+    <string name="day_earlier">Earlier</string>
+    <string name="all_downloads">All downloads</string>
+    <string name="speed_label">Speed now</string>
+    <string name="time_left">Time left</string>
+    <string name="size_label">Size</string>
+    <string name="status_label">Status</string>
+    <string name="source">Source</string>
+    <string name="queue_label">Queue</string>
+    <string name="queue_working">Running</string>
+    <string name="queue_resting">Stopped</string>
+    <string name="stop_word">Stop</string>
+    <string name="run_word">Run</string>
+    <string name="source_clipboard">From the clipboard</string>
+    <string name="add_to_queue">Add to %1$s</string>
+    <string name="now_word">Now</string>
+    <string name="other_queue">Another queue</string>
+    <string name="download_size">Download, %1$s</string>
+    <string name="forward">Forward</string>
+    <string name="browser_home">Start page</string>
+    <string name="blocked_today">Blocked today</string>
+    <string name="guards_on">On</string>
+    <string name="guards_off">Off</string>
+    <string name="blocked_ads">Ads</string>
+    <string name="blocked_trackers">Trackers</string>
+    <string name="blocked_malware">Harmful sites</string>
+    <string name="what_is_blocked">What is blocked</string>
+    <string name="guard_phishing">Phishing sites</string>
+    <string name="guard_phishing_hint">Safe Browsing, always on</string>
+    <string name="always_on">On</string>
+    <string name="last_update">Last update</string>
+    <string name="update_now">Update now</string>
+    <string name="preferred_quality">Preferred quality</string>
+    <string name="protection_short">Ads and harmful sites in the browser</string>
+    <string name="group_about">About Zajil</string>
+    <string name="version">Version</string>
+    <plurals name="connections_working">
+        <item quantity="one">%1$s connection downloads the file</item>
+        <item quantity="other">%1$s connections download parts of the file together</item>
+    </plurals>
+    <plurals name="requests">
+        <item quantity="one">request</item>
+        <item quantity="other">requests</item>
+    </plurals>
+    <string name="lists_signed">%1$s, signed and checked</string>
 </resources>

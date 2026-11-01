@@ -5,14 +5,14 @@ import io.github.motalim_ai.zajil.downloads.Status
 import io.github.motalim_ai.zajil.video.Container
 
 /** A file's kind, by its name's extension, as the desktop's categories group them. */
-enum class Kind(val icon: ColorIcon) {
-    Video(ColorIcon.Video),
-    Music(ColorIcon.Music),
-    Images(ColorIcon.Images),
-    Documents(ColorIcon.Documents),
-    Programs(ColorIcon.Programs),
-    Archives(ColorIcon.Archives),
-    Other(ColorIcon.File),
+enum class Kind(val icon: LineIcon) {
+    Video(LineIcon.Video),
+    Music(LineIcon.Music),
+    Images(LineIcon.Image),
+    Documents(LineIcon.File),
+    Programs(LineIcon.App),
+    Archives(LineIcon.Archive),
+    Other(LineIcon.File),
     ;
 
     companion object {
@@ -41,14 +41,32 @@ enum class Kind(val icon: ColorIcon) {
     }
 }
 
-/** The home screen's filters. */
+/** Where a download is, as the D5 design groups it: its row's colours and its filter chip. */
+enum class Stage {
+    Active, Done, Waiting, Failed;
+
+    companion object {
+        fun of(status: Status): Stage = when (status) {
+            Status.Running, Status.Merging, Status.Publishing -> Active
+            Status.Done -> Done
+            Status.Failed -> Failed
+            Status.Queued, Status.Paused, Status.Interrupted, Status.NeedsLocalNetwork -> Waiting
+        }
+    }
+}
+
+/** The downloads' filters: by stage (D5), then by kind when there is one of it. */
 enum class Filter {
-    All, Active, Done, Video, Music, Images, Documents, Programs, Archives, Other;
+    All, Active, Done, Waiting, Failed, Playlists, Video, Music, Images, Documents, Programs, Archives, Other;
 
     fun matches(download: Download): Boolean = when (this) {
         All -> true
-        Active -> download.status in setOf(Status.Running, Status.Queued, Status.Merging, Status.Publishing)
-        Done -> download.status == Status.Done
+        Active -> Stage.of(download.status) == Stage.Active
+        Done -> Stage.of(download.status) == Stage.Done
+        Waiting -> Stage.of(download.status) == Stage.Waiting
+        Failed -> Stage.of(download.status) == Stage.Failed
+        // A playlist's videos go to its own folder (0.3.0).
+        Playlists -> download.folder != null || download.plan != null
         Video -> Kind.of(download) == Kind.Video
         Music -> Kind.of(download) == Kind.Music
         Images -> Kind.of(download) == Kind.Images
@@ -56,5 +74,12 @@ enum class Filter {
         Programs -> Kind.of(download) == Kind.Programs
         Archives -> Kind.of(download) == Kind.Archives
         Other -> Kind.of(download) == Kind.Other
+    }
+
+    companion object {
+        /** The home's «النشاط» card: the stages but «failed». */
+        val HOME = listOf(All, Active, Done, Waiting)
+        val STAGES = listOf(All, Active, Done, Waiting, Failed)
+        val KINDS = listOf(Video, Music, Images, Documents, Programs, Archives, Other)
     }
 }

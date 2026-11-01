@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The desktop's accent (apps/desktop/src/styles/app.css), also for the system's own dialogs (the time picker). -->
+    <!-- The D5 design's blue, also for the system's own dialogs (the time picker). -->
     <style name="Theme.Zajil" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:colorPrimary">#FF1C6CD0</item>
-        <item name="android:colorPrimaryDark">#FF1C6CD0</item>
-        <item name="android:colorAccent">#FF1C6CD0</item>
+        <item name="android:colorPrimary">#FF0A5FE0</item>
+        <item name="android:colorPrimaryDark">#FF0A5FE0</item>
+        <item name="android:colorAccent">#FF0A5FE0</item>
         <item name="android:windowBackground">@color/zajil_bg</item>
     </style>
     <!-- The Quick Settings tile's window: only its sheet shows, over the screen below. -->

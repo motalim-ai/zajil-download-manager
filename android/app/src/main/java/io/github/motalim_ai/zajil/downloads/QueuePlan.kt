@@ -1,5 +1,6 @@
 package io.github.motalim_ai.zajil.downloads
 
+import java.time.DayOfWeek
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -24,9 +25,11 @@ data class QueueRules(
     val maxRunning: Int = 3,
     /** Only on an unmetered network (Wi-Fi). */
     val wifiOnly: Boolean = false,
-    /** The queue starts at [startAt] every day. */
+    /** The queue starts at [startAt] on each of [days]. */
     val scheduled: Boolean = false,
     val startAt: LocalTime = LocalTime.of(2, 0),
+    /** The days it starts on (D5's night queue): every day unless the user leaves some out; never none. */
+    val days: Set<DayOfWeek> = DayOfWeek.entries.toSet(),
     /**
      * With [scheduled]: the queue has reached its time and runs until it is
      * empty; then it waits for the next [startAt].
@@ -79,12 +82,16 @@ object QueuePlan {
     }
 
     /**
-     * The next time the clock shows [at] in [zone], strictly after [now]
-     * (a time that a clock change skips is moved forward, as java.time does).
+     * The next time the clock shows [at] in [zone] on one of [days],
+     * strictly after [now] (a time that a clock change skips is moved
+     * forward, as java.time does). No day at all counts as every day.
      */
-    fun nextStart(now: ZonedDateTime, at: LocalTime, zone: ZoneId = now.zone): ZonedDateTime {
+    fun nextStart(now: ZonedDateTime, at: LocalTime, zone: ZoneId = now.zone, days: Set<DayOfWeek> = DayOfWeek.entries.toSet()): ZonedDateTime {
+        val allowed = days.ifEmpty { DayOfWeek.entries.toSet() }
         val today = ZonedDateTime.of(LocalDateTime.of(now.toLocalDate(), at), zone)
-        return if (today.isAfter(now)) today else today.plusDays(1)
+        var next = if (today.isAfter(now)) today else ZonedDateTime.of(LocalDateTime.of(now.toLocalDate().plusDays(1), at), zone)
+        while (next.dayOfWeek !in allowed) next = ZonedDateTime.of(LocalDateTime.of(next.toLocalDate().plusDays(1), at), zone)
+        return next
     }
 
     /**

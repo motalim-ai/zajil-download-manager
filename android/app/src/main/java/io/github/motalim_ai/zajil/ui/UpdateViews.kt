@@ -57,35 +57,31 @@ object UpdatePrefs {
 fun AppUpdateRows() {
     val context = LocalContext.current
     var auto by remember { mutableStateOf(UpdatePrefs.auto(context)) }
+    SettingRow(stringResource(R.string.version), value = BuildConfig.VERSION_NAME, icon = LineIcon.Info, chevron = false)
+    RowLine()
     SettingRow(
         stringResource(R.string.update_auto),
-        hint = stringResource(R.string.update_version, BuildConfig.VERSION_NAME),
-        value = stringResource(if (auto) R.string.update_daily else R.string.update_off),
-        valueColor = if (auto) Z.colors.accent else Z.colors.muted,
+        icon = LineIcon.Reload,
         onClick = {
             auto = !auto
             UpdatePrefs.setAuto(context, auto)
         },
-    )
+    ) {
+        ZSwitch(auto, { on ->
+            auto = on
+            UpdatePrefs.setAuto(context, on)
+        })
+    }
     RowLine()
     UpdateSteps(inSettings = true)
 }
 
-/** The card at the top of the list when an update was found at start. */
+/** The card under the home's blue card when an update was found at start. */
 @Composable
 fun UpdateCard() {
     val state by AppUpdate.state.collectAsStateWithLifecycle()
     if (state is AppUpdate.State.Idle || state is AppUpdate.State.Latest || state is AppUpdate.State.Checking) return
-    val shape = RoundedCornerShape(16.dp)
-    Column(
-        Modifier
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 10.dp)
-            .fillMaxWidth()
-            .clip(shape)
-            .background(Z.colors.sel)
-            .border(1.dp, Z.colors.line, shape),
-    ) {
+    ZCard(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp)) {
         UpdateSteps(inSettings = false)
     }
 }
@@ -99,7 +95,7 @@ private fun UpdateSteps(inSettings: Boolean) {
     val muted = Z.colors.muted
     when (val s = state) {
         AppUpdate.State.Idle -> if (inSettings) {
-            SettingRow(stringResource(R.string.update_check), value = stringResource(R.string.check_now), onClick = { check() })
+            SettingRow(stringResource(R.string.update_check), value = stringResource(R.string.check_now), icon = LineIcon.Update, onClick = { check() })
         }
         AppUpdate.State.Checking -> SettingRow(stringResource(R.string.update_check), value = stringResource(R.string.ytdlp_checking), valueColor = muted)
         AppUpdate.State.Latest -> SettingRow(
@@ -139,22 +135,5 @@ private fun UpdateSteps(inSettings: Boolean) {
 /** The green note at the end of Settings. */
 @Composable
 fun PromiseNote() {
-    val c = Z.colors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(c.greenBg)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        androidx.compose.material3.Icon(
-            lineIcon(LineIcon.Shield),
-            contentDescription = null,
-            tint = c.green,
-            modifier = Modifier.size(22.dp),
-        )
-        ZText(stringResource(R.string.promise), size = 13.sp, color = c.green, weight = FontWeight.Normal)
-    }
+    Note(stringResource(R.string.promise), Z.colors.greenBg, Z.colors.green, LineIcon.Shield)
 }

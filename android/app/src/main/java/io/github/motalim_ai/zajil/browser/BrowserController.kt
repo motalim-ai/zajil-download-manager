@@ -46,6 +46,7 @@ data class PageState(
     val loading: Boolean = true,
     val progress: Int = 0,
     val canGoBack: Boolean = false,
+    val canGoForward: Boolean = false,
 )
 
 /** A tab, as the switcher lists it. */
@@ -218,6 +219,11 @@ class BrowserController(private val context: Context) {
     fun back() {
         val tab = current ?: return
         if (tab.view.canGoBack()) tab.view.goBack() else closeTab(tab.id)
+    }
+
+    /** Forward in the tab's history, if the user went back. */
+    fun forward() {
+        current?.view?.takeIf { it.canGoForward() }?.goForward()
     }
 
     /** Closes every tab: the home. */
@@ -438,20 +444,20 @@ class BrowserController(private val context: Context) {
                 if (tab == current) _blocked.value = 0
             }
             tab.requested = false
-            setPage(tab, PageState(url, loading = true, canGoBack = view.canGoBack()))
+            setPage(tab, PageState(url, loading = true, canGoBack = view.canGoBack(), canGoForward = view.canGoForward()))
             moved(tab, url)
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             val tab = tabOf(view) ?: return
             val before = tab.page?.url
-            setPage(tab, tab.page?.copy(url = url, canGoBack = view.canGoBack()) ?: PageState(url))
+            setPage(tab, tab.page?.copy(url = url, canGoBack = view.canGoBack(), canGoForward = view.canGoForward()) ?: PageState(url))
             if (url != before) moved(tab, url)
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             val tab = tabOf(view) ?: return
-            setPage(tab, tab.page?.copy(loading = false, progress = 100, canGoBack = view.canGoBack()))
+            setPage(tab, tab.page?.copy(loading = false, progress = 100, canGoBack = view.canGoBack(), canGoForward = view.canGoForward()))
             tab.sitePage = tab.sitePage?.copy(title = view.title.orEmpty())
             publish(tab)
             // Private mode: no history, no recent list, no sites (A6b).
@@ -479,6 +485,7 @@ class BrowserController(private val context: Context) {
             if (host !in tab.bypass) {
                 // A harmful site: a page is stopped and warned about; a part of one is not made.
                 protection.harm(host, Finds.site(host))?.let { guard ->
+                    protection.blocked(ListKind.Malware)
                     if (request.isForMainFrame) {
                         main.post { warn(tab, Warning(request.url.toString(), host, guard)) }
                     } else {
@@ -490,9 +497,12 @@ class BrowserController(private val context: Context) {
             if (request.isForMainFrame) return null
             // Ads and trackers of another site than the page's, where they are not let through.
             val site = tab.site
-            if (site != null && Finds.site(host) != site && protection.settings.value.active(Guard.Ads, site) && protection.listed(Guard.Ads, host)) {
-                count(tab)
-                return EMPTY()
+            if (site != null && Finds.site(host) != site && protection.settings.value.active(Guard.Ads, site)) {
+                protection.adKind(host)?.let { kind ->
+                    count(tab)
+                    protection.blocked(kind)
+                    return EMPTY()
+                }
             }
             val url = request.url.toString()
             val kind = Finds.kindOf(url) ?: return null

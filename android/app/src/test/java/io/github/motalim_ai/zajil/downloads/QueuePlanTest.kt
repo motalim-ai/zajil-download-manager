@@ -102,4 +102,25 @@ class QueuePlanTest {
         // Exactly now is not ahead: tomorrow.
         assertEquals(now.plusDays(1), QueuePlan.nextStart(now, LocalTime.of(22, 15)))
     }
+
+    @Test
+    fun the_next_start_skips_the_days_left_out() {
+        val zone = ZoneId.of("Africa/Cairo")
+        // A Thursday evening; the queue starts at 1:00 every day but Friday.
+        val now = ZonedDateTime.of(2026, 10, 29, 22, 0, 0, 0, zone)
+        val noFriday = java.time.DayOfWeek.entries.toSet() - java.time.DayOfWeek.FRIDAY
+        assertEquals(
+            ZonedDateTime.of(2026, 10, 31, 1, 0, 0, 0, zone),
+            QueuePlan.nextStart(now, LocalTime.of(1, 0), days = noFriday),
+        )
+        // Today is allowed and still ahead: today.
+        assertEquals(now.withHour(23).withMinute(0), QueuePlan.nextStart(now, LocalTime.of(23, 0), days = noFriday))
+        // Only Thursday, already passed: a week later.
+        assertEquals(
+            ZonedDateTime.of(2026, 11, 5, 21, 0, 0, 0, zone),
+            QueuePlan.nextStart(now, LocalTime.of(21, 0), days = setOf(java.time.DayOfWeek.THURSDAY)),
+        )
+        // No day at all is every day.
+        assertEquals(now.withHour(23).withMinute(0), QueuePlan.nextStart(now, LocalTime.of(23, 0), days = emptySet()))
+    }
 }

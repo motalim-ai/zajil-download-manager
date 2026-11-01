@@ -12,6 +12,7 @@ use zajil_core::limit::SpeedLimit;
 use zajil_core::{Engine, Error, Event, FromBrowser, Options, Stop};
 
 pub mod lists;
+pub mod parts;
 #[cfg(target_os = "android")]
 mod tls;
 pub mod tools;

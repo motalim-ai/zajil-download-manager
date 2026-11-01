@@ -6,9 +6,12 @@ import io.github.motalim_ai.zajil.engine.HostCheck
 import io.github.motalim_ai.zajil.engine.checkAndroidLists
 import io.github.motalim_ai.zajil.update.Https
 import java.io.File
+import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +54,29 @@ data class GuardSettings(
 }
 
 /**
+ * Today's blocked requests in the browser, by list (D5's «حُجب اليوم»):
+ * only counts, never an address. [day] is the phone's local day (days since
+ * 1970).
+ */
+data class BlockedToday(val day: Long = -1, val ads: Int = 0, val trackers: Int = 0, val malware: Int = 0) {
+    val total: Long get() = ads.toLong() + trackers + malware
+
+    /** One more of [kind] on [today]: a new day starts from zero. */
+    fun plus(kind: ListKind, today: Long): BlockedToday {
+        val base = on(today)
+        fun Int.next() = if (this == Int.MAX_VALUE) this else this + 1
+        return when (kind) {
+            ListKind.Ads -> base.copy(ads = base.ads.next())
+            ListKind.Trackers -> base.copy(trackers = base.trackers.next())
+            ListKind.Malware -> base.copy(malware = base.malware.next())
+        }
+    }
+
+    /** As shown on [today]: nothing if the counts are another day's. */
+    fun on(today: Long) = if (today == day) this else BlockedToday(today)
+}
+
+/**
  * Zajil's protection in its browser and its downloads (ADR-0012, section
  * 17). Not an antivirus: it protects browsing and downloads inside Zajil
  * only. The lists are open filter lists compiled to hosts, shipped in the
@@ -74,8 +100,44 @@ class Protection(private val context: Context) {
     /** The lists' version: when they were compiled (seconds since 1970); 0 until they are read. */
     val sequence: StateFlow<Long> = _sequence.asStateFlow()
 
+    private val _today = MutableStateFlow(readToday())
+
+    /** Today's blocked requests; [BlockedToday.on] today before showing them. */
+    val today: StateFlow<BlockedToday> = _today.asStateFlow()
+    private val saving = AtomicBoolean(false)
+
     init {
         io.launch { load() }
+    }
+
+    /** A request of [kind] was blocked: counted, and the count kept a moment later. */
+    fun blocked(kind: ListKind) {
+        _today.update { it.plus(kind, LocalDate.now().toEpochDay()) }
+        if (saving.compareAndSet(false, true)) {
+            io.launch {
+                delay(2_000)
+                saving.set(false)
+                val t = _today.value
+                prefs.edit().putLong(TODAY, t.day).putInt(TODAY_ADS, t.ads).putInt(TODAY_TRACKERS, t.trackers).putInt(TODAY_MALWARE, t.malware).apply()
+            }
+        }
+    }
+
+    private fun readToday() = BlockedToday(
+        prefs.getLong(TODAY, -1),
+        prefs.getInt(TODAY_ADS, 0).coerceAtLeast(0),
+        prefs.getInt(TODAY_TRACKERS, 0).coerceAtLeast(0),
+        prefs.getInt(TODAY_MALWARE, 0).coerceAtLeast(0),
+    )
+
+    /** Which of the ads and trackers lists has [host], or null. */
+    fun adKind(host: String): ListKind? {
+        val l = lists
+        return when {
+            l[ListKind.Ads]?.matches(host) == true -> ListKind.Ads
+            l[ListKind.Trackers]?.matches(host) == true -> ListKind.Trackers
+            else -> null
+        }
     }
 
     /** What [host] is listed as, for [guard]: ads or trackers, or malware. */
@@ -193,6 +255,10 @@ class Protection(private val context: Context) {
         const val ON = "on"
         const val OFF = "off"
         const val SEQUENCE = "lists_sequence"
+        const val TODAY = "today"
+        const val TODAY_ADS = "today_ads"
+        const val TODAY_TRACKERS = "today_trackers"
+        const val TODAY_MALWARE = "today_malware"
         const val RELEASES = "https://github.com/motalim-ai/zajil-download-manager/releases/download"
     }
 }

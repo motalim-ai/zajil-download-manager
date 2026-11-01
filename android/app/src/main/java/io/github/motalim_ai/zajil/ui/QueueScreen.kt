@@ -3,44 +3,43 @@ package io.github.motalim_ai.zajil.ui
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,16 +49,22 @@ import io.github.motalim_ai.zajil.downloads.Download
 import io.github.motalim_ai.zajil.downloads.NetworkState
 import io.github.motalim_ai.zajil.downloads.Queue
 import io.github.motalim_ai.zajil.downloads.QueuePlan
+import io.github.motalim_ai.zajil.downloads.QueueRules
 import io.github.motalim_ai.zajil.downloads.QueueSettings
 import io.github.motalim_ai.zajil.downloads.Status
+import java.time.DayOfWeek
 import java.time.LocalTime
 
+/** The week as the design shows it: Saturday first. */
+private val WEEK = listOf(
+    DayOfWeek.SATURDAY, DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY,
+    DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY,
+)
+
 /**
- * The queues (A2; several from 0.3.0) as the approved design shows them:
- * «New queue» in the bar, and a card for each queue. The open one has its
- * state, «Run» or «Stop», how many at once, «Wi-Fi only» and a daily time;
- * the others show what they are in one line («Night queue»: starts 1:00 ·
- * Wi-Fi only · 5 downloads), and open with a tap.
+ * «الطوابير» (D5): the main queue on the blue card, with how many at
+ * once and «Wi-Fi only» at hand, then the other queues, each with its time
+ * and days if it is scheduled.
  */
 @Composable
 fun QueueScreen(bottomPadding: PaddingValues) {
@@ -67,44 +72,37 @@ fun QueueScreen(bottomPadding: PaddingValues) {
     val queues by center.settings.queues.collectAsStateWithLifecycle()
     val list by center.list.collectAsStateWithLifecycle()
     val network by center.networkState.collectAsStateWithLifecycle()
-    var open by rememberSaveable { mutableLongStateOf(Queue.MAIN) }
+    var open by rememberSaveable { mutableStateOf<Long?>(null) }
     var naming by rememberSaveable { mutableStateOf<Long?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     val c = Z.colors
 
-    Column(Modifier.fillMaxSize().background(c.bg)) {
-        TitleBar(stringResource(R.string.queues)) {
-            PillButton(stringResource(R.string.new_queue), LineIcon.Plus) { creating = true }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottomPadding.calculateBottomPadding())) {
+        TabHeader(stringResource(R.string.queues)) {
+            HeaderButton(stringResource(R.string.new_queue), { creating = true }, LineIcon.Plus)
         }
-        Column(
-            Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 14.dp)
-                .padding(bottom = bottomPadding.calculateBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            for (queue in queues) {
-                val mine = list.filter { QueuePlan.queueOf(it, queues) == queue.id }
-                QueueCard(
-                    queue,
-                    mine,
-                    network,
-                    expanded = queue.id == open || queues.none { it.id == open },
-                    onOpen = { open = queue.id },
-                    onRename = { naming = queue.id },
-                    onDelete = {
-                        center.deleteQueue(queue.id)
-                        open = Queue.MAIN
-                    },
-                )
-            }
-            ZText(
-                stringResource(R.string.queue_footer),
-                Modifier.padding(horizontal = 6.dp).fillMaxWidth(),
-                size = 12.5.sp,
-                color = c.muted,
+        val main = queues.first()
+        MainQueue(main, list.filter { QueuePlan.queueOf(it, queues) == main.id }, network)
+        for (queue in queues.drop(1)) {
+            OtherQueue(
+                queue,
+                list.filter { QueuePlan.queueOf(it, queues) == queue.id },
+                network,
+                expanded = open == queue.id,
+                onToggle = { open = if (open == queue.id) null else queue.id },
+                onRename = { naming = queue.id },
+                onDelete = {
+                    center.deleteQueue(queue.id)
+                    open = null
+                },
             )
         }
+        ZText(
+            stringResource(R.string.queue_footer),
+            Modifier.padding(horizontal = 22.dp, vertical = 16.dp).fillMaxWidth(),
+            size = 12.5.sp,
+            color = c.muted,
+        )
     }
     if (creating) {
         NameSheet(stringResource(R.string.new_queue), "", stringResource(R.string.create_queue), onDismiss = { creating = false }) { name ->
@@ -121,113 +119,268 @@ fun QueueScreen(bottomPadding: PaddingValues) {
     }
 }
 
+/** «2 يحمّلان الآن، 3 في الانتظار», or the queue's state in a word. */
 @Composable
-private fun QueueCard(
-    queue: Queue,
-    list: List<Download>,
-    network: NetworkState,
-    expanded: Boolean,
-    onOpen: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-) {
+private fun queueLine(list: List<Download>, rules: QueueRules, network: NetworkState): String {
+    val running = list.count { it.status == Status.Running }
+    val waiting = list.count { it.status == Status.Queued }
+    val counts = listOfNotNull(
+        running.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.queue_downloading, it, it) },
+        waiting.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.queue_waiting, it, it) },
+    )
+    return counts.ifEmpty { listOf(queueState(list, rules, network)) }.joinToString(stringResource(R.string.list_sep))
+}
+
+/** The main queue's state, in a word or two. */
+@Composable
+fun queueState(list: List<Download>, rules: QueueRules, network: NetworkState): String {
+    val waiting = list.any { it.status == Status.Queued }
+    val running = list.any { it.status == Status.Running }
+    return when {
+        rules.scheduled && !rules.open && !running -> stringResource(R.string.queue_starts_at, timeText(rules.startAt))
+        waiting && !network.connected -> stringResource(R.string.wait_network)
+        waiting && rules.wifiOnly && !network.unmetered -> stringResource(R.string.wait_wifi)
+        running || waiting -> stringResource(R.string.queue_running)
+        else -> stringResource(R.string.queue_empty)
+    }
+}
+
+@Composable
+private fun MainQueue(queue: Queue, list: List<Download>, network: NetworkState) {
+    val settings = LocalContext.current.downloads.settings
+    val rules = queue.rules
+    val c = Z.colors
+    val running = list.any { it.status == Status.Running }
+    LayeredCard(Modifier.padding(start = 18.dp, end = 18.dp, top = 38.dp), gap = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                ZText(queueName(queue), size = 21.sp, weight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                ZText(queueLine(list, rules, network), size = 13.5.sp, color = c.heroSub)
+            }
+            Row(
+                Modifier.height(30.dp).clip(CircleShape).background(Color(0x38FFFFFF)).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (running) Color(0xFF5FDCA0) else Color(0x99FFFFFF)))
+                ZText(stringResource(if (running) R.string.queue_working else R.string.queue_resting), size = 13.sp, color = Color.White)
+            }
+        }
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0x24FFFFFF)).padding(horizontal = 14.dp, vertical = 4.dp)) {
+            QueueRows(queue, list, onBlue = true)
+        }
+    }
+}
+
+/** A queue's settings, as rows: on the blue card or in a white one. */
+@Composable
+private fun ColumnScope.QueueRows(queue: Queue, list: List<Download>, onBlue: Boolean, withRun: Boolean = true) {
     val context = LocalContext.current
     val center = context.downloads
     val settings = center.settings
     val rules = queue.rules
     val c = Z.colors
-    val running = list.count { it.status == Status.Running }
-    val waiting = list.count { it.status == Status.Queued }
-    val busy = running > 0 || waiting > 0
-    ZCard(radius = 18.dp) {
+    val ink = if (onBlue) Color.White else c.ink
+    val sub = if (onBlue) c.heroSub else c.faint
+    val line = if (onBlue) Color(0x2EFFFFFF) else c.lineSoft
+    PanelRow(stringResource(R.string.max_running), null, ink, sub) {
+        Stepper(rules.maxRunning, 1, QueueSettings.MAX, { n -> settings.update(queue.id) { it.copy(maxRunning = n) } }, onBlue = onBlue)
+    }
+    RowLine(line)
+    PanelRow(stringResource(R.string.wifi_only), stringResource(R.string.wifi_only_hint), ink, sub, onClick = { settings.update(queue.id) { it.copy(wifiOnly = !it.wifiOnly) } }) {
+        ZSwitch(rules.wifiOnly, { on -> settings.update(queue.id) { it.copy(wifiOnly = on) } }, onBlue = onBlue)
+    }
+    RowLine(line)
+    val pickTime = {
+        TimePickerDialog(
+            context,
+            { _, hour, minute -> settings.update(queue.id) { it.copy(scheduled = true, startAt = LocalTime.of(hour, minute), open = false) } },
+            rules.startAt.hour,
+            rules.startAt.minute,
+            DateFormat.is24HourFormat(context),
+        ).show()
+    }
+    PanelRow(
+        stringResource(R.string.schedule),
+        stringResource(if (rules.scheduled) R.string.schedule_hint else R.string.schedule_off_hint),
+        ink,
+        sub,
+        onClick = pickTime,
+    ) {
+        if (rules.scheduled) ZText(timeText(rules.startAt), size = 15.sp, weight = FontWeight.Bold, color = ink)
+        // Turned on, the queue waits for the next start time.
+        ZSwitch(rules.scheduled, { on -> settings.update(queue.id) { it.copy(scheduled = on, open = false) } }, onBlue = onBlue)
+    }
+    if (rules.scheduled) {
+        Days(rules.days, onBlue, Modifier.padding(bottom = 12.dp)) { days -> settings.update(queue.id) { it.copy(days = days) } }
+    }
+    if (withRun) {
+        RowLine(line)
+        val busy = list.any { it.status == Status.Running || it.status == Status.Queued }
+        PanelRow(
+            stringResource(if (busy) R.string.stop_queue else R.string.run_queue),
+            null,
+            ink,
+            sub,
+        ) {
+            SoftButton(
+                stringResource(if (busy) R.string.stop_word else R.string.run_word),
+                { if (busy) center.stopQueue(queue.id) else center.runQueue(queue.id) },
+                color = if (onBlue) c.accent else if (busy) c.red else c.blue,
+                background = if (onBlue) Color.White else if (busy) c.redBg else c.sel,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PanelRow(
+    label: String,
+    hint: String?,
+    ink: Color,
+    sub: Color,
+    onClick: (() -> Unit)? = null,
+    end: @Composable () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            ZText(label, size = 14.5.sp, color = ink)
+            if (hint != null) ZText(hint, size = 12.5.sp, color = sub)
+        }
+        end()
+    }
+}
+
+/** The days a scheduled queue starts on: Saturday first; at least one stays on. */
+@Composable
+private fun Days(days: Set<DayOfWeek>, onBlue: Boolean, modifier: Modifier = Modifier, onChange: (Set<DayOfWeek>) -> Unit) {
+    val c = Z.colors
+    val locale = LocalConfiguration.current.locales[0]
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        WEEK.forEach { day ->
+            val on = day in days
+            val name = day.getDisplayName(java.time.format.TextStyle.FULL, locale)
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .toggleable(on, role = Role.Checkbox) { now -> if (now) onChange(days + day) else if (days.size > 1) onChange(days - day) }
+                    .semantics { contentDescription = name },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                on && onBlue -> Color.White
+                                on -> c.accent
+                                onBlue -> Color(0x24FFFFFF)
+                                else -> c.sunken
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ZText(
+                        day.getDisplayName(java.time.format.TextStyle.NARROW, locale),
+                        size = 14.sp,
+                        weight = FontWeight.SemiBold,
+                        color = when {
+                            on && onBlue -> c.accent
+                            on -> Color.White
+                            onBlue -> c.heroSub
+                            else -> c.chevron
+                        },
+                        style = TextStyle(textDecoration = if (on) null else TextDecoration.LineThrough),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Another queue: its name and what it holds, its time or «run»; its settings when opened. */
+@Composable
+private fun OtherQueue(
+    queue: Queue,
+    list: List<Download>,
+    network: NetworkState,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val center = LocalContext.current.downloads
+    val rules = queue.rules
+    val c = Z.colors
+    val busy = list.any { it.status == Status.Running || it.status == Status.Queued }
+    val running = list.any { it.status == Status.Running }
+    ZCard(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp), padding = PaddingValues(16.dp)) {
         Row(
-            Modifier.clickable(enabled = !expanded, onClick = onOpen).padding(14.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onToggle),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ColorImage(if (rules.scheduled) ColorIcon.QueueTimed else ColorIcon.Queue, 40.dp)
+            if (!rules.scheduled) {
+                IconCircle(if (running) LineIcon.Downloads else LineIcon.Pause, if (running) c.sel else c.sunken, if (running) c.blue else c.softInk, size = 42.dp)
+            }
             Column(Modifier.weight(1f)) {
-                ZText(queueName(queue), size = 16.5.sp, weight = FontWeight.Bold, maxLines = 1)
-                val parts = if (expanded) {
+                ZText(queueName(queue), size = 17.sp, weight = FontWeight.SemiBold, maxLines = 1)
+                val count = list.count { it.status != Status.Done }
+                ZText(
                     listOfNotNull(
-                        queueState(list, rules, network),
-                        running.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.queue_downloading, it, it) },
-                        waiting.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.queue_waiting, it, it) },
-                    )
-                } else {
-                    // The design's one line: when it starts, Wi-Fi, how many it has.
-                    listOfNotNull(
-                        stringResource(R.string.queue_starts_at, timeText(rules.startAt)).takeIf { rules.scheduled },
+                        if (!rules.scheduled && !busy) stringResource(R.string.queue_resting) else null,
+                        pluralStringResource(R.plurals.queue_count, count, count),
                         stringResource(R.string.wifi_only_short).takeIf { rules.wifiOnly },
-                        list.count { it.status != Status.Done }.let { pluralStringResource(R.plurals.queue_count, it, it) },
-                    )
-                }
-                ZText(parts.joinToString(" · "), size = 12.5.sp, color = c.muted)
+                    ).joinToString(stringResource(R.string.list_sep)),
+                    size = 13.sp,
+                    color = c.faint,
+                )
             }
-            if (expanded) {
-                if (busy) {
-                    RoundIconButton(ColorIcon.Stop, stringResource(R.string.stop_queue), { center.stopQueue(queue.id) })
-                } else {
-                    RoundIconButton(ColorIcon.Resume, stringResource(R.string.run_queue), { center.runQueue(queue.id) })
-                }
+            if (rules.scheduled) {
+                Pill(stringResource(R.string.queue_starts_at, timeText(rules.startAt)), c.amberBg, c.amber, icon = LineIcon.Clock)
+            } else {
+                SoftButton(
+                    stringResource(if (busy) R.string.stop_word else R.string.run_word),
+                    { if (busy) center.stopQueue(queue.id) else center.runQueue(queue.id) },
+                    color = if (busy) c.red else c.blue,
+                    background = if (busy) c.redBg else c.sel,
+                    height = 38.dp,
+                )
             }
+        }
+        if (rules.scheduled && !expanded) {
+            Days(rules.days, onBlue = false, Modifier.padding(top = 12.dp)) { days -> center.settings.update(queue.id) { it.copy(days = days) } }
+            // What happens at the time; while it runs, how it is doing.
+            ZText(
+                if (busy) queueLine(list, rules, network) else stringResource(R.string.schedule_hint),
+                Modifier.padding(top = 8.dp),
+                size = 12.5.sp,
+                color = c.faint,
+            )
         }
         if (!expanded) return@ZCard
         RowLine()
-        SettingRow(stringResource(R.string.max_running)) {
-            Stepper(rules.maxRunning, 1, QueueSettings.MAX) { n -> settings.update(queue.id) { it.copy(maxRunning = n) } }
-        }
+        QueueRows(queue, list, onBlue = false, withRun = rules.scheduled)
+        RowLine()
+        SettingRow(stringResource(R.string.rename_queue), onClick = onRename)
         RowLine()
         SettingRow(
-            stringResource(R.string.wifi_only),
-            hint = stringResource(R.string.wifi_only_hint),
-            onClick = { settings.update(queue.id) { it.copy(wifiOnly = !it.wifiOnly) } },
-        ) {
-            Switch(
-                checked = rules.wifiOnly,
-                onCheckedChange = { on -> settings.update(queue.id) { it.copy(wifiOnly = on) } },
-                colors = switchColors(),
-            )
-        }
-        RowLine()
-        SettingRow(
-            stringResource(R.string.schedule),
-            hint = stringResource(if (rules.scheduled) R.string.schedule_hint else R.string.schedule_off_hint),
-            leading = { ColorImage(ColorIcon.Schedule, 26.dp) },
-            minHeight = 64.dp,
-            onClick = {
-                TimePickerDialog(
-                    context,
-                    { _, hour, minute ->
-                        settings.update(queue.id) { it.copy(scheduled = true, startAt = LocalTime.of(hour, minute), open = false) }
-                    },
-                    rules.startAt.hour,
-                    rules.startAt.minute,
-                    DateFormat.is24HourFormat(context),
-                ).show()
-            },
-        ) {
-            if (rules.scheduled) {
-                ZText(timeText(rules.startAt), size = 15.sp, weight = FontWeight.Bold, color = c.accent)
-            }
-            Switch(
-                checked = rules.scheduled,
-                // Turned on, the queue waits for the next start time.
-                onCheckedChange = { on -> settings.update(queue.id) { it.copy(scheduled = on, open = false) } },
-                colors = switchColors(),
-            )
-        }
-        if (!queue.main) {
-            RowLine()
-            SettingRow(stringResource(R.string.rename_queue), onClick = onRename) {}
-            RowLine()
-            SettingRow(
-                stringResource(R.string.delete_queue),
-                hint = stringResource(R.string.delete_queue_hint),
-                onClick = onDelete,
-                labelColor = c.red,
-            ) {}
-        }
+            stringResource(R.string.delete_queue),
+            hint = stringResource(R.string.delete_queue_hint),
+            onClick = onDelete,
+            labelColor = c.red,
+            chevron = false,
+        )
     }
 }
 
@@ -241,9 +394,9 @@ private fun NameSheet(title: String, initial: String, action: String, onDismiss:
     var name by rememberSaveable { mutableStateOf(initial) }
     val ok = name.isNotBlank()
     ZSheet(onDismiss = onDismiss, label = title) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ZText(title, size = 19.sp, weight = FontWeight.Bold)
-            SheetField(name, { name = it.take(QueueSettings.MAX_NAME) }, stringResource(R.string.queue_name), KeyboardType.Text, TextDirection.Content)
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SheetTitle(title)
+            ZField(name, { name = it.take(QueueSettings.MAX_NAME) }, stringResource(R.string.queue_name))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MainButton(
                     action,
@@ -261,51 +414,3 @@ private fun NameSheet(title: String, initial: String, action: String, onDismiss:
         }
     }
 }
-
-/** The bar's action: an outlined pill with an icon («New queue»). */
-@Composable
-fun PillButton(text: String, icon: LineIcon, onClick: () -> Unit) {
-    val c = Z.colors
-    Row(
-        Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            Modifier
-                .height(36.dp)
-                .clip(CircleShape)
-                .background(c.sel)
-                .border(1.dp, c.accent, CircleShape)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(lineIcon(icon), null, tint = c.accent, modifier = Modifier.size(16.dp))
-            ZText(text, size = 13.sp, weight = FontWeight.SemiBold, color = c.accent)
-        }
-    }
-}
-
-/** A screen's title on the white bar: «Queues», «Settings», and its action if any. */
-@Composable
-fun TitleBar(title: String, action: (@Composable () -> Unit)? = null) {
-    Column(Modifier.background(Z.colors.surface).windowInsetsPadding(WindowInsets.statusBars)) {
-        Row(
-            Modifier.padding(start = 16.dp, end = 12.dp).heightIn(min = 60.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ZText(title, Modifier.weight(1f).padding(top = 4.dp), size = 21.sp, weight = FontWeight.Bold)
-            action?.invoke()
-        }
-        RowLine()
-    }
-}
-
-@Composable
-fun switchColors() = SwitchDefaults.colors(
-    checkedTrackColor = Z.colors.accent,
-    checkedThumbColor = Z.colors.accentInk,
-    uncheckedTrackColor = Z.colors.sunken,
-    uncheckedBorderColor = Z.colors.outline,
-    uncheckedThumbColor = Z.colors.muted,
-)

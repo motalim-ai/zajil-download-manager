@@ -18,101 +18,146 @@ import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.downloads.Look
 
 /**
- * The desktop's colours (apps/desktop/src/styles/app.css), the approved
- * Android design's (A5 design, 2026-11), light and dark.
+ * The approved D5 design's colours (2026-11-01), light and dark: the
+ * hand-over's tokens, each named for what it colours.
  */
 @Immutable
 data class ZajilColors(
     val dark: Boolean,
+    /** The screen's background: a vertical gradient from [bg] to [bgBottom]. */
     val bg: Color,
+    val bgBottom: Color,
+    /** Cards, sheets, the bar and the header's round buttons. */
     val surface: Color,
+    /** A soft grey fill: inactive tabs and chips, icon circles, fields. */
     val sunken: Color,
+    /** The icons on [sunken]. */
+    val softInk: Color,
     val ink: Color,
     val muted: Color,
+    /** The second line under a row's title. */
+    val faint: Color,
+    /** A card's or an option's border. */
     val line: Color,
     /** Between the rows of one card. */
     val lineSoft: Color,
-    /** An outlined button's border, and the sheet's handle. */
+    /** The sheet's handle, a switch's track when off. */
     val outline: Color,
+    /** A row's «›» at the end. */
+    val chevron: Color,
+    /** The primary blue: buttons, the active tab, the hero card. */
     val accent: Color,
     val accentInk: Color,
+    /** A text link on the background («تغيير»). */
+    val link: Color,
+    /** «عرض الكل». */
+    val quietLink: Color,
+    /** The live total speed under the app's name. */
+    val speed: Color,
+    /** The hero card's layers behind it, and its slider's knob. */
+    val heroInner: Color,
+    val heroOuter: Color,
+    val heroKnob: Color,
+    /** Secondary text on the blue cards. */
+    val heroSub: Color,
+    /** The status pairs (tint, colour): active, done, waiting, failed. */
     val sel: Color,
-    /** A chosen row in a list of choices. */
-    val picked: Color,
-    val track: Color,
-    val fab: Color,
-    val fabInk: Color,
     val blue: Color,
-    val amber: Color,
-    val amberBg: Color,
-    val amberFill: Color,
-    val red: Color,
-    val redBg: Color,
     val green: Color,
     val greenBg: Color,
-    val grey: Color,
-    val greyBg: Color,
+    val amber: Color,
+    val amberBg: Color,
+    val red: Color,
+    val redBg: Color,
+    val purple: Color,
+    val purpleBg: Color,
+    /** A chosen option's fill in a list of choices. */
+    val picked: Color,
+    /** A thin progress bar's track. */
+    val track: Color,
     val scrim: Color,
+    val cardShadow: Color,
+    val barShadow: Color,
 )
 
 private val Light = ZajilColors(
     dark = false,
-    bg = Color(0xFFEEF3F8),
+    bg = Color(0xFFF5F6F9),
+    bgBottom = Color(0xFFE9EBF0),
     surface = Color(0xFFFFFFFF),
-    sunken = Color(0xFFF5F8FB),
-    ink = Color(0xFF10263D),
-    muted = Color(0xFF4A5D72),
-    line = Color(0xFFD8E2EC),
-    lineSoft = Color(0xFFE3EAF1),
-    outline = Color(0xFFC7D3DF),
-    accent = Color(0xFF1C6CD0),
+    sunken = Color(0xFFF1F3F7),
+    softInk = Color(0xFF3A3C44),
+    ink = Color(0xFF121722),
+    muted = Color(0xFF6B6E78),
+    faint = Color(0xFF8A93A3),
+    line = Color(0xFFE6E8EE),
+    lineSoft = Color(0xFFEDF0F4),
+    outline = Color(0xFFD5D9E1),
+    chevron = Color(0xFFA3A9B4),
+    accent = Color(0xFF0A5FE0),
     accentInk = Color(0xFFFFFFFF),
-    sel = Color(0xFFDCEBFC),
-    picked = Color(0xFFEEF5FE),
-    track = Color(0xFFDCE7F2),
-    fab = Color(0xFFFFFFFF),
-    fabInk = Color(0xFF10263D),
-    blue = Color(0xFF1C6CD0),
-    amber = Color(0xFF8F5D00),
-    amberBg = Color(0xFFFFF1CC),
-    amberFill = Color(0xFFB97800),
-    red = Color(0xFFB53232),
-    redBg = Color(0xFFFBE4E4),
-    green = Color(0xFF136E4B),
-    greenBg = Color(0xFFDDF3EA),
-    grey = Color(0xFF4A5D72),
-    greyBg = Color(0xFFE8EDF3),
-    scrim = Color(0x6B0A1828),
+    link = Color(0xFF0A5FE0),
+    quietLink = Color(0xFF5F6B7D),
+    speed = Color(0xFF0A5FE0),
+    heroInner = Color(0xFF4A8BEF),
+    heroOuter = Color(0xFFA4C3F5),
+    heroKnob = Color(0xFF0A3FA6),
+    heroSub = Color(0xFFD2E2FF),
+    sel = Color(0xFFE5EFFF),
+    blue = Color(0xFF0A5FE0),
+    green = Color(0xFF128A4F),
+    greenBg = Color(0xFFE2F6EA),
+    amber = Color(0xFFA86A00),
+    amberBg = Color(0xFFFFF1D6),
+    red = Color(0xFFC4302B),
+    redBg = Color(0xFFFDE6E4),
+    purple = Color(0xFF7B4BD6),
+    purpleBg = Color(0xFFEFE7FD),
+    picked = Color(0xFFF2F7FF),
+    track = Color(0xFFE6E8EE),
+    scrim = Color(0x6B0C101A),
+    cardShadow = Color(0x66121722),
+    barShadow = Color(0x38121722),
 )
 
 private val Dark = ZajilColors(
     dark = true,
-    bg = Color(0xFF07111D),
-    surface = Color(0xFF0E2034),
-    sunken = Color(0xFF0B1A2B),
-    ink = Color(0xFFE3EEF9),
-    muted = Color(0xFFA3B8CF),
-    line = Color(0xFF1C3550),
-    lineSoft = Color(0xFF16304A),
-    outline = Color(0xFF2A4866),
-    accent = Color(0xFF8ADCFF),
-    accentInk = Color(0xFF0A1828),
-    sel = Color(0xFF173A5C),
-    picked = Color(0xFF12304D),
-    track = Color(0xFF183453),
-    fab = Color(0xFF173A5C),
-    fabInk = Color(0xFFE3EEF9),
-    blue = Color(0xFF2E9BFF),
-    amber = Color(0xFFFFC94D),
-    amberBg = Color(0xFF3A2C08),
-    amberFill = Color(0xFFFFC94D),
+    bg = Color(0xFF11141B),
+    bgBottom = Color(0xFF0B0D12),
+    surface = Color(0xFF1B1F28),
+    sunken = Color(0xFF262B35),
+    softInk = Color(0xFFD5D9E1),
+    ink = Color(0xFFEEF1F6),
+    muted = Color(0xFF9AA1AD),
+    faint = Color(0xFF8B94A4),
+    line = Color(0xFF2F3440),
+    lineSoft = Color(0xFF2A2F39),
+    outline = Color(0xFF3A404C),
+    chevron = Color(0xFF6B7280),
+    accent = Color(0xFF0A5FE0),
+    accentInk = Color(0xFFFFFFFF),
+    link = Color(0xFF8AB8FF),
+    quietLink = Color(0xFF8AB8FF),
+    speed = Color(0xFF7FB0FF),
+    heroInner = Color(0xFF2A5FC0),
+    heroOuter = Color(0xFF1D3A73),
+    heroKnob = Color(0xFF0A3FA6),
+    heroSub = Color(0xFFD2E2FF),
+    sel = Color(0xFF16294A),
+    blue = Color(0xFF7FB0FF),
+    green = Color(0xFF5FDCA0),
+    greenBg = Color(0xFF123526),
+    amber = Color(0xFFF3B94D),
+    amberBg = Color(0xFF3A2C10),
     red = Color(0xFFFF8A80),
     redBg = Color(0xFF3B1518),
-    green = Color(0xFF6FD9A8),
-    greenBg = Color(0xFF0F3426),
-    grey = Color(0xFFA3B8CF),
-    greyBg = Color(0xFF1C3550),
-    scrim = Color(0x9902080E),
+    purple = Color(0xFFB598F0),
+    purpleBg = Color(0xFF2A2140),
+    picked = Color(0xFF16294A),
+    track = Color(0xFF2A2F39),
+    scrim = Color(0x990C101A),
+    cardShadow = Color(0x66000000),
+    barShadow = Color(0x99000000),
 )
 
 val LocalZajilColors = staticCompositionLocalOf { Light }
@@ -123,7 +168,7 @@ object Z {
         @Composable get() = LocalZajilColors.current
 }
 
-/** IBM Plex Sans Arabic, as on the desktop: in the APK, never fetched (OFL, assets/licenses). */
+/** IBM Plex Sans Arabic, the only family (D5): in the APK, never fetched (OFL, assets/licenses). */
 val Plex = FontFamily(
     Font(R.font.plex_arabic_regular, FontWeight.Normal),
     Font(R.font.plex_arabic_medium, FontWeight.Medium),
