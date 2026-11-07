@@ -106,7 +106,9 @@ fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view
 /// Not fatal: without it, a download from the browser needs Zajil open.
 fn record_app(fixed: &Path, program: Option<PathBuf>) {
     let Some(program) = program else {
-        eprintln!("zajil: the browsers' copy of zajil-host cannot start Zajil: no program to record");
+        eprintln!(
+            "zajil: the browsers' copy of zajil-host cannot start Zajil: no program to record"
+        );
         return;
     };
     if let Err(err) = zajil_platform::native_host::record_app(fixed, &program) {
