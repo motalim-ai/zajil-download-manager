@@ -261,20 +261,36 @@ fn not_running(err: &io::Error) -> bool {
 /// its, its own process group on macOS and Linux, and on Windows out of the
 /// browser's job when the job allows it (Firefox kills its hosts' job when
 /// it closes them).
+///
+/// This program may be the browsers' copy in Zajil's data folder
+/// (`native_host::fixed_copy`), with no app beside it: then it starts the
+/// Zajil recorded there, only if it is unchanged since
+/// (`native_host::app_to_start`), and keeps it open until it has started.
 fn start_app(data_dir: &Path) -> Result<(), (HostProblem, String)> {
     let here = std::env::current_exe()
         .map_err(|e| (HostProblem::NotFound, format!("cannot find myself: {e}")))?;
-    let app = here.with_file_name(if cfg!(windows) {
+    let beside = here.with_file_name(if cfg!(windows) {
         "zajil-desktop.exe"
     } else {
         "zajil-desktop"
     });
-    if !app.is_file() {
-        return Err((
-            HostProblem::NotFound,
-            format!("{} is not there", app.display()),
-        ));
-    }
+    let (app, _held) = if beside.is_file() {
+        (beside, None)
+    } else {
+        let recorded = here.parent().map(zajil_platform::native_host::app_to_start);
+        match recorded {
+            Some(Ok((app, file))) => (app, Some(file)),
+            Some(Err(err)) if err.kind() != io::ErrorKind::NotFound => {
+                return Err((HostProblem::NotFound, format!("the recorded Zajil: {err}")));
+            }
+            _ => {
+                return Err((
+                    HostProblem::NotFound,
+                    format!("{} is not there", beside.display()),
+                ));
+            }
+        }
+    };
     #[cfg(target_os = "macos")]
     if let Some(bundle) = app_bundle(&here) {
         return open_app(bundle, data_dir);

@@ -59,6 +59,10 @@ pub fn dir_has_acl(dir: &Path) -> io::Result<bool> {
     acl::has_entries(&open_dir_nofollow(dir)?)
 }
 
+pub fn open_program(path: &Path) -> io::Result<File> {
+    open_regular_nofollow(path, false)
+}
+
 #[allow(unsafe_code)]
 pub fn open_private_tool(path: &Path) -> io::Result<File> {
     let file = open_regular_nofollow(path, false)?;

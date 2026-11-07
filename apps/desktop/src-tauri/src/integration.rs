@@ -63,14 +63,16 @@ fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view
     }
     if appimage {
         // The copy is checked instead (its folder, itself, its SHA-256).
-        return zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
+        let copy = zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
             eprintln!("zajil: the browsers' copy of zajil-host: {err}");
             if err.kind() == std::io::ErrorKind::PermissionDenied {
                 Problem::Unsafe
             } else {
                 Problem::Missing
             }
-        });
+        })?;
+        record_app(fixed, std::env::var_os("APPIMAGE").map(PathBuf::from));
+        return Ok(copy);
     }
     let safe =
         |path: &Path| zajil_platform::fs::only_user_or_root_can_change(path).unwrap_or(false);
@@ -86,15 +88,30 @@ fn host_beside(exe: &Path, appimage: bool, fixed: &Path) -> Result<PathBuf, view
                 "zajil: other users may change {}: the browsers get a copy of zajil-host",
                 dir.display()
             );
-            return zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
+            let copy = zajil_platform::native_host::fixed_copy(&host, fixed).map_err(|err| {
                 eprintln!("zajil: the browsers' copy of zajil-host: {err}");
                 Problem::Unsafe
-            });
+            })?;
+            record_app(fixed, Some(exe.clone()));
+            return Ok(copy);
         }
         #[cfg(not(windows))]
         return Err(Problem::Unsafe);
     }
     Ok(host)
+}
+
+/// Records `program` as the Zajil that the browsers' copy of the host in
+/// `fixed` starts when Zajil is not running (`native_host::record_app`).
+/// Not fatal: without it, a download from the browser needs Zajil open.
+fn record_app(fixed: &Path, program: Option<PathBuf>) {
+    let Some(program) = program else {
+        eprintln!("zajil: the browsers' copy of zajil-host cannot start Zajil: no program to record");
+        return;
+    };
+    if let Err(err) = zajil_platform::native_host::record_app(fixed, &program) {
+        eprintln!("zajil: the browsers' copy of zajil-host cannot start Zajil: {err}");
+    }
 }
 
 /// Registers `zajil-host` with every supported browser for the current user
