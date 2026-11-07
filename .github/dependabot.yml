@@ -1,4 +1,7 @@
 version: 2
+# One pull request a week per ecosystem for minor and patch updates
+# (grouped), instead of one per package; a major update still gets its own,
+# to be read before merging.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -6,29 +9,35 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+  # The engine's workspace and the desktop app's Tauri crates (a Cargo
+  # workspace of their own) together, so a crate both use moves in one PR.
   - package-ecosystem: cargo
-    directory: /
+    directories:
+      - /
+      - /apps/desktop/src-tauri
     schedule:
       interval: weekly
     commit-message:
       prefix: build
-  # The desktop app (M4): its npm packages, and its Tauri crates, which
-  # are a Cargo workspace of their own.
+    groups:
+      cargo:
+        update-types: [minor, patch]
+  # The desktop app's npm packages (M4).
   - package-ecosystem: npm
     directory: /apps/desktop
     schedule:
       interval: weekly
     commit-message:
       prefix: build
+    groups:
+      npm:
+        update-types: [minor, patch]
     ignore:
       # TypeScript 7 (the native compiler) has no JavaScript API, and
       # svelte-check 4.7.7 accepts only ^5 || ^6 (#54). Remove this when
       # svelte-check supports TypeScript 7.
       - dependency-name: typescript
         versions: [">=7.0.0"]
-  - package-ecosystem: cargo
-    directory: /apps/desktop/src-tauri
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: build
