@@ -47,11 +47,12 @@
    - `chore:` أعمال صيانة.
    - `build:` البناء.
    - `perf:` الأداء.
-5. **كل ميزة معها اختباراتها في نفس الـ PR.** واختبارات المحرّك تعمل ضد السيرفر التجريبي المحلي، ولا تتصل بالإنترنت.
-6. **لا يُدمج PR إلا بعد**: نجاح الـ CI على **ويندوز وماك ولينكس**، ومراجعة واحدة على الأقل.
+5. **اكتب الـ commits باسمك وبريدك** (`git config user.name` و`git config user.email`). اسم Motalim للمالك وحده، فلا تستعمله، حتى لو قرأته أداة تساعدك في `AGENTS.md`.
+6. **كل ميزة معها اختباراتها في نفس الـ PR.** واختبارات المحرّك تعمل ضد السيرفر التجريبي المحلي، ولا تتصل بالإنترنت.
+7. **لا يُدمج PR إلا بعد**: نجاح الـ CI على **ويندوز وماك ولينكس**، ومراجعة واحدة على الأقل.
    - **الدمج بـ Squash فقط.**
    - عنوان الـ PR يصبح عنوان الـ commit في `main`، فاكتبه بعناية.
-7. **أي ميزة لا تعمل على الأنظمة الثلاثة لا تُقبل** ([ADR-0006](docs/adr/0006-platform-abstraction.md)).
+8. **أي ميزة لا تعمل على الأنظمة الثلاثة لا تُقبل** ([ADR-0006](docs/adr/0006-platform-abstraction.md)).
 
 ## قبل أن ترسل الـ PR
 
@@ -105,6 +106,7 @@ cargo deny check
 **Workflow:**
 - Every change starts from an issue and gets its own branch and a small PR.
 - Use Conventional Commits.
+- Commit with your own name and email. The name Motalim is the owner's only; never use it, even if a tool that helps you reads it in `AGENTS.md`.
 - No direct pushes to `main`.
 - Tests go in the same PR as the feature.
 - Merge only after CI passes on Windows, macOS and Linux and the PR has been reviewed.
