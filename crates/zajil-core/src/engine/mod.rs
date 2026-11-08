@@ -361,13 +361,16 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
-/// The download engine. Cheap to share; one client is reused.
+/// The download engine. Cheap to share; its clients are reused.
 #[derive(Debug, Clone)]
 pub struct Engine {
     /// It follows no redirect itself ([`get_following`] does):
     /// [`Engine::fetch_page`] returns the redirect, whose caller checks
     /// each target first.
     client: Client,
+    /// Direct links from limited-download hosts get more time to start
+    /// responding, without changing the timeout for other hosts.
+    limited_host_client: Client,
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
@@ -418,9 +421,15 @@ pub mod engine_test_hooks {
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
-        let client = build_client(&options, &[])?;
+        let client = build_client(&options, &[], options.idle_timeout)?;
+        let limited_host_client = build_client(
+            &options,
+            &[],
+            http::limited_host_idle_timeout(options.idle_timeout),
+        )?;
         Ok(Engine {
             client,
+            limited_host_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),
@@ -439,9 +448,16 @@ impl Engine {
     /// trusted root, and CI checks that its release build lacks the feature.
     #[cfg(feature = "test-support")]
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
-        let client = build_client(&options, &[ca_der.to_vec()])?;
+        let roots = [ca_der.to_vec()];
+        let client = build_client(&options, &roots, options.idle_timeout)?;
+        let limited_host_client = build_client(
+            &options,
+            &roots,
+            http::limited_host_idle_timeout(options.idle_timeout),
+        )?;
         Ok(Engine {
             client,
+            limited_host_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),

@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Direct download links from Nitroflare and Rapidgator now get an extended idle timeout of up to 15 minutes (#372), allowing the hosts' own wait to finish before Zajil gives up. Zajil does not skip wait periods, automate CAPTCHA, or bypass host limits.
+
 ### Fixed
 
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.
