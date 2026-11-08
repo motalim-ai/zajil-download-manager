@@ -47,6 +47,10 @@ ts-rs = "12.0.1"
 zajil-core = { path = "../../../crates/zajil-core" }
 # The batch window's patterns (`batch.rs`), as `zajil batch`'s.
 zajil-grab = { path = "../../../crates/zajil-grab" }
+# The video sites' pages that «Batch download» refuses (`video_pages.rs`),
+# from the page's own list: both already in the tree through tauri.
+regex = "1.13.1"
+url = "2.5.8"
 zajil-host = { path = "../../../crates/zajil-host" }
 zajil-i18n = { path = "../../../crates/zajil-i18n" }
 zajil-platform = { path = "../../../crates/zajil-platform" }

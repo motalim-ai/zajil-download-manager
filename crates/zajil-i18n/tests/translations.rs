@@ -138,6 +138,17 @@ fn text(lang: Lang, key: &str, count: f64) -> String {
 /// or `$count` shown without `PLURAL`).
 const ARABIC: &[(&str, [&str; 6])] = &[
     (
+        "batch-error-video_page",
+        [
+            "ليس في هذه الروابط صفحة فيديو.",
+            "في هذه الروابط صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط صفحتا فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 3 صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 11 صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 100 صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+        ],
+    ),
+    (
         "batch-links-count",
         [
             "لا روابط",
@@ -338,6 +349,13 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 ];
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
+    (
+        "batch-error-video_page",
+        [
+            "One of these links is a video's page, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».",
+            "2 of these links are video pages, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».",
+        ],
+    ),
     ("batch-links-count", ["1 link", "2 links"]),
     ("downloads-count", ["1 download", "2 downloads"]),
     (
@@ -851,6 +869,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("batch-shown", &["shown"]),
     ("batch-error-at", &["at"]),
     ("batch-error-too_many", &["max"]),
+    ("batch-error-video_page", &["count"]),
     ("batch-error-not_http", &["http", "https"]),
     ("delete-unfinished", &["count"]),
     ("delete-also-finished", &["count"]),

@@ -11,6 +11,7 @@ export type BatchProblem = {
  * `in_fragment`, `backslash`, `unclosed`, `unopened`, `nested`,
  * `empty`, `bad_range`, `mixed`, `descending`, `zero_step`, `width`,
  * `too_large`, `bad_counter`, `star_needs_range`, `second_star`,
- * `no_star`, `no_pattern`, `too_many`, `bad_url`.
+ * `no_star`, `no_pattern`, `too_many`, `bad_url`, `video_page` (how
+ * many of the links are a video site's pages, in `count`).
  */
 kind: string, at: number | null, text: string | null, count: number | null, max: number | null, };

@@ -64,7 +64,8 @@ pub struct BatchProblem {
     /// `in_fragment`, `backslash`, `unclosed`, `unopened`, `nested`,
     /// `empty`, `bad_range`, `mixed`, `descending`, `zero_step`, `width`,
     /// `too_large`, `bad_counter`, `star_needs_range`, `second_star`,
-    /// `no_star`, `no_pattern`, `too_many`, `bad_url`.
+    /// `no_star`, `no_pattern`, `too_many`, `bad_url`, `video_page` (how
+    /// many of the links are a video site's pages, in `count`).
     pub kind: String,
     pub at: Option<usize>,
     pub text: Option<String>,
@@ -132,10 +133,32 @@ fn links(request: &BatchRequest) -> Result<Vec<String>, PatternError> {
     pattern::expand(request.pattern.trim(), star.as_ref(), MAX_URLS)
 }
 
+/// Refuses `links` when any is a big video site's page: the engine would
+/// save each page's HTML, not its video (a playlist's pattern came out as
+/// `watch (1).html` to `watch (12).html`, #332). «Add link» reads such a
+/// page, or its playlist's, in «Video quality».
+fn no_video_pages(links: &[String]) -> Result<(), BatchProblem> {
+    let pages = links
+        .iter()
+        .filter(|link| crate::video_pages::is_video_page(link))
+        .count();
+    if pages == 0 {
+        return Ok(());
+    }
+    Err(BatchProblem {
+        kind: "video_page".into(),
+        at: None,
+        text: None,
+        count: Some(pages as u64),
+        max: None,
+    })
+}
+
 /// The preview: how many links, and the first [`SHOWN`].
 #[tauri::command]
 pub fn batch_preview(request: BatchRequest) -> Result<BatchPreview, BatchProblem> {
     let links = links(&request)?;
+    no_video_pages(&links)?;
     Ok(BatchPreview {
         count: links.len() as u64,
         shown: links.into_iter().take(SHOWN).collect(),
@@ -158,6 +181,8 @@ pub async fn batch_add<R: tauri::Runtime>(
         return Err("a ui-test scene adds nothing".into());
     }
     let links = links(&request).map_err(|e| e.to_string())?;
+    no_video_pages(&links)
+        .map_err(|_| "a video site's page is not downloaded in a batch".to_owned())?;
     let (store, settings, system) = (
         app.store.clone(),
         app.settings.clone(),
@@ -272,6 +297,53 @@ mod tests {
             from: from.map(Into::into),
             to: to.map(Into::into),
             width,
+        }
+    }
+
+    /// A pattern whose links are video pages is refused, with how many
+    /// (#332: a playlist's came out as `watch (1).html` to `watch (12).html`);
+    /// files on the same site, or beside a video page's path, are not.
+    #[test]
+    fn video_pages_are_not_a_batch() {
+        let refused = batch_preview(request(
+            "https://www.youtube.com/watch?v=abc&index=*",
+            Some("1"),
+            Some("12"),
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            (refused.kind.as_str(), refused.count),
+            ("video_page", Some(12))
+        );
+        let refused = batch_preview(request(
+            "https://vimeo.com/{1000,1001,about}",
+            None,
+            None,
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            (refused.kind.as_str(), refused.count),
+            ("video_page", Some(2))
+        );
+        assert!(
+            batch_preview(request(
+                "https://site.com/img*.jpg",
+                Some("1"),
+                Some("3"),
+                None
+            ))
+            .is_ok()
+        );
+        for files in [
+            "https://www.youtube.com/s/img[1-3].png",
+            "https://vimeo.com/about/[1-3]",
+        ] {
+            assert!(
+                batch_preview(request(files, None, None, None)).is_ok(),
+                "{files}"
+            );
         }
     }
 

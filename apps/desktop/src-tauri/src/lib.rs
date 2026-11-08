@@ -43,6 +43,7 @@ mod tray;
 mod ui_test;
 mod update;
 mod video;
+mod video_pages;
 pub mod view;
 mod windows;
 
