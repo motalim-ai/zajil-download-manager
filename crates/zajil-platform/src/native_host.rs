@@ -193,6 +193,97 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(bytes).into()
 }
 
+/// The file beside the browsers' copy of `zajil-host` ([`fixed_copy`]) that
+/// names the Zajil it starts when Zajil is not running: the program's
+/// SHA-256 in hex, then its absolute path, one per line. Without it the copy
+/// looked for Zajil beside itself, where it never is, so a download from the
+/// browser failed whenever Zajil was closed (Windows since 1.2.1, and an
+/// AppImage).
+pub const APP_RECORD: &str = "zajil-program";
+
+/// Records `program` as the Zajil that the copy of the host in `dir` starts
+/// ([`app_to_start`]), with its SHA-256: written privately under a new name,
+/// then renamed over the old record.
+pub fn record_app(dir: &Path, program: &Path) -> io::Result<()> {
+    let path = program
+        .to_str()
+        .filter(|p| !p.contains(['\n', '\r']) && program.is_absolute())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} cannot be recorded", program.display()),
+            )
+        })?;
+    let digest = hex(&sha256_of(&mut std::fs::File::open(program)?)?);
+    crate::fs::private_dir(dir)?;
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(io::Error::other)?;
+    let new = dir.join(format!(".{APP_RECORD}.{}.new", hex(&random)));
+    let written = (|| {
+        let mut file = crate::fs::create_private(&new)?;
+        write!(file, "{digest}\n{path}\n")?;
+        file.sync_all()?;
+        drop(file);
+        crate::fs::replace_file(&new, &dir.join(APP_RECORD))?;
+        crate::fs::sync_dir(dir)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&new);
+    }
+    written
+}
+
+/// The Zajil recorded in `dir` ([`record_app`]), opened with
+/// [`crate::fs::open_program`] and checked against its recorded SHA-256:
+/// the program in a place others may change is started only as it was when
+/// Zajil recorded it. The caller starts it while the returned file is still
+/// open, so on Windows nothing can change it in between.
+pub fn app_to_start(dir: &Path) -> io::Result<(PathBuf, std::fs::File)> {
+    use std::io::Read;
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the record of Zajil is not valid",
+        )
+    };
+    let mut text = String::new();
+    crate::fs::open_private_tool(&dir.join(APP_RECORD))?.read_to_string(&mut text)?;
+    let mut lines = text.lines();
+    let (Some(digest), Some(path), None) = (lines.next(), lines.next(), lines.next()) else {
+        return Err(invalid());
+    };
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err(invalid());
+    }
+    let mut file = crate::fs::open_program(&path)?;
+    if hex(&sha256_of(&mut file)?) != digest {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} changed since Zajil recorded it", path.display()),
+        ));
+    }
+    Ok((path, file))
+}
+
+/// The SHA-256 of what `file` holds from where it is, read in pieces (an
+/// AppImage is large).
+fn sha256_of(file: &mut impl std::io::Read) -> io::Result<[u8; 32]> {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0u8; 1 << 16];
+    loop {
+        match file.read(&mut buffer)? {
+            0 => return Ok(hasher.finalize().into()),
+            n => hasher.update(&buffer[..n]),
+        }
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Registers the host with a browser for the current user (ADR-0006).
 pub trait NativeHostRegistrar {
     /// Registers `host` (an absolute path) for the extension ids `allowed`
