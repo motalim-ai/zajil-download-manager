@@ -8,6 +8,8 @@ import type { UpdateView } from "./bindings/UpdateView";
 export const updateApi = {
   /** The newer release found at this start, if any. */
   notice: () => invoke<UpdateView | null>("update_notice"),
+  /** Checks for a newer release now, even when automatic checks are off. */
+  checkNow: () => invoke<UpdateView | null>("update_check_now"),
   /** Opens its release page in the browser, from Rust. */
   openReleasePage: () => invoke<void>("open_release_page"),
   /** «Skip this version»: not shown again; a newer one is. */

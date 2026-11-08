@@ -316,6 +316,35 @@ pub fn update_notice(notice: State<'_, Notice>) -> Option<UpdateView> {
     })
 }
 
+/// Checks for a newer release when the user asks, regardless of the
+/// automatic-check setting, and remembers it for «Update now».
+#[tauri::command]
+pub async fn update_check_now<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+) -> Result<Option<UpdateView>, String> {
+    let engine = handle.state::<App>().engine.clone();
+    let current = handle.package_info().version.to_string();
+    let release = zajil_core::update::newer_release(&engine, &current, &zajil_core::Stop::new())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(release) = release else {
+        let notice = handle.state::<Notice>();
+        *notice.0.lock().unwrap() = None;
+        *notice.1.lock().unwrap() = None;
+        return Ok(None);
+    };
+    let update = signed_update(&handle).await;
+    let view = UpdateView {
+        version: release.version.clone(),
+        can_install: update.is_some(),
+    };
+    let notice = handle.state::<Notice>();
+    *notice.0.lock().unwrap() = Some(release);
+    *notice.1.lock().unwrap() = update;
+    let _ = handle.emit_to("main", "update-available", view.clone());
+    Ok(Some(view))
+}
+
 /// «Skip this version»: not shown again at the next starts; a newer one is.
 #[tauri::command]
 pub async fn update_skip<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Result<(), String> {
