@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.
 
+### Tests
+
+- **The desktop tests start in a Windows build with the GNU toolchain** (#333, found and first fixed by @MohammedFattay): they stopped at once with `STATUS_ENTRYPOINT_NOT_FOUND`, since only MSVC's linker embedded the app manifest. With GNU, `windres` now makes it a resource linked in every target (`WINDRES` when set, else the target's own `windres`), and a missing or failing `windres` is a warning, not a stopped build. Releases and CI build with MSVC and are unchanged.
+
 ## [1.2.3] - 2026-11-01
 
 Lighter: the owner's request after two YouTube comments (Zajil's window took most of its memory, and the window felt heavier than before). Measured on macOS only (release builds, the main window in front, 30 s once settled; memory is the physical footprint of Zajil with every WebKit process it started, as Activity Monitor shows it; downloads from a local server):
