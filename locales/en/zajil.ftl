@@ -764,6 +764,11 @@ batch-error-second_star = Only one star in the link.
 batch-error-no_star = «From» and «To» work with a star in the link.
 batch-error-no_pattern = The link has no pattern: put a star or a range where it changes.
 batch-error-bad_url = One of the links the pattern makes is not valid.
+batch-error-video_page =
+    { PLURAL($count) ->
+        [one] One of these links is a video's page, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».
+       *[other] { $count } of these links are video pages, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».
+    }
 
 ## Site grabber (M7)
 cmd-grab = Site grabber…
