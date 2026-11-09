@@ -361,7 +361,7 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
-/// The download engine. Cheap to share; its clients are reused.
+/// The download engine. Cheap to share; one client is reused.
 #[derive(Debug, Clone)]
 pub struct Engine {
     /// It follows no redirect itself ([`get_following`] does):
@@ -418,7 +418,7 @@ pub mod engine_test_hooks {
 
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
-        let client = build_client(&options, &[], options.idle_timeout)?;
+        let client = build_client(&options, &[])?;
         Ok(Engine {
             client,
             options,
@@ -439,8 +439,7 @@ impl Engine {
     /// trusted root, and CI checks that its release build lacks the feature.
     #[cfg(feature = "test-support")]
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
-        let roots = [ca_der.to_vec()];
-        let client = build_client(&options, &roots, options.idle_timeout)?;
+        let client = build_client(&options, &[ca_der.to_vec()])?;
         Ok(Engine {
             client,
             options,

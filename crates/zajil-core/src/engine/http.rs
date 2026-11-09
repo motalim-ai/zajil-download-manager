@@ -2,7 +2,7 @@
 //! without their secrets, TLS, validators and `Content-Range`.
 
 use std::io;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use reqwest::header::{self, HeaderMap};
 use reqwest::{Client, Response, StatusCode, Url, redirect};
@@ -34,11 +34,7 @@ pub(super) enum ReadBody {
 
 /// The engine's client. It follows no redirect itself: [`get_following`]
 /// does, so that each hop gets the headers for its own address.
-pub(super) fn build_client(
-    options: &Options,
-    extra_roots: &[Vec<u8>],
-    idle_timeout: Duration,
-) -> Result<Client, Error> {
+pub(super) fn build_client(options: &Options, extra_roots: &[Vec<u8>]) -> Result<Client, Error> {
     // rustls with the `ring` provider, and reqwest's built-in use of the
     // operating system's certificate store and checks
     // (`rustls-platform-verifier`). Nothing here can turn verification off.
@@ -58,7 +54,7 @@ pub(super) fn build_client(
         // page is sent by `FromBrowser` instead.
         .referer(false)
         .connect_timeout(options.connect_timeout)
-        .read_timeout(idle_timeout)
+        .read_timeout(options.idle_timeout)
         // Never one picked up implicitly from the system or the
         // environment: only the user's own.
         .no_proxy();
