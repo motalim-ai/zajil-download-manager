@@ -36,7 +36,9 @@
       {/if}
     </span>
   </div>
-  <div class="body">
+  <!-- The scrollable details region must be tabbable so keyboard users can scroll it. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div class="body" role="region" tabindex="0" aria-labelledby="details-title">
     <div class="main">
       <h2 id="details-title"><FileName name={d.name} /></h2>
       <p class="from">

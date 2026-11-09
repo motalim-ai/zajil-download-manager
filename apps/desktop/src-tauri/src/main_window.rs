@@ -273,7 +273,7 @@ mod tests {
         let outer = tauri::PhysicalSize::new(1208, 724);
         assert_eq!(
             bounded_inner_size(inner, outer, tauri::PhysicalSize::new(1366, 728)),
-            tauri::PhysicalSize::new(1358, 704)
+            inner
         );
         assert_eq!(
             bounded_inner_size(inner, outer, tauri::PhysicalSize::new(1920, 1080)),

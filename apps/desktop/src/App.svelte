@@ -1159,7 +1159,7 @@ import { patchRows } from "./lib/progressRows";
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 228px 1fr;
     min-height: 0;
   }
   .main {
@@ -1201,10 +1201,5 @@ import { patchRows } from "./lib/progressRows";
   }
   .end {
     margin-inline-start: auto;
-  }
-  @media (max-width: 840px) {
-    .body {
-      grid-template-columns: 176px minmax(0, 1fr);
-    }
   }
 </style>
