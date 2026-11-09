@@ -368,9 +368,6 @@ pub struct Engine {
     /// [`Engine::fetch_page`] returns the redirect, whose caller checks
     /// each target first.
     client: Client,
-    /// Direct links from limited-download hosts get more time to start
-    /// responding, without changing the timeout for other hosts.
-    limited_host_client: Client,
     options: Options,
     /// The browser's headers for downloads from this engine (M5).
     browser: Arc<crate::browser::FromBrowser>,
@@ -422,14 +419,8 @@ pub mod engine_test_hooks {
 impl Engine {
     pub fn new(options: Options) -> Result<Self, Error> {
         let client = build_client(&options, &[], options.idle_timeout)?;
-        let limited_host_client = build_client(
-            &options,
-            &[],
-            http::limited_host_idle_timeout(options.idle_timeout),
-        )?;
         Ok(Engine {
             client,
-            limited_host_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),
@@ -450,14 +441,8 @@ impl Engine {
     pub fn with_test_root(options: Options, ca_der: &[u8]) -> Result<Self, Error> {
         let roots = [ca_der.to_vec()];
         let client = build_client(&options, &roots, options.idle_timeout)?;
-        let limited_host_client = build_client(
-            &options,
-            &roots,
-            http::limited_host_idle_timeout(options.idle_timeout),
-        )?;
         Ok(Engine {
             client,
-            limited_host_client,
             options,
             browser: Arc::default(),
             sites: Arc::default(),

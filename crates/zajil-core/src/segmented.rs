@@ -145,7 +145,6 @@ pub(crate) enum Outcome {
 /// What the engine hands over to download segments.
 pub(crate) struct Job {
     pub client: Client,
-    pub limited_host_client: Client,
     /// The browser's headers for this download (M5): kept in memory only.
     pub browser: Arc<crate::browser::FromBrowser>,
     /// `Options::max_redirects`.
@@ -190,7 +189,6 @@ pub(crate) async fn run(
 ) -> Result<Outcome, Error> {
     let Job {
         client,
-        limited_host_client,
         browser,
         max_redirects,
         connections,
@@ -239,7 +237,6 @@ pub(crate) async fn run(
         site,
         request_size,
         client,
-        limited_host_client,
         browser,
         max_redirects,
         url,
@@ -515,7 +512,6 @@ struct Ctx {
     /// See [`Job::site`].
     site: Option<Arc<tokio::sync::Semaphore>>,
     client: Client,
-    limited_host_client: Client,
     browser: Arc<crate::browser::FromBrowser>,
     max_redirects: usize,
     url: Url,
@@ -1092,7 +1088,6 @@ async fn request_range(
         .map_or(to, |n| to.min(from.saturating_add(n - 1)));
     let request = get_following(
         &ctx.client,
-        &ctx.limited_host_client,
         &ctx.browser,
         ctx.max_redirects,
         ctx.url.clone(),

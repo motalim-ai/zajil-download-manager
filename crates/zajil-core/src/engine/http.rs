@@ -14,10 +14,6 @@ use super::download::Attempt;
 use super::probe::{is_bare_page, read_page};
 use super::{Engine, Error, Event, Options};
 
-/// Nitroflare and Rapidgator direct links can take several minutes to
-/// respond while the host applies its own free-download wait.
-pub(super) const LIMITED_HOST_IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-
 /// The origin (`scheme://host[:port]`) the download's bytes came from: its
 /// final address, else its link.
 pub(super) fn origin_of(state: &DownloadState) -> Option<String> {
@@ -77,25 +73,6 @@ pub(super) fn build_client(
         .user_agent(concat!("Zajil/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(Error::Http)
-}
-
-fn is_limited_download_host(url: &Url) -> bool {
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    ["nitroflare.com", "rapidgator.net"]
-        .iter()
-        .copied()
-        .any(|domain| {
-            host == domain
-                || host
-                    .strip_suffix(domain)
-                    .is_some_and(|prefix| prefix.ends_with('.'))
-        })
-}
-
-pub(super) fn limited_host_idle_timeout(configured: Duration) -> Duration {
-    configured.max(LIMITED_HOST_IDLE_TIMEOUT)
 }
 
 pub(crate) fn parse_url(raw: &str) -> Result<Url, Error> {
@@ -498,7 +475,6 @@ impl Engine {
     ) -> Result<Response, Error> {
         get_following(
             &self.client,
-            &self.limited_host_client,
             &self.browser,
             self.options.max_redirects,
             url,
@@ -527,7 +503,6 @@ impl Engine {
 /// origin (security review for 1.2.3).
 pub(crate) async fn get_following(
     client: &Client,
-    limited_host_client: &Client,
     browser: &crate::browser::FromBrowser,
     max_redirects: usize,
     url: Url,
@@ -543,11 +518,6 @@ pub(crate) async fn get_following(
         if let Some(host) = browser.refuses(&url) {
             return Err(Error::Refused { host });
         }
-        let client = if is_limited_download_host(&url) {
-            limited_host_client
-        } else {
-            client
-        };
         let response = more(browser.apply(&url, client.get(url.clone())))
             .send()
             .await
@@ -588,71 +558,6 @@ mod tests {
     use super::*;
 
     const FIVE_GIB: u64 = 5 * 1024 * 1024 * 1024;
-
-    #[test]
-    fn only_nitroflare_and_rapidgator_receive_the_longer_wait() {
-        for url in [
-            "https://nitroflare.com/file/abc",
-            "https://dl.nitroflare.com/file/abc",
-            "https://rapidgator.net/file/abc",
-            "https://cdn.rapidgator.net/file/abc",
-        ] {
-            assert!(is_limited_download_host(&Url::parse(url).unwrap()), "{url}");
-        }
-        for url in [
-            "https://nitroflare.com.attacker.example/file",
-            "https://notrapidgator.net/file",
-            "https://example.com/file",
-        ] {
-            assert!(
-                !is_limited_download_host(&Url::parse(url).unwrap()),
-                "{url}"
-            );
-        }
-        assert_eq!(
-            limited_host_idle_timeout(Duration::from_secs(60)),
-            LIMITED_HOST_IDLE_TIMEOUT
-        );
-        assert_eq!(
-            limited_host_idle_timeout(Duration::from_secs(20 * 60)),
-            Duration::from_secs(20 * 60)
-        );
-    }
-
-    #[tokio::test]
-    async fn limited_host_may_take_longer_to_answer_before_the_file_starts() {
-        let server = zajil_testserver::TestServer::http();
-        server.put(
-            "/slow.bin",
-            zajil_testserver::FileSpec::new(b"file".to_vec())
-                .answer_after(Duration::from_millis(250)),
-        );
-        let mut url = Url::parse(&server.url("/slow.bin")).unwrap();
-        url.set_host(Some("nitroflare.com")).unwrap();
-        let resolve = |timeout| {
-            Client::builder()
-                .connect_timeout(Duration::from_secs(2))
-                .read_timeout(timeout)
-                .no_proxy()
-                .resolve("nitroflare.com", server.addr())
-                .build()
-                .unwrap()
-        };
-        let client = resolve(Duration::from_millis(100));
-        let limited_host_client = resolve(Duration::from_secs(2));
-        let response = get_following(
-            &client,
-            &limited_host_client,
-            &crate::browser::FromBrowser::default(),
-            10,
-            url,
-            |request| request,
-        )
-        .await
-        .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(&response.bytes().await.unwrap()[..], b"file");
-    }
 
     #[test]
     fn parses_content_range() {
