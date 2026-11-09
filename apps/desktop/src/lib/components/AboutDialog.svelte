@@ -39,19 +39,31 @@
       }));
       void api.appVersion().then(
         (value) => (version = value),
-        (error) => (versionError = String(error)),
+        (error) => {
+          console.error("zajil: could not read the installed version in About", error);
+          versionError = locale.t("about-error-read-hint");
+        },
       );
       void api.videoToolsStatus().then(
         (value) => (tools = value),
-        (error) => (toolsError = String(error)),
+        (error) => {
+          console.error("zajil: could not read video tools in About", error);
+          toolsError = locale.t("about-error-read-hint");
+        },
       );
       void updateApi.notice().then(
         (view) => {
           if (!manuallyChecked) found = view;
         },
-        (error) => (checkError = String(error)),
+        (error) => {
+          console.error("zajil: could not read update notice in About", error);
+          checkError = locale.t("about-error-check-hint");
+        },
       );
-    })().catch((error) => (checkError = String(error)));
+    })().catch((error) => {
+      console.error("zajil: could not initialize About dialog", error);
+      checkError = locale.t("about-error-check-hint");
+    });
     return () => unlisten.forEach((stop) => stop());
   });
 
@@ -72,7 +84,8 @@
       found = await updateApi.checkNow();
       checkMessage = found ? null : locale.t("about-up-to-date");
     } catch (error) {
-      checkError = String(error);
+      console.error("zajil: could not check for updates in About", error);
+      checkError = locale.t("about-error-check-hint");
     } finally {
       checking = false;
     }
@@ -84,8 +97,9 @@
     try {
       await updateApi.install();
     } catch (error) {
+      console.error("zajil: could not install update from About", error);
       progress = undefined;
-      installError = String(error);
+      installError = locale.t("about-error-install-hint");
     }
   }
 
@@ -94,7 +108,8 @@
     try {
       await updateApi.openReleasePage();
     } catch (error) {
-      releaseError = String(error);
+      console.error("zajil: could not open release page from About", error);
+      releaseError = locale.t("about-error-release-hint");
     }
   }
 

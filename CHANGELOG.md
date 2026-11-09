@@ -13,7 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- The desktop About dialog shows the installed version, checks for newer releases on demand, and offers the signed installer or release page.
+- The desktop About dialog can check for newer releases on demand and offers the signed installer or release page. Errors now show localized guidance while technical details are logged.
 
 ## [1.2.3] - 2026-11-01
 

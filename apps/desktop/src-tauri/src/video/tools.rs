@@ -66,7 +66,10 @@ pub async fn video_tools_status(app: State<'_, crate::App>) -> Result<Vec<ToolVi
     let toolbox = Toolbox::new(folders(&app).0);
     tauri::async_runtime::spawn_blocking(move || tools_status(&toolbox))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|error| {
+            eprintln!("zajil: video tools status in About could not be read: {error}");
+            "video tools status could not be read".to_owned()
+        })
 }
 
 /// Why `tool` is not ready, checked again a moment later before it is

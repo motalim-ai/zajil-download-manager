@@ -828,6 +828,11 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
         &["binary", "license", "source", "tool", "version"],
     ),
     ("about-or-later", &["license"]),
+    ("about-check-failed", &["error"]),
+    ("about-install-failed", &["error"]),
+    ("about-release-failed", &["error"]),
+    ("about-version-error", &["error"]),
+    ("about-tools-error", &["error"]),
     ("tool-license-yt-dlp", &["binary", "source"]),
     // A button's name.
     ("tb-earlier", &["name"]),
