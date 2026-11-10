@@ -33,6 +33,12 @@ class BrowserTabsTest {
     fun closingTheLastPrivateTabRequiresConfirmationWithoutAffectingRegularTabs() {
         assertEquals(true, BrowserTabs.needsPrivateConfirmation(tabs, id = 2))
         assertEquals(false, BrowserTabs.needsPrivateConfirmation(tabs, id = 3))
-        assertEquals(false, BrowserTabs.needsPrivateConfirmation(tabs.dropLast(1), id = 2))
+        assertEquals(
+            false,
+            BrowserTabs.needsPrivateConfirmation(
+                tabs + TabInfo(4, "Private 2", "https://example.com/4", privateMode = true),
+                id = 2,
+            ),
+        )
     }
 }
