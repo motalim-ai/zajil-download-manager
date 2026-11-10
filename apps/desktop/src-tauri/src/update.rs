@@ -324,14 +324,19 @@ pub async fn update_check_now<R: tauri::Runtime>(
 ) -> Result<Option<UpdateView>, String> {
     let engine = handle.state::<App>().engine.clone();
     let current = handle.package_info().version.to_string();
-    let release =
-        match zajil_core::update::newer_release(&engine, &current, &zajil_core::Stop::new()).await {
-            Ok(release) => release,
-            Err(error) => {
-                eprintln!("zajil: the About update check: {error}");
-                return Err("update check failed".into());
-            }
-        };
+    let release = match zajil_core::update::newer_release(
+        &engine,
+        &current,
+        &zajil_core::Stop::new(),
+    )
+    .await
+    {
+        Ok(release) => release,
+        Err(error) => {
+            eprintln!("zajil: the About update check: {error}");
+            return Err("update check failed".into());
+        }
+    };
     let Some(release) = release else {
         let notice = handle.state::<Notice>();
         *notice.0.lock().unwrap() = None;
@@ -419,14 +424,11 @@ pub async fn update_install<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> R
         app.stop.request();
         crate::shutdown::wait_for_queues(app.stopped.subscribe(), crate::shutdown::STOP_WAIT).await;
     }
-    update.install(&bytes).map_err(|error| {
-        eprintln!("zajil: the update could not be installed: {error}");
-        "update install failed".to_owned()
-    })?;
-    handle.restart().map_err(|error| {
-        eprintln!("zajil: Zajil could not restart after installing the update: {error}");
-        "update install failed".to_owned()
-    })
+    if let Err(e) = update.install(&bytes) {
+        // Opened again as it was: the bar comes back at its start.
+        eprintln!("zajil: the update could not be installed: {e}");
+    }
+    handle.restart()
 }
 
 /// «Release page»: the found release's page in the default browser.

@@ -828,6 +828,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
         &["binary", "license", "source", "tool", "version"],
     ),
     ("about-or-later", &["license"]),
+    ("about-update-found", &["version"]),
     ("about-check-failed", &["error"]),
     ("about-install-failed", &["error"]),
     ("about-release-failed", &["error"]),
@@ -1377,6 +1378,69 @@ const WHOLE_TEXTS: &[Whole] = &[
                 ("source", "SOURCE"),
             ],
             "yt-dlp VERSION, under the BINARY for the file Zajil downloads (its source code: LICENSE). Its source: SOURCE",
+        ),
+    },
+    Whole {
+        key: "about-update-found",
+        ar: (&[("version", "1.2.4")], "النسخة 1.2.4 متاحة."),
+        en: (&[("version", "1.2.4")], "Version 1.2.4 is available."),
+    },
+    Whole {
+        key: "about-check-failed",
+        ar: (
+            &[("error", "تحقّق من الاتصال بالإنترنت ثم أعد المحاولة.")],
+            "تعذّر التحقّق من التحديثات. تحقّق من الاتصال بالإنترنت ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Check your internet connection and try again.")],
+            "Could not check for updates. Check your internet connection and try again.",
+        ),
+    },
+    Whole {
+        key: "about-install-failed",
+        ar: (
+            &[("error", "تحقّق من الاتصال بالإنترنت وأعد المحاولة.")],
+            "تعذّر تثبيت التحديث. تحقّق من الاتصال بالإنترنت وأعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Check your internet connection and try again.")],
+            "Could not install the update. Check your internet connection and try again.",
+        ),
+    },
+    Whole {
+        key: "about-release-failed",
+        ar: (
+            &[("error", "تحقّق من إعداد المتصفح الافتراضي ثم أعد المحاولة.")],
+            "تعذّر فتح صفحة الإصدار. تحقّق من إعداد المتصفح الافتراضي ثم أعد المحاولة.",
+        ),
+        en: (
+            &[(
+                "error",
+                "Check your default browser settings and try again.",
+            )],
+            "Could not open the release page. Check your default browser settings and try again.",
+        ),
+    },
+    Whole {
+        key: "about-version-error",
+        ar: (
+            &[("error", "أعد تشغيل زاجِل، ثم أعد المحاولة.")],
+            "تعذّرت قراءة النسخة المثبّتة. أعد تشغيل زاجِل، ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Restart Zajil and try again.")],
+            "Could not read the installed version. Restart Zajil and try again.",
+        ),
+    },
+    Whole {
+        key: "about-tools-error",
+        ar: (
+            &[("error", "أعد تشغيل زاجِل، ثم أعد المحاولة.")],
+            "تعذّرت قراءة أدوات الفيديو. أعد تشغيل زاجِل، ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Restart Zajil and try again.")],
+            "Could not read the video tools. Restart Zajil and try again.",
         ),
     },
     Whole {
