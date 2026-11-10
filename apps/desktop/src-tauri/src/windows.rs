@@ -787,6 +787,10 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
         };
         let base = read("tauri.conf.json")["app"]["windows"][0].clone();
+        assert_eq!(base["width"], 1180);
+        assert_eq!(base["height"], 760);
+        assert_eq!(base["minWidth"], 900);
+        assert_eq!(base["minHeight"], 560);
         for (name, own) in [
             (
                 "tauri.macos.conf.json",

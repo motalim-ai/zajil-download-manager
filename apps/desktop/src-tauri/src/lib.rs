@@ -302,6 +302,9 @@ pub fn run() {
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
             if let Some(window) = tauri_app.get_webview_window("main") {
+                if let Err(err) = main_window::fit_to_work_area(&window) {
+                    eprintln!("zajil: the main window could not fit its monitor: {err}");
+                }
                 eprintln!(
                     "zajil: the window is made (shown: {}); its page is loading",
                     window.is_visible().unwrap_or(false)

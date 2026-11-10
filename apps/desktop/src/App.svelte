@@ -1182,6 +1182,7 @@ import { patchRows } from "./lib/progressRows";
   /* A desktop status bar: its parts in panels with lines between. */
   .status {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     padding: 3px 6px;
     border-top: 1px solid var(--line);
