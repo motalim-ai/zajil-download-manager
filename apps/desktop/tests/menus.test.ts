@@ -30,7 +30,7 @@ describe("the menus", () => {
     }
   });
 
-  it("open by their names' first letters", () => {
+  it("keep Alt access letters without needing a visible underline", () => {
     expect(accessLetter("ملف")).toBe("م");
     expect(accessLetter("Edit")).toBe("E");
   });

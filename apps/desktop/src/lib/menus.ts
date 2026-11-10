@@ -59,5 +59,5 @@ export const ROW_MENU: Item[] = [
 export const commandKey = (command: Command): string => `cmd-${command}`;
 
 /** A menu's access letter (Alt with it opens the menu): its name's first
- * letter, underlined. */
+ * letter. */
 export const accessLetter = (name: string): string => [...name][0] ?? "";

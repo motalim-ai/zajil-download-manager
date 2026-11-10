@@ -33,8 +33,8 @@
     onrun(command);
   }
 
-  // Alt with a menu's underlined letter opens it (the next one, if two share
-  // it, as «م» does in Arabic); Alt alone, then its release, goes to the bar.
+  // Alt with a menu's first letter opens it (the next one, if two share it,
+  // as «م» does in Arabic); Alt alone, then its release, goes to the bar.
   let altAlone = false;
   function onWindowKeydown(event: KeyboardEvent) {
     altAlone = event.key === "Alt";
@@ -105,7 +105,6 @@
 <div class="menubar" role="menubar" aria-label={locale.t("menu-bar")} bind:this={bar}>
   {#each MENU_BAR as menu, i (menu.key)}
     {@const name = locale.t(menu.key)}
-    {@const first = accessLetter(name)}
     <div class="slot">
       <button
         id="menubar-{i}"
@@ -117,7 +116,7 @@
         onclick={() => (open === i ? close() : void show(i, "none"))}
         onpointerenter={() => open !== null && open !== i && void show(i, "none")}
         onkeydown={(e) => onBarKey(e, i)}
-      ><u>{first}</u>{name.slice(first.length)}</button>
+      >{name}</button>
       {#if open === i}
         <div id="menu-{i}" class="menu" role="menu" aria-labelledby="menubar-{i}" tabindex="-1" onkeydown={(e) => onMenuKey(e, i)}>
           {#each menu.items as item, j (j)}
@@ -163,10 +162,6 @@
   .top:hover,
   .top[aria-expanded="true"] {
     background: var(--sel);
-  }
-  u {
-    text-decoration-thickness: 1px;
-    text-underline-offset: 3px;
   }
   .menu {
     position: absolute;
