@@ -69,7 +69,9 @@ fn bounded_inner_size(
     let frame_height = outer.height.saturating_sub(inner.height);
     tauri::PhysicalSize::new(
         inner.width.min(work_area.width.saturating_sub(frame_width)),
-        inner.height.min(work_area.height.saturating_sub(frame_height)),
+        inner
+            .height
+            .min(work_area.height.saturating_sub(frame_height)),
     )
 }
 
