@@ -170,8 +170,10 @@ pub async fn video_keep<R: tauri::Runtime>(
     state.started.lock().unwrap().take_if(|s| *s == id);
     let queue = known_queue(&handle.state::<crate::App>(), queue);
     with_row(&state, id, |row| row.queue = queue);
-    let name = zajil_core::sanitize::sanitize_file_name(name.trim());
-    let wanted = MoveTo { folder, name };
+    let wanted = MoveTo {
+        folder,
+        name: wanted_name(&name),
+    };
     let done_file = with_row(&state, id, |row| match (&row.file, row.status) {
         (Some(file), StatusView::Done) => {
             (!row.lands_at(&wanted)).then(|| (PathBuf::from(file), row.name.clone()))
@@ -200,6 +202,19 @@ pub async fn video_keep<R: tauri::Runtime>(
     save_rows(&handle.state::<crate::App>(), &state);
     let _ = handle.emit("downloads-changed", ());
     Ok(())
+}
+
+/// The name the user gave «Video quality», as a file can be; none when
+/// the box was empty: the video keeps its own, the page's title once read.
+/// The box is empty until the title comes, and «Start download» works
+/// meanwhile: an empty name made a file name of `download` (#374).
+fn wanted_name(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        String::new()
+    } else {
+        zajil_core::sanitize::sanitize_file_name(name)
+    }
 }
 
 /// «Download later»: it stops, and waits paused in the list, to go to
@@ -369,5 +384,33 @@ mod tests {
         );
         // Nothing running: nothing to stop.
         give_up(&state);
+    }
+
+    /// #374: «Start download» pressed before the page's title came gave
+    /// the video the name `download`. An empty box keeps the video's own
+    /// name; a name given is a file's.
+    #[test]
+    fn an_empty_name_keeps_the_video_s_own() {
+        assert_eq!(wanted_name(""), "");
+        assert_eq!(wanted_name("  "), "");
+        assert_eq!(wanted_name(" درس/أول "), "أول");
+        let row = super::super::download::new_row(
+            FIRST_ID + 1,
+            super::super::download::NewVideo {
+                url: "https://e.com/w".into(),
+                title: Some("أقوى خدعة".into()),
+            },
+            "/d",
+        );
+        let kept = MoveTo {
+            folder: "/d".into(),
+            name: wanted_name(""),
+        };
+        assert!(row.lands_at(&kept), "nothing to move: it keeps its title");
+        let elsewhere = MoveTo {
+            folder: "/e".into(),
+            name: wanted_name(""),
+        };
+        assert!(!row.lands_at(&elsewhere) && elsewhere.name.is_empty());
     }
 }
