@@ -316,6 +316,45 @@ pub fn update_notice(notice: State<'_, Notice>) -> Option<UpdateView> {
     })
 }
 
+/// Checks for a newer release when the user asks, regardless of the
+/// automatic-check setting, and remembers it for «Update now».
+#[tauri::command]
+pub async fn update_check_now<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+) -> Result<Option<UpdateView>, String> {
+    let engine = handle.state::<App>().engine.clone();
+    let current = handle.package_info().version.to_string();
+    let release = match zajil_core::update::newer_release(
+        &engine,
+        &current,
+        &zajil_core::Stop::new(),
+    )
+    .await
+    {
+        Ok(release) => release,
+        Err(error) => {
+            eprintln!("zajil: the About update check: {error}");
+            return Err("update check failed".into());
+        }
+    };
+    let Some(release) = release else {
+        let notice = handle.state::<Notice>();
+        *notice.0.lock().unwrap() = None;
+        *notice.1.lock().unwrap() = None;
+        return Ok(None);
+    };
+    let update = signed_update(&handle).await;
+    let view = UpdateView {
+        version: release.version.clone(),
+        can_install: update.is_some(),
+    };
+    let notice = handle.state::<Notice>();
+    *notice.0.lock().unwrap() = Some(release);
+    *notice.1.lock().unwrap() = update;
+    let _ = handle.emit_to("main", "update-available", view.clone());
+    Ok(Some(view))
+}
+
 /// «Skip this version»: not shown again at the next starts; a newer one is.
 #[tauri::command]
 pub async fn update_skip<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Result<(), String> {
@@ -344,7 +383,8 @@ pub async fn update_skip<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Resu
 #[tauri::command]
 pub async fn update_install<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> Result<(), String> {
     let Some(update) = handle.state::<Notice>().1.lock().unwrap().clone() else {
-        return Err("no signed update was found".into());
+        eprintln!("zajil: the About update install was requested without a signed update");
+        return Err("update install failed".into());
     };
     let mut done = 0u64;
     let mut shown = std::time::Instant::now();
@@ -373,7 +413,7 @@ pub async fn update_install<R: tauri::Runtime>(handle: tauri::AppHandle<R>) -> R
         .is_some_and(|(_, key)| signed_by(&bytes, &update.signature, key));
     if !ours {
         eprintln!("zajil: the update's file is not signed by a key of Zajil's; not installed");
-        return Err("the update could not be checked".into());
+        return Err("update install failed".into());
     }
     eprintln!("zajil: installing the update to {}", update.version);
     // As when quitting: the downloads save their progress and stop, and
@@ -399,12 +439,16 @@ pub fn open_release_page<R: tauri::Runtime>(
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let Some(page) = notice.0.lock().unwrap().as_ref().map(|r| r.page.clone()) else {
+        eprintln!("zajil: the About release page was requested without a newer release");
         return Err("no newer release was found".into());
     };
     handle
         .opener()
         .open_url(page, None::<&str>)
-        .map_err(|e| e.to_string())
+        .map_err(|error| {
+            eprintln!("zajil: the About release page could not be opened: {error}");
+            "release page could not be opened".to_owned()
+        })
 }
 
 #[cfg(test)]
