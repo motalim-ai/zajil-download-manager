@@ -796,6 +796,7 @@ import { patchRows } from "./lib/progressRows";
       if (screen === "settings") view = "settings";
     }
     if (screen === "categories") view = "categories";
+    if (screen === "about") aboutOpen = true;
     // Download 2: its name is mixed (M5.5: mixed names in every window).
     if (screen === "details") details = await api.details(2);
     // The failed download, its new link refused as another file's (M5).
@@ -856,6 +857,17 @@ import { patchRows } from "./lib/progressRows";
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     };
     await settle();
+    if (screen === "about") {
+      for (let i = 0; i < 100; i++) {
+        const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="about-title"]');
+        const content = dialog?.querySelector(".content");
+        const hasVersion = content?.children[0]?.matches(".version, .problem");
+        const hasDetails = content?.children[1]?.matches("pre, .problem");
+        if (hasVersion && hasDetails) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await settle();
+    }
     // «Batch download» shows its links a moment after the pattern (Rust
     // makes them): the picture waits for them, 5 s at most.
     if (screen === "batch") {
@@ -915,6 +927,31 @@ import { patchRows } from "./lib/progressRows";
       const buttons = Math.ceil(Math.max(...[...content.querySelectorAll("button")].map((b) => b.getBoundingClientRect().bottom)));
       fit = { content: bottom(), window: window.innerHeight, scroll: scrolled(), buttons, cut, scrolls };
     }
+    let aboutLayout: unknown = undefined;
+    if (screen === "about") {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="about-title"]');
+      const dialogRect = dialog?.getBoundingClientRect();
+      const footerRect = dialog?.querySelector("footer")?.getBoundingClientRect();
+      const content = dialog?.querySelector<HTMLElement>(".content");
+      const text = content?.querySelector<HTMLElement>("pre");
+      aboutLayout = {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        dialog: dialogRect && { left: dialogRect.left, top: dialogRect.top, right: dialogRect.right, bottom: dialogRect.bottom },
+        footer: footerRect && { top: footerRect.top, bottom: footerRect.bottom },
+        language: document.documentElement.lang,
+        direction: dialog ? getComputedStyle(dialog).direction : null,
+        content: content && {
+          clientWidth: content.clientWidth,
+          scrollWidth: content.scrollWidth,
+          clientHeight: content.clientHeight,
+          scrollHeight: content.scrollHeight,
+          overflowY: getComputedStyle(content).overflowY,
+        },
+        text: text && { clientWidth: text.clientWidth, scrollWidth: text.scrollWidth },
+        surface: dialog ? getComputedStyle(dialog).backgroundColor : null,
+        foreground: dialog ? getComputedStyle(dialog).color : null,
+      };
+    }
     if (screen !== "names") {
       // Automatic accessibility check of what is on screen (axe-core,
       // a test-only dependency loaded only in this build).
@@ -930,7 +967,7 @@ import { patchRows } from "./lib/progressRows";
       const { checkNames } = await import("./uitest/names");
       const known = [...snapshot.downloads.map((d) => d.name), ...(windowScene ? [windowScene.complete.name] : [])];
       const names = checkNames(document.body, known);
-      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch, names, fit });
+      await test.uiTestReport({ scenario, dpr: window.devicePixelRatio, window: await test.windowRect(), accessibility, languageSwitch, names, fit, aboutLayout });
     }
     return true;
   }

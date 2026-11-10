@@ -203,7 +203,7 @@ mod tests {
     fn menu_commands_go_to_the_main_window_but_select_all() {
         assert_eq!(menu_target("select-all", "add-1"), "add-1");
         assert_eq!(menu_target("select-all", "main"), "main");
-        for command in ["add-link", "settings", "quit", "pause-all", "schedule"] {
+        for command in ["about", "add-link", "settings", "quit", "pause-all", "schedule"] {
             assert_eq!(menu_target(command, "progress-7"), "main", "{command}");
             assert_eq!(menu_target(command, "main"), "main", "{command}");
         }
