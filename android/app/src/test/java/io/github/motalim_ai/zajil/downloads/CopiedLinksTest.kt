@@ -33,6 +33,12 @@ class CopiedLinksTest {
     }
 
     @Test
+    fun clipboardHtmlAddressCanBeSuggestedWithoutBeingOfferedAsADownload() {
+        assertEquals("https://example.com/index.html", CopiedLinks.suggestion("https://example.com/index.html"))
+        assertEquals("https://example.com/file.zip", CopiedLinks.suggestion("Copied file: https://example.com/file.zip"))
+    }
+
+    @Test
     fun onlyAHashOfTheLinkIsKept() {
         val link = "https://example.com/f.zip?sig=secret"
         val kept = CopiedLinks.hash(link)

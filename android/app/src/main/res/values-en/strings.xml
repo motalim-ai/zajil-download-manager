@@ -257,8 +257,14 @@
     <string name="browse">Browser</string>
     <string name="private_mode">Private mode</string>
     <string name="private_on">Private</string>
-    <string name="private_note">Private mode: what you visit is not kept, and cookies and site data are deleted when it ends.</string>
+    <string name="private_note">Private mode: what you visit is not kept, and cookies and site data are deleted when you close its tabs.</string>
     <string name="private_unsupported">This phone\'s web view has no private mode. Update «Android System WebView».</string>
+    <string name="regular_tabs">Regular</string>
+    <string name="private_tabs">Private</string>
+    <string name="close_private_tabs">Close private tabs</string>
+    <string name="close_private_tabs_title">Close private tabs?</string>
+    <string name="close_private_tabs_message">All private tabs will close, and their cookies and site data will be deleted.</string>
+    <string name="clipboard_suggestion">Copied link — suggested to open</string>
     <string name="address_hint">Type an address or search</string>
     <string name="sites">Sites</string>
     <string name="add_site">Add</string>
