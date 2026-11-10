@@ -9,11 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **A video from the browser's list was saved as `download`** (#374, reported by @congfo): «Start download» pressed in «Video quality» before the page's title came, with the name box still empty, named the finished file `download.mp4` or `download.webm` (numbered when taken), though the list showed the title while it downloaded. An empty name now keeps the video's own, its title.
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.
 
 ### Added
 
 - The desktop About dialog can check for newer releases on demand and offers the signed installer or release page. Errors now show localized guidance while technical details are logged.
+
+### Tests
+
+- **The desktop tests start in a Windows build with the GNU toolchain** (#333, found and first fixed by @MohammedFattay): they stopped at once with `STATUS_ENTRYPOINT_NOT_FOUND`, since only MSVC's linker embedded the app manifest. With GNU, `windres` now makes it a resource linked in every target (`WINDRES` when set, else the target's own `windres`), and a missing or failing `windres` is a warning, not a stopped build. Releases and CI build with MSVC and are unchanged.
 
 ## [1.2.3] - 2026-11-01
 
