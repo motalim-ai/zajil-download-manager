@@ -30,7 +30,6 @@ import androidx.webkit.WebViewFeature
 import io.github.motalim_ai.zajil.BuildConfig
 import io.github.motalim_ai.zajil.downloads.BrowserLink
 import io.github.motalim_ai.zajil.downloads.CookieSource
-import io.github.motalim_ai.zajil.downloads.CopiedLinks
 import io.github.motalim_ai.zajil.protection
 import io.github.motalim_ai.zajil.video.VideoPages
 import java.security.SecureRandom
@@ -94,11 +93,6 @@ class BrowserController(private val context: Context) {
 
     private val _tabs = MutableStateFlow<List<TabInfo>>(emptyList())
     val tabs: StateFlow<List<TabInfo>> = _tabs.asStateFlow()
-
-    private val _clipboardSuggestion = MutableStateFlow<String?>(null)
-
-    /** A copied link shown inline in the browser, never as a download prompt. */
-    val clipboardSuggestion: StateFlow<String?> = _clipboardSuggestion.asStateFlow()
 
     /** A link the page wanted to download: offered in Zajil's sheet, never started. */
     private val _requests = MutableSharedFlow<Pair<String, BrowserLink?>>(extraBufferCapacity = 4)
@@ -332,18 +326,6 @@ class BrowserController(private val context: Context) {
     fun destroy() {
         close()
         deletePrivateProfile()
-    }
-
-    /** Reads only while the browser is visible; the result is a navigation suggestion, not a download offer. */
-    fun refreshClipboardSuggestion() {
-        if ((context as? android.app.Activity)?.hasWindowFocus() != true) return
-        _clipboardSuggestion.value = CopiedLinks.suggest(context)
-    }
-
-    fun openClipboardSuggestion() {
-        val url = _clipboardSuggestion.value ?: return
-        _clipboardSuggestion.value = null
-        open(url)
     }
 
     /**

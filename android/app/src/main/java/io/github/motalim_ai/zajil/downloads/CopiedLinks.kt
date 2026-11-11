@@ -8,8 +8,10 @@ import java.security.MessageDigest
  * A link the user copied, read only while a Zajil window has the focus
  * (Android 10 and later allow nothing else): never in the background.
  *
- * The browser may show a copied link as an inline suggestion. A download
- * offer is read only when the user explicitly asks for the clipboard link.
+ * Zajil remembers which copy it last looked at (the clip's time, which
+ * needs no read of its text: Android shows its «pasted» notice only for a
+ * read) and which link it last offered (a SHA-256 of it, not the link), so
+ * that one copied link is offered once.
  */
 object CopiedLinks {
     /** What the clipboard holds, for [read]. */
@@ -36,19 +38,10 @@ object CopiedLinks {
     fun shouldOffer(link: String, lastOffered: String?, inList: Boolean): Boolean =
         !inList && hash(link) != lastOffered
 
-    /** A link to suggest in the browser, without saving it or creating a download offer. */
-    fun suggest(context: Context): String? {
-        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return null
-        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
-            ?: return null
-        return suggestion(text.toString())
-    }
-
-    fun suggestion(text: String): String? = Links.first(text)
-
     /**
-     * The copied link for a surface the user explicitly opened, such as the
-     * Quick Settings tile or the home-screen clipboard button.
+     * The copied link for the open-time offer ([onlyNew]), or for the Quick
+     * Settings tile, which the user tapped to ask for it (any copied link).
+     * Either way it counts as offered.
      */
     fun read(context: Context, onlyNew: Boolean, inList: (String) -> Boolean): Copied {
         val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return Copied.Unavailable

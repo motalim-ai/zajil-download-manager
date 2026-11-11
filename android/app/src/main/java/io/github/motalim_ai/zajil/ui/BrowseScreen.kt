@@ -1,7 +1,6 @@
 package io.github.motalim_ai.zajil.ui
 
 import android.app.Activity
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
@@ -95,9 +94,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -126,20 +122,6 @@ private val TILES = listOf(0xFFD42F2C, 0xFF1D63D8, 0xFFB0399B, 0xFF2A3A44, 0xFF1
 /** «المتصفح» (A6; D5): the browser's home, or the page with its found videos. */
 @Composable
 fun BrowseScreen(browser: BrowserController, onFound: (Found) -> Unit, onSignIns: () -> Unit, bottomPadding: PaddingValues) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(browser, lifecycleOwner) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            delay(300)
-            browser.refreshClipboardSuggestion()
-        }
-    }
-    DisposableEffect(browser, context) {
-        val clipboard = context.getSystemService(ClipboardManager::class.java)
-        val listener = ClipboardManager.OnPrimaryClipChangedListener { browser.refreshClipboardSuggestion() }
-        clipboard?.addPrimaryClipChangedListener(listener)
-        onDispose { clipboard?.removePrimaryClipChangedListener(listener) }
-    }
     val page by browser.page.collectAsStateWithLifecycle()
     if (page == null) BrowseHome(browser, bottomPadding) else BrowsePage(browser, onFound, onSignIns)
 }
@@ -175,10 +157,9 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
             if (groupTabs.isNotEmpty()) TabsButton(groupTabs.size) { sheet = "tabs" }
         }
         AddressField(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), onGo = browser::open)
-        ClipboardSuggestion(browser, Modifier.padding(start = 18.dp, end = 18.dp, top = 10.dp))
         if (refused) ZText(stringResource(R.string.private_unsupported), Modifier.padding(horizontal = 22.dp, vertical = 8.dp), size = 13.sp, color = c.red)
         if (private) Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp)) { Note(stringResource(R.string.private_note), c.amberBg, c.amber, LineIcon.Private) }
-        if (private) QuietButton(
+        if (private && tabs.any { it.privateMode }) QuietButton(
             stringResource(R.string.close_private_tabs),
             onClick = { closePrivate = true },
             modifier = Modifier.padding(horizontal = 18.dp),
@@ -268,38 +249,6 @@ private fun AddressField(modifier: Modifier, onGo: (String) -> Unit) {
         },
         background = Z.colors.surface,
     )
-}
-
-@Composable
-private fun ClipboardSuggestion(browser: BrowserController, modifier: Modifier = Modifier) {
-    val suggestion by browser.clipboardSuggestion.collectAsStateWithLifecycle()
-    if (suggestion != null) {
-        val c = Z.colors
-        Row(
-            modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(c.surface)
-                .clickable(role = Role.Button, onClick = browser::openClipboardSuggestion)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-                .semantics { contentDescription = stringResource(R.string.clipboard_suggestion) },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            ZIcon(LineIcon.Clipboard, c.accent, 19.dp)
-            Column(Modifier.weight(1f)) {
-                ZText(stringResource(R.string.clipboard_suggestion), size = 12.sp, color = c.muted)
-                ZText(
-                    suggestion.orEmpty(),
-                    size = 13.sp,
-                    color = c.ink,
-                    maxLines = 1,
-                    style = TextStyle(textDirection = TextDirection.Ltr),
-                )
-            }
-            ZText(stringResource(R.string.open), size = 13.sp, color = c.accent, weight = FontWeight.SemiBold)
-        }
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -421,7 +370,6 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                 ) { protecting = true }
                 TabsButton(BrowserTabs.inGroup(tabs, private).size) { showingTabs = true }
             }
-            ClipboardSuggestion(browser, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp))
             if (state.loading) {
                 ThinBar(state.progress / 100f, height = 2.dp, track = Color.Transparent)
             }

@@ -303,7 +303,6 @@
     <string name="close_private_tabs">إغلاق التبويبات الخاصة</string>
     <string name="close_private_tabs_title">إغلاق التبويبات الخاصة؟</string>
     <string name="close_private_tabs_message">سيُغلق كل ما في الوضع الخاص، وتُحذف كوكيز هذه المواقع وبياناتها.</string>
-    <string name="clipboard_suggestion">رابط منسوخ — اقتراح للفتح</string>
     <string name="address_hint">اكتب عنوانًا أو ابحث</string>
     <string name="sites">مواقع</string>
     <string name="add_site">إضافة</string>

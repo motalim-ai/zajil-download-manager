@@ -209,27 +209,44 @@ fun TabsSheet(browser: BrowserController, onDismiss: () -> Unit) {
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (privateMode) {
                 MainButton(
                     stringResource(R.string.new_tab),
                     onClick = {
                         browser.newTabHome()
                         onDismiss()
                     },
-                    modifier = Modifier.weight(2f),
+                    modifier = Modifier.fillMaxWidth(),
                     icon = LineIcon.Plus,
                 )
-                if (privateMode || currentTabs.size > 1) {
+                if (currentTabs.isNotEmpty()) {
                     QuietButton(
-                        stringResource(if (privateMode) R.string.close_private_tabs else R.string.close_all_tabs),
+                        stringResource(R.string.close_private_tabs),
+                        onClick = { closePrivate = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MainButton(
+                        stringResource(R.string.new_tab),
                         onClick = {
-                            if (privateMode) closePrivate = true else {
+                            browser.newTabHome()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(2f),
+                        icon = LineIcon.Plus,
+                    )
+                    if (currentTabs.size > 1) {
+                        QuietButton(
+                            stringResource(R.string.close_all_tabs),
+                            onClick = {
                                 browser.closeRegularTabs()
                                 onDismiss()
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }

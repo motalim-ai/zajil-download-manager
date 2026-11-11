@@ -102,6 +102,7 @@ class MainActivity : ZajilActivity() {
     override fun onResume() {
         super.onResume()
         browser.onResume()
+        lookAtClipboardSoon()
     }
 
     override fun onPause() {
@@ -133,6 +134,37 @@ class MainActivity : ZajilActivity() {
                     offer.value = Offer(src, Source.Browser, browser.linkFor(src))
                 }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) lookAtClipboardSoon()
+    }
+
+    /**
+     * Android lets an app read the clipboard only while its window has the
+     * focus: a link copied since Zajil last looked is offered, once, a
+     * moment after the window has it (some phones answer nothing at the
+     * instant itself: then once more a little later). Nothing is read in the
+     * background, nor while a sheet is open.
+     */
+    private fun lookAtClipboardSoon() {
+        val view = window.decorView
+        view.removeCallbacks(lookAtClipboard)
+        view.removeCallbacks(lookAgain)
+        view.postDelayed(lookAtClipboard, 250)
+    }
+
+    private val lookAgain = Runnable { lookAtClipboard(retry = false) }
+    private val lookAtClipboard = Runnable { lookAtClipboard(retry = true) }
+
+    private fun lookAtClipboard(retry: Boolean) {
+        if (!hasWindowFocus() || offer.value != null || videoSheet.value != null) return
+        when (val copied = CopiedLinks.read(this, onlyNew = true) { link -> downloads.list.value.any { it.url == link } }) {
+            CopiedLinks.Copied.Unavailable -> if (retry) window.decorView.postDelayed(lookAgain, 750)
+            is CopiedLinks.Copied.Link -> offer.value = Offer(copied.url, Source.Clipboard)
+            CopiedLinks.Copied.Seen, CopiedLinks.Copied.NoLink -> {}
         }
     }
 
