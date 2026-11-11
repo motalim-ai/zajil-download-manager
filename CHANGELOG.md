@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **The category tree's expand and collapse marks use the app's bundled font**, not a platform-specific system font.
 - **The desktop window stays within the usable monitor area**: the toolbar and status bar wrap instead of clipping when the window is resized narrower.
 - **A video from the browser's list was saved as `download`** (#374, reported by @congfo): «Start download» pressed in «Video quality» before the page's title came, with the name box still empty, named the finished file `download.mp4` or `download.webm` (numbered when taken), though the list showed the title while it downloaded. An empty name now keeps the video's own, its title.
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.

@@ -246,7 +246,10 @@
     border-radius: 2px;
     background: var(--surface);
     color: var(--muted);
-    font: 600 11px/1 system-ui, sans-serif;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
   }
   .twist:hover .box {
     border-color: var(--accent);
