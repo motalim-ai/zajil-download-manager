@@ -100,6 +100,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.browser.BrowserController
+import io.github.motalim_ai.zajil.browser.BrowserTabs
 import io.github.motalim_ai.zajil.browser.Finds
 import io.github.motalim_ai.zajil.browser.Found
 import io.github.motalim_ai.zajil.browser.FullScreen
@@ -137,9 +138,12 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
     val tabs by browser.tabs.collectAsStateWithLifecycle()
     var adding by rememberSaveable { mutableStateOf(false) }
     var refused by remember { mutableStateOf(false) }
+    var closePrivate by remember { mutableStateOf(false) }
     var sheet by rememberSaveable { mutableStateOf<String?>(null) }
     // Back from a new tab's home: the last tab again.
-    BackHandler(enabled = tabs.isNotEmpty()) { browser.switchTo(tabs.last().id) }
+    BackHandler(enabled = tabs.any { it.privateMode == private }) {
+        BrowserTabs.lastInGroup(tabs, private)?.let { browser.switchTo(it.id) }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = bottomPadding.calculateBottomPadding())) {
         TabHeader(stringResource(R.string.browse)) {
             HeaderButton(
@@ -149,11 +153,17 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
                 background = if (private) c.amberBg else c.surface,
                 tint = if (private) c.amber else c.ink,
             )
-            if (tabs.isNotEmpty()) TabsButton(tabs.size) { sheet = "tabs" }
+            val groupTabs = BrowserTabs.inGroup(tabs, private)
+            if (groupTabs.isNotEmpty()) TabsButton(groupTabs.size) { sheet = "tabs" }
         }
         AddressField(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), onGo = browser::open)
         if (refused) ZText(stringResource(R.string.private_unsupported), Modifier.padding(horizontal = 22.dp, vertical = 8.dp), size = 13.sp, color = c.red)
         if (private) Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp)) { Note(stringResource(R.string.private_note), c.amberBg, c.amber, LineIcon.Private) }
+        if (private && tabs.any { it.privateMode }) QuietButton(
+            stringResource(R.string.close_private_tabs),
+            onClick = { closePrivate = true },
+            modifier = Modifier.padding(horizontal = 18.dp),
+        )
         SectionLabel(stringResource(R.string.sites), Modifier.padding(top = 2.dp))
         // Five to a row, as the design; the last place adds a site.
         val tiles: List<Shortcut?> = shortcuts + null
@@ -208,6 +218,13 @@ private fun BrowseHome(browser: BrowserController, bottomPadding: PaddingValues)
         "tabs" -> TabsSheet(browser, onDismiss = { sheet = null })
         "history" -> HistorySheet(browser, onDismiss = { sheet = null })
     }
+    if (closePrivate) ClosePrivateDialog(
+        onConfirm = {
+            browser.closePrivateTabs()
+            closePrivate = false
+        },
+        onDismiss = { closePrivate = false },
+    )
 }
 
 /** «ابحث أو اكتب رابطًا»: a white pill on the background. */
@@ -330,7 +347,10 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
     var protecting by rememberSaveable { mutableStateOf(false) }
     val warning by browser.warning.collectAsStateWithLifecycle()
     val state = page ?: return
-    BackHandler { browser.back() }
+    var closePrivate by remember { mutableStateOf(false) }
+    BackHandler {
+        if (!browser.back()) closePrivate = true
+    }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // As little as the address needs: the page has the rest (the owner's request).
@@ -348,7 +368,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                     onGo = browser::open,
                     onBookmark = { browser.store.toggleBookmark(state.title, state.url) },
                 ) { protecting = true }
-                TabsButton(tabs.size) { showingTabs = true }
+                TabsButton(BrowserTabs.inGroup(tabs, private).size) { showingTabs = true }
             }
             if (state.loading) {
                 ThinBar(state.progress / 100f, height = 2.dp, track = Color.Transparent)
@@ -364,7 +384,13 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
                         )
                     }
                 }
-                warning?.let { w -> WarningScreen(w, onBack = browser::leaveWarning, onProceed = browser::proceedAnyway) }
+                warning?.let {
+                    WarningScreen(
+                        it,
+                        onBack = { if (!browser.leaveWarning()) closePrivate = true },
+                        onProceed = browser::proceedAnyway,
+                    )
+                }
                 val downloadable = found.count { !(it is Found.Element && it.protected) }
                 if (found.isNotEmpty() && warning == null) {
                     FoundButton(
@@ -378,7 +404,7 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
             PageBar(
                 state,
                 blocked,
-                onBack = browser::back,
+                onBack = { if (!browser.back()) closePrivate = true },
                 onForward = browser::forward,
                 onHome = browser::newTabHome,
                 onReload = { browser.reload() },
@@ -388,6 +414,13 @@ private fun BrowsePage(browser: BrowserController, onFound: (Found) -> Unit, onS
         fullScreen?.let { shown -> key(shown) { FullScreenVideo(shown, onLeave = browser::leaveFullScreen) } }
     }
     if (showingTabs) TabsSheet(browser, onDismiss = { showingTabs = false })
+    if (closePrivate) ClosePrivateDialog(
+        onConfirm = {
+            browser.closePrivateTabs()
+            closePrivate = false
+        },
+        onDismiss = { closePrivate = false },
+    )
     if (protecting) ProtectionSheet(browser, hostOf(state.url), onDismiss = { protecting = false })
     if (listing) {
         FoundSheet(

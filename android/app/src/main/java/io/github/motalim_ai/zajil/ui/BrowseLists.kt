@@ -19,7 +19,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.motalim_ai.zajil.R
 import io.github.motalim_ai.zajil.browser.BrowserController
+import io.github.motalim_ai.zajil.browser.BrowserTabs
 import io.github.motalim_ai.zajil.browser.SiteIcons
 import java.net.URI
 
@@ -65,6 +69,21 @@ fun TabsButton(count: Int, onClick: () -> Unit) {
             ZText(if (count > 99) "∞" else "$count", size = 12.sp, weight = FontWeight.Bold, color = c.ink)
         }
     }
+}
+
+@Composable
+fun ClosePrivateDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.close_private_tabs_title)) },
+        text = { Text(stringResource(R.string.close_private_tabs_message)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(stringResource(R.string.close_private_tabs)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_sheet)) }
+        },
+    )
 }
 
 /** Whether [url] is the Motalim channel, which shows its own mark (the D5 hand-over). */
@@ -142,18 +161,35 @@ fun RowClose(label: String, onClick: () -> Unit) {
 fun TabsSheet(browser: BrowserController, onDismiss: () -> Unit) {
     val c = Z.colors
     val tabs by browser.tabs.collectAsStateWithLifecycle()
+    val privateMode by browser.privateMode.collectAsStateWithLifecycle()
     val page by browser.page.collectAsStateWithLifecycle()
     val icons by browser.store.icons.icons.collectAsStateWithLifecycle()
-    val current = page?.url
+    val currentTabs = BrowserTabs.inGroup(tabs, privateMode)
+    var closePrivate by remember { mutableStateOf(false) }
+    var refused by remember { mutableStateOf(false) }
     ZSheet(onDismiss = onDismiss, label = stringResource(R.string.tabs)) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             SheetTitle(stringResource(R.string.tabs)) { SheetClose(onDismiss) }
-            if (tabs.isEmpty()) ZText(stringResource(R.string.no_tabs), size = 13.5.sp, color = c.muted)
-            if (tabs.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (privateMode) {
+                    QuietButton(stringResource(R.string.regular_tabs), onClick = { browser.setPrivate(false) }, modifier = Modifier.weight(1f))
+                    MainButton(stringResource(R.string.private_tabs), onClick = {}, modifier = Modifier.weight(1f))
+                } else {
+                    MainButton(stringResource(R.string.regular_tabs), onClick = {}, modifier = Modifier.weight(1f))
+                    QuietButton(
+                        stringResource(R.string.private_tabs),
+                        onClick = { refused = !browser.setPrivate(true) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (refused) ZText(stringResource(R.string.private_unsupported), size = 13.sp, color = c.red)
+            if (currentTabs.isEmpty()) ZText(stringResource(R.string.no_tabs), size = 13.5.sp, color = c.muted)
+            if (currentTabs.isNotEmpty()) {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).border(1.dp, c.line, RoundedCornerShape(22.dp))) {
-                    tabs.forEachIndexed { i, tab ->
+                    currentTabs.forEachIndexed { i, tab ->
                         if (i > 0) RowLine()
-                        Box(Modifier.background(if (current != null && tab.url == current) c.picked else Color.Transparent).padding(start = 14.dp, end = 4.dp)) {
+                        Box(Modifier.background(if (page?.url == tab.url) c.picked else Color.Transparent).padding(start = 14.dp, end = 4.dp)) {
                             SiteRow(
                                 tab.url,
                                 tab.title.ifBlank { hostOf(tab.url) },
@@ -164,29 +200,66 @@ fun TabsSheet(browser: BrowserController, onDismiss: () -> Unit) {
                                     browser.switchTo(tab.id)
                                     onDismiss()
                                 },
-                            ) { RowClose(stringResource(R.string.close_tab)) { browser.closeTab(tab.id) } }
+                            ) {
+                                RowClose(stringResource(R.string.close_tab)) {
+                                    if (!browser.closeTab(tab.id)) closePrivate = true
+                                }
+                            }
                         }
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (privateMode) {
                 MainButton(
                     stringResource(R.string.new_tab),
                     onClick = {
                         browser.newTabHome()
                         onDismiss()
                     },
-                    modifier = Modifier.weight(2f),
+                    modifier = Modifier.fillMaxWidth(),
                     icon = LineIcon.Plus,
                 )
-                if (tabs.size > 1) {
-                    QuietButton(stringResource(R.string.close_all_tabs), onClick = {
-                        browser.close()
-                        onDismiss()
-                    }, modifier = Modifier.weight(1f))
+                if (currentTabs.isNotEmpty()) {
+                    QuietButton(
+                        stringResource(R.string.close_private_tabs),
+                        onClick = { closePrivate = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MainButton(
+                        stringResource(R.string.new_tab),
+                        onClick = {
+                            browser.newTabHome()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(2f),
+                        icon = LineIcon.Plus,
+                    )
+                    if (currentTabs.size > 1) {
+                        QuietButton(
+                            stringResource(R.string.close_all_tabs),
+                            onClick = {
+                                browser.closeRegularTabs()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }
+    }
+    if (closePrivate) {
+        ClosePrivateDialog(
+            onConfirm = {
+                browser.closePrivateTabs()
+                closePrivate = false
+                onDismiss()
+            },
+            onDismiss = { closePrivate = false },
+        )
     }
 }
 

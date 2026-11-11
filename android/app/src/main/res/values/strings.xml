@@ -296,8 +296,13 @@
     <string name="browse">المتصفح</string>
     <string name="private_mode">وضع خاص</string>
     <string name="private_on">خاص</string>
-    <string name="private_note">وضع خاص: لا يُحفظ ما تزوره، وتُحذف الكوكيز والبيانات حين ينتهي.</string>
+    <string name="private_note">وضع خاص: لا يُحفظ ما تزوره، وتُحذف الكوكيز والبيانات حين تغلق تبويباته.</string>
     <string name="private_unsupported">متصفح هذا الهاتف لا يدعم الوضع الخاص. حدّث «Android System WebView».</string>
+    <string name="regular_tabs">عادي</string>
+    <string name="private_tabs">خاص</string>
+    <string name="close_private_tabs">إغلاق التبويبات الخاصة</string>
+    <string name="close_private_tabs_title">إغلاق التبويبات الخاصة؟</string>
+    <string name="close_private_tabs_message">سيُغلق كل ما في الوضع الخاص، وتُحذف كوكيز هذه المواقع وبياناتها.</string>
     <string name="address_hint">اكتب عنوانًا أو ابحث</string>
     <string name="sites">مواقع</string>
     <string name="add_site">إضافة</string>

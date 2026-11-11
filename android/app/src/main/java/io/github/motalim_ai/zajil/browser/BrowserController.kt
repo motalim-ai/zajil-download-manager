@@ -56,9 +56,6 @@ data class PageState(
 /** A page's video in full screen: its own view, and how to tell the page it ended. */
 class FullScreen(val view: View, val callback: WebChromeClient.CustomViewCallback)
 
-/** A tab, as the switcher lists it. */
-data class TabInfo(val id: Long, val title: String, val url: String)
-
 /** A harmful page the browser stopped before it loaded: [url], and why. */
 data class Warning(val url: String, val host: String, val guard: Guard)
 
@@ -103,12 +100,16 @@ class BrowserController(private val context: Context) {
 
     private val main = Handler(Looper.getMainLooper())
 
+    init {
+        deletePrivateProfile()
+    }
+
     /** The page script's secret for its reports (never in a page), and its channel's name. */
     private val token = random()
     private val bridge = "zajil_" + random().take(12)
 
     /** A tab: its WebView, its page, and what was found on it, by layer (main thread). */
-    private inner class Tab(val id: Long, val view: WebView) {
+    private inner class Tab(val id: Long, val view: WebView, val privateMode: Boolean) {
         var page: PageState? = null
         var found: List<Found> = emptyList()
         var sitePage: Found.SitePage? = null
@@ -162,8 +163,12 @@ class BrowserController(private val context: Context) {
 
     /** At most [MAX_TABS]: the oldest goes first. */
     private fun newTab(): Tab {
-        if (tabList.size >= MAX_TABS) closeTab(tabList.first().id)
-        val tab = Tab(nextId++, create())
+        val groupSize = tabList.count { it.privateMode == _private.value }
+        if (groupSize >= MAX_TABS) {
+            tabList.first { it.privateMode == _private.value }.let(::removeTab)
+        }
+        val privateMode = _private.value
+        val tab = Tab(nextId++, create(privateMode), privateMode)
         synchronized(tabList) { tabList += tab }
         current = tab
         listTabs()
@@ -176,6 +181,7 @@ class BrowserController(private val context: Context) {
         leaveFullScreen()
         current?.takeIf { it != tab }?.view?.onPause()
         current = tab
+        _private.value = tab.privateMode
         tab.view.onResume()
         _page.value = tab.page
         _found.value = tab.found
@@ -194,11 +200,11 @@ class BrowserController(private val context: Context) {
     }
 
     /** Away from the harmful page: back, or the tab closes. */
-    fun leaveWarning() {
-        val tab = current ?: return
+    fun leaveWarning(): Boolean {
+        val tab = current ?: return true
         tab.warning = null
         _warning.value = null
-        back()
+        return back()
     }
 
     private val _fullScreen = MutableStateFlow<FullScreen?>(null)
@@ -216,31 +222,32 @@ class BrowserController(private val context: Context) {
     /** The current page's site, for the protection sheet. */
     val site: String? get() = current?.site
 
-    /** Closes tab [id]; the current one gives way to the last other tab, or the home. */
-    fun closeTab(id: Long) {
-        leaveFullScreen()
-        val tab = tabList.firstOrNull { it.id == id } ?: return
-        synchronized(tabList) { tabList -= tab }
-        tab.view.stopLoading()
-        tab.view.destroy()
-        listTabs()
-        if (tab == current) {
-            current = null
-            tabList.lastOrNull()?.let { switchTo(it.id) } ?: run {
-                _page.value = null
-                _found.value = emptyList()
-                _blocked.value = 0
-                _warning.value = null
-            }
+    /** True when closing [id] would end the private session. */
+    fun needsPrivateConfirmation(id: Long): Boolean = BrowserTabs.needsPrivateConfirmation(_tabs.value, id)
+
+    /** Closes tab [id]; false when closing the last private tab needs confirmation. */
+    fun closeTab(id: Long): Boolean {
+        val tab = tabList.firstOrNull { it.id == id } ?: return true
+        if (needsPrivateConfirmation(id)) return false
+        val mode = tab.privateMode
+        val wasCurrent = tab == current
+        removeTab(tab)
+        if (wasCurrent) {
+            tabList.lastOrNull { it.privateMode == mode }?.let { switchTo(it.id) } ?: showHome(mode)
         }
+        return true
     }
 
     fun reload() = webView?.reload()
 
-    /** Back in the tab's history, or the tab closes. */
-    fun back() {
-        val tab = current ?: return
-        if (tab.view.canGoBack()) tab.view.goBack() else closeTab(tab.id)
+    /** Back in the tab's history, or the tab closes; false asks the UI to confirm ending private mode. */
+    fun back(): Boolean {
+        val tab = current ?: return true
+        if (tab.view.canGoBack()) {
+            tab.view.goBack()
+            return true
+        }
+        return closeTab(tab.id)
     }
 
     /** Forward in the tab's history, if the user went back. */
@@ -248,13 +255,48 @@ class BrowserController(private val context: Context) {
         current?.view?.takeIf { it.canGoForward() }?.goForward()
     }
 
-    /** Closes every tab: the home. */
+    /** Closes every tab when the browser activity is destroyed. */
     fun close() {
-        tabList.toList().forEach { closeTab(it.id) }
+        tabList.toList().forEach(::removeTab)
+        showHome(_private.value)
+    }
+
+    /** Closes the regular group only. Private tabs and their profile remain untouched. */
+    fun closeRegularTabs() {
+        tabList.filterNot { it.privateMode }.toList().forEach(::removeTab)
+        if (!_private.value) showHome(false)
+    }
+
+    /** Closes the private group and deletes its cookies and site data. */
+    fun closePrivateTabs() {
+        tabList.filter { it.privateMode }.toList().forEach(::removeTab)
+        deletePrivateProfile()
+        if (_private.value) showHome(false)
+    }
+
+    private fun removeTab(tab: Tab) {
+        if (tab == current) {
+            leaveFullScreen()
+            current = null
+        }
+        synchronized(tabList) { tabList -= tab }
+        tab.view.stopLoading()
+        tab.view.destroy()
+        listTabs()
+    }
+
+    private fun showHome(privateMode: Boolean) {
+        current?.view?.onPause()
+        current = null
+        _private.value = privateMode
+        _page.value = null
+        _found.value = emptyList()
+        _blocked.value = 0
+        _warning.value = null
     }
 
     private fun listTabs() {
-        _tabs.value = tabList.map { TabInfo(it.id, it.page?.title.orEmpty(), it.page?.url.orEmpty()) }
+        _tabs.value = tabList.map { TabInfo(it.id, it.page?.title.orEmpty(), it.page?.url.orEmpty(), it.privateMode) }
     }
 
     /** [tab]'s page changed: the screen shows it if it is the current tab. */
@@ -267,18 +309,13 @@ class BrowserController(private val context: Context) {
     }
 
     /**
-     * Private mode on or off: its pages run in a WebView profile of their
-     * own (cookies, storage, cache), deleted when it ends; nothing is added
-     * to the home's lists. False if this phone's WebView has no profiles.
+     * Selects the regular or private tab group without closing either.
+     * False if this phone's WebView has no private profiles.
      */
     fun setPrivate(on: Boolean): Boolean {
         if (on == _private.value) return true
         if (on && !privateSupported) return false
-        close()
-        // Off: its data goes. On: so does any left from a session the app
-        // never ended (killed, or a profile still held when it closed).
-        deletePrivateProfile()
-        _private.value = on
+        BrowserTabs.lastInGroup(_tabs.value, on)?.let { switchTo(it.id) } ?: showHome(on)
         return true
     }
 
@@ -288,7 +325,7 @@ class BrowserController(private val context: Context) {
 
     fun destroy() {
         close()
-        if (_private.value) deletePrivateProfile()
+        deletePrivateProfile()
     }
 
     /**
@@ -308,11 +345,11 @@ class BrowserController(private val context: Context) {
             page = Finds.referrer(pageUrl),
             source = when {
                 !same -> CookieSource.None
-                _private.value -> CookieSource.Private
+                tab.privateMode -> CookieSource.Private
                 else -> CookieSource.Browser
             },
             userAgent = tab.view.settings.userAgentString,
-            cookies = if (same) cookieManager()?.getCookie(url) else null,
+            cookies = if (same) cookieManager(tab.privateMode)?.getCookie(url) else null,
         )
     }
 
@@ -366,7 +403,7 @@ class BrowserController(private val context: Context) {
         return null
     }
 
-    private fun cookieManager(): CookieManager? = if (_private.value) {
+    private fun cookieManager(privateMode: Boolean): CookieManager? = if (privateMode) {
         runCatching { ProfileStore.getInstance().getProfile(PRIVATE)?.cookieManager }.getOrNull()
     } else {
         CookieManager.getInstance()
@@ -386,11 +423,11 @@ class BrowserController(private val context: Context) {
         }
     }
 
-    private fun create(): WebView {
+    private fun create(privateMode: Boolean): WebView {
         // DevTools over adb, in the debug build only: how a site's blank page is diagnosed.
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         val view = WebView(context)
-        if (_private.value) {
+        if (privateMode) {
             val profile = ProfileStore.getInstance().getOrCreateProfile(PRIVATE)
             WebViewCompat.setProfile(view, PRIVATE)
             runCatching { guardWorkers(profile.serviceWorkerController) }
@@ -417,7 +454,7 @@ class BrowserController(private val context: Context) {
             mediaPlaybackRequiresUserGesture = true
             builtInZoomControls = true
             displayZoomControls = false
-            if (_private.value) cacheMode = WebSettings.LOAD_NO_CACHE
+            if (privateMode) cacheMode = WebSettings.LOAD_NO_CACHE
         }
         // The page's height is the screen's, never «wrap content»: Compose's
         // AndroidView gives a view without layout params WRAP_CONTENT, and
@@ -425,7 +462,7 @@ class BrowserController(private val context: Context) {
         // blank white page (owner's report, 2026-11-01).
         view.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         // Third-party cookies stay off (WebView's default), in both modes.
-        cookieManager()?.setAcceptThirdPartyCookies(view, false)
+        cookieManager(privateMode)?.setAcceptThirdPartyCookies(view, false)
         view.webViewClient = Client()
         view.webChromeClient = Chrome()
         // A page's download: offered in Zajil's sheet, never started by the page.
@@ -559,9 +596,9 @@ class BrowserController(private val context: Context) {
             tab.sitePage = tab.sitePage?.copy(title = view.title.orEmpty())
             publish(tab)
             // Private mode: no history, no recent list, no sites (A6b).
-            if (_private.value || !url.startsWith("http")) return
+            if (tab.privateMode || !url.startsWith("http")) return
             store.visited(Visit(view.title?.takeIf { it.isNotBlank() } ?: url, url))
-            if (!CookieManager.getInstance().getCookie(url).isNullOrEmpty()) store.keepsCookies(url)
+            if (!cookieManager(tab.privateMode)?.getCookie(url).isNullOrEmpty()) store.keepsCookies(url)
         }
 
         /**
@@ -619,7 +656,14 @@ class BrowserController(private val context: Context) {
         override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) = handler.cancel()
 
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-            tabOf(view)?.let { closeTab(it.id) } ?: view.destroy()
+            tabOf(view)?.let { tab ->
+                val mode = tab.privateMode
+                val wasCurrent = tab == current
+                removeTab(tab)
+                if (wasCurrent) {
+                    tabList.lastOrNull { it.privateMode == mode }?.let { switchTo(it.id) } ?: showHome(mode)
+                }
+            } ?: view.destroy()
             return true
         }
     }
@@ -628,7 +672,8 @@ class BrowserController(private val context: Context) {
         /** The page's own icon, kept for its site's tile and row; never in private mode. */
         override fun onReceivedIcon(view: WebView, icon: Bitmap?) {
             val url = view.url ?: return
-            if (icon == null || _private.value || !url.startsWith("http")) return
+            val tab = tabOf(view) ?: return
+            if (icon == null || tab.privateMode || !url.startsWith("http")) return
             store.icons.fromPage(url, icon)
         }
 
