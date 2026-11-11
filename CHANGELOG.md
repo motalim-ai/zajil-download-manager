@@ -13,6 +13,8 @@ Fixes, most of them reported or sent by users and contributors during the stabil
 
 ### Fixed
 
+- **Windows and Linux menu access letters are underlined only while Alt is held or keyboard navigation is active**; idle menu labels stay clean and the Alt shortcuts remain available.
+
 - **A video from the browser's list was saved as `download`** (#374, reported by @congfo): «Start download» pressed in «Video quality» before the page's title came, with the name box still empty, named the finished file `download.mp4` or `download.webm` (numbered when taken), though the list showed the title while it downloaded. An empty name now keeps the video's own, its title.
 - **A download from the browser failed while Zajil was closed, on Windows when Zajil is installed where other users may change files, and from an AppImage** (#360): there the browsers start a copy of `zajil-host` in Zajil's data folder, and that copy looked for Zajil beside itself, where it never is. Zajil now records beside the copy which program it is and its SHA-256, and the copy starts that program only if it is unchanged.
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.
@@ -20,6 +22,8 @@ Fixes, most of them reported or sent by users and contributors during the stabil
 - **The category tree's «+» and «−» marks use the app's own font** (#379, by @MohammedMehdiTBER), IBM Plex Sans Arabic, not each system's, so they look the same on Windows, macOS and Linux.
 
 ### Added
+
+- **Android browser tabs stay in separate regular and private groups**: switching between the groups keeps both open, and closing the private group requires confirmation.
 
 - **«About Zajil» shows Zajil's version and checks for a newer one when asked** (#369, by @MohammedMehdiTBER): it offers the signed update, or the release page where there is none for this system. Its errors are short Arabic and English messages saying what to do, and the details go to the log. A failed install restarts Zajil as before, since its downloads were stopped for it.
 
