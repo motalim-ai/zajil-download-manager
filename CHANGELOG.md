@@ -7,20 +7,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-11-11
+
+Fixes, most of them reported or sent by users and contributors during the stability period of 1.2.x. Four came from @MohammedMehdiTBER's review of the desktop app on the three systems (#369, #371, #379, #380).
+
 ### Fixed
 
-- **The desktop window stays within the usable monitor area**: the toolbar and status bar wrap instead of clipping when the window is resized narrower.
+- **Windows and Linux menu access letters are underlined only while Alt is held or keyboard navigation is active**; idle menu labels stay clean and the Alt shortcuts remain available.
+
 - **A video from the browser's list was saved as `download`** (#374, reported by @congfo): «Start download» pressed in «Video quality» before the page's title came, with the name box still empty, named the finished file `download.mp4` or `download.webm` (numbered when taken), though the list showed the title while it downloaded. An empty name now keeps the video's own, its title.
+- **A download from the browser failed while Zajil was closed, on Windows when Zajil is installed where other users may change files, and from an AppImage** (#360): there the browsers start a copy of `zajil-host` in Zajil's data folder, and that copy looked for Zajil beside itself, where it never is. Zajil now records beside the copy which program it is and its SHA-256, and the copy starts that program only if it is unchanged.
 - **«Batch download» saved a video site's pages, not their videos** (#332, found and first fixed by @MohammedFattay): a pattern of YouTube `watch` links came out as `watch (1).html` to `watch (12).html`. A pattern whose links are the big video sites' pages is now refused before anything is added, saying how many of its links are such pages, and pointing to «Add link», which reads a video or a playlist in «Video quality». The sites' list is one file now, `apps/desktop/src/lib/videoPages.json`, read by the page and by Rust. Files on those sites still go in a batch, and `zajil batch` is unchanged.
+- **The main window stays within the screen's usable area** (#371, by @MohammedMehdiTBER): it could open larger than the screen's usable area, on a 1366×768 laptop for one, and is now made to fit it, frame included. And when the window is made narrower, the toolbar and the status bar wrap instead of cutting their buttons and text.
+- **The category tree's «+» and «−» marks use the app's own font** (#379, by @MohammedMehdiTBER), IBM Plex Sans Arabic, not each system's, so they look the same on Windows, macOS and Linux.
 
 ### Added
 
-- The desktop About dialog can check for newer releases on demand and offers the signed installer or release page. Errors now show localized guidance while technical details are logged.
 - **Android browser tabs stay in separate regular and private groups**: switching between the groups keeps both open, and closing the private group requires confirmation.
+
+- **«About Zajil» shows Zajil's version and checks for a newer one when asked** (#369, by @MohammedMehdiTBER): it offers the signed update, or the release page where there is none for this system. Its errors are short Arabic and English messages saying what to do, and the details go to the log. A failed install restarts Zajil as before, since its downloads were stopped for it.
 
 ### Tests
 
+- **«About Zajil» is captured in Arabic and English, light and dark,** on the three systems' screenshot runs (#380, by @MohammedMehdiTBER); CI checks that it fits the window, that its text wraps, its colours' contrast, and its accessibility.
 - **The desktop tests start in a Windows build with the GNU toolchain** (#333, found and first fixed by @MohammedFattay): they stopped at once with `STATUS_ENTRYPOINT_NOT_FOUND`, since only MSVC's linker embedded the app manifest. With GNU, `windres` now makes it a resource linked in every target (`WINDRES` when set, else the target's own `windres`), and a missing or failing `windres` is a warning, not a stopped build. Releases and CI build with MSVC and are unchanged.
+
+### Dependencies
+
+- Minor and patch updates from Dependabot, now grouped into one pull request a week (#361): the Tauri dialog and notification plugins (2.8.4 and 2.8.0, the same in Rust and in the page), Svelte 5.57.3, Vite 8.3.6, Vitest 5.1.0, jiff, zip and rand. `blake2` 0.11 and `ed25519-dalek` 3.0 are used by the Android crate's tests only.
 
 ## [1.2.3] - 2026-11-01
 
@@ -521,7 +535,12 @@ The first build of the release workflow, a draft that was never published (see 1
     - `io.github.motalim_ai.zajil` for Linux and the Native Messaging host (`.host`).
   - FTP moved to 1.x.
 
-[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/motalim-ai/zajil-download-manager/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.4
+[1.2.3]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.3
+[1.2.2]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.2
+[1.2.1]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.1
+[1.2.0]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.2.0
 [1.1.3]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.3
 [1.1.2]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.2
 [1.1.1]: https://github.com/motalim-ai/zajil-download-manager/releases/tag/v1.1.1
