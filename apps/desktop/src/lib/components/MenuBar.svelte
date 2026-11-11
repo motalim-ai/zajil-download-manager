@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { locale } from "../i18n.svelte";
   import { shortcutOf, type Command } from "../commands";
-  import { MENU_BAR, accessLetter, commandKey } from "../menus";
+  import { MENU_BAR, accessLetter, accessLettersVisible, commandKey } from "../menus";
 
   let {
     can,
@@ -25,6 +25,7 @@
   function close(refocus = true) {
     const was = open;
     open = null;
+    keyboardMode = false;
     if (refocus && was !== null) document.getElementById(`menubar-${was}`)?.focus();
   }
   function run(command: Command) {
@@ -36,9 +37,17 @@
   // Alt with a menu's first letter opens it (the next one, if two share it,
   // as «م» does in Arabic); Alt alone, then its release, goes to the bar.
   let altAlone = false;
+  let altDown = $state(false);
+  let keyboardMode = $state(false);
   function onWindowKeydown(event: KeyboardEvent) {
-    altAlone = event.key === "Alt";
-    if (!event.altKey || event.ctrlKey || event.metaKey || event.key === "Alt") return;
+    if (event.key === "Alt") {
+      altAlone = true;
+      altDown = true;
+      return;
+    }
+    altAlone = false;
+    if (event.key === "Tab") keyboardMode = false;
+    if (!event.altKey || event.ctrlKey || event.metaKey) return;
     const letter = event.key.toLocaleLowerCase();
     const names = MENU_BAR.map((m) => accessLetter(locale.t(m.key)).toLocaleLowerCase());
     const start = open === null ? 0 : open + 1;
@@ -46,17 +55,23 @@
     const found = order.find((i) => names[i] === letter);
     if (found !== undefined) {
       event.preventDefault();
+      keyboardMode = true;
       void show(found);
     }
   }
   function onWindowKeyup(event: KeyboardEvent) {
-    if (event.key === "Alt" && altAlone) {
-      altAlone = false;
-      document.getElementById("menubar-0")?.focus();
+    if (event.key === "Alt") {
+      altDown = false;
+      if (altAlone) {
+        altAlone = false;
+        keyboardMode = true;
+        document.getElementById("menubar-0")?.focus();
+      }
     }
   }
 
   function onBarKey(event: KeyboardEvent, index: number) {
+    keyboardMode = true;
     // Right and left follow the reading direction.
     const forward = locale.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
     const back = locale.dir === "rtl" ? "ArrowRight" : "ArrowLeft";
@@ -75,6 +90,7 @@
   }
 
   function onMenuKey(event: KeyboardEvent, index: number) {
+    keyboardMode = true;
     const items = [...(bar?.querySelectorAll<HTMLButtonElement>(`#menu-${index} [role="menuitem"]:not([aria-disabled="true"])`) ?? [])];
     const at = items.indexOf(document.activeElement as HTMLButtonElement);
     const forward = locale.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
@@ -100,11 +116,17 @@
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} />
-<svelte:document onpointerdown={(e) => open !== null && !bar?.contains(e.target as Node) && close(false)} />
+<svelte:document
+  onpointerdown={(e) => {
+    keyboardMode = false;
+    if (open !== null && !bar?.contains(e.target as Node)) close(false);
+  }}
+/>
 
 <div class="menubar" role="menubar" aria-label={locale.t("menu-bar")} bind:this={bar}>
   {#each MENU_BAR as menu, i (menu.key)}
     {@const name = locale.t(menu.key)}
+    {@const first = accessLetter(name)}
     <div class="slot">
       <button
         id="menubar-{i}"
@@ -116,7 +138,7 @@
         onclick={() => (open === i ? close() : void show(i, "none"))}
         onpointerenter={() => open !== null && open !== i && void show(i, "none")}
         onkeydown={(e) => onBarKey(e, i)}
-      >{name}</button>
+      >{#if accessLettersVisible(altDown, keyboardMode)}<u>{first}</u>{name.slice(first.length)}{:else}{name}{/if}</button>
       {#if open === i}
         <div id="menu-{i}" class="menu" role="menu" aria-labelledby="menubar-{i}" tabindex="-1" onkeydown={(e) => onMenuKey(e, i)}>
           {#each menu.items as item, j (j)}
@@ -162,6 +184,10 @@
   .top:hover,
   .top[aria-expanded="true"] {
     background: var(--sel);
+  }
+  u {
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
   }
   .menu {
     position: absolute;

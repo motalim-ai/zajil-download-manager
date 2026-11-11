@@ -668,7 +668,7 @@ jobs:
           shots="$RUNNER_TEMP/ui-shots"
           # Every screen in Arabic and English, light and dark, each with
           # its axe-core check, and the language switched in one session.
-          scenarios="names switch-ar-light switch-en-dark"
+          scenarios="names switch-ar-light switch-en-dark menu-ar-light menu-alt-ar-light"
           for screen in list add link progress complete schedule batch grab tools quality details refresh settings categories; do
             for lang in ar en; do
               for theme in light dark; do scenarios="$scenarios $screen-$lang-$theme"; done

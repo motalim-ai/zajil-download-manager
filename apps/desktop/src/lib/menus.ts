@@ -58,6 +58,9 @@ export const ROW_MENU: Item[] = [
 /** A command's name in the translations. */
 export const commandKey = (command: Command): string => `cmd-${command}`;
 
-/** A menu's access letter (Alt with it opens the menu): its name's first
- * letter. */
+/** A menu's access letter (Alt with it opens the menu): its name's first letter. */
 export const accessLetter = (name: string): string => [...name][0] ?? "";
+
+/** Show access letters only while Alt is down or keyboard menu navigation is active. */
+export const accessLettersVisible = (altDown: boolean, keyboardMode: boolean): boolean =>
+  altDown || keyboardMode;

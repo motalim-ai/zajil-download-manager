@@ -784,7 +784,13 @@ import { patchRows } from "./lib/progressRows";
     const test = await import("./uitest/api");
     const scenario = await test.uiTestScenario();
     if (!scenario) return false;
-    const [screen = "list", lang = "ar", theme = "light"] = scenario.split("-");
+    const parts = scenario.split("-");
+    const menuShot = parts[0] === "menu";
+    const menuAlt = menuShot && parts[1] === "alt";
+    const screen = menuShot ? "list" : parts[0] || "list";
+    const offset = menuShot ? (menuAlt ? 2 : 1) : 1;
+    const lang = parts[offset] || "ar";
+    const theme = parts[offset + 1] || "light";
     locale.set(lang as Lang);
     setTheme(theme);
     snapshot = await api.snapshot();
@@ -856,6 +862,10 @@ import { patchRows } from "./lib/progressRows";
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     };
     await settle();
+    if (menuAlt) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt", bubbles: true }));
+      await settle();
+    }
     // «Batch download» shows its links a moment after the pattern (Rust
     // makes them): the picture waits for them, 5 s at most.
     if (screen === "batch") {

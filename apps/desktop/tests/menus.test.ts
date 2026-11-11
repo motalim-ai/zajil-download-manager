@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accelerator, commandFor, keyOf, label, KEYS, type Command } from "../src/lib/commands";
-import { MENU_BAR, ROW_MENU, accessLetter, commandKey } from "../src/lib/menus";
+import { MENU_BAR, ROW_MENU, accessLetter, accessLettersVisible, commandKey } from "../src/lib/menus";
 import { COLUMNS, DEFAULT, MAX_WIDTH, MIN_WIDTH, clean, load, move, save, toggle, visible } from "../src/lib/columns";
 import { LANGS, makeBundle } from "../src/lib/i18n.svelte";
 
@@ -30,7 +30,11 @@ describe("the menus", () => {
     }
   });
 
-  it("keep Alt access letters without needing a visible underline", () => {
+  it("show menu access underlines only during Alt or keyboard navigation", () => {
+    expect(accessLettersVisible(false, false)).toBe(false);
+    expect(accessLettersVisible(true, false)).toBe(true);
+    expect(accessLettersVisible(false, true)).toBe(true);
+    expect(accessLettersVisible(true, true)).toBe(true);
     expect(accessLetter("ملف")).toBe("م");
     expect(accessLetter("Edit")).toBe("E");
   });
