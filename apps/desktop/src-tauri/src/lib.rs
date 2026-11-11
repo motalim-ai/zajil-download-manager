@@ -43,6 +43,7 @@ mod tray;
 mod ui_test;
 mod update;
 mod video;
+mod video_pages;
 pub mod view;
 mod windows;
 
@@ -301,6 +302,9 @@ pub fn run() {
         .setup(move |tauri_app| {
             let handle = tauri_app.handle().clone();
             if let Some(window) = tauri_app.get_webview_window("main") {
+                if let Err(err) = main_window::fit_to_work_area(&window) {
+                    eprintln!("zajil: the main window could not fit its monitor: {err}");
+                }
                 eprintln!(
                     "zajil: the window is made (shown: {}); its page is loading",
                     window.is_visible().unwrap_or(false)
@@ -566,6 +570,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         complete::set_show_complete,
         complete::complete_info,
         update::update_notice,
+        update::update_check_now,
         update::open_release_page,
         update::update_skip,
         update::update_install,
@@ -688,6 +693,7 @@ fn handlers<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         complete::set_show_complete,
         complete::complete_info,
         update::update_notice,
+        update::update_check_now,
         update::open_release_page,
         update::update_skip,
         update::update_install,

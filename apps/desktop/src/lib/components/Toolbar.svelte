@@ -213,7 +213,7 @@
     top: 110px;
     inset-inline-start: 24px;
     width: 300px;
-    /* Never past the window's bottom (its smallest is 560 px high). */
+    /* Keep the panel inside the window's usable height. */
     max-height: calc(100vh - 130px);
     overflow: auto;
     background: var(--surface);
@@ -257,12 +257,12 @@
 
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: stretch;
     gap: 1px;
     padding: 4px 8px;
     border-bottom: 1px solid var(--line);
     background: linear-gradient(var(--surface), var(--toolbar-end, var(--surface)));
-    overflow: hidden;
   }
   .tb {
     display: flex;

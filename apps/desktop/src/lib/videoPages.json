@@ -1,0 +1,12 @@
+[
+  ["^(www\\.|m\\.|music\\.)?youtube\\.com$", "^/(watch|shorts/|live/|embed/|playlist)"],
+  ["^youtu\\.be$", "^/[\\w-]+"],
+  ["^(www\\.|mobile\\.)?(x|twitter)\\.com$", "^/[^/]+/status/\\d+"],
+  ["^(www\\.)?instagram\\.com$", "^/(p|reel|reels|tv)/"],
+  ["^(www\\.|m\\.|web\\.)?facebook\\.com$", "^/(.+/videos/|watch|reel/|share/(v|r)/)"],
+  ["^fb\\.watch$", "^/[\\w-]+"],
+  ["^(www\\.|m\\.)?tiktok\\.com$", "^/@[^/]+/video/\\d+"],
+  ["^(vm|vt)\\.tiktok\\.com$", "^/[\\w-]+"],
+  ["^(www\\.)?vimeo\\.com$", "^/\\d+"],
+  ["^(www\\.)?dailymotion\\.com$", "^/video/"]
+]

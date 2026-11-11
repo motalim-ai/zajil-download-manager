@@ -29,6 +29,52 @@ use crate::App;
 /// The main window's label, in the configuration.
 pub const LABEL: &str = "main";
 
+/// Keeps the main window inside the current monitor's usable area. Window
+/// sizes are logical, so a fixed config size can exceed an HD screen at
+/// higher display scaling.
+pub(crate) fn fit_to_work_area<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+) -> tauri::Result<()> {
+    let Some(monitor) = window.current_monitor()? else {
+        return Ok(());
+    };
+    let area = *monitor.work_area();
+    let inner = window.inner_size()?;
+    let outer = window.outer_size()?;
+    let size = bounded_inner_size(inner, outer, area.size);
+    if size == inner || size.width == 0 || size.height == 0 {
+        return Ok(());
+    }
+
+    let frame_width = outer.width.saturating_sub(inner.width);
+    let frame_height = outer.height.saturating_sub(inner.height);
+    let outer_width = size.width.saturating_add(frame_width);
+    let outer_height = size.height.saturating_add(frame_height);
+    let x = area.position.x.saturating_add(
+        i32::try_from(area.size.width.saturating_sub(outer_width) / 2).unwrap_or(i32::MAX),
+    );
+    let y = area.position.y.saturating_add(
+        i32::try_from(area.size.height.saturating_sub(outer_height) / 2).unwrap_or(i32::MAX),
+    );
+    window.set_size(size)?;
+    window.set_position(tauri::PhysicalPosition::new(x, y))
+}
+
+fn bounded_inner_size(
+    inner: tauri::PhysicalSize<u32>,
+    outer: tauri::PhysicalSize<u32>,
+    work_area: tauri::PhysicalSize<u32>,
+) -> tauri::PhysicalSize<u32> {
+    let frame_width = outer.width.saturating_sub(inner.width);
+    let frame_height = outer.height.saturating_sub(inner.height);
+    tauri::PhysicalSize::new(
+        inner.width.min(work_area.width.saturating_sub(frame_width)),
+        inner
+            .height
+            .min(work_area.height.saturating_sub(frame_height)),
+    )
+}
+
 /// The main window's state while Zajil runs.
 #[derive(Default)]
 pub struct MainWindow {
@@ -172,6 +218,9 @@ async fn make<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) -> tauri::Result<
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
     let window = tauri::WebviewWindowBuilder::from_config(handle, &config)?.build()?;
+    if let Err(err) = fit_to_work_area(&window) {
+        eprintln!("zajil: the main window could not fit its monitor: {err}");
+    }
     let state = handle.state::<MainWindow>();
     state.hidden.store(false, Ordering::SeqCst);
     state.freed.store(false, Ordering::SeqCst);
@@ -219,6 +268,20 @@ pub fn painted<R: tauri::Runtime>(handle: &tauri::AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_window_size_fits_the_work_area_and_keeps_its_frame() {
+        let inner = tauri::PhysicalSize::new(1200, 700);
+        let outer = tauri::PhysicalSize::new(1208, 724);
+        assert_eq!(
+            bounded_inner_size(inner, outer, tauri::PhysicalSize::new(1366, 728)),
+            inner
+        );
+        assert_eq!(
+            bounded_inner_size(inner, outer, tauri::PhysicalSize::new(1920, 1080)),
+            inner
+        );
+    }
 
     // Tauri's mock runtime keeps a destroyed window in its registry and
     // sends no window events, so these test the decisions; the window

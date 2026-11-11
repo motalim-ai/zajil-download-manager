@@ -39,7 +39,7 @@ bindgen = ["uniffi/cli"]
 [dev-dependencies]
 # Signing a tools list with a throwaway key, to test the good one too.
 base64.workspace = true
-blake2 = "0.10.6"
+blake2 = "0.11.0"
 ed25519-dalek = "3.0.0"
 getrandom.workspace = true
 sha2.workspace = true

@@ -12,13 +12,14 @@
 
 ## 2. الهوية في git وGitHub (إلزامي)
 
-- **كل commit باسم Motalim**، `Motalim <252922374+motalim-ai@users.noreply.github.com>`، **ما عدا commits الـ Dependabot** التي تُدمج من الـ PRs الخاصة به (بقرار المالك على [#86](https://github.com/motalim-ai/zajil-download-manager/pull/86): روبوت GitHub الرسمي، لا أداة ذكاء اصطناعي). تحقق قبل كل commit:
+> **لمن هذا القسم:** قواعده كلها لعمل المالك نفسه على جهازه: اسم Motalim، وحساب `motalim-ai`، وأوامر `gh` والدفع، ومنع سطر النسبة. إن كنت تعمل لمساهم من خارج المشروع، من نسخته (fork)، فاكتب الـ commits **باسم المساهم وبريده**، وادفع إلى نسخته بحسابه، ولا تستعمل اسم Motalim ولا بريده أبدًا: الـ commit يُنسب إلى من كتبه.
+
+- **كل commit من المالك باسم Motalim**، `Motalim <252922374+motalim-ai@users.noreply.github.com>`، **ما عدا commits الـ Dependabot** التي تُدمج من الـ PRs الخاصة به (بقرار المالك على [#86](https://github.com/motalim-ai/zajil-download-manager/pull/86): روبوت GitHub الرسمي، لا أداة ذكاء اصطناعي). تحقق قبل كل commit:
   ```bash
   git config user.name    # Motalim
   git config user.email   # 252922374+motalim-ai@users.noreply.github.com
   ```
 - **ممنوع** إضافة سطر `Co-Authored-By` أو أي سطر نسبة آخر، في رسائل الـ commits وفي وصف الـ PR.
-- **ممنوع في كل الأحوال أي ذكر لأي أداة ذكاء اصطناعي**: في الـ commits، ووصف الـ PRs، والتعليقات، والـ Issues (ومنه سطر «Generated with …» في آخر الوصف).
 - **الحساب النشط في `gh` على جهاز المالك حساب آخر. لا تغيّره أبدًا** (لا تستخدم `gh auth switch` ولا `gh auth login`). استخدم حساب `motalim-ai` عبر التوكن في كل أمر:
   ```bash
   GH_TOKEN=$(gh auth token -u motalim-ai) gh <command>
@@ -75,7 +76,7 @@
    ثم افحص الـ PR بنفسك بـ [قائمة الفحص في القسم 10](#10-قائمة-فحص-قبل-فتح-أي-pr)، واكتب في وصفه أنك فعلت.
 8. **حدّث الوثائق** (ARCHITECTURE وPARITY وCHANGELOG) في نفس الـ PR إذا تغيّر شيء فيها.
 9. **الصق البرومبت** الذي أنتج التغيير في قسم «البرومبت المستخدم» في وصف الـ PR.
-10. **لا تذكر اسم أي أداة ذكاء اصطناعي بعينها** في ملفات المستودع. هذا الملف (`AGENTS.md`) هو المرجع الوحيد لكل الأدوات، وأي ملف إشارة خاص بأداة معينة يبقى محليًا ولا يُرفع إلى المستودع.
+10. **هذا الملف (`AGENTS.md`) هو المرجع الوحيد لكل الأدوات.** وأي ملف إشارة خاص بأداة معينة يبقى محليًا ولا يُرفع إلى المستودع.
 11. **إصدار Rust مثبّت** في `rust-toolchain.toml`. وكل GitHub Action مثبّت برقم commit (SHA) مع تعليق بالإصدار. لا تغيّر أيًّا منهما إلا في PR مستقل.
 
 ## 6. الأمان من أول يوم

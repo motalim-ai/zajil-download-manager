@@ -7,7 +7,7 @@ import { format, LANGS } from "../src/lib/i18n.svelte";
 const KINDS = [
   "not_http", "too_long", "hidden", "no_host", "in_host", "in_fragment", "backslash", "unclosed", "unopened", "nested", "empty",
   "bad_range", "mixed", "descending", "zero_step", "width", "too_large", "bad_counter", "star_needs_range", "second_star", "no_star",
-  "no_pattern", "too_many", "bad_url",
+  "no_pattern", "too_many", "bad_url", "video_page",
 ];
 
 describe("a refused pattern", () => {
@@ -19,6 +19,10 @@ describe("a refused pattern", () => {
         expect(what, kind).not.toBe(`batch-error-${kind}`);
         expect(what, kind).not.toBe("");
       }
+    });
+    it(`says how many links are video pages, in ${lang}`, () => {
+      const [what] = problemText(say, { kind: "video_page", at: null, text: null, count: 12, max: null });
+      expect(what).toContain("12");
     });
     it(`says where, in ${lang}`, () => {
       const lines = problemText(say, { kind: "unclosed", at: 18, text: "[", count: null, max: null });

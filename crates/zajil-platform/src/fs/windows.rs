@@ -74,7 +74,7 @@ pub fn dir_has_acl(_dir: &Path) -> io::Result<bool> {
     Ok(false)
 }
 
-pub fn open_private_tool(path: &Path) -> io::Result<File> {
+pub fn open_program(path: &Path) -> io::Result<File> {
     // Shared for reading only: while it is open, nobody can write,
     // delete or rename it, nor rename a folder above it.
     let file = OpenOptions::new()
@@ -89,6 +89,11 @@ pub fn open_private_tool(path: &Path) -> io::Result<File> {
     {
         return Err(not_regular(path));
     }
+    Ok(file)
+}
+
+pub fn open_private_tool(path: &Path) -> io::Result<File> {
+    let file = open_program(path)?;
     if !only_user_or_root_can_change(path)? {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,

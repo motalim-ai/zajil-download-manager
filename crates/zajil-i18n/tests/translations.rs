@@ -138,6 +138,17 @@ fn text(lang: Lang, key: &str, count: f64) -> String {
 /// or `$count` shown without `PLURAL`).
 const ARABIC: &[(&str, [&str; 6])] = &[
     (
+        "batch-error-video_page",
+        [
+            "ليس في هذه الروابط صفحة فيديو.",
+            "في هذه الروابط صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط صفحتا فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 3 صفحات فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 11 صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+            "في هذه الروابط 100 صفحة فيديو، والفيديو لا يُحمَّل بالجملة: ألصق رابط الفيديو أو قائمة التشغيل في «إضافة رابط».",
+        ],
+    ),
+    (
         "batch-links-count",
         [
             "لا روابط",
@@ -338,6 +349,13 @@ const ARABIC: &[(&str, [&str; 6])] = &[
 ];
 
 const ENGLISH: &[(&str, [&str; 2])] = &[
+    (
+        "batch-error-video_page",
+        [
+            "One of these links is a video's page, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».",
+            "2 of these links are video pages, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».",
+        ],
+    ),
     ("batch-links-count", ["1 link", "2 links"]),
     ("downloads-count", ["1 download", "2 downloads"]),
     (
@@ -810,6 +828,12 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
         &["binary", "license", "source", "tool", "version"],
     ),
     ("about-or-later", &["license"]),
+    ("about-update-found", &["version"]),
+    ("about-check-failed", &["error"]),
+    ("about-install-failed", &["error"]),
+    ("about-release-failed", &["error"]),
+    ("about-version-error", &["error"]),
+    ("about-tools-error", &["error"]),
     ("tool-license-yt-dlp", &["binary", "source"]),
     // A button's name.
     ("tb-earlier", &["name"]),
@@ -851,6 +875,7 @@ const REVIEWED_VARIABLES: &[(&str, &[&str])] = &[
     ("batch-shown", &["shown"]),
     ("batch-error-at", &["at"]),
     ("batch-error-too_many", &["max"]),
+    ("batch-error-video_page", &["count"]),
     ("batch-error-not_http", &["http", "https"]),
     ("delete-unfinished", &["count"]),
     ("delete-also-finished", &["count"]),
@@ -1353,6 +1378,69 @@ const WHOLE_TEXTS: &[Whole] = &[
                 ("source", "SOURCE"),
             ],
             "yt-dlp VERSION, under the BINARY for the file Zajil downloads (its source code: LICENSE). Its source: SOURCE",
+        ),
+    },
+    Whole {
+        key: "about-update-found",
+        ar: (&[("version", "1.2.4")], "النسخة 1.2.4 متاحة."),
+        en: (&[("version", "1.2.4")], "Version 1.2.4 is available."),
+    },
+    Whole {
+        key: "about-check-failed",
+        ar: (
+            &[("error", "تحقّق من الاتصال بالإنترنت ثم أعد المحاولة.")],
+            "تعذّر التحقّق من التحديثات. تحقّق من الاتصال بالإنترنت ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Check your internet connection and try again.")],
+            "Could not check for updates. Check your internet connection and try again.",
+        ),
+    },
+    Whole {
+        key: "about-install-failed",
+        ar: (
+            &[("error", "تحقّق من الاتصال بالإنترنت وأعد المحاولة.")],
+            "تعذّر تثبيت التحديث. تحقّق من الاتصال بالإنترنت وأعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Check your internet connection and try again.")],
+            "Could not install the update. Check your internet connection and try again.",
+        ),
+    },
+    Whole {
+        key: "about-release-failed",
+        ar: (
+            &[("error", "تحقّق من إعداد المتصفح الافتراضي ثم أعد المحاولة.")],
+            "تعذّر فتح صفحة الإصدار. تحقّق من إعداد المتصفح الافتراضي ثم أعد المحاولة.",
+        ),
+        en: (
+            &[(
+                "error",
+                "Check your default browser settings and try again.",
+            )],
+            "Could not open the release page. Check your default browser settings and try again.",
+        ),
+    },
+    Whole {
+        key: "about-version-error",
+        ar: (
+            &[("error", "أعد تشغيل زاجِل، ثم أعد المحاولة.")],
+            "تعذّرت قراءة النسخة المثبّتة. أعد تشغيل زاجِل، ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Restart Zajil and try again.")],
+            "Could not read the installed version. Restart Zajil and try again.",
+        ),
+    },
+    Whole {
+        key: "about-tools-error",
+        ar: (
+            &[("error", "أعد تشغيل زاجِل، ثم أعد المحاولة.")],
+            "تعذّرت قراءة أدوات الفيديو. أعد تشغيل زاجِل، ثم أعد المحاولة.",
+        ),
+        en: (
+            &[("error", "Restart Zajil and try again.")],
+            "Could not read the video tools. Restart Zajil and try again.",
         ),
     },
     Whole {

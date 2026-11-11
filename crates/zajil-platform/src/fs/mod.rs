@@ -226,6 +226,15 @@ pub fn open_private_tool(path: &Path) -> io::Result<File> {
     imp::open_private_tool(path)
 }
 
+/// Opens the program `path` to check it before it starts, wherever it is
+/// (others may be able to change it): a regular file, never through a
+/// link, checked on the opened file. On Windows it stays locked like
+/// [`open_private_tool`]'s while the handle is open, so what was checked is
+/// what starts.
+pub fn open_program(path: &Path) -> io::Result<File> {
+    imp::open_program(path)
+}
+
 /// Lets the owner run `file` (mode `0700` on macOS and Linux; nothing to do
 /// on Windows, where a `.exe` runs by its name). For a tool Zajil checked
 /// before saving it (ADR-0009).

@@ -31,7 +31,6 @@
   import { asRefreshProblem, refreshText } from "./lib/refresh";
   import Icon from "./lib/components/Icon.svelte";
   import ColorIcon from "./lib/components/ColorIcon.svelte";
-  import { toolLines } from "./lib/about";
   import { api } from "./lib/api";
   import { finishedQueues, play, type Sound } from "./lib/sounds";
   import type { DownloadView } from "./lib/bindings/DownloadView";
@@ -45,6 +44,7 @@ import { patchRows } from "./lib/progressRows";
   import UpdateBar from "./lib/components/UpdateBar.svelte";
   import ExtensionBar from "./lib/components/ExtensionBar.svelte";
   import VideoBar from "./lib/components/VideoBar.svelte";
+  import AboutDialog from "./lib/components/AboutDialog.svelte";
   import { num, size, speed } from "./lib/format";
   import type { Snapshot } from "./lib/bindings/Snapshot";
   import type { DetailsView } from "./lib/bindings/DetailsView";
@@ -80,6 +80,7 @@ import { patchRows } from "./lib/progressRows";
   // last try was refused.
   let refreshing = $state<{ id: number; name: string; problem: string | null; detail: string | null; busy: boolean } | null>(null);
   let error = $state<string | null>(null);
+  let aboutOpen = $state(false);
   // What the last toolbar command answered, if it failed.
   let failed = $state<string | null>(null);
   let view = $state<View>("list");
@@ -398,7 +399,7 @@ import { patchRows } from "./lib/progressRows";
     }
     await refresh();
   }
-  const dialogOpen = $derived(Boolean(refreshing || deleteAsk));
+  const dialogOpen = $derived(Boolean(refreshing || deleteAsk || aboutOpen));
   // The table is on screen: what the selection buttons act on is seen
   // (review of #96: Delete removed rows hidden behind the settings).
   const tableShown = $derived(view === "list" && !details);
@@ -515,7 +516,7 @@ import { patchRows } from "./lib/progressRows";
   /** Whether `command` has something to act on now. */
   function canRun(command: Command): boolean {
     if (TOOL.includes(command)) return can(command as ToolAction);
-    if (dialogOpen && command !== "quit" && command !== "about") return false;
+    if (dialogOpen && command !== "quit" && !(command === "about" && !aboutOpen)) return false;
     switch (command) {
       case "open":
       case "open-folder":
@@ -709,26 +710,10 @@ import { patchRows } from "./lib/progressRows";
     await api.quitApp();
   }
 
-  // «About»: the version, and the video tools (`lib/about.ts`); and «Copy
-  // problem info» for a report (owner's decision, 2026-10-31: copied, never
-  // sent by Zajil).
-  async function about() {
-    const version = await api.appVersion().catch(() => "");
-    const tools = await api.videoToolsStatus().catch(() => []);
-    const more = toolLines((key, args) => locale.t(key, args), tools);
-    const text = [locale.t("about-text", { version }), ...(more.length ? ["", ...more] : [])].join("\n");
-    const copy = await ask(text, {
-      title: locale.t("app-name"),
-      kind: "info",
-      okLabel: locale.t("about-copy-problem"),
-      cancelLabel: locale.t("win-close"),
-    }).catch(() => false);
-    if (!copy) return;
-    const done = await api.copyProblemInfo().then(
-      () => true,
-      () => false,
-    );
-    await message(locale.t(done ? "about-copied-problem" : "about-copy-failed"), { title: locale.t("app-name"), kind: done ? "info" : "error" }).catch(() => {});
+  // The About dialog includes the installed version and an explicit
+  // release check; problem information is still copied only on request.
+  function about() {
+    aboutOpen = true;
   }
 
   // Copy (Ctrl+C, or the system's Copy on macOS) on the table is «Copy
@@ -1136,6 +1121,7 @@ import { patchRows } from "./lib/progressRows";
       <span><ColorIcon name="s-waiting" size={13} />{locale.t("footer-waiting", { count: waiting })}</span>
       {#if selected.length > 0}<span class="end">{locale.t("footer-selected", { number: num(locale.lang, locale.digits, selected.length, 0) })}</span>{/if}
     </footer>
+    {#if aboutOpen}<AboutDialog onclose={() => (aboutOpen = false)} />{/if}
     <div class="visually-hidden" aria-live="polite" role="status">{announcement}</div>
   </div>
 {/if}
@@ -1152,6 +1138,7 @@ import { patchRows } from "./lib/progressRows";
     padding-top: 28px;
   }
   .window {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -1182,6 +1169,7 @@ import { patchRows } from "./lib/progressRows";
   /* A desktop status bar: its parts in panels with lines between. */
   .status {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     padding: 3px 6px;
     border-top: 1px solid var(--line);

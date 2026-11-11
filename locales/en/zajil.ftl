@@ -381,6 +381,22 @@ about-text = Zajil, version { $version }
 about-copy-problem = Copy problem info
 about-copied-problem = The problem info is copied: Zajil's version, the system, the video tools and the log's last lines, with no link. Paste it with what went wrong wherever you ask for help: the project's GitHub page, a comment or a message.
 about-copy-failed = Could not copy to the clipboard.
+about-close = Close
+about-updates = Updates
+about-check-updates = Check for updates
+about-checking-updates = Checking for updates…
+about-up-to-date = Zajil is up to date.
+about-update-found = Version { $version } is available.
+about-update-installing = Downloading and installing the update…
+about-check-failed = Could not check for updates. { $error }
+about-install-failed = Could not install the update. { $error }
+about-release-failed = Could not open the release page. { $error }
+about-version-error = Could not read the installed version. { $error }
+about-tools-error = Could not read the video tools. { $error }
+about-error-check-hint = Check your internet connection and try again.
+about-error-install-hint = Check your internet connection and try again.
+about-error-release-hint = Check your default browser settings and try again.
+about-error-read-hint = Restart Zajil and try again.
 table-label = Downloads
 col-resize = { $column } column width
 sys-hide = Hide { $app }
@@ -764,6 +780,11 @@ batch-error-second_star = Only one star in the link.
 batch-error-no_star = «From» and «To» work with a star in the link.
 batch-error-no_pattern = The link has no pattern: put a star or a range where it changes.
 batch-error-bad_url = One of the links the pattern makes is not valid.
+batch-error-video_page =
+    { PLURAL($count) ->
+        [one] One of these links is a video's page, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».
+       *[other] { $count } of these links are video pages, and videos are not downloaded in a batch: paste the video's or the playlist's link in «Add link».
+    }
 
 ## Site grabber (M7)
 cmd-grab = Site grabber…
