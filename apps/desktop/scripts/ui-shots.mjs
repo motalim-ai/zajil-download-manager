@@ -8,7 +8,7 @@
 //   node scripts/ui-shots.mjs <app> <out-folder> <scenario>...
 //   scenario: <view>-<lang>-<theme>, e.g. list-ar-light, or names; view is
 //   list, add, link, progress, complete, schedule, batch, grab, tools,
-//   quality, details, refresh, settings, categories, or switch (the
+//   quality, details, refresh, settings, categories, about, or switch (the
 //   language changes in the same session, checked here)
 //
 // Each scenario also carries an axe-core check of the page: a critical or
@@ -111,7 +111,7 @@ for (const scenario of scenarios) {
   else {
     // Let the window manager finish drawing the frame.
     await sleep(800);
-    const { window, accessibility = [], languageSwitch, names, fit } = JSON.parse(readFileSync(report, "utf8"));
+    const { window, accessibility = [], languageSwitch, names, fit, aboutLayout } = JSON.parse(readFileSync(report, "utf8"));
     // Any critical or serious accessibility problem fails (M4 criterion);
     // the others are listed.
     for (const v of accessibility) {
@@ -142,6 +142,50 @@ for (const scenario of scenarios) {
         ];
         for (const why of problems) fail(why);
         if (problems.length === 0) console.log(`${scenario}: the window (${fit.window}) holds all its content (${fit.content}), nothing cut or scrolling`);
+      }
+    }
+    if (/^about-/.test(scenario)) {
+      let aboutFailed = false;
+      const fail = (why) => {
+        console.error(`${scenario}: ${why}`);
+        aboutFailed = true;
+        failed = true;
+      };
+      const layout = aboutLayout;
+      if (!layout?.dialog || !layout.footer || !layout.content || !layout.text) {
+        fail("the About dialog did not report its layout");
+      } else {
+        const [, language] = scenario.split("-");
+        const expectedDirection = language === "ar" ? "rtl" : "ltr";
+        if (layout.language !== language || layout.direction !== expectedDirection)
+          fail(`the About dialog direction is ${layout.direction} for ${layout.language}, expected ${expectedDirection} for ${language}`);
+        const { width, height } = layout.viewport;
+        const d = layout.dialog;
+        if (d.left < -1 || d.top < -1 || d.right > width + 1 || d.bottom > height + 1)
+          fail(`the About dialog is outside the window (${width}x${height})`);
+        if (layout.footer.top < d.top || layout.footer.bottom > height + 1)
+          fail("the About actions are clipped by the window");
+        if (layout.content.scrollWidth > layout.content.clientWidth + 1 || layout.text.scrollWidth > layout.text.clientWidth + 1)
+          fail("About text overflows horizontally instead of wrapping");
+        if (layout.content.scrollHeight > layout.content.clientHeight + 1 && !/auto|scroll/.test(layout.content.overflowY))
+          fail("the About content cannot scroll when it is taller than the window");
+        const luminance = (color) => {
+          const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+          if (!channels || channels.length !== 3) return null;
+          const [r, g, b] = channels.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const surface = luminance(layout.surface);
+        const foreground = luminance(layout.foreground);
+        const dark = scenario.endsWith("-dark");
+        if (surface === null || foreground === null || (dark ? surface >= 0.25 : surface <= 0.75))
+          fail(`the About dialog does not follow the ${dark ? "dark" : "light"} theme`);
+        else if ((Math.max(surface, foreground) + 0.05) / (Math.min(surface, foreground) + 0.05) < 4.5)
+          fail("the About text does not have 4.5:1 contrast against its surface");
+        if (!aboutFailed) console.log(`${scenario}: About layout and ${dark ? "dark" : "light"} colors are readable`);
       }
     }
     if (scenario.startsWith("switch-")) {

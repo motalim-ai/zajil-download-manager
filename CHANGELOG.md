@@ -20,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Tests
 
+- **The About dialog is captured in Arabic and English with light and dark themes** on all three UI screenshot runners; CI checks its bounds, text wrapping, theme colors, and accessibility.
 - **The desktop tests start in a Windows build with the GNU toolchain** (#333, found and first fixed by @MohammedFattay): they stopped at once with `STATUS_ENTRYPOINT_NOT_FOUND`, since only MSVC's linker embedded the app manifest. With GNU, `windres` now makes it a resource linked in every target (`WINDRES` when set, else the target's own `windres`), and a missing or failing `windres` is a warning, not a stopped build. Releases and CI build with MSVC and are unchanged.
 
 ## [1.2.3] - 2026-11-01
