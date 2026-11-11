@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - The desktop About dialog can check for newer releases on demand and offers the signed installer or release page. Errors now show localized guidance while technical details are logged.
-- **Android browser tabs stay in their own groups**: switching between regular and private tabs keeps both groups open, and closing the private group requires confirmation. Clipboard links are suggested inside the browser instead of opening a download offer automatically. JVM tests cover group selection, the last-private-tab guard and link extraction; this UI change has not been tested on an emulator.
+- **Android browser tabs stay in separate regular and private groups**: switching between the groups keeps both open, and closing the private group requires confirmation.
 
 ### Tests
 
